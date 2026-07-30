@@ -16,6 +16,15 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Rust build artifacts
+/target/
+
+# Device export duplicated at data/vendor/device-export/ — these root copies
+# are scratch and get deleted once extraction is confirmed.
+/es_systems.xml
+/es_find_rules.xml
+/es_settings.xml
+
 # Node / Tauri, if the GUI lands there
 node_modules/
 dist/
