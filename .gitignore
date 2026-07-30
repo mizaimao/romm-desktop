@@ -1,0 +1,26 @@
+# Local test library built by tools/build_test_library.py.
+# ~29 GB of APFS clones -- reproducible from the ES-DE source, never committed.
+/library/
+
+# Local credentials and persisted device identity. See config.example.toml.
+/config.toml
+/state.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Tauri, if the GUI lands there
+node_modules/
+dist/
+build/
+src-tauri/target/
+
+# macOS
+.DS_Store

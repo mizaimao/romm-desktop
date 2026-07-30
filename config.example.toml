@@ -1,0 +1,113 @@
+# RomM desktop client configuration.
+#
+#   cp config.example.toml config.toml
+#
+# config.toml is gitignored -- it holds credentials. Nothing here is read until
+# the client exists; this file is the contract for what it will ask for.
+
+[server]
+# Base URL of the RomM server, no trailing slash.
+url = "http://dev.lan"
+
+# Plain HTTP is not a secure context, so the browser player is stuck on
+# single-threaded cores and psp/dosbox cannot run in-browser at all. Irrelevant
+# to a native client, but if you ever add HTTPS, change the URL here too.
+verify_tls = true
+
+# Seconds. Disc images are large; keep the read timeout generous.
+connect_timeout = 10
+read_timeout = 300
+
+
+[auth]
+# One of:
+#   "device_code"   -- OAuth device flow. Client prints a code, you approve it
+#                      in the RomM web UI. No password ever stored. Default.
+#   "client_token"  -- long-lived token from /api/client-tokens. Best for an
+#                      unattended install; paste it below.
+#   "basic"         -- HTTP basic. Simplest for first-light testing only.
+method = "device_code"
+
+# method = "client_token"
+token = ""
+
+# method = "basic"
+username = ""
+password = ""
+
+# Scopes requested during device-code init. This set covers library reads plus
+# bidirectional save/state sync; drop assets.write for a read-only client.
+scopes = [
+  "me.read",
+  "roms.read",
+  "platforms.read",
+  "assets.read",
+  "assets.write",
+  "devices.read",
+  "devices.write",
+]
+
+
+[device]
+# Stable identity for this install. The server keys its per-device sync
+# watermark on the device_id it returns for this identifier, so CHANGING THIS
+# RESETS SYNC HISTORY -- every save then re-negotiates with no watermark, which
+# turns quiet no-ops into uploads and downloads. Set it once and leave it.
+client_device_identifier = "romm-desktop-macos-frank"
+
+# Free-form, shown in the RomM devices list.
+name = "Frank's Mac"
+client = "romm-desktop"
+platform = "macOS"
+
+# The returned device_id and access token are persisted to state.json, not here.
+
+
+[library]
+# Local stand-in for the remote library, built by:
+#   python3 tools/build_test_library.py
+# Laid out as RomM "struct_a" (roms/<platform_slug>/), so a RomM instance can
+# scan it directly and the slugs match the server's.
+local_root = "./library"
+
+# Where ROMs downloaded from the server are cached.
+download_root = "~/Games/romm"
+
+# Prefer the local library over the network when a ROM exists in both. Set
+# false once the remote path works to exercise real downloads.
+prefer_local = true
+
+
+[emulators.retroarch]
+# RetroArch names saves after the ROM file, so mapping a save back to a rom_id
+# is fs_name matching -- and it MUST be platform-scoped. This library has
+# nes+famicom, snes+sfc, and arcade+mame as distinct platforms with overlapping
+# ROM names; an unscoped match will resolve to the wrong game.
+enabled = true
+saves_dir = "~/Library/Application Support/RetroArch/saves"
+states_dir = "~/Library/Application Support/RetroArch/states"
+
+# Saves pair between client and server on (rom_id, slot), so slot names must be
+# stable and non-null. A null slot is treated as an archival upload and ALWAYS
+# negotiates as "upload", which accumulates duplicates without bound.
+# Derive slots from the emulator's own convention:
+[emulators.retroarch.slot_map]
+".srm" = "autosave"
+".state" = "slot0"
+".state1" = "slot1"
+".state2" = "slot2"
+
+
+[sync]
+# Refuse to write anything until explicitly disabled. Stay on this until the
+# operation table looks right across several real sessions.
+dry_run = true
+
+# The server reports conflicts and will not resolve them. On "conflict", never
+# auto-overwrite: keep the loser as <name>.conflict-<ISO8601> and surface it.
+conflict_policy = "preserve_both"
+
+# Copying or restoring save files resets mtimes, which manufactures false
+# conflicts because updated_at drives the comparison. Track our own last-synced
+# state in state.json rather than trusting filesystem mtime alone.
+trust_filesystem_mtime = false
