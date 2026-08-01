@@ -533,7 +533,18 @@ fn cmd_browse() -> Result<()> {
     let map = CoreMap::load(Path::new(CORE_MAP))?;
     // Missing RetroArch is not fatal; browsing still works, launching doesn't.
     let ra = RetroArch::locate(cfg.retroarch.root.as_deref()).ok();
-    tui::run(&store, &cfg.local_roms_dir(), ra, map)
+    // Likewise a missing server only disables downloading.
+    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
+        .ok()
+        .map(std::sync::Arc::new);
+    tui::run(
+        &store,
+        &cfg.local_roms_dir(),
+        ra,
+        map,
+        client,
+        tokio::runtime::Handle::current(),
+    )
 }
 
 #[tokio::main]

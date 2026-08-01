@@ -6,6 +6,8 @@
 
 use std::io::{Stdout, stdout};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -18,11 +20,22 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 
+use crate::api;
 use crate::cache::{Cache, PlatformRow, RomRow};
 use crate::coremap::CoreMap;
+use crate::download;
 use crate::retroarch::RetroArch;
+
+/// Live state of a download, shared between the worker task and the UI.
+#[derive(Default)]
+struct Progress {
+    done: u64,
+    total: u64,
+    label: String,
+    finished: Option<Result<String, String>>,
+}
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 
@@ -47,6 +60,13 @@ pub struct App {
     ra: Option<RetroArch>,
     map: CoreMap,
     quit: bool,
+    /// Set while a download is in flight; cleared once the UI reports it.
+    progress: Option<Arc<Mutex<Progress>>>,
+    /// Set when a download was started by Enter rather than `d`: launch this
+    /// ROM once the bytes land.
+    launch_when_done: Option<RomRow>,
+    client: Option<Arc<api::Client>>,
+    rt: tokio::runtime::Handle,
 }
 
 impl App {
@@ -55,6 +75,8 @@ impl App {
         local_roms: PathBuf,
         ra: Option<RetroArch>,
         map: CoreMap,
+        client: Option<Arc<api::Client>>,
+        rt: tokio::runtime::Handle,
     ) -> Result<Self> {
         let platforms = cache.platforms()?;
         let mut platform_state = ListState::default();
@@ -79,6 +101,10 @@ impl App {
             ra,
             map,
             quit: false,
+            progress: None,
+            launch_when_done: None,
+            client,
+            rt,
         })
     }
 
@@ -153,16 +179,31 @@ impl App {
             .map(str::to_owned)
     }
 
-    fn launch(&mut self, term: &mut Term) -> Result<()> {
+    /// Enter: play. Downloads first if the ROM is not local yet.
+    fn play(&mut self, term: &mut Term) -> Result<()> {
         let Some(rom) = self.selected_rom().cloned() else {
             return Ok(());
         };
+        if self.local_path(&rom).is_some() {
+            return self.launch_rom(&rom, term);
+        }
+        if self.client.is_none() {
+            self.status = "not downloaded, and no server connection".into();
+            return Ok(());
+        }
+        self.launch_when_done = Some(rom);
+        self.start_download();
+        Ok(())
+    }
+
+    fn launch_rom(&mut self, rom: &RomRow, term: &mut Term) -> Result<()> {
+        let rom = rom.clone();
         let Some(ra) = &self.ra else {
             self.status = "RetroArch not found".into();
             return Ok(());
         };
         let Some(path) = self.local_path(&rom) else {
-            self.status = format!("not downloaded: {} (Stage 4 adds fetching)", rom.fs_name);
+            self.status = format!("not downloaded: {}", rom.fs_name);
             return Ok(());
         };
         let Some(core) = self.resolve_core(ra, &rom.platform_slug) else {
@@ -182,6 +223,91 @@ impl App {
             Err(e) => format!("launch failed: {e}"),
         };
         Ok(())
+    }
+
+    /// Kick off a download on the tokio runtime. The UI keeps redrawing while
+    /// it runs; progress arrives through the shared `Progress`.
+    fn start_download(&mut self) {
+        if self.progress.is_some() {
+            self.status = "a download is already running".into();
+            return;
+        }
+        let Some(rom) = self.selected_rom().cloned() else { return };
+        let Some(client) = self.client.clone() else {
+            self.status = "no server connection — check config.toml".into();
+            return;
+        };
+        if self.local_path(&rom).is_some() {
+            self.status = format!("{} is already downloaded", rom.name);
+            return;
+        }
+
+        let shared = Arc::new(Mutex::new(Progress {
+            total: rom.fs_size_bytes.max(0) as u64,
+            label: rom.name.clone(),
+            ..Default::default()
+        }));
+        self.progress = Some(shared.clone());
+
+        let roms_dir = self.local_roms.clone();
+        self.rt.spawn(async move {
+            let target = download::Target {
+                rom_id: rom.id,
+                fs_name: &rom.fs_name,
+                platform_slug: &rom.platform_slug,
+                expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
+                md5: rom.md5_hash.as_deref(),
+                sha1: rom.sha1_hash.as_deref(),
+            };
+            let sink = shared.clone();
+            let result = download::fetch(
+                client.http(),
+                client.base(),
+                client.auth(),
+                &target,
+                &roms_dir,
+                |done, total| {
+                    if let Ok(mut p) = sink.lock() {
+                        p.done = done;
+                        if total > 0 {
+                            p.total = total;
+                        }
+                    }
+                },
+            )
+            .await;
+
+            if let Ok(mut p) = shared.lock() {
+                p.finished = Some(match result {
+                    Ok(_) => Ok(format!("{} downloaded", rom.name)),
+                    Err(e) => Err(format!("{}: {e}", rom.name)),
+                });
+            }
+        });
+        self.status = "starting download…".into();
+    }
+
+    /// Retire a finished download. Returns a ROM to launch when the download
+    /// was started by Enter and succeeded.
+    fn poll_download(&mut self) -> Option<RomRow> {
+        let done = self
+            .progress
+            .as_ref()
+            .and_then(|p| p.lock().ok().and_then(|g| g.finished.clone()));
+        let outcome = done?;
+        self.progress = None;
+        match outcome {
+            Ok(msg) => {
+                self.status = msg;
+                // Only auto-launch if this download was an Enter, not a `d`.
+                self.launch_when_done.take()
+            }
+            Err(msg) => {
+                self.status = format!("download failed — {msg}");
+                self.launch_when_done = None;
+                None
+            }
+        }
     }
 
     fn on_key(&mut self, code: KeyCode, mods: KeyModifiers, cache: &Cache, term: &mut Term)
@@ -218,13 +344,14 @@ impl App {
             KeyCode::PageUp => self.move_selection(-10),
             KeyCode::Home => self.move_selection(isize::MIN / 2),
             KeyCode::End => self.move_selection(isize::MAX / 2),
+            KeyCode::Char('d') if self.view == View::Roms => self.start_download(),
             KeyCode::Char('/') if self.view == View::Roms => {
                 self.searching = true;
                 self.filter.clear();
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => match self.view {
                 View::Platforms => self.enter_platform(cache)?,
-                View::Roms => self.launch(term)?,
+                View::Roms => self.play(term)?,
             },
             KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
                 if self.view == View::Roms {
@@ -256,6 +383,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         .constraints([
             Constraint::Min(3),
             Constraint::Length(if app.searching { 3 } else { 0 }),
+            Constraint::Length(if app.progress.is_some() { 3 } else { 0 }),
             Constraint::Length(3),
         ])
         .split(f.area());
@@ -275,9 +403,28 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
         f.render_widget(p, chunks[1]);
     }
 
+    if let Some(shared) = &app.progress
+        && let Ok(p) = shared.lock()
+    {
+        let ratio = if p.total > 0 {
+            (p.done as f64 / p.total as f64).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let gauge = Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title(format!(
+                " downloading {} ",
+                p.label.chars().take(48).collect::<String>()
+            )))
+            .gauge_style(Style::default().fg(Color::Green))
+            .ratio(ratio)
+            .label(format!("{} / {}", human(p.done as i64), human(p.total as i64)));
+        f.render_widget(gauge, chunks[2]);
+    }
+
     let help = match app.view {
         View::Platforms => "↑↓/jk move   ⏎ open   q quit",
-        View::Roms => "↑↓/jk move   ⏎ launch   / search   esc back   q quit",
+        View::Roms => "↑↓/jk move   ⏎ play (downloads first)   d download only   / search   esc back   q quit",
     };
     let footer = Paragraph::new(vec![
         Line::from(Span::styled(
@@ -288,7 +435,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     ])
     .wrap(Wrap { trim: true })
     .block(Block::default().borders(Borders::ALL));
-    f.render_widget(footer, chunks[2]);
+    f.render_widget(footer, chunks[3]);
 }
 
 fn draw_platforms(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
@@ -399,8 +546,15 @@ fn restore_terminal(term: &mut Term) -> Result<()> {
     Ok(())
 }
 
-pub fn run(cache: &Cache, local_roms: &Path, ra: Option<RetroArch>, map: CoreMap) -> Result<()> {
-    let mut app = App::new(cache, local_roms.to_path_buf(), ra, map)?;
+pub fn run(
+    cache: &Cache,
+    local_roms: &Path,
+    ra: Option<RetroArch>,
+    map: CoreMap,
+    client: Option<Arc<api::Client>>,
+    rt: tokio::runtime::Handle,
+) -> Result<()> {
+    let mut app = App::new(cache, local_roms.to_path_buf(), ra, map, client, rt)?;
     if app.platforms.is_empty() {
         anyhow::bail!("cache is empty — run `sync` first");
     }
@@ -411,8 +565,14 @@ pub fn run(cache: &Cache, local_roms: &Path, ra: Option<RetroArch>, map: CoreMap
     // Keep the terminal restorable even if drawing panics.
     let result = (|| -> Result<()> {
         while !app.quit {
+            if let Some(rom) = app.poll_download() {
+                app.launch_rom(&rom, &mut term)?;
+            }
             term.draw(|f| draw(f, &mut app))?;
-            if let Event::Key(key) = event::read()?
+            // Timeout rather than a blocking read, so the progress gauge keeps
+            // animating while a download runs in the background.
+            if event::poll(Duration::from_millis(100))?
+                && let Event::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
                 app.on_key(key.code, key.modifiers, cache, &mut term)?;
