@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use romm_desktop::{api, cache, cores, download, media, parity, saves, theme, tui};
+use romm_desktop::{
+    api, cache, cores, download, media, parity, saves, theme, theme_remote, tui,
+};
 use romm_desktop::config::Config;
 use romm_desktop::coremap::CoreMap;
 use romm_desktop::retroarch::{self, RetroArch};
@@ -555,7 +557,7 @@ fn cmd_themes(install: bool) -> Result<()> {
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
     let slugs: Vec<String> = store.platforms()?.into_iter().map(|p| p.fs_slug).collect();
 
-    let themes = theme::discover(cfg.theme.root.as_deref());
+    let themes = theme::discover_with(cfg.theme.root.as_deref(), Some(&cfg.themes_dir()));
     if themes.is_empty() {
         bail!("no ES-DE themes found — install ES-DE, or set [theme] root in config.toml");
     }
@@ -574,12 +576,128 @@ fn cmd_themes(install: bool) -> Result<()> {
     }
 
     if install {
-        let media_root = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
+        let media_root = cfg.media_dir();
         let n = theme::install(&themes, &map, &slugs, &media_root)?;
         println!("\ninstalled {n} logos into {}/_platforms", media_root.display());
     } else {
         println!("\n(pass --install to copy them into the local media tree)");
     }
+    Ok(())
+}
+
+/// List themes available from the official ES-DE themes list.
+async fn cmd_themes_available(filter: Option<&str>) -> Result<()> {
+    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let mut list = theme_remote::list(&http).await?;
+    if let Some(f) = filter {
+        list.retain(|t| t.matches(f));
+    }
+    let cfg = Config::load()?;
+    let dir = cfg.themes_dir();
+
+    println!("{} themes available\n", list.len());
+    for t in &list {
+        let installed = dir.join(t.dir_name()).is_dir();
+        println!(
+            "  {}{:<26} {:<28} {}",
+            if installed { "* " } else { "  " },
+            t.name.chars().take(24).collect::<String>(),
+            t.dir_name(),
+            t.author
+        );
+    }
+    println!("\n* = already downloaded    (cargo run -- themes --get <name>)");
+    Ok(())
+}
+
+/// Download (or update) a theme from the official list.
+async fn cmd_themes_get(needle: &str, logos_only: bool) -> Result<()> {
+    let cfg = Config::load()?;
+    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let list = theme_remote::list(&http).await?;
+
+    let hits: Vec<_> = list.iter().filter(|t| t.matches(needle)).collect();
+    let theme_entry = match hits.len() {
+        0 => bail!("no theme matches {needle:?} — try `themes --available`"),
+        1 => hits[0],
+        _ => {
+            // An exact name match disambiguates; otherwise make the user choose.
+            match hits.iter().find(|t| t.name.eq_ignore_ascii_case(needle)) {
+                Some(t) => t,
+                None => {
+                    println!("{} matches — be more specific:", hits.len());
+                    for t in hits {
+                        println!("  {:<26} {}", t.name, t.dir_name());
+                    }
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    let dir = cfg.themes_dir();
+    println!("{} — {}", theme_entry.name, theme_entry.url);
+    println!("cloning into {} …", dir.join(theme_entry.dir_name()).display());
+    let (path, fresh) = theme_remote::install(theme_entry, &dir)?;
+    let size = theme_remote::size_of(&path);
+    println!(
+        "{} ({:.1} MB)",
+        if fresh { "downloaded" } else { "updated" },
+        size as f64 / 1_048_576.0
+    );
+
+    if logos_only {
+        // Themes ship hundreds of MB of wallpapers and per-system art we never
+        // render. Keep the logos, drop the rest.
+        let map = CoreMap::load(Path::new(CORE_MAP))?;
+        let store = cache::Cache::open(Path::new(CACHE_DB))?;
+        let slugs: Vec<String> =
+            store.platforms()?.into_iter().map(|p| p.fs_slug).collect();
+        let one = vec![romm_desktop::theme::Theme {
+            name: theme_entry.dir_name(),
+            path: path.clone(),
+        }];
+        let n = theme::install(&one, &map, &slugs, &cfg.media_dir())?;
+        theme_remote::remove(&theme_entry.dir_name(), &dir)?;
+        println!(
+            "kept {n} logos, deleted the {:.0} MB checkout",
+            size as f64 / 1_048_576.0
+        );
+        return Ok(());
+    }
+
+    println!("\nRun `themes --install` to copy its logos into the platform grid.");
+    println!("(or re-run with --logos-only to keep just the icons and delete the rest)");
+    Ok(())
+}
+
+/// Update every downloaded theme.
+async fn cmd_themes_update() -> Result<()> {
+    let cfg = Config::load()?;
+    let dir = cfg.themes_dir();
+    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let list = theme_remote::list(&http).await?;
+
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        bail!("nothing downloaded yet — see `themes --available`");
+    };
+    let mut n = 0;
+    for entry in entries.flatten().filter(|e| e.path().is_dir()) {
+        let name = entry.file_name().to_string_lossy().to_string();
+        match list.iter().find(|t| t.dir_name() == name) {
+            Some(t) => {
+                print!("  {name:<28} ");
+                use std::io::Write as _;
+                std::io::stdout().flush().ok();
+                match theme_remote::install(t, &dir) {
+                    Ok(_) => { println!("ok"); n += 1; }
+                    Err(e) => println!("FAILED — {e}"),
+                }
+            }
+            None => println!("  {name:<28} not in the official list, skipped"),
+        }
+    }
+    println!("\n{n} theme(s) updated");
     Ok(())
 }
 
@@ -627,7 +745,19 @@ async fn main() -> Result<()> {
         Some("sync") => cmd_sync(args.iter().any(|a| a == "--full")).await,
         Some("browse") => cmd_browse(),
         Some("scan") => cmd_scan(),
-        Some("themes") => cmd_themes(install),
+        Some("themes") => {
+            let arg = |flag: &str| args.iter().position(|a| a == flag)
+                .and_then(|i| args.get(i + 1)).map(String::as_str);
+            if args.iter().any(|a| a == "--available") {
+                cmd_themes_available(arg("--available")).await
+            } else if let Some(name) = arg("--get") {
+                cmd_themes_get(name, args.iter().any(|a| a == "--logos-only")).await
+            } else if args.iter().any(|a| a == "--update") {
+                cmd_themes_update().await
+            } else {
+                cmd_themes(install)
+            }
+        }
         Some("art") => {
             let n = args.get(1).filter(|a| !a.starts_with("--")).context("usage: art <term>")?;
             cmd_art(n).await
@@ -658,6 +788,9 @@ async fn main() -> Result<()> {
             eprintln!("  hash-parity                      verify content_hash matches the server");
             eprintln!("  scan                             inspect local saves/states");
             eprintln!("  themes [--install]               ES-DE theme logos for the console grid");
+            eprintln!("  themes --available [filter]      list downloadable ES-DE themes");
+            eprintln!("  themes --get <name> [--logos-only]  download a theme (or just its icons)");
+            eprintln!("  themes --update                  update all downloaded themes");
             eprintln!("  doctor                           what's installed, what can launch");
             eprintln!("  cores [--install]                list/install missing libretro cores");
             eprintln!("  suggest                          list launchable ROMs in library/");

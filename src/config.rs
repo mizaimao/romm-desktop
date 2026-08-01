@@ -97,4 +97,14 @@ impl Config {
     pub fn local_roms_dir(&self) -> PathBuf {
         PathBuf::from(&self.library.local_root).join("roms")
     }
+
+    pub fn media_dir(&self) -> PathBuf {
+        PathBuf::from(&self.library.local_root).join("downloaded_media")
+    }
+
+    /// Where downloaded ES-DE themes go. Inside the library folder so the
+    /// "delete one folder to reclaim everything" property holds.
+    pub fn themes_dir(&self) -> PathBuf {
+        PathBuf::from(&self.library.local_root).join("themes")
+    }
 }

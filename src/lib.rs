@@ -13,5 +13,6 @@ pub mod parity;
 pub mod retroarch;
 pub mod savehash;
 pub mod theme;
+pub mod theme_remote;
 pub mod saves;
 pub mod tui;

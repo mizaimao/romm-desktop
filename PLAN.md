@@ -669,7 +669,45 @@ fetched art are interchangeable and there is only one lookup path. Local media
 covers ~2% of the library; the server has covers for **92%** and screenshots
 for 89%.
 
-## 12. Open questions
+## 12. Console icons — ES-DE themes
+
+`src/theme.rs` (local) + `src/theme_remote.rs` (downloader).
+
+```
+themes                            list installed themes + logo coverage
+themes --install                  copy logos into library/downloaded_media/_platforms/
+themes --available [filter]       list the 64 themes in the official ES-DE list
+themes --get <name>               clone one (depth 1)
+themes --get <name> --logos-only  clone, keep the 24 icons, delete the rest
+themes --update                   update everything downloaded
+```
+
+**Deliberately not RomM's `url_logo`** — it points at `images.igdb.com` (32 of 34
+platforms) and `cdn.thegamesdb.net` (2), i.e. third-party CDNs, not the RomM server.
+ES-DE themes are local, offline, SVG, and match the frontend already in use.
+
+Themes disagree on where logos live; three conventions are checked directly and
+anything else is found by a depth-limited sweep for `<system>.<ext>` inside a
+directory whose name contains "logo":
+
+| convention | example theme |
+|---|---|
+| `<theme>/<system>/images/logo.svg` | slate-es-de |
+| `<theme>/system/logos/<system>.svg` | linear-es-de |
+| `<theme>/_inc/system-logo/<system>.svg` | canvas-es-de |
+
+Discovery order puts downloaded themes first, then `~/ES-DE/themes`, then the
+ES-DE.app bundle, and falls through theme by theme per platform — so a sparse
+custom theme still contributes what it has.
+
+> **`--logos-only` matters.** Canvas is a 298 MB checkout of which we render
+> 240 KB. Cloning, extracting, and deleting keeps the icons without the bulk.
+
+Slug→system naming needs care: ROM-hack systems (`genh`, `msu-md`) claim the
+same RomM slug as their base system, so every candidate name is tried rather
+than picking one alphabetically.
+
+## 13. Open questions
 
 - Whether save **states** negotiate through `/api/sync/negotiate` — the payload only
   declares a `saves` array. Unverified.

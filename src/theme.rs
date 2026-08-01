@@ -48,7 +48,15 @@ pub struct Theme {
 
 /// All themes found on this machine, deduplicated by name.
 pub fn discover(extra_root: Option<&str>) -> Vec<Theme> {
+    discover_with(extra_root, None)
+}
+
+/// As [`discover`], but also searching a downloaded-themes directory first.
+pub fn discover_with(extra_root: Option<&str>, downloaded: Option<&Path>) -> Vec<Theme> {
     let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(d) = downloaded {
+        roots.push(d.to_path_buf());
+    }
     if let Some(e) = extra_root {
         roots.push(expand_tilde(e));
     }
@@ -112,15 +120,63 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
 }
 
 /// Locate a system logo within one theme.
+///
+/// Themes do not agree on where logos live. Three conventions are common
+/// enough to check directly; anything else is found by the generic sweep in
+/// [`logo_by_sweep`].
 pub fn logo_for(theme: &Theme, esde_system: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     for ext in ICON_EXTENSIONS {
-        // slate-es-de and most community themes
+        // slate-es-de and many community themes
         candidates.push(theme.path.join(esde_system).join("images").join(format!("logo.{ext}")));
         // linear-es-de
         candidates.push(theme.path.join("system").join("logos").join(format!("{esde_system}.{ext}")));
+        // canvas-es-de and relatives
+        candidates.push(theme.path.join("_inc").join("system-logo").join(format!("{esde_system}.{ext}")));
     }
-    first_existing(&candidates)
+    first_existing(&candidates).or_else(|| logo_by_sweep(theme, esde_system))
+}
+
+/// Fallback: look for `<system>.<ext>` inside any directory whose name mentions
+/// "logo".
+///
+/// Depth-limited because theme repositories run to hundreds of megabytes and a
+/// full walk per system would be slow; logo directories are always shallow.
+fn logo_by_sweep(theme: &Theme, esde_system: &str) -> Option<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth == 0 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if name.starts_with('.') {
+                continue;
+            }
+            if name.contains("logo") {
+                out.push(path.clone());
+            }
+            walk(&path, depth - 1, out);
+        }
+    }
+
+    let mut dirs = Vec::new();
+    walk(&theme.path, 3, &mut dirs);
+    for dir in dirs {
+        for ext in ICON_EXTENSIONS {
+            let p = dir.join(format!("{esde_system}.{ext}"));
+            if p.is_file() {
+                return p.canonicalize().ok();
+            }
+        }
+    }
+    None
 }
 
 /// Resolve logos for every platform slug, using the first theme that has one.
