@@ -34,6 +34,9 @@ pub struct Platform {
 #[derive(Debug, Deserialize)]
 pub struct Rom {
     pub id: i64,
+    /// Display title, e.g. `"'88 Games"`. Distinct from `fs_name`.
+    #[serde(default)]
+    pub name: Option<String>,
     pub fs_name: String,
     #[serde(default)]
     pub fs_size_bytes: Option<i64>,
@@ -45,6 +48,9 @@ pub struct Rom {
     pub sha1_hash: Option<String>,
     #[serde(default)]
     pub crc_hash: Option<String>,
+    /// Drives incremental sync via the `updated_after` query param.
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +83,21 @@ impl Client {
             base: base_url.trim_end_matches('/').to_owned(),
             auth,
         })
+    }
+
+    /// Shared HTTP client — reuse it so connections stay pooled.
+    pub fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
+    /// Pre-encoded HTTP Basic credential, for callers issuing their own
+    /// requests (streaming downloads).
+    pub fn auth(&self) -> &str {
+        &self.auth
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -115,21 +136,42 @@ impl Client {
 
     /// One page of ROMs. `platform_id` is sent as `platform_ids` — the API
     /// ignores unknown params silently, and `platform_id` is not a real one.
+    ///
+    /// `updated_after` (ISO-8601) makes this incremental: after a first full
+    /// pull, later syncs return only what changed.
     pub async fn roms(
         &self,
         platform_id: Option<i64>,
         limit: u32,
         offset: u32,
+        updated_after: Option<&str>,
     ) -> Result<RomPage> {
         let mut path = format!("/api/roms?limit={limit}&offset={offset}");
         if let Some(id) = platform_id {
             path.push_str(&format!("&platform_ids={id}"));
+        }
+        if let Some(ts) = updated_after {
+            path.push_str(&format!("&updated_after={}", urlencode(ts)));
         }
         self.get_json(&path).await
     }
 
     /// Total ROM count, without pulling any rows we don't need.
     pub async fn rom_count(&self) -> Result<i64> {
-        Ok(self.roms(None, 1, 0).await?.total)
+        Ok(self.roms(None, 1, 0, None).await?.total)
     }
+}
+
+/// Minimal percent-encoding for query values (timestamps contain `:` and `+`).
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }

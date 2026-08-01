@@ -63,6 +63,56 @@ impl CoreMap {
         out
     }
 
+    /// Every RomM platform that lists `core` among its emulators.
+    pub fn platforms_with_core(&self, core: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for system in self.systems.values() {
+            let has = system
+                .emulators
+                .iter()
+                .any(|e| e.core.as_deref() == Some(core));
+            if has {
+                for p in &system.romm_platforms {
+                    if !out.contains(p) {
+                        out.push(p.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Map an emulator's *display name* to a core stem.
+    ///
+    /// RetroArch names its save subdirectories after the core's display name,
+    /// which differs from ES-DE's labels (`"MAME"` vs `"MAME - Current"`), so
+    /// match on a normalised form of both the label and the stem itself.
+    pub fn core_by_display_name(
+        &self,
+        display: &str,
+        normalise: fn(&str) -> String,
+    ) -> Option<String> {
+        let want = normalise(display);
+        if want.is_empty() {
+            return None;
+        }
+        let mut fallback = None;
+        for system in self.systems.values() {
+            for emu in &system.emulators {
+                let Some(core) = emu.core.as_deref() else {
+                    continue;
+                };
+                if normalise(core) == want {
+                    return Some(core.to_owned());
+                }
+                if normalise(&emu.label) == want {
+                    fallback.get_or_insert_with(|| core.to_owned());
+                }
+            }
+        }
+        fallback
+    }
+
     /// Human label for a core, for display.
     pub fn label_for(&self, core: &str) -> Option<&str> {
         self.systems

@@ -6,6 +6,13 @@
 /config.toml
 /state.json
 
+# Personal save/state data used as scanner test input — not ours to commit.
+/Saves/
+
+# Metadata cache — regenerate with `cargo run -- sync`.
+/cache.sqlite3
+/cache.sqlite3-*
+
 # Python
 __pycache__/
 *.py[cod]

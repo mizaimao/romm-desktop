@@ -9,10 +9,16 @@
 //!     cargo run -- launch <rom> --go      # actually spawn it
 
 mod api;
+mod cache;
 mod config;
 mod coremap;
 mod cores;
+mod download;
+mod parity;
 mod retroarch;
+mod savehash;
+mod saves;
+mod tui;
 
 use std::path::{Path, PathBuf};
 
@@ -318,6 +324,218 @@ async fn cmd_cores(install: bool) -> Result<()> {
     Ok(())
 }
 
+const CACHE_DB: &str = "cache.sqlite3";
+
+/// Stage 2 — pull metadata into the local cache.
+async fn cmd_sync(full: bool) -> Result<()> {
+    let cfg = Config::load()?;
+    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+    let mut store = cache::Cache::open(Path::new(CACHE_DB))?;
+
+    let before = store.rom_count().unwrap_or(0);
+    let started = std::time::Instant::now();
+    let (platforms, upserted, incremental) = store.sync(&client, full).await?;
+    let after = store.rom_count().unwrap_or(0);
+
+    println!(
+        "{} sync: {platforms} platforms, {upserted} rom rows in {:.1}s",
+        if incremental { "incremental" } else { "full" },
+        started.elapsed().as_secs_f64()
+    );
+    println!("cache now holds {after} roms ({:+})", after - before);
+    if let Some(w) = store.watermark() {
+        println!("watermark {w}");
+    }
+    Ok(())
+}
+
+fn human(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    for (i, u) in UNITS.iter().enumerate() {
+        if v < 1024.0 || i == UNITS.len() - 1 {
+            return format!("{v:.1} {u}");
+        }
+        v /= 1024.0;
+    }
+    unreachable!()
+}
+
+/// Stage 4 — download a ROM by search term.
+async fn cmd_get(needle: &str) -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let matches = store.search(needle, 25)?;
+
+    let rom = match matches.len() {
+        0 => bail!("nothing in the cache matches {needle:?} — try `sync` first"),
+        1 => matches.into_iter().next().unwrap(),
+        n => {
+            println!("{n} matches — be more specific:");
+            for m in matches.iter().take(15) {
+                println!(
+                    "  {:<16} {:<48} {:>10}",
+                    m.platform_slug,
+                    m.name.chars().take(46).collect::<String>(),
+                    human(m.fs_size_bytes as u64)
+                );
+            }
+            return Ok(());
+        }
+    };
+
+    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+    let roms_dir = cfg.local_roms_dir();
+
+    println!(
+        "{} [{}]  {}",
+        rom.name,
+        rom.platform_slug,
+        human(rom.fs_size_bytes as u64)
+    );
+
+    let target = download::Target {
+        rom_id: rom.id,
+        fs_name: &rom.fs_name,
+        platform_slug: &rom.platform_slug,
+        expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
+        md5: rom.md5_hash.as_deref(),
+        sha1: rom.sha1_hash.as_deref(),
+    };
+
+    let started = std::time::Instant::now();
+    let mut last_tick = std::time::Instant::now();
+    // Bytes already on disk when we started, so the rate reflects what this
+    // session actually transferred rather than crediting us with the resume.
+    let mut baseline: Option<u64> = None;
+    let outcome = download::fetch(
+        client.http(),
+        client.base(),
+        client.auth(),
+        &target,
+        &roms_dir,
+        |done, total| {
+            let base = *baseline.get_or_insert(done);
+            // Throttle so the terminal isn't the bottleneck on a fast transfer.
+            if last_tick.elapsed().as_millis() < 200 {
+                return;
+            }
+            last_tick = std::time::Instant::now();
+            let pct = if total > 0 {
+                format!("{:5.1}%", done as f64 / total as f64 * 100.0)
+            } else {
+                "  ?  ".to_owned()
+            };
+            let rate = done.saturating_sub(base) as f64
+                / started.elapsed().as_secs_f64().max(0.001)
+                / 1_048_576.0;
+            print!(
+                "\r  {pct}  {:>10} / {:<10} {rate:6.1} MB/s   ",
+                human(done),
+                human(total)
+            );
+            use std::io::Write as _;
+            std::io::stdout().flush().ok();
+        },
+    )
+    .await;
+
+    println!();
+    match outcome? {
+        download::Outcome::AlreadyHave(p) => println!("already downloaded and verified: {}", p.display()),
+        download::Outcome::Downloaded { path, bytes, resumed_from, verified } => {
+            let how = match verified {
+                download::Verified::Md5 => "md5 verified",
+                download::Verified::Sha1 => "sha1 verified",
+                download::Verified::SizeOnly => "size only — server published no hash",
+            };
+            if resumed_from > 0 {
+                println!("resumed from {}", human(resumed_from));
+            }
+            println!(
+                "{} in {:.1}s ({})\n{}",
+                human(bytes),
+                started.elapsed().as_secs_f64(),
+                how,
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Stage 5a — report what the local save scanner finds.
+fn cmd_scan() -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    if store.rom_count().unwrap_or(0) == 0 {
+        bail!("cache is empty — run `sync` first so saves can be resolved to rom ids");
+    }
+    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let root = Path::new(&cfg.saves.root);
+    if !root.is_dir() {
+        bail!("{} not found — set [saves] root in config.toml", root.display());
+    }
+
+    let found = saves::scan(root, &store, &map)?;
+    println!("scanning {}\n", root.display());
+
+    let (mut ok, mut amb, mut unmatched, mut unknown, mut superseded) = (0, 0, 0, 0, 0);
+    for c in &found {
+        let kind = match c.kind { saves::Kind::Save => "save ", saves::Kind::State => "state" };
+        let core = c.core.clone().unwrap_or_else(|| format!("?{}", c.core_dir));
+        print!("{kind} {:<10} {:<9} {:<44}", core, c.slot, c.rom_base.chars().take(42).collect::<String>());
+        match &c.resolution {
+            saves::Resolution::Resolved { rom_id, platform, .. } => {
+                if c.canonical {
+                    ok += 1;
+                    println!(" -> {platform}/{rom_id}");
+                } else {
+                    superseded += 1;
+                    println!(
+                        " -> {platform}/{rom_id}  SUPERSEDED by {}",
+                        c.superseded_by.as_deref().unwrap_or("?")
+                    );
+                }
+            }
+            saves::Resolution::Ambiguous(hits) => {
+                amb += 1;
+                println!(" -> AMBIGUOUS: {}", hits.iter()
+                    .map(|(id, p, _)| format!("{p}/{id}"))
+                    .collect::<Vec<_>>().join(", "));
+            }
+            saves::Resolution::Unmatched => { unmatched += 1; println!(" -> no matching rom"); }
+            saves::Resolution::UnknownCore => { unknown += 1; println!(" -> unknown core dir"); }
+        }
+    }
+
+    println!("\n{} files: {ok} to sync, {superseded} superseded, {amb} ambiguous, \
+              {unmatched} unmatched, {unknown} unknown core", found.len());
+    if superseded > 0 {
+        println!("\nSuperseded entries share a (rom_id, slot) with a save from the platform's\n\
+                  default core. Only the default core's file is synced, or they would\n\
+                  overwrite each other on the server every run.");
+    }
+    if amb > 0 {
+        println!("\nAmbiguous entries are NOT guessed — the same filename exists on more than one\n\
+                  platform (this library has arcade+mame and nes+famicom overlapping).");
+    }
+    Ok(())
+}
+
+/// Stage 2 — browse the cache.
+fn cmd_browse() -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    if store.rom_count().unwrap_or(0) == 0 {
+        bail!("cache is empty — run `cargo run -- sync` first");
+    }
+    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    // Missing RetroArch is not fatal; browsing still works, launching doesn't.
+    let ra = RetroArch::locate(cfg.retroarch.root.as_deref()).ok();
+    tui::run(&store, &cfg.local_roms_dir(), ra, map)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -335,6 +553,19 @@ async fn main() -> Result<()> {
         Some("suggest") => cmd_suggest(),
         Some("check") => cmd_check().await,
         Some("cores") => cmd_cores(install).await,
+        Some("sync") => cmd_sync(args.iter().any(|a| a == "--full")).await,
+        Some("browse") => cmd_browse(),
+        Some("scan") => cmd_scan(),
+        Some("hash-parity") => {
+            let cfg = Config::load()?;
+            let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+            parity::run(&client).await
+        }
+        Some("get") => {
+            let needle = args.get(1).filter(|a| !a.starts_with("--"))
+                .context("usage: get <search term>")?;
+            cmd_get(needle).await
+        }
         Some("launch") => {
             let rom = args
                 .get(1)
@@ -345,6 +576,11 @@ async fn main() -> Result<()> {
         _ => {
             eprintln!("usage:");
             eprintln!("  check                            verify server auth + library reach");
+            eprintln!("  sync [--full]                    pull metadata into the local cache");
+            eprintln!("  browse                           TUI library browser");
+            eprintln!("  get <term>                       download a ROM (resumable, verified)");
+            eprintln!("  hash-parity                      verify content_hash matches the server");
+            eprintln!("  scan                             inspect local saves/states");
             eprintln!("  doctor                           what's installed, what can launch");
             eprintln!("  cores [--install]                list/install missing libretro cores");
             eprintln!("  suggest                          list launchable ROMs in library/");

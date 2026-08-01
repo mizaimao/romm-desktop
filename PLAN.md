@@ -59,22 +59,62 @@ Verified: 24/24 slugs resolve against the live server, 239/239 games resolve to 
 Measured against the live server, not assumed. These override the original handoff notes
 where they disagree.
 
+### ⚠ The real latency: a stale DNS record
+
+**`dev.lan` resolves to two A records, and the first one is dead.**
+
+| address | ping | TCP connect |
+|---|---|---|
+| `10.10.10.199` | 100% packet loss | **75 s, times out** |
+| `10.10.10.77` | 4 ms | 0.00 s |
+
+Every new connection tries `.199` first, waits out the TCP timeout, then falls back to
+`.77`. Measured repeatedly: `http://dev.lan` = **75.2 s** for any first request on a
+connection; `http://10.10.10.77` = **0.20 s**. It affects *everything*, including the
+unauthenticated `/api/heartbeat` — it is not RomM, not auth, not the API.
+
+Effect on this client, same code, only the host changed:
+
+| | via `dev.lan` | via `10.10.10.77` |
+|---|---|---|
+| full sync (9,856 roms) | 83.5 s | **8.5 s** |
+| incremental sync | 75.7 s | **0.8 s** |
+
+> **Proper fix is to remove the stale `10.10.10.199` record from LAN DNS.** Until then
+> `config.toml` points at the IP. This is very likely a large part of the "latency" that
+> motivated building a native client in the first place — worth re-checking whether the web
+> UI still feels slow once DNS is fixed.
+
 ### Performance — metadata is not slow
+
+Measured against `10.10.10.77` (i.e. with the DNS problem bypassed):
 
 | Operation | Result |
 |---|---|
-| `/api/roms` paging **with keep-alive** | ~1,270 rows/s |
-| Full cold pull, all 9,856 ROMs | **~8 seconds** |
-| Incremental (`updated_after`, nothing changed) | 0.44 s, 0 rows |
-| Small ROM download (12 MB zip) | 21.8 MB/s |
-| Large ROM download (300 MB `.chd`) | **3.8 MB/s** |
+| `/api/roms` paging, 500/page | 0.27–0.56 s per page |
+| Full cold pull, all 9,856 ROMs | **~8.5 seconds** |
+| Incremental (`updated_after`, nothing changed) | 0.8 s, 0 rows |
+| ROM download, 110 MB `.chd` | ~76 MB/s |
+| ROM download, 1.5 GB `.chd` | **~115 MB/s** |
 
-An earlier estimate of "43 minutes for a full pull" was **wrong** — an artifact of a script
-that opened a new TCP connection per request while competing with other queries. Use a
-connection pool (`reqwest` does this by default) and it is 300× faster.
+> **The earlier "3.8 MB/s" figure was wrong — it was ~95% DNS timeout.** That test moved
+> 300 MB in 78.5 s; subtract the 75 s dead-record stall and it is 300 MB in ~3.5 s, i.e.
+> ~86 MB/s. Consistent with the numbers above. Transfers run at LAN speed.
 
-**Consequence:** local metadata caching is a nice-to-have for offline browsing, *not* a
-performance necessity. The real cost is bulk ROM transfer. Cache ROMs aggressively.
+An earlier estimate of "43 minutes for a full pull" was **wrong**, and the first explanation
+for *why* it was wrong was also incomplete. It was originally attributed to missing
+keep-alive. The true cause is the dead DNS record above: that script opened a new TCP
+connection per request, so it paid the ~60–75 s timeout roughly 40 times. Keep-alive helped
+only because it paid the penalty once instead of per request.
+
+**Consequence:** nothing about this server is slow. Metadata is ~8 s cold and sub-second
+incrementally; ROM transfer runs at wire speed. A 1.5 GB PSP image takes ~50 s, not the
+~20 minutes predicted from the bad measurement.
+
+This removes the last *performance* argument for the client. Local caching is for offline
+use and instant navigation, not speed. **The remaining justification is unchanged and
+still sound:** native emulation (in-browser is stuck on single-threaded cores, and PSP
+cannot run there at all) and save/state sync with real conflict detection across devices.
 
 > Large-file throughput is one sample; the small file may have been served from the
 > server's page cache. Confirm whether the ceiling is network or server disk before
@@ -170,13 +210,25 @@ One shared `reqwest::Client` gives connection pooling for free — the 300× tha
 43-minute measurement was missing. `platform_ids` is sent as an array, with a comment
 saying why.
 
-### Stage 2 — Library browse (TUI, read-only)
+### Stage 2 — Library browse (TUI) ✅ DONE
 
-Drill-down: platforms → games → detail. Cache metadata in SQLite; refresh via
-`updated_after`.
+`src/cache.rs` (SQLite) + `src/tui.rs` (ratatui/crossterm).
 
-**Done when:** all 24 platforms and 9,856 games navigable with no network calls after the
-first sync.
+```
+cargo run -- sync [--full]     8.5 s cold, 0.8 s incremental
+cargo run -- browse            platforms -> games, launch with Enter
+```
+
+Cache holds all 9,856 roms in a 2 MB SQLite file; browsing does zero network I/O.
+Incremental sync stores a watermark of `max(updated_at)` rather than "now", so clock skew
+between client and server can't silently drop rows.
+
+The browser marks `●` platforms with an installed core and `▣` ROMs present in `library/`.
+Enter launches (windowed); the TUI leaves the alternate screen before spawning and restores
+after, or the emulator and the TUI fight over the terminal.
+
+**Dependency note:** `rusqlite` is pinned to 0.37 — 0.40 pulls `libsqlite3-sys` 0.38, which
+uses the unstable `cfg_select` feature and will not build on stable Rust 1.94.
 
 ### Stage 3 — Core mapping ✅ DONE (ahead of schedule)
 
@@ -213,15 +265,31 @@ Streaming, resumable via HTTP Range (`HEAD` is supported), verified against the 
 **Done when:** pick a remote game → download → verify → launch, and a killed transfer
 resumes rather than restarting.
 
-Must stay responsive: a PSP `.chd` at 3.8 MB/s is a ~20-minute download. Must refuse
-tiny-`.m3u` multi-disc ROMs with a clear message.
+Verified: interrupting a 1.5 GB transfer at 305 MB and re-running resumes from exactly
+that offset and still passes md5 — so a resumed file is byte-correct. Deliberately
+planting a corrupt `.part` is caught by the hash and refused rather than renamed into
+place. Tiny `.m3u` stubs are rejected before any transfer.
 
 ### Stage 5 — Save sync
 
-**Gate on hash parity before writing any sync code.** Port `compute_content_hash`, upload a
-save through the web UI, read back its `content_hash`, assert equality. Get this wrong and
-`no_op` never fires — meaning the entire save set re-uploads on every run, forever. RomM
-itself shipped this bug.
+**Hash parity gate: ✅ PASSED.** `src/savehash.rs` ports `compute_content_hash`;
+`cargo run -- hash-parity` (`src/parity.rs`) uploads crafted saves, compares against the
+`content_hash` the *server* computed, then deletes them again. All 5 cases pass:
+
+| case | what it exercises |
+|---|---|
+| plain binary | raw-MD5 path |
+| empty file | streaming-loop boundary |
+| zip, entries written out of order | `sorted()` actually applied |
+| zip with directory entries | directory members skipped |
+| zip, empty member + non-ASCII names | UTF-8 ordering, zero-length member |
+
+Rust orders `str` by UTF-8 bytes where Python orders by code point; these agree because
+UTF-8 preserves code-point order. The non-ASCII case confirms that empirically rather than
+by argument.
+
+Getting this wrong would mean `no_op` never fires and the entire save set re-uploads on
+every run, forever. RomM itself shipped that bug.
 
 ```python
 # Byte-exact port target. sorted() and the "\n" join are load-bearing.

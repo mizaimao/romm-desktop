@@ -13,6 +13,8 @@ pub struct Config {
     pub library: Library,
     #[serde(default)]
     pub retroarch: RetroArchCfg,
+    #[serde(default)]
+    pub saves: SavesCfg,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -41,6 +43,24 @@ impl Default for Library {
 
 fn default_local_root() -> String {
     "./library".to_owned()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SavesCfg {
+    /// Directory containing `saves/` and `states/` subdirectories. In a
+    /// portable RetroArch install this is the portable root itself.
+    #[serde(default = "default_saves_root")]
+    pub root: String,
+}
+
+impl Default for SavesCfg {
+    fn default() -> Self {
+        Self { root: default_saves_root() }
+    }
+}
+
+fn default_saves_root() -> String {
+    "./Saves".to_owned()
 }
 
 #[derive(Debug, Default, Deserialize)]
