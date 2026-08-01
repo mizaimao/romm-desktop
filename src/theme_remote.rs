@@ -24,6 +24,7 @@ struct ThemesList {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteTheme {
     pub name: String,
     /// Directory name the theme is cloned into; also its stable identifier.
@@ -36,7 +37,21 @@ pub struct RemoteTheme {
     pub variants: Vec<String>,
     #[serde(default)]
     pub color_schemes: Vec<String>,
+    #[serde(default)]
+    pub screenshots: Vec<Screenshot>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Screenshot {
+    #[serde(default)]
+    pub image: String,
+    #[serde(default)]
+    pub caption: String,
+}
+
+/// Base for screenshot paths, which are relative to the themes-list repo.
+const SCREENSHOT_BASE: &str =
+    "https://gitlab.com/es-de/themes/themes-list/-/raw/master/";
 
 impl RemoteTheme {
     /// Directory name to clone into, falling back to a slug of the name.
@@ -50,12 +65,33 @@ impl RemoteTheme {
             .collect()
     }
 
+    /// Absolute URL of the first screenshot, for preview thumbnails.
+    ///
+    /// Hosted on gitlab.com, not the RomM server — previewing a theme is
+    /// inherently a network operation, since the next step clones it.
+    pub fn screenshot_url(&self) -> Option<String> {
+        let s = self.screenshots.first()?;
+        (!s.image.is_empty()).then(|| format!("{SCREENSHOT_BASE}{}", s.image))
+    }
+
     /// Loose match on name or reponame, for CLI lookup.
     pub fn matches(&self, needle: &str) -> bool {
         let n = needle.to_ascii_lowercase();
         self.name.to_ascii_lowercase().contains(&n)
             || self.reponame.to_ascii_lowercase().contains(&n)
     }
+}
+
+/// Fetch the official themes list with a throwaway client.
+///
+/// Themes are browsable with no RomM server configured, so this does not
+/// depend on the API client existing.
+pub async fn list_default() -> Result<Vec<RemoteTheme>> {
+    let http = reqwest::Client::builder()
+        .user_agent("romm-desktop/0.1")
+        .build()
+        .context("building HTTP client")?;
+    list(&http).await
 }
 
 /// Fetch the official themes list.

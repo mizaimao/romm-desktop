@@ -14,7 +14,7 @@ use tauri::{Emitter, State};
 
 use romm_desktop::{
     api, cache, config::Config, coremap::CoreMap, download, media, retroarch::RetroArch,
-    theme,
+    theme, theme_remote,
 };
 
 const CACHE_DB: &str = "cache.sqlite3";
@@ -30,6 +30,7 @@ struct AppState {
     roms_dir: PathBuf,
     media_dir: PathBuf,
     theme_root: Option<String>,
+    themes_dir: PathBuf,
 }
 
 #[derive(Serialize)]
@@ -255,6 +256,90 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     })
 }
 
+#[derive(Serialize)]
+struct ThemeView {
+    name: String,
+    reponame: String,
+    author: String,
+    url: String,
+    variants: Vec<String>,
+    screenshot: Option<String>,
+    installed: bool,
+    /// Bytes on disk, 0 when not installed.
+    size_bytes: u64,
+}
+
+/// The official ES-DE themes list, annotated with what is already installed.
+#[tauri::command]
+async fn themes_available(state: State<'_, AppState>) -> CmdResult<Vec<ThemeView>> {
+    let list = theme_remote::list_default().await.map_err(err)?;
+    let dir = state.themes_dir.clone();
+    Ok(list
+        .into_iter()
+        .map(|t| {
+            let path = dir.join(t.dir_name());
+            let installed = path.is_dir();
+            ThemeView {
+                screenshot: t.screenshot_url(),
+                size_bytes: if installed { theme_remote::size_of(&path) } else { 0 },
+                installed,
+                reponame: t.dir_name(),
+                name: t.name,
+                author: t.author,
+                url: t.url,
+                variants: t.variants,
+            }
+        })
+        .collect())
+}
+
+/// Download a theme. With `logos_only`, keep just the platform icons and
+/// delete the checkout — themes run to hundreds of MB and we render ~240 KB.
+#[tauri::command]
+async fn theme_download(
+    state: State<'_, AppState>,
+    reponame: String,
+    logos_only: bool,
+) -> CmdResult<String> {
+    let list = theme_remote::list_default().await.map_err(err)?;
+    let entry = list
+        .into_iter()
+        .find(|t| t.dir_name() == reponame)
+        .ok_or_else(|| format!("{reponame} is not in the themes list"))?;
+
+    let dir = state.themes_dir.clone();
+    let (path, fresh) = theme_remote::install(&entry, &dir).map_err(err)?;
+    let size = theme_remote::size_of(&path);
+
+    let slugs: Vec<String> = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
+    };
+    let one = vec![theme::Theme { name: entry.dir_name(), path: path.clone() }];
+    let n = theme::install(&one, &state.map, &slugs, &state.media_dir).map_err(err)?;
+
+    if logos_only {
+        theme_remote::remove(&entry.dir_name(), &dir).map_err(err)?;
+        return Ok(format!(
+            "{}: kept {n} icons, freed {:.0} MB",
+            entry.name,
+            size as f64 / 1_048_576.0
+        ));
+    }
+    Ok(format!(
+        "{} {} ({:.0} MB), {n} icons applied",
+        entry.name,
+        if fresh { "downloaded" } else { "updated" },
+        size as f64 / 1_048_576.0
+    ))
+}
+
+#[tauri::command]
+fn theme_remove(state: State<'_, AppState>, reponame: String) -> CmdResult<String> {
+    theme_remote::remove(&reponame, &state.themes_dir).map_err(err)?;
+    Ok(format!("removed {reponame}"))
+}
+
 /// Copy system logos out of an installed ES-DE theme into the media tree.
 #[tauri::command]
 fn install_theme_logos(state: State<'_, AppState>) -> CmdResult<String> {
@@ -262,7 +347,7 @@ fn install_theme_logos(state: State<'_, AppState>) -> CmdResult<String> {
         let cache = state.cache.lock().map_err(err)?;
         cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
     };
-    let themes = theme::discover(state.theme_root.as_deref());
+    let themes = theme::discover_with(state.theme_root.as_deref(), Some(&state.themes_dir));
     if themes.is_empty() {
         return Err("no ES-DE themes found — install ES-DE or set [theme] root".into());
     }
@@ -401,6 +486,7 @@ fn main() {
             roms_dir,
             media_dir,
             theme_root: cfg.theme.root.clone(),
+            themes_dir: cfg.themes_dir(),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,
@@ -410,6 +496,9 @@ fn main() {
             download_rom,
             launch_rom,
             install_theme_logos,
+            themes_available,
+            theme_download,
+            theme_remove,
             status
         ])
         .run(tauri::generate_context!())
