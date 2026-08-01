@@ -3,6 +3,19 @@ name = "romm-desktop"
 version = "0.1.0"
 edition = "2024"
 
+# The core is a library so the Tauri GUI (src-tauri/) and the CLI/TUI share one
+# backend rather than reimplementing it.
+[lib]
+name = "romm_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "romm-desktop"
+path = "src/main.rs"
+
+[workspace]
+members = ["src-tauri"]
+
 [dependencies]
 anyhow = "1.0.104"
 base64 = "0.23.0"

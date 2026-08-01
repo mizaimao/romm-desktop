@@ -8,25 +8,14 @@
 //!     cargo run -- launch <rom>           # resolve + print the command
 //!     cargo run -- launch <rom> --go      # actually spawn it
 
-mod api;
-mod cache;
-mod config;
-mod coremap;
-mod cores;
-mod download;
-mod parity;
-mod retroarch;
-mod savehash;
-mod saves;
-mod tui;
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use config::Config;
-use coremap::CoreMap;
-use retroarch::RetroArch;
+use romm_desktop::{api, cache, cores, download, parity, saves, tui};
+use romm_desktop::config::Config;
+use romm_desktop::coremap::CoreMap;
+use romm_desktop::retroarch::{self, RetroArch};
 
 const CORE_MAP: &str = "data/esde-core-map.json";
 

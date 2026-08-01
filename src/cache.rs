@@ -148,6 +148,16 @@ impl Cache {
         Ok(rows)
     }
 
+    pub fn rom_by_id(&self, id: i64) -> Result<Option<RomRow>> {
+        let sql = format!("SELECT {ROM_COLUMNS} FROM roms WHERE id = ?1");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows = stmt.query_map([id], rom_from_row)?;
+        Ok(match rows.next() {
+            Some(r) => Some(r?),
+            None => None,
+        })
+    }
+
     /// Case-insensitive search over display name and filename.
     pub fn search(&self, needle: &str, limit: usize) -> Result<Vec<RomRow>> {
         let sql = format!(
