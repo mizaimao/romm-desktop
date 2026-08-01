@@ -643,7 +643,33 @@ external processes** — not embedded.
   own save layout; defer.
 - **Cache ROMs, not metadata-first.** Metadata is 8 s cold; ROM transfer is the real cost.
 
-## 11. Open questions
+## 11. Storage layout (decided)
+
+All downloaded data lives in one plain folder beside the executable:
+
+```
+<project root>/library/
+├── roms/<platform>/<game>          downloaded ROMs
+└── downloaded_media/<platform>/    covers, screenshots, videos
+    ├── covers/     fetched from the server, or imported from ES-DE
+    ├── screenshots/
+    └── videos/     ES-DE only — the server has no videos
+```
+
+**Explicitly not `~/Library/Application Support/RomM`**: hard to find, easy to
+forget, and it accumulates gigabytes invisibly. A visible folder can be
+inspected, backed up, or deleted wholesale, and nothing in it is unrecoverable.
+
+The GUI shows the absolute paths and total size in the status line (hover for
+detail) so it is never a mystery where the disk went.
+
+Artwork resolution prefers local ES-DE media and falls back to the server,
+caching fetched files into the *same* ES-DE-shaped tree — so imported and
+fetched art are interchangeable and there is only one lookup path. Local media
+covers ~2% of the library; the server has covers for **92%** and screenshots
+for 89%.
+
+## 12. Open questions
 
 - Whether save **states** negotiate through `/api/sync/negotiate` — the payload only
   declares a `saves` array. Unverified.

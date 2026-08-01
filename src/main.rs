@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use romm_desktop::{api, cache, cores, download, parity, saves, tui};
+use romm_desktop::{api, cache, cores, download, media, parity, saves, theme, tui};
 use romm_desktop::config::Config;
 use romm_desktop::coremap::CoreMap;
 use romm_desktop::retroarch::{self, RetroArch};
@@ -512,6 +512,77 @@ fn cmd_scan() -> Result<()> {
     Ok(())
 }
 
+/// Resolve artwork for a ROM — local first, else fetch from the server.
+async fn cmd_art(needle: &str) -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password).ok();
+    let media_root = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
+
+    let matches = store.search(needle, 5)?;
+    if matches.is_empty() {
+        bail!("nothing matches {needle:?}");
+    }
+    for rom in matches {
+        let stem = Path::new(&rom.fs_name)
+            .file_stem().map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| rom.fs_name.clone());
+        println!("{} [{}]", rom.name, rom.platform_slug);
+        for (kind, server) in [
+            (media::COVERS, rom.cover_path.as_deref()),
+            (media::SCREENSHOTS, rom.screenshot_path.as_deref()),
+            (media::VIDEOS, None),
+        ] {
+            let before = media::find_local(&media_root, &rom.platform_slug, &stem, kind).is_some();
+            let got = media::ensure(
+                client.as_ref(), &media_root, &rom.platform_slug, &stem, kind, server,
+            ).await;
+            let how = match (&got, before) {
+                (Some(_), true) => "local",
+                (Some(_), false) => "FETCHED",
+                (None, _) => "none",
+            };
+            println!("  {kind:<12} {how:<8} {}", got.map(|p| p.display().to_string()).unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
+/// Inspect ES-DE themes and install their system logos locally.
+fn cmd_themes(install: bool) -> Result<()> {
+    let cfg = Config::load()?;
+    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let slugs: Vec<String> = store.platforms()?.into_iter().map(|p| p.fs_slug).collect();
+
+    let themes = theme::discover(cfg.theme.root.as_deref());
+    if themes.is_empty() {
+        bail!("no ES-DE themes found — install ES-DE, or set [theme] root in config.toml");
+    }
+    println!("themes found:");
+    for t in &themes {
+        println!("  {:<16} {}", t.name, t.path.display());
+    }
+
+    let found = theme::logos(&themes, &map, &slugs);
+    println!("\nlogos: {}/{} platforms", found.len(), slugs.len());
+    for slug in &slugs {
+        match found.get(slug) {
+            Some(p) => println!("  {slug:<16} {}", p.display()),
+            None => println!("  {slug:<16} — none"),
+        }
+    }
+
+    if install {
+        let media_root = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
+        let n = theme::install(&themes, &map, &slugs, &media_root)?;
+        println!("\ninstalled {n} logos into {}/_platforms", media_root.display());
+    } else {
+        println!("\n(pass --install to copy them into the local media tree)");
+    }
+    Ok(())
+}
+
 /// Stage 2 — browse the cache.
 fn cmd_browse() -> Result<()> {
     let cfg = Config::load()?;
@@ -556,6 +627,11 @@ async fn main() -> Result<()> {
         Some("sync") => cmd_sync(args.iter().any(|a| a == "--full")).await,
         Some("browse") => cmd_browse(),
         Some("scan") => cmd_scan(),
+        Some("themes") => cmd_themes(install),
+        Some("art") => {
+            let n = args.get(1).filter(|a| !a.starts_with("--")).context("usage: art <term>")?;
+            cmd_art(n).await
+        }
         Some("hash-parity") => {
             let cfg = Config::load()?;
             let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
@@ -581,6 +657,7 @@ async fn main() -> Result<()> {
             eprintln!("  get <term>                       download a ROM (resumable, verified)");
             eprintln!("  hash-parity                      verify content_hash matches the server");
             eprintln!("  scan                             inspect local saves/states");
+            eprintln!("  themes [--install]               ES-DE theme logos for the console grid");
             eprintln!("  doctor                           what's installed, what can launch");
             eprintln!("  cores [--install]                list/install missing libretro cores");
             eprintln!("  suggest                          list launchable ROMs in library/");

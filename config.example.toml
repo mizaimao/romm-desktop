@@ -13,7 +13,16 @@ username = ""
 password = ""
 
 [library]
-# Local stand-in for the server, built by tools/build_test_library.py.
+# EVERYTHING this app downloads lives under here — ROMs, cover art, videos.
+# Deliberately a plain folder next to the executable rather than somewhere like
+# ~/Library/Application Support, so it is easy to find, inspect, back up, and
+# delete. Deleting this folder reclaims all the space and loses nothing that
+# cannot be re-downloaded.
+#
+#   <local_root>/roms/<platform>/<game>          downloaded ROMs
+#   <local_root>/downloaded_media/<platform>/    covers, screenshots, videos
+#
+# Relative paths resolve against the project root, not the shell's cwd.
 local_root = "./library"
 
 [retroarch]

@@ -51,6 +51,12 @@ pub struct Rom {
     /// Drives incremental sync via the `updated_after` query param.
     #[serde(default)]
     pub updated_at: Option<String>,
+    /// Server-side artwork, e.g. `/assets/romm/resources/roms/2/42/cover/big.png?ts=...`.
+    /// Note the timestamp query contains a raw space and must be encoded.
+    #[serde(default)]
+    pub path_cover_large: Option<String>,
+    #[serde(default)]
+    pub merged_screenshots: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

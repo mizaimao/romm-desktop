@@ -12,7 +12,10 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{Emitter, State};
 
-use romm_desktop::{api, cache, config::Config, coremap::CoreMap, download, retroarch::RetroArch};
+use romm_desktop::{
+    api, cache, config::Config, coremap::CoreMap, download, media, retroarch::RetroArch,
+    theme,
+};
 
 const CACHE_DB: &str = "cache.sqlite3";
 const CORE_MAP: &str = "data/esde-core-map.json";
@@ -26,6 +29,7 @@ struct AppState {
     retroarch: Option<RetroArch>,
     roms_dir: PathBuf,
     media_dir: PathBuf,
+    theme_root: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -35,6 +39,8 @@ struct PlatformView {
     rom_count: i64,
     /// Whether a libretro core for this platform is actually installed.
     playable: bool,
+    /// ES-DE theme logo, if one has been installed locally.
+    logo: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -77,6 +83,8 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
         .into_iter()
         .map(|p| PlatformView {
             playable: resolve_core(&state, &p.fs_slug).is_some(),
+            logo: theme::installed_logo(&state.media_dir, &p.fs_slug)
+                .map(|p| p.display().to_string()),
             slug: p.fs_slug,
             name: p.display_name,
             rom_count: p.rom_count,
@@ -119,7 +127,7 @@ fn search(state: State<'_, AppState>, term: String) -> CmdResult<Vec<RomView>> {
 }
 
 #[tauri::command]
-fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail> {
+async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
         cache.rom_by_id(id).map_err(err)?
@@ -138,10 +146,27 @@ fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail> {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| row.fs_name.clone());
 
+    // Local ES-DE media covers only ~2% of this library, so fall back to the
+    // server's artwork and cache it into the same tree.
+    let client = state.client.clone();
+    let media_root = state.media_dir.clone();
+    let as_url = |p: Option<std::path::PathBuf>| p.map(|p| p.display().to_string());
+
+    let cover = media::ensure(
+        client.as_deref(), &media_root, &row.platform_slug, &stem,
+        media::COVERS, row.cover_path.as_deref(),
+    ).await;
+    let screenshot = media::ensure(
+        client.as_deref(), &media_root, &row.platform_slug, &stem,
+        media::SCREENSHOTS, row.screenshot_path.as_deref(),
+    ).await;
+    // No server-side video exists on this deployment; local only.
+    let video = media::find_local(&media_root, &row.platform_slug, &stem, media::VIDEOS);
+
     Ok(RomDetail {
-        cover: find_media(&state, &row.platform_slug, &stem, "covers"),
-        video: find_media(&state, &row.platform_slug, &stem, "videos"),
-        screenshot: find_media(&state, &row.platform_slug, &stem, "screenshots"),
+        cover: as_url(cover),
+        video: as_url(video),
+        screenshot: as_url(screenshot),
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
         id: row.id,
         name: row.name,
@@ -230,6 +255,21 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     })
 }
 
+/// Copy system logos out of an installed ES-DE theme into the media tree.
+#[tauri::command]
+fn install_theme_logos(state: State<'_, AppState>) -> CmdResult<String> {
+    let slugs: Vec<String> = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
+    };
+    let themes = theme::discover(state.theme_root.as_deref());
+    if themes.is_empty() {
+        return Err("no ES-DE themes found — install ES-DE or set [theme] root".into());
+    }
+    let n = theme::install(&themes, &state.map, &slugs, &state.media_dir).map_err(err)?;
+    Ok(format!("installed {n} logos from {}", themes[0].name))
+}
+
 #[derive(Serialize)]
 struct Status {
     server: String,
@@ -237,6 +277,10 @@ struct Status {
     retroarch: Option<String>,
     cores_installed: usize,
     roms_cached: i64,
+    /// Absolute paths, shown in the UI so downloaded data is never a mystery.
+    roms_dir: String,
+    media_dir: String,
+    disk_bytes: u64,
 }
 
 #[tauri::command]
@@ -259,7 +303,30 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
             .map(|r| r.installed_cores().len())
             .unwrap_or(0),
         roms_cached: cache.rom_count().unwrap_or(0),
+        roms_dir: abs(&state.roms_dir),
+        media_dir: abs(&state.media_dir),
+        disk_bytes: dir_size(&state.roms_dir) + dir_size(&state.media_dir),
     })
+}
+
+fn abs(p: &Path) -> String {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf()).display().to_string()
+}
+
+/// Recursive size of everything we have downloaded, so the UI can say how much
+/// disk this app is using before you go looking for it.
+fn dir_size(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_size(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
 }
 
 // --- helpers -------------------------------------------------------------
@@ -284,26 +351,37 @@ fn resolve_core(state: &State<'_, AppState>, platform: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Locate an ES-DE media file and return it as an absolute path for the
-/// frontend to turn into an `asset:` URL.
-fn find_media(
-    state: &State<'_, AppState>,
-    platform: &str,
-    stem: &str,
-    kind: &str,
-) -> Option<String> {
-    let dir = state.media_dir.join(platform).join(kind);
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.file_stem().is_some_and(|s| s == stem) {
-            return path.canonicalize().ok().map(|p| p.display().to_string());
+/// Find the project root and make it the working directory.
+///
+/// Config, cache, core map and library are all addressed relative to the
+/// project root, but the process cwd varies by how the app was started —
+/// `tauri dev` uses `src-tauri/`, a bundled `.app` uses `/`. Anchor once here
+/// so everything downstream can keep using plain relative paths.
+fn anchor_to_project_root() {
+    const MARKER: &str = "data/esde-core-map.json";
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.extend(cwd.ancestors().map(Path::to_path_buf));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        roots.extend(exe.ancestors().map(Path::to_path_buf));
+    }
+
+    for root in roots {
+        if root.join(MARKER).is_file() {
+            let _ = std::env::set_current_dir(&root);
+            return;
         }
     }
-    None
+    eprintln!(
+        "warning: could not locate {MARKER}; run from the project root or the \
+         library and cache will appear empty"
+    );
 }
 
 fn main() {
+    anchor_to_project_root();
     let cfg = Config::load().unwrap_or_default();
     let store = cache::Cache::open(Path::new(CACHE_DB)).expect("opening metadata cache");
     let map = CoreMap::load(Path::new(CORE_MAP)).expect("loading core map");
@@ -322,6 +400,7 @@ fn main() {
             retroarch,
             roms_dir,
             media_dir,
+            theme_root: cfg.theme.root.clone(),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,
@@ -330,6 +409,7 @@ fn main() {
             rom_detail,
             download_rom,
             launch_rom,
+            install_theme_logos,
             status
         ])
         .run(tauri::generate_context!())

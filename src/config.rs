@@ -15,6 +15,8 @@ pub struct Config {
     pub retroarch: RetroArchCfg,
     #[serde(default)]
     pub saves: SavesCfg,
+    #[serde(default)]
+    pub theme: ThemeCfg,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -61,6 +63,14 @@ impl Default for SavesCfg {
 
 fn default_saves_root() -> String {
     "./Saves".to_owned()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ThemeCfg {
+    /// Extra directory to search for ES-DE themes, checked before the
+    /// standard locations. Unset means probe ~/ES-DE/themes and the ES-DE.app
+    /// bundle.
+    pub root: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

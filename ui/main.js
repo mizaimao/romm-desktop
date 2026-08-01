@@ -54,6 +54,11 @@ async function showPlatforms() {
     .map(
       (p) => `
       <div class="card" data-slug="${p.slug}">
+        <div class="logo">${
+          p.logo
+            ? `<img src="${convertFileSrc(p.logo)}" alt="" />`
+            : `<span class="ph">${escapeHtml(p.slug)}</span>`
+        }</div>
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="meta">
           <span class="dot ${p.playable ? "on" : ""}"></span>
@@ -213,7 +218,12 @@ listen("download-progress", ({ payload }) => {
       s.connected ? s.server : "offline",
       `${s.roms_cached} roms`,
       s.retroarch ? `${s.cores_installed} cores` : "no RetroArch",
+      `${human(s.disk_bytes)} on disk`,
     ].join(" · ");
+    el.status.title =
+      `Downloads:  ${s.roms_dir}\nArtwork:    ${s.media_dir}\n\n` +
+      `Everything this app downloads lives there. Delete that folder to reclaim the space.`;
+    window.__storage = s;
   } catch (e) {
     el.status.textContent = "backend error";
   }
