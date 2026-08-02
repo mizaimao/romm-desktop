@@ -5,6 +5,7 @@ import { human } from "./util.js";
 import { showPlatforms, runSearch, setLayout } from "./library.js";
 import { setSidebar } from "./detail.js";
 import { showThemes } from "./themes.js";
+import { installKeys } from "./keys.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
@@ -57,4 +58,5 @@ listen("download-progress", ({ payload }) => {
   setLayout(state.layout);
   setSidebar(state.sidebar);
   await showPlatforms();
+  installKeys();
 })();

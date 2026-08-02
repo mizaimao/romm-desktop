@@ -26,6 +26,7 @@ export const el = {
   layoutBtn: document.getElementById("layout-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),
   lb: document.getElementById("lightbox"),
+  settingsBtn: document.getElementById("settings-btn"),
 };
 
 // Tauri globals, exposed once so modules do not each reach into window.

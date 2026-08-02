@@ -10,11 +10,16 @@ negotiation is not yet wired up.
 
 ```
 src/            core library — api, cache, download, media, theme, retroarch
-src/main.rs     CLI + TUI frontend
+src/main.rs     CLI (clap) + TUI frontend
 src-tauri/      Tauri GUI shell (thin; delegates to the library)
-ui/             static frontend, no bundler
+ui/js/          static ES modules, no bundler
 tools/          one-shot extraction scripts
 ```
+
+GUI keyboard: arrows move, Enter opens/plays, Esc/Backspace goes back, `/`
+searches, `?` lists what is bound. Every binding is configurable in Settings
+(⚙) and persisted; download / grid-list / info-pane / themes ship **unbound**,
+since bare letters are easy to press by accident.
 
 ---
 
