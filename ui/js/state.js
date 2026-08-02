@@ -14,6 +14,7 @@ export const state = {
   sidebar: localStorage.getItem("sidebar") !== "off",
   /// Base card width in px; the grid scales from this.
   zoom: Number(localStorage.getItem("zoom")) || 150,
+  gamepad: null,
 };
 
 export const el = {

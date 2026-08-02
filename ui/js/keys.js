@@ -77,7 +77,7 @@ function toggleHelp() {
   document.body.appendChild(box);
 }
 
-const HANDLERS = {
+export const HANDLERS = {
   left: () => move(-1),
   right: () => move(1),
   // A list is one column, so vertical movement steps one row there and a full
@@ -106,6 +106,12 @@ const HANDLERS = {
   },
   themes: () => (state.view === "themes" ? showPlatforms() : showThemes()),
 };
+
+/// Run an action by id, as the keyboard would. Shared with the gamepad.
+export function runAction(id) {
+  const handler = HANDLERS[id];
+  if (handler) handler(columns(items()));
+}
 
 export function installKeys() {
   el.settingsBtn?.addEventListener("click", toggleSettings);
