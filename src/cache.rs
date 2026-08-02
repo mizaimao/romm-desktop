@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS roms (
     updated_at     TEXT,
     cover_path     TEXT,
     screenshot_path TEXT,
-    screenshots_json TEXT
+    screenshots_json TEXT,
+    cover_small_path TEXT
 );
 CREATE INDEX IF NOT EXISTS roms_platform ON roms(platform_slug);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -62,12 +63,14 @@ pub struct RomRow {
     pub screenshot_path: Option<String>,
     /// Every screenshot the server has, JSON-encoded. Games range from 0 to 12.
     pub screenshots_json: Option<String>,
+    pub cover_small_path: Option<String>,
 }
 
 /// Columns every `RomRow` query selects, in order.
 const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name), \
                            fs_name, COALESCE(fs_size_bytes, 0), md5_hash, sha1_hash, \
-                           cover_path, screenshot_path, screenshots_json";
+                           cover_path, screenshot_path, screenshots_json, \
+                           cover_small_path";
 
 fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
     Ok(RomRow {
@@ -81,6 +84,7 @@ fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
         cover_path: r.get(7)?,
         screenshot_path: r.get(8)?,
         screenshots_json: r.get(9)?,
+        cover_small_path: r.get(10)?,
     })
 }
 
@@ -110,7 +114,7 @@ impl Cache {
         conn.execute_batch(SCHEMA).context("creating schema")?;
         // Older caches predate the artwork columns; add them in place rather
         // than forcing a full resync.
-        for col in ["cover_path", "screenshot_path", "screenshots_json"] {
+        for col in ["cover_path", "screenshot_path", "screenshots_json", "cover_small_path"] {
             let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} TEXT"), []);
         }
         Ok(Self { conn })
@@ -257,8 +261,9 @@ impl Cache {
                         "INSERT INTO roms(id, platform_slug, name, fs_name,
                                           fs_size_bytes, md5_hash, sha1_hash,
                                           crc_hash, updated_at, cover_path,
-                                          screenshot_path, screenshots_json)
-                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                                          screenshot_path, screenshots_json,
+                                          cover_small_path)
+                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
                          ON CONFLICT(id) DO UPDATE SET
                             platform_slug = excluded.platform_slug,
                             name          = excluded.name,
@@ -270,7 +275,8 @@ impl Cache {
                             updated_at    = excluded.updated_at,
                             cover_path    = excluded.cover_path,
                             screenshot_path = excluded.screenshot_path,
-                            screenshots_json = excluded.screenshots_json",
+                            screenshots_json = excluded.screenshots_json,
+                            cover_small_path = excluded.cover_small_path",
                         params![
                             rom.id,
                             rom.platform_fs_slug.clone().unwrap_or_default(),
@@ -284,6 +290,7 @@ impl Cache {
                             rom.path_cover_large,
                             rom.merged_screenshots.first(),
                             serde_json::to_string(&rom.merged_screenshots).ok(),
+                            rom.path_cover_small,
                         ],
                     )?;
                 }

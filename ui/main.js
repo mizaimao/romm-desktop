@@ -16,14 +16,17 @@ const el = {
   status: document.getElementById("status"),
   toast: document.getElementById("toast"),
   themesBtn: document.getElementById("themes-btn"),
+  layoutBtn: document.getElementById("layout-btn"),
 };
 
 let state = {
-  view: "platforms", // platforms | roms | search
+  view: "platforms", // platforms | roms | search | themes
   platform: null,
   rows: [],
   selected: null,
   downloading: new Map(), // rom id -> {done, total}
+  // Grid shows box art, list is denser. Remembered across launches.
+  layout: localStorage.getItem("layout") || "grid",
 };
 
 const human = (b) => {
@@ -45,6 +48,8 @@ function toast(msg, ms = 4000) {
 async function showPlatforms() {
   state.view = "platforms";
   el.themesBtn.classList.remove("active");
+  el.layoutBtn.hidden = true;
+  coverObserver?.disconnect();
   state.platform = null;
   state.selected = null;
   el.back.hidden = true;
@@ -82,6 +87,7 @@ async function showRoms(slug) {
   el.search.value = "";
   const rows = await invoke("roms", { platform: slug });
   state.rows = rows;
+  el.layoutBtn.hidden = false;
   el.title.textContent = `${slug} — ${rows.length} games`;
   renderRows(rows, false);
 }
@@ -94,6 +100,7 @@ async function runSearch(term) {
   el.back.hidden = false;
   const rows = await invoke("search", { term });
   state.rows = rows;
+  el.layoutBtn.hidden = false;
   el.title.textContent = `Search “${term}” — ${rows.length}`;
   renderRows(rows, true);
 }
@@ -103,7 +110,22 @@ function renderRows(rows, showPlatform) {
     el.list.innerHTML = `<div class="empty">Nothing here.</div>`;
     return;
   }
-  el.list.innerHTML = `<div class="rows">${rows
+  el.list.innerHTML =
+    state.layout === "grid" ? gridMarkup(rows) : listMarkup(rows, showPlatform);
+
+  el.list.querySelectorAll("[data-id]").forEach((n) =>
+    n.addEventListener("click", () => selectRom(Number(n.dataset.id)))
+  );
+
+  if (state.layout === "grid") observeCovers();
+
+  // Opening straight into a selected game means the artwork pane is populated
+  // instead of the user staring at an empty sidebar.
+  if (rows.length) selectRom(rows[0].id);
+}
+
+function listMarkup(rows, showPlatform) {
+  return `<div class="rows">${rows
     .map(
       (r) => `
       <div class="row" data-id="${r.id}">
@@ -114,10 +136,67 @@ function renderRows(rows, showPlatform) {
       </div>`
     )
     .join("")}</div>`;
+}
 
-  el.list.querySelectorAll(".row").forEach((row) =>
-    row.addEventListener("click", () => selectRom(Number(row.dataset.id)))
+function gridMarkup(rows) {
+  return `<div class="gcards">${rows
+    .map(
+      (r) => `
+      <div class="gcard" data-id="${r.id}">
+        <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
+        <div class="gname">${escapeHtml(r.name)}</div>
+        <div class="gmeta">${r.downloaded ? "▣ " : ""}${human(r.size_bytes)}</div>
+      </div>`
+    )
+    .join("")}</div>`;
+}
+
+// Covers are fetched only for cards that scroll into view, in batches, so a
+// 2,400-game platform does not trigger 2,400 requests on open.
+let coverObserver;
+let coverQueue = [];
+let coverTimer;
+
+function observeCovers() {
+  coverObserver?.disconnect();
+  coverQueue = [];
+  coverObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        coverObserver.unobserve(e.target);
+        coverQueue.push(Number(e.target.dataset.id));
+      }
+      clearTimeout(coverTimer);
+      coverTimer = setTimeout(flushCovers, 80);
+    },
+    { root: el.list, rootMargin: "300px" }
   );
+  el.list.querySelectorAll(".gcard").forEach((c) => coverObserver.observe(c));
+}
+
+async function flushCovers() {
+  const ids = coverQueue.splice(0, 40);
+  if (!ids.length) return;
+  try {
+    const covers = await invoke("rom_covers", { ids });
+    for (const { id, cover } of covers) {
+      if (!cover) continue;
+      const art = el.list.querySelector(`.gcard[data-id="${id}"] .art`);
+      if (art) art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;
+    }
+  } catch (e) {
+    /* leave placeholders in place */
+  }
+  if (coverQueue.length) setTimeout(flushCovers, 30);
+}
+
+function setLayout(next) {
+  state.layout = next;
+  localStorage.setItem("layout", next);
+  el.layoutBtn.textContent = next === "grid" ? "List" : "Grid";
+  el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
+  if (state.rows.length) renderRows(state.rows, state.view === "search");
 }
 
 // --- theme picker --------------------------------------------------------
@@ -127,6 +206,7 @@ async function showThemes() {
   el.back.hidden = false;
   el.detail.hidden = true;
   el.themesBtn.classList.add("active");
+  el.layoutBtn.hidden = true;
   el.title.textContent = "Console icon themes";
   el.list.innerHTML = `<div class="empty">Loading themes…</div>`;
 
@@ -236,7 +316,7 @@ async function themeAction(reponame, act, btn) {
 
 async function selectRom(id) {
   state.selected = id;
-  el.list.querySelectorAll(".row").forEach((r) =>
+  el.list.querySelectorAll(".row, .gcard").forEach((r) =>
     r.classList.toggle("sel", Number(r.dataset.id) === id)
   );
 
@@ -367,6 +447,10 @@ el.back.addEventListener("click", () => {
   showPlatforms();
 });
 
+el.layoutBtn.addEventListener("click", () =>
+  setLayout(state.layout === "grid" ? "list" : "grid")
+);
+
 el.themesBtn.addEventListener("click", () => {
   if (state.view === "themes") {
     el.themesBtn.classList.remove("active");
@@ -409,5 +493,7 @@ listen("download-progress", ({ payload }) => {
   } catch (e) {
     el.status.textContent = "backend error";
   }
+  setLayout(state.layout);
+  el.layoutBtn.hidden = true;
   await showPlatforms();
 })();

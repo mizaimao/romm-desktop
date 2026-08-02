@@ -184,6 +184,67 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     })
 }
 
+#[derive(Serialize)]
+struct CoverView {
+    id: i64,
+    cover: Option<String>,
+}
+
+/// Resolve covers for a batch of ROMs.
+///
+/// The grid asks only for what has scrolled into view, and this bounds the
+/// fan-out further, so browsing a 2,400-game platform never turns into 2,400
+/// simultaneous requests.
+#[tauri::command]
+async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<CoverView>> {
+    const CONCURRENCY: usize = 8;
+
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        ids.iter()
+            .filter_map(|id| cache.rom_by_id(*id).ok().flatten())
+            .collect::<Vec<_>>()
+    };
+
+    let mut out = Vec::with_capacity(rows.len());
+    for chunk in rows.chunks(CONCURRENCY) {
+        let mut set = tokio::task::JoinSet::new();
+        for row in chunk {
+            let client = state.client.clone();
+            let media_root = state.media_dir.clone();
+            let (id, platform, fs_name, small, large) = (
+                row.id,
+                row.platform_slug.clone(),
+                row.fs_name.clone(),
+                row.cover_small_path.clone(),
+                row.cover_path.clone(),
+            );
+            set.spawn(async move {
+                let stem = Path::new(&fs_name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or(fs_name);
+                let cover = media::ensure_thumb(
+                    client.as_deref(),
+                    &media_root,
+                    &platform,
+                    &stem,
+                    small.as_deref(),
+                    large.as_deref(),
+                )
+                .await;
+                CoverView { id, cover: cover.map(|p| p.display().to_string()) }
+            });
+        }
+        while let Some(res) = set.join_next().await {
+            if let Ok(v) = res {
+                out.push(v);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Download a ROM, emitting `download-progress` events as it goes.
 #[tauri::command]
 async fn download_rom(
@@ -541,6 +602,7 @@ fn main() {
             search,
             rom_detail,
             download_rom,
+            rom_covers,
             launch_rom,
             install_theme_logos,
             themes_available,

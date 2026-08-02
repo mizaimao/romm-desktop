@@ -55,6 +55,10 @@ pub struct Rom {
     /// Note the timestamp query contains a raw space and must be encoded.
     #[serde(default)]
     pub path_cover_large: Option<String>,
+    /// Thumbnail variant — averages ~71 KB against ~278 KB for the large one,
+    /// which matters a lot when a grid shows hundreds at once.
+    #[serde(default)]
+    pub path_cover_small: Option<String>,
     #[serde(default)]
     pub merged_screenshots: Vec<String>,
 }

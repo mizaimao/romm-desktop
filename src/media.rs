@@ -21,6 +21,9 @@ use crate::api;
 pub const COVERS: &str = "covers";
 pub const SCREENSHOTS: &str = "screenshots";
 pub const VIDEOS: &str = "videos";
+/// Thumbnails for the grid. Not an ES-DE directory — ES-DE has no thumb
+/// concept — but kept in the same tree so one delete clears everything.
+pub const COVERS_THUMB: &str = "covers_thumb";
 
 /// Look for an already-present media file, whatever its extension.
 pub fn find_local(media_root: &Path, platform: &str, stem: &str, kind: &str) -> Option<PathBuf> {
@@ -95,6 +98,31 @@ pub async fn fetch(
     let path = dir.join(format!("{stem}.{}", extension_of(server_path)));
     std::fs::write(&path, &bytes).with_context(|| format!("writing {}", path.display()))?;
     path.canonicalize().or(Ok(path))
+}
+
+/// Grid thumbnail: the small cover if the server has one, otherwise whatever
+/// full-size cover is already local (an imported ES-DE one, typically).
+pub async fn ensure_thumb(
+    client: Option<&api::Client>,
+    media_root: &Path,
+    platform: &str,
+    stem: &str,
+    small: Option<&str>,
+    large: Option<&str>,
+) -> Option<PathBuf> {
+    if let Some(p) = find_local(media_root, platform, stem, COVERS_THUMB) {
+        return Some(p);
+    }
+    // An already-downloaded full cover beats spending a request on a thumb.
+    if let Some(p) = find_local(media_root, platform, stem, COVERS) {
+        return Some(p);
+    }
+    if small.is_some() {
+        if let Some(p) = ensure(client, media_root, platform, stem, COVERS_THUMB, small).await {
+            return Some(p);
+        }
+    }
+    ensure(client, media_root, platform, stem, COVERS, large).await
 }
 
 /// Resolve a set of screenshots: any already local, plus anything the server
