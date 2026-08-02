@@ -189,7 +189,7 @@ main {
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 14px;
 }
-.gcard { cursor: pointer; }
+.gcard { cursor: pointer; user-select: none; }
 .gcard .art {
   aspect-ratio: 3 / 4;
   background: var(--panel);
@@ -234,6 +234,7 @@ main {
   cursor: pointer;
   border: 1px solid transparent;
 }
+.row { user-select: none; }
 .row:hover { background: var(--panel); }
 .row.sel { background: var(--panel); border-color: var(--accent); }
 .row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -243,12 +244,29 @@ main {
 
 /* Detail pane */
 #detail {
-  width: 340px;
+  width: 360px;
   flex-shrink: 0;
   border-left: 1px solid var(--line);
   background: var(--panel);
-  overflow-y: auto;
   padding: 16px;
+  /* Media scrolls; the buttons stay pinned so they are never below the fold,
+     which was the complaint about the old fixed-height layout. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#detail .scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+#detail .pinned {
+  padding-top: 12px;
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
 }
 
 #detail h2 { margin: 0 0 4px; font-size: 16px; }

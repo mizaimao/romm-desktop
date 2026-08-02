@@ -113,9 +113,17 @@ function renderRows(rows, showPlatform) {
   el.list.innerHTML =
     state.layout === "grid" ? gridMarkup(rows) : listMarkup(rows, showPlatform);
 
-  el.list.querySelectorAll("[data-id]").forEach((n) =>
-    n.addEventListener("click", () => selectRom(Number(n.dataset.id)))
-  );
+  el.list.querySelectorAll("[data-id]").forEach((n) => {
+    const id = Number(n.dataset.id);
+    n.addEventListener("click", () => selectRom(id));
+    // Double-click is the shortcut for "just play it" — downloads first if
+    // needed, exactly like the primary button.
+    n.addEventListener("dblclick", async (ev) => {
+      ev.preventDefault();
+      const d = await invoke("rom_detail", { id });
+      play(d);
+    });
+  });
 
   if (state.layout === "grid") observeCovers();
 
@@ -353,22 +361,26 @@ async function selectRom(id) {
 
   el.detail.hidden = false;
   el.detail.innerHTML = `
-    <h2>${escapeHtml(d.name)}</h2>
-    <div class="sub">${escapeHtml(d.fs_name)}</div>
-    ${top}
-    ${bottom}
-    ${vid}
-    <dl>
-      <dt>Platform</dt><dd>${d.platform}</dd>
-      <dt>Size</dt><dd>${human(d.size_bytes)}</dd>
-      <dt>Core</dt><dd>${d.core_label ? escapeHtml(d.core_label) : "<em>none installed</em>"}</dd>
-      <dt>Local</dt><dd>${d.downloaded ? "yes" : "no"}</dd>
-    </dl>
-    <div class="actions">
-      <button class="primary" id="play">${d.downloaded ? "Play" : "Download & Play"}</button>
-      <button class="ghost" id="dl" ${d.downloaded ? "disabled" : ""}>Download</button>
+    <div class="scroll">
+      <h2>${escapeHtml(d.name)}</h2>
+      <div class="sub">${escapeHtml(d.fs_name)}</div>
+      ${top}
+      ${bottom}
+      ${vid}
+      <dl>
+        <dt>Platform</dt><dd>${d.platform}</dd>
+        <dt>Size</dt><dd>${human(d.size_bytes)}</dd>
+        <dt>Core</dt><dd>${d.core_label ? escapeHtml(d.core_label) : "<em>none installed</em>"}</dd>
+        <dt>Local</dt><dd>${d.downloaded ? "yes" : "no"}</dd>
+      </dl>
     </div>
-    <progress id="prog" hidden></progress>`;
+    <div class="pinned">
+      <div class="actions">
+        <button class="primary" id="play">${d.downloaded ? "Play" : "Download & Play"}</button>
+        <button class="ghost" id="dl" ${d.downloaded ? "disabled" : ""}>Download</button>
+      </div>
+      <progress id="prog" hidden></progress>
+    </div>`;
 
   if (shots.length > 1) startSlideshow(shots.length);
 

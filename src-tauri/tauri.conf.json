@@ -10,11 +10,12 @@
     "windows": [
       {
         "title": "RomM",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 900,
-        "minHeight": 600,
-        "resizable": true
+        "width": 1500,
+        "height": 950,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {

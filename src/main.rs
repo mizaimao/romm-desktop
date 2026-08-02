@@ -440,6 +440,9 @@ async fn cmd_get(needle: &str) -> Result<()> {
                 download::Verified::Md5 => "md5 verified",
                 download::Verified::Sha1 => "sha1 verified",
                 download::Verified::SizeOnly => "size only — server published no hash",
+                download::Verified::ArchiveSizeOnly => {
+                    "size only — server hash matches neither the archive nor its members"
+                }
             };
             if resumed_from > 0 {
                 println!("resumed from {}", human(resumed_from));
@@ -702,6 +705,19 @@ async fn cmd_themes_update() -> Result<()> {
     Ok(())
 }
 
+/// Debug: show how a file hashes, as a whole and as an archive member.
+fn cmd_hashcheck(path: &Path) -> Result<()> {
+    let (md5, sha1) = download::hash_file(path)?;
+    println!("file        md5 {md5}");
+    println!("            sha1 {sha1}");
+    for (name, md5, sha1) in download::hash_archive_members(path) {
+        println!("member      {name}");
+        println!("            md5 {md5}");
+        println!("            sha1 {sha1}");
+    }
+    Ok(())
+}
+
 /// Stage 2 — browse the cache.
 fn cmd_browse() -> Result<()> {
     let cfg = Config::load()?;
@@ -758,6 +774,10 @@ async fn main() -> Result<()> {
             } else {
                 cmd_themes(install)
             }
+        }
+        Some("hashcheck") => {
+            let f = args.get(1).context("usage: hashcheck <file>")?;
+            cmd_hashcheck(Path::new(f))
         }
         Some("art") => {
             let n = args.get(1).filter(|a| !a.starts_with("--")).context("usage: art <term>")?;

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
 use md5::Digest as _;
+use sha1::Digest as _;
 
 /// Outcome of a download attempt.
 #[derive(Debug)]
@@ -33,6 +34,9 @@ pub enum Verified {
     Sha1,
     /// Server published no hash for this ROM — size was all we could check.
     SizeOnly,
+    /// An archive whose recorded hash matches neither the container nor any
+    /// member. Size still matched. See `verify` for why this is tolerated.
+    ArchiveSizeOnly,
 }
 
 /// What we need to fetch and check one ROM.
@@ -58,7 +62,7 @@ fn urlencode_path(s: &str) -> String {
     out
 }
 
-fn hash_file(path: &Path) -> Result<(String, String)> {
+pub fn hash_file(path: &Path) -> Result<(String, String)> {
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
     let mut md5 = md5::Md5::new();
@@ -75,6 +79,68 @@ fn hash_file(path: &Path) -> Result<(String, String)> {
     Ok((hex::encode(md5.finalize()), hex::encode(sha1.finalize())))
 }
 
+/// Hash every ROM inside an archive.
+///
+/// RomM records the hash of the *content*, not the container: for
+/// `Contra III (USA).zip` its `md5_hash` is the md5 of the `.sfc` inside. Most
+/// of this library is archived (2,413 arcade zips, 467 sfc 7z), so verifying
+/// against the archive bytes alone would reject essentially every archive
+/// download.
+///
+/// All members are hashed rather than just one, because archives here are not
+/// always single-ROM — `Dear Boys (Japan).7z` holds both a clean dump and a
+/// hacked variant, and RomM recorded the hash of one of them.
+pub fn hash_archive_members(path: &Path) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+
+    if let Ok(file) = std::fs::File::open(path)
+        && let Ok(mut zip) = zip::ZipArchive::new(std::io::BufReader::new(file))
+    {
+        for i in 0..zip.len() {
+            let Ok(mut entry) = zip.by_index(i) else { continue };
+            if entry.is_dir() {
+                continue;
+            }
+            let name = entry.name().to_owned();
+            let mut buf = Vec::new();
+            if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() {
+                out.push((
+                    name,
+                    hex::encode(md5::Md5::digest(&buf)),
+                    hex::encode(sha1::Sha1::digest(&buf)),
+                ));
+            }
+        }
+        return out;
+    }
+
+    // 7z: same idea, different container.
+    if let Ok(mut archive) = sevenz_rust2::ArchiveReader::open(path, Default::default()) {
+        let names: Vec<String> = archive
+            .archive()
+            .files
+            .iter()
+            .filter(|e| e.has_stream())
+            .map(|e| e.name().to_owned())
+            .collect();
+        for name in names {
+            if let Ok(buf) = archive.read_file(&name) {
+                out.push((
+                    name,
+                    hex::encode(md5::Md5::digest(&buf)),
+                    hex::encode(sha1::Sha1::digest(&buf)),
+                ));
+            }
+        }
+    }
+    out
+}
+
+#[allow(dead_code)]
+fn hash_archive_member_unused(_path: &Path) -> Option<(String, String)> {
+    None
+}
+
 /// Compare against whichever hash the server published. Returns which one was
 /// used, or an error describing the mismatch.
 fn verify(path: &Path, target: &Target<'_>) -> Result<Verified> {
@@ -83,18 +149,43 @@ fn verify(path: &Path, target: &Target<'_>) -> Result<Verified> {
     if want_md5.is_none() && want_sha1.is_none() {
         return Ok(Verified::SizeOnly);
     }
+
     let (got_md5, got_sha1) = hash_file(path)?;
-    if let Some(want) = want_md5 {
-        if got_md5.eq_ignore_ascii_case(want) {
-            return Ok(Verified::Md5);
+    let matches = |md5: &str, sha1: &str| match (want_md5, want_sha1) {
+        (Some(w), _) if md5.eq_ignore_ascii_case(w) => Some(Verified::Md5),
+        (None, Some(w)) if sha1.eq_ignore_ascii_case(w) => Some(Verified::Sha1),
+        _ => None,
+    };
+
+    if let Some(v) = matches(&got_md5, &got_sha1) {
+        return Ok(v);
+    }
+    // Fall back to the archive's members, one of which is what RomM hashed.
+    let members = hash_archive_members(path);
+    for (_, m_md5, m_sha1) in &members {
+        if let Some(v) = matches(m_md5, m_sha1) {
+            return Ok(v);
         }
-        bail!("md5 mismatch: server {want}, downloaded {got_md5}");
     }
-    let want = want_sha1.unwrap();
-    if got_sha1.eq_ignore_ascii_case(want) {
-        return Ok(Verified::Sha1);
+
+    // Archives get a pass when nothing matches.
+    //
+    // RomM's recorded hash for multi-file archives is not reproducible from
+    // the bytes it serves: sampling 12 arcade romsets, none matched either the
+    // zip itself or any member. Single-member archives do match, so the check
+    // above is still worth running. Hard-failing here would make 2,413 arcade
+    // games and most of sfc permanently undownloadable over what is a
+    // server-side metadata problem.
+    //
+    // Size is still enforced by the caller, which catches truncation — the
+    // realistic failure mode. Non-archives keep the strict check, because
+    // their hashes verify reliably.
+    if !members.is_empty() {
+        return Ok(Verified::ArchiveSizeOnly);
     }
-    bail!("sha1 mismatch: server {want}, downloaded {got_sha1}")
+
+    let want = want_md5.unwrap_or_else(|| want_sha1.unwrap_or(""));
+    bail!("hash mismatch: server {want}, downloaded {got_md5}")
 }
 
 /// Download `target` into `<library_roms>/<platform>/<fs_name>`.
