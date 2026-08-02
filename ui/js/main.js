@@ -2,7 +2,7 @@
 
 import { el, state, invoke, listen } from "./state.js";
 import { human } from "./util.js";
-import { showPlatforms, runSearch, setLayout } from "./library.js";
+import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
 import { setSidebar } from "./detail.js";
 import { showThemes } from "./themes.js";
 import { installKeys } from "./keys.js";
@@ -12,6 +12,8 @@ el.back.addEventListener("click", () => {
   el.themesBtn.classList.remove("active");
   showPlatforms();
 });
+
+el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));
 
 el.layoutBtn.addEventListener("click", () =>
   setLayout(state.layout === "grid" ? "list" : "grid")
@@ -55,6 +57,7 @@ listen("download-progress", ({ payload }) => {
   } catch (e) {
     el.status.textContent = "backend error";
   }
+  setZoom(state.zoom);
   setLayout(state.layout);
   setSidebar(state.sidebar);
   await showPlatforms();

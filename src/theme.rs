@@ -34,7 +34,8 @@ const THEME_ROOTS: &[&str] = &[
     "/Applications/ES-DE.app/Contents/Resources/themes",
 ];
 
-const ICON_EXTENSIONS: &[&str] = &["svg", "png", "webp", "jpg"];
+// svg first (crisp at any size), then the raster formats themes use.
+const ICON_EXTENSIONS: &[&str] = &["svg", "webp", "png", "jpg"];
 
 /// Which piece of per-system art to use for the platform grid.
 ///
@@ -50,16 +51,28 @@ pub enum IconStyle {
     ConsoleGame,
     /// The system's controller.
     Controller,
+    /// Rendered hardware art (modern-es-de `art/`, linear-es-de `systemart/`).
+    SystemArt,
+    /// The older hardware renders modern-es-de keeps alongside the current set.
+    SystemArtLegacy,
 }
 
 impl IconStyle {
-    pub const ALL: [IconStyle; 3] = [Self::Logo, Self::ConsoleGame, Self::Controller];
+    pub const ALL: [IconStyle; 5] = [
+        Self::Logo,
+        Self::ConsoleGame,
+        Self::Controller,
+        Self::SystemArt,
+        Self::SystemArtLegacy,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::Logo => "logo",
             Self::ConsoleGame => "consolegame",
             Self::Controller => "controller",
+            Self::SystemArt => "systemart",
+            Self::SystemArtLegacy => "systemart_legacy",
         }
     }
 
@@ -68,6 +81,8 @@ impl IconStyle {
             Self::Logo => "Logos",
             Self::ConsoleGame => "Consoles",
             Self::Controller => "Controllers",
+            Self::SystemArt => "Hardware",
+            Self::SystemArtLegacy => "Hardware (classic)",
         }
     }
 
@@ -172,6 +187,24 @@ pub fn art_for(theme: &Theme, esde_system: &str, style: IconStyle) -> Option<Pat
         candidates.push(
             theme.path.join(esde_system).join("images").join(format!("{}.{ext}", style.key())),
         );
+    }
+    // Hardware renders live in their own top-level directories rather than
+    // per-system folders: modern-es-de uses art/ and art_legacy/, linear-es-de
+    // uses system/systemart/.
+    match style {
+        IconStyle::SystemArt => {
+            for ext in ICON_EXTENSIONS {
+                candidates.push(theme.path.join("art").join(format!("{esde_system}.{ext}")));
+                candidates
+                    .push(theme.path.join("system").join("systemart").join(format!("{esde_system}.{ext}")));
+            }
+        }
+        IconStyle::SystemArtLegacy => {
+            for ext in ICON_EXTENSIONS {
+                candidates.push(theme.path.join("art_legacy").join(format!("{esde_system}.{ext}")));
+            }
+        }
+        _ => {}
     }
     if style == IconStyle::Logo {
         for ext in ICON_EXTENSIONS {

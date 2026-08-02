@@ -91,6 +91,13 @@ header h1 {
 #settings-btn { padding: 6px 10px; }
 #themes-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+#zoom-wrap { display: flex; align-items: center; }
+#zoom {
+  width: 96px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 #status { color: var(--dim); font-size: 12px; white-space: nowrap; }
 
 /* Theme picker */
@@ -147,7 +154,7 @@ main {
 /* Platform grid */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--card, 150px) * 1.25), 1fr));
   gap: 10px;
 }
 
@@ -190,7 +197,9 @@ main {
 .gcards {
   display: grid;
   /* Wider cards for landscape box art so a 1.37 cover is not tiny. */
-  grid-template-columns: repeat(auto-fill, minmax(clamp(132px, calc(132px * var(--ar, 0.75) / 0.75), 210px), 1fr));
+  /* Cards scale from --card (the zoom slider) and widen for landscape art. */
+  grid-template-columns: repeat(auto-fill, minmax(
+    clamp(90px, calc(var(--card, 150px) * var(--ar, 0.75) / 0.75), 420px), 1fr));
   gap: 14px;
   /* Default until the platform's real ratio is measured. */
   --ar: 0.75;

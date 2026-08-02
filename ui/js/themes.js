@@ -9,6 +9,7 @@ export async function showThemes() {
   el.detail.hidden = true;
   el.layoutBtn.hidden = true;
   el.sidebarBtn.hidden = true;
+  el.zoomWrap.hidden = true;
   el.themesBtn.classList.add("active");
   el.title.textContent = "Console icon themes";
   el.list.innerHTML = `<div class="empty">Loading themes…</div>`;

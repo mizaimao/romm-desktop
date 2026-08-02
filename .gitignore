@@ -32,6 +32,9 @@ venv/
 /es_find_rules.xml
 /es_settings.xml
 
+# Mobile icon sets tauri-icon emits; we only ship desktop.
+/src-tauri/gen/android/
+
 # Node / Tauri
 node_modules/
 dist/

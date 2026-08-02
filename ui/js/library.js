@@ -12,6 +12,7 @@ export async function showPlatforms() {
   el.detail.hidden = true;
   el.layoutBtn.hidden = true;
   el.sidebarBtn.hidden = true;
+  el.zoomWrap.hidden = false; // the platform grid scales too
   el.themesBtn.classList.remove("active");
   coverObserver?.disconnect();
   el.title.textContent = "Platforms";
@@ -48,6 +49,7 @@ export async function showRoms(slug) {
   el.back.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;
+  el.zoomWrap.hidden = state.layout !== "grid";
   el.search.value = "";
   state.rows = await invoke("roms", { platform: slug });
   el.title.textContent = `${slug} — ${state.rows.length} games`;
@@ -62,6 +64,7 @@ export async function runSearch(term) {
   el.back.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;
+  el.zoomWrap.hidden = state.layout !== "grid";
   state.rows = await invoke("search", { term });
   el.title.textContent = `Search “${term}” — ${state.rows.length}`;
   renderRows(state.rows, true);
@@ -125,11 +128,20 @@ function gridMarkup(rows) {
     .join("")}</div>`;
 }
 
+/// Card size, applied as a CSS variable so both grids scale from one number.
+export function setZoom(px) {
+  state.zoom = px;
+  localStorage.setItem("zoom", String(px));
+  el.zoom.value = String(px);
+  document.documentElement.style.setProperty("--card", `${px}px`);
+}
+
 export function setLayout(next) {
   state.layout = next;
   localStorage.setItem("layout", next);
   el.layoutBtn.textContent = next === "grid" ? "List" : "Grid";
   el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
+  el.zoomWrap.hidden = next !== "grid" && state.view !== "platforms";
   if (state.rows.length) renderRows(state.rows, state.view === "search");
 }
 

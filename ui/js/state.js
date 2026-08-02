@@ -12,6 +12,8 @@ export const state = {
   aspects: {},
   layout: localStorage.getItem("layout") || "grid",
   sidebar: localStorage.getItem("sidebar") !== "off",
+  /// Base card width in px; the grid scales from this.
+  zoom: Number(localStorage.getItem("zoom")) || 150,
 };
 
 export const el = {
@@ -27,6 +29,8 @@ export const el = {
   sidebarBtn: document.getElementById("sidebar-btn"),
   lb: document.getElementById("lightbox"),
   settingsBtn: document.getElementById("settings-btn"),
+  zoom: document.getElementById("zoom"),
+  zoomWrap: document.getElementById("zoom-wrap"),
 };
 
 // Tauri globals, exposed once so modules do not each reach into window.
