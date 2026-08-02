@@ -5,12 +5,14 @@ import { human } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
 import { setSidebar } from "./detail.js";
 import { showThemes } from "./themes.js";
+import { showSystems } from "./systems.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
   el.themesBtn.classList.remove("active");
+  el.systemsBtn.classList.remove("active");
   showPlatforms();
 });
 
@@ -21,6 +23,10 @@ el.layoutBtn.addEventListener("click", () =>
 );
 
 el.sidebarBtn.addEventListener("click", () => setSidebar(!state.sidebar));
+
+el.systemsBtn.addEventListener("click", () =>
+  state.view === "systems" ? showPlatforms() : showSystems()
+);
 
 el.themesBtn.addEventListener("click", () =>
   state.view === "themes" ? showPlatforms() : showThemes()

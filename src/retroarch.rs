@@ -214,9 +214,21 @@ config_save_on_exit = \"false\"
         dir: &Path,
         user_config: Option<&Path>,
     ) -> Result<PathBuf> {
+        self.write_overrides_full(dir, user_config, "")
+    }
+
+    /// As above, with `extra` (per-platform shader settings) inserted before
+    /// the user's file — so the user can still override even those.
+    pub fn write_overrides_full(
+        &self,
+        dir: &Path,
+        user_config: Option<&Path>,
+        extra: &str,
+    ) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
+        body.push_str(extra);
 
         if let Some(user) = user_config {
             match std::fs::read_to_string(user) {

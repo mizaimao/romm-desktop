@@ -26,6 +26,9 @@ venv/
 # Rust build artifacts
 /target/
 
+# Built app bundle — rebuild with `npx tauri build`.
+/RomM.app/
+
 # Device export duplicated at data/vendor/device-export/ — these root copies
 # are scratch and get deleted once extraction is confirmed.
 /es_systems.xml

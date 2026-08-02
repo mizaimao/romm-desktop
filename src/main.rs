@@ -19,6 +19,7 @@ use romm_desktop::config::Config;
 use romm_desktop::coremap::{self, CoreMap};
 use romm_desktop::retroarch::{self, RetroArch};
 use romm_desktop::retroarch_install;
+use romm_desktop::shaders;
 use romm_desktop::util::human;
 
 const CORE_MAP: &str = "data/esde-core-map.json";
@@ -158,8 +159,18 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     if RetroArch::ensure_user_config(&user_cfg).unwrap_or(false) {
         println!("created {} — put your button map / filters there", user_cfg.display());
     }
+    let shader_cfg = if cfg.shaders.enabled {
+        let platform = platform_from_path(rom).unwrap_or_default();
+        let preset = shaders::preset_for(&cfg.shaders.by_platform, &platform);
+        if let Some(p) = &preset {
+            println!("shader  {} ({p})", shaders::label_of(p));
+        }
+        shaders::config_lines(&ra, preset.as_deref())
+    } else {
+        String::new()
+    };
     let overrides = ra
-        .write_overrides_with(Path::new(&cfg.library.local_root), Some(&user_cfg))
+        .write_overrides_full(Path::new(&cfg.library.local_root), Some(&user_cfg), &shader_cfg)
         .ok();
     let cmd = ra.launch_command_with(&core, rom, fullscreen, overrides.as_deref())?;
     let label = map
@@ -279,6 +290,46 @@ async fn cmd_check() -> Result<()> {
     if platforms.len() > 8 {
         println!("    … and {} more", platforms.len() - 8);
     }
+    Ok(())
+}
+
+/// Show the shader assigned to each platform, and the alternatives.
+fn cmd_shaders(platform: Option<&str>) -> Result<()> {
+    let cfg = Config::load()?;
+    let ra = locate_retroarch(&cfg)?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+
+    if let Some(slug) = platform {
+        let display = shaders::display_of(slug);
+        let current = shaders::preset_for(&cfg.shaders.by_platform, slug);
+        println!("{slug} — {} display\n", match display {
+            shaders::Display::Crt => "CRT / television",
+            shaders::Display::Handheld => "handheld LCD",
+        });
+        for opt in shaders::available(&ra, display) {
+            let mark = if current.as_deref() == Some(opt.path) { "*" } else { " " };
+            println!("  {mark} {:<28} {:<34} {}", opt.label, opt.path, opt.note);
+        }
+        println!("  {} {:<28} {}", if current.is_none() { "*" } else { " " }, "None", "no shader");
+        println!("\nSet in config.toml:\n  [shaders.by_platform]\n  {slug} = \"crt/crt-geom\"");
+        return Ok(());
+    }
+
+    println!("{:<17} {:<11} {}", "platform", "display", "shader");
+    for p in store.platforms()? {
+        let d = match shaders::display_of(&p.fs_slug) {
+            shaders::Display::Crt => "CRT",
+            shaders::Display::Handheld => "handheld",
+        };
+        let cur = shaders::preset_for(&cfg.shaders.by_platform, &p.fs_slug);
+        let shown = match &cur {
+            Some(x) if shaders::resolve(&ra, x).is_some() => shaders::label_of(x).to_owned(),
+            Some(x) => format!("{x} (MISSING)"),
+            None => "none".to_owned(),
+        };
+        println!("  {:<15} {:<11} {}", p.fs_slug, d, shown);
+    }
+    println!("\n`shaders <platform>` lists the alternatives.");
     Ok(())
 }
 
@@ -641,21 +692,32 @@ async fn cmd_art(needle: &str) -> Result<()> {
             .file_stem().map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| rom.fs_name.clone());
         println!("{} [{}]", rom.name, rom.platform_slug);
-        for (kind, server) in [
-            (media::COVERS, rom.cover_path.as_deref()),
-            (media::SCREENSHOTS, rom.screenshot_path.as_deref()),
-            (media::VIDEOS, None),
-        ] {
-            let before = media::find_local(&media_root, &rom.platform_slug, &stem, kind).is_some();
-            let got = media::ensure(
-                client.as_ref(), &media_root, &rom.platform_slug, &stem, kind, server,
-            ).await;
+        for (kind, _) in media::ESDE_TYPES {
+            let before =
+                media::find_local(&media_root, &rom.platform_slug, &stem, kind).is_some();
+            // RomM's own copies for the two types it knows; the ES-DE tree for
+            // everything else.
+            let got = match *kind {
+                media::COVERS if rom.cover_path.is_some() => {
+                    media::ensure(
+                        client.as_ref(), &media_root, &rom.platform_slug, &stem,
+                        kind, rom.cover_path.as_deref(),
+                    ).await
+                }
+                _ => {
+                    media::ensure_esde(
+                        client.as_ref(), &media_root, &rom.platform_slug, &stem, kind,
+                    ).await
+                }
+            };
             let how = match (&got, before) {
                 (Some(_), true) => "local",
                 (Some(_), false) => "FETCHED",
                 (None, _) => "none",
             };
-            println!("  {kind:<12} {how:<8} {}", got.map(|p| p.display().to_string()).unwrap_or_default());
+            println!("  {kind:<15} {how:<8} {}",
+                     got.map(|p| p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())
+                        .unwrap_or_default());
         }
     }
     Ok(())
@@ -906,6 +968,11 @@ enum Command {
     },
     /// Show what is installed and which platforms can launch
     Doctor,
+    /// Show or list per-platform video shaders
+    Shaders {
+        /// Limit to one platform and list its alternatives
+        platform: Option<String>,
+    },
     /// Download and install RetroArch itself
     InstallRetroarch {
         /// Pin a release instead of taking the newest known one
@@ -973,6 +1040,7 @@ async fn main() -> Result<()> {
             _ => cmd_themes(install),
         },
         Command::Doctor => cmd_doctor(),
+        Command::Shaders { platform } => cmd_shaders(platform.as_deref()),
         Command::InstallRetroarch { version } => cmd_install_retroarch(version.as_deref()).await,
         Command::Cores { install } => cmd_cores(install).await,
         Command::Suggest => cmd_suggest(),

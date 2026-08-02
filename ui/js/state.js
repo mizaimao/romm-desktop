@@ -26,6 +26,7 @@ export const el = {
   status: document.getElementById("status"),
   toast: document.getElementById("toast"),
   themesBtn: document.getElementById("themes-btn"),
+  systemsBtn: document.getElementById("systems-btn"),
   layoutBtn: document.getElementById("layout-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),
   lb: document.getElementById("lightbox"),

@@ -15,7 +15,7 @@ use tauri::{Emitter, State};
 
 use romm_desktop::{
     api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
-    theme, theme_remote, util,
+    shaders, theme, theme_remote, util,
 };
 
 const CACHE_DB: &str = "cache.sqlite3";
@@ -34,6 +34,8 @@ struct AppState {
     themes_dir: PathBuf,
     core_overrides: std::collections::BTreeMap<String, String>,
     user_retroarch_cfg: PathBuf,
+    shaders_enabled: bool,
+    shader_overrides: std::collections::BTreeMap<String, String>,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
@@ -78,6 +80,9 @@ struct RomDetail {
     video: Option<String>,
     /// Every screenshot we could resolve; the UI cycles through them.
     screenshots: Vec<String>,
+    /// ES-DE artwork by type — 3dboxes, miximages, marquees, fanart and the
+    /// rest. Far richer than RomM's own cover + one screenshot.
+    art: std::collections::BTreeMap<String, String>,
 
     // Descriptive metadata, straight from RomM (which on this server got it
     // from the ES-DE gamelist import).
@@ -196,13 +201,31 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         &row.screenshots(),
     ).await;
     // No server-side video exists on this deployment; local only.
-    let video = media::find_local(&media_root, &row.platform_slug, &stem, media::VIDEOS);
+    let video = media::ensure_esde(
+        client.as_deref(), &media_root, &row.platform_slug, &stem, media::VIDEOS,
+    )
+    .await;
 
     // Manuals are PDFs, which the webview renders natively.
     let manual = media::ensure(
         client.as_deref(), &media_root, &row.platform_slug, &stem,
         media::MANUALS, row.manual_path.as_deref(),
     ).await;
+
+    // Everything ES-DE has for this game, fetched lazily and cached.
+    let mut art = std::collections::BTreeMap::new();
+    for (kind, _) in media::ESDE_TYPES {
+        if matches!(*kind, media::COVERS | media::SCREENSHOTS) {
+            continue; // handled above, from RomM's own copies
+        }
+        if let Some(p) = media::ensure_esde(
+            client.as_deref(), &media_root, &row.platform_slug, &stem, kind,
+        )
+        .await
+        {
+            art.insert((*kind).to_owned(), p.display().to_string());
+        }
+    }
 
     let meta: Option<serde_json::Value> = row
         .meta_json
@@ -224,6 +247,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         cover: as_url(cover),
         video: as_url(video),
         screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
+        art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
         id: row.id,
         name: row.name,
@@ -386,10 +410,17 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
         .ok_or_else(|| format!("no installed core for {}", row.platform_slug))?;
 
     if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
-    let overrides = state
-        .roms_dir
-        .parent()
-        .and_then(|lib| ra.write_overrides_with(lib, Some(&state.user_retroarch_cfg)).ok());
+    // Per-platform shader, same as the CLI applies.
+    let shader_cfg = if state.shaders_enabled {
+        let preset = shaders::preset_for(&state.shader_overrides, &row.platform_slug);
+        shaders::config_lines(ra, preset.as_deref())
+    } else {
+        String::new()
+    };
+    let overrides = state.roms_dir.parent().and_then(|lib| {
+        ra.write_overrides_full(lib, Some(&state.user_retroarch_cfg), &shader_cfg)
+            .ok()
+    });
     let status = ra
         .launch_with(&core, &path, false, overrides.as_deref())
         .map_err(err)?;
@@ -482,6 +513,132 @@ async fn theme_download(
 fn theme_remove(state: State<'_, AppState>, reponame: String) -> CmdResult<String> {
     theme_remote::remove(&reponame, &state.themes_dir).map_err(err)?;
     Ok(format!("removed {reponame}"))
+}
+
+#[derive(Serialize)]
+struct EmulatorOption {
+    core: String,
+    label: String,
+    installed: bool,
+    /// True for the core ES-DE would pick by default.
+    is_default: bool,
+}
+
+#[derive(Serialize)]
+struct ShaderOptionView {
+    path: String,
+    label: String,
+    note: String,
+}
+
+#[derive(Serialize)]
+struct SystemView {
+    slug: String,
+    name: String,
+    rom_count: i64,
+    display: String,
+    /// Currently selected core and shader, whether defaulted or chosen.
+    core: Option<String>,
+    shader: Option<String>,
+    emulators: Vec<EmulatorOption>,
+    shaders: Vec<ShaderOptionView>,
+}
+
+/// Per-system configuration, ES-DE style: every alternative emulator the theme
+/// data knows about, plus the shader presets this RetroArch can load.
+#[tauri::command]
+fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.platforms().map_err(err)?
+    };
+    let ra = state.retroarch.as_ref();
+
+    Ok(rows
+        .into_iter()
+        .map(|p| {
+            let slug = p.fs_slug;
+            let default_core = state.map.default_core(&slug);
+
+            // Alternatives come from the ES-DE extraction, so the list matches
+            // what ES-DE itself offers for the system.
+            let mut emulators: Vec<EmulatorOption> = state
+                .map
+                .alternatives(&slug)
+                .into_iter()
+                .map(|core| EmulatorOption {
+                    label: state.map.label_for(core).unwrap_or(core).to_owned(),
+                    installed: ra.is_some_and(|r| r.has_core(core)),
+                    is_default: Some(core) == default_core,
+                    core: core.to_owned(),
+                })
+                .collect();
+            // Installed first, then ES-DE's own ordering.
+            emulators.sort_by_key(|e| (!e.installed, !e.is_default));
+
+            let display = shaders::display_of(&slug);
+            let shader_list = ra
+                .map(|r| {
+                    shaders::available(r, display)
+                        .into_iter()
+                        .map(|o| ShaderOptionView {
+                            path: o.path.to_owned(),
+                            label: o.label.to_owned(),
+                            note: o.note.to_owned(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            SystemView {
+                core: resolve_core(&state, &slug),
+                shader: if state.shaders_enabled {
+                    shaders::preset_for(&state.shader_overrides, &slug)
+                } else {
+                    None
+                },
+                display: match display {
+                    shaders::Display::Crt => "CRT",
+                    shaders::Display::Handheld => "Handheld",
+                }
+                .to_owned(),
+                name: p.display_name,
+                rom_count: p.rom_count,
+                emulators,
+                shaders: shader_list,
+                slug,
+            }
+        })
+        .collect())
+}
+
+/// Persist a per-system core or shader choice to config.toml.
+///
+/// Written through a TOML edit rather than a full re-serialise so comments and
+/// hand-written sections survive.
+#[tauri::command]
+fn set_system_choice(
+    state: State<'_, AppState>,
+    slug: String,
+    field: String,
+    value: String,
+) -> CmdResult<String> {
+    let table = match field.as_str() {
+        "core" => "cores.overrides",
+        "shader" => "shaders.by_platform",
+        other => return Err(format!("unknown field {other}")),
+    };
+    romm_desktop::config::set_table_entry("config.toml", table, &slug, &value).map_err(err)?;
+
+    // Reflect it immediately; the file is the source of truth on next launch.
+    match field.as_str() {
+        "core" => {
+            let mut m = state.core_overrides.clone();
+            m.insert(slug.clone(), value.clone());
+        }
+        _ => {}
+    }
+    Ok(format!("{slug}: {field} = {value} (restart to apply everywhere)"))
 }
 
 /// Copy system logos out of an installed ES-DE theme into the media tree.
@@ -596,15 +753,21 @@ fn resolve_core(state: &State<'_, AppState>, platform: &str) -> Option<String> {
     coremap::resolve_core(&state.map, &state.core_overrides, platform, |c| ra.has_core(c))
 }
 
-/// Find the project root and make it the working directory.
+/// Find the data root and make it the working directory.
 ///
-/// Config, cache, core map and library are all addressed relative to the
-/// project root, but the process cwd varies by how the app was started —
-/// `tauri dev` uses `src-tauri/`, a bundled `.app` uses `/`. Anchor once here
-/// so everything downstream can keep using plain relative paths.
-fn anchor_to_project_root() {
+/// Config, cache, core map and library are all addressed relative to one
+/// directory, but where that is depends on how the app was started:
+///
+/// * a dev checkout — the repo itself, found by walking up for the core map
+/// * a bundled `.app` — `~/RomM`, created on first launch
+///
+/// `~/RomM` rather than `~/Library/Application Support`: a visible folder can
+/// be found, backed up and deleted, and nothing in it is unrecoverable. Inside
+/// the bundle is not an option — it breaks code signing and is wiped on update.
+fn anchor_to_data_root() {
     const MARKER: &str = "data/esde-core-map.json";
 
+    // 1. A source checkout, if we are running from one.
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         roots.extend(cwd.ancestors().map(Path::to_path_buf));
@@ -612,21 +775,54 @@ fn anchor_to_project_root() {
     if let Ok(exe) = std::env::current_exe() {
         roots.extend(exe.ancestors().map(Path::to_path_buf));
     }
-
     for root in roots {
         if root.join(MARKER).is_file() {
             let _ = std::env::set_current_dir(&root);
             return;
         }
     }
-    eprintln!(
-        "warning: could not locate {MARKER}; run from the project root or the \
-         library and cache will appear empty"
-    );
+
+    // 2. Bundled: use a plainly-named folder in the user's home.
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let Some(data_root) = home.map(|h| h.join("RomM")) else {
+        eprintln!("warning: no HOME; leaving the working directory alone");
+        return;
+    };
+    if let Err(e) = std::fs::create_dir_all(data_root.join("data")) {
+        eprintln!("warning: could not create {}: {e}", data_root.display());
+        return;
+    }
+
+    // The core map ships inside the bundle; copy it out once so the app has a
+    // writable, inspectable copy alongside everything else. Resolved from the
+    // executable rather than Tauri's path API, so this can run before the app
+    // is built and no AppHandle is needed.
+    let dest = data_root.join(MARKER);
+    if !dest.is_file()
+        && let Ok(exe) = std::env::current_exe()
+        && let Some(contents) = exe.parent().and_then(|p| p.parent())
+    {
+        // Tauri rewrites a `../data/x` resource path to `_up_/data/x` inside
+        // the bundle, so check that first and fall back to the flat location.
+        let candidates = [
+            contents.join("Resources/_up_/data/esde-core-map.json"),
+            contents.join("Resources/esde-core-map.json"),
+        ];
+        match candidates.iter().find(|p| p.is_file()) {
+            Some(res) => {
+                if let Err(e) = std::fs::copy(res, &dest) {
+                    eprintln!("warning: could not seed {}: {e}", dest.display());
+                }
+            }
+            None => eprintln!("warning: no bundled core map found; platform icons and core mapping will be unavailable"),
+        }
+    }
+
+    let _ = std::env::set_current_dir(&data_root);
 }
 
 fn main() {
-    anchor_to_project_root();
+    anchor_to_data_root();
     let cfg = Config::load().unwrap_or_default();
     let store = cache::Cache::open(Path::new(CACHE_DB)).expect("opening metadata cache");
     // Archive verification depends on the server's exclusion lists; load the
@@ -652,6 +848,8 @@ fn main() {
             themes_dir: cfg.themes_dir(),
             core_overrides: cfg.cores.overrides.clone(),
             user_retroarch_cfg: cfg.user_retroarch_config(),
+            shaders_enabled: cfg.shaders.enabled,
+            shader_overrides: cfg.shaders.by_platform.clone(),
             icon_style: AtomicU8::new(0),
         })
         .invoke_handler(tauri::generate_handler![
@@ -668,6 +866,8 @@ fn main() {
             theme_remove,
             icon_styles,
             set_icon_style,
+            systems,
+            set_system_choice,
             status
         ])
         .run(tauri::generate_context!())

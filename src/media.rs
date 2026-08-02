@@ -17,6 +17,30 @@ use anyhow::{Context, Result, bail};
 
 use crate::api;
 
+/// Every ES-DE media type, with the extensions each realistically uses.
+///
+/// The server exposes these at
+/// `/assets/romm/resources/esde-media/<platform>/<type>/<rom basename>.<ext>`
+/// — symlinks into the ROM library from RomM's own resources tree, which is a
+/// mounted volume and already web-served. Far richer than RomM's own metadata,
+/// which carries one cover and one screenshot.
+pub const ESDE_TYPES: &[(&str, &[&str])] = &[
+    ("covers", &["png", "jpg", "webp"]),
+    ("backcovers", &["png", "jpg", "webp"]),
+    ("3dboxes", &["png", "jpg", "webp"]),
+    ("miximages", &["png", "jpg", "webp"]),
+    ("screenshots", &["png", "jpg", "webp"]),
+    ("titlescreens", &["png", "jpg", "webp"]),
+    ("marquees", &["png", "jpg", "webp"]),
+    ("fanart", &["png", "jpg", "webp"]),
+    ("physicalmedia", &["png", "jpg", "webp"]),
+    ("videos", &["mp4", "webm", "mkv"]),
+    ("manuals", &["pdf"]),
+];
+
+/// Path prefix the media symlinks live under, relative to the server root.
+const ESDE_BASE: &str = "/assets/romm/resources/esde-media";
+
 /// ES-DE media subdirectory names, in the order the UI prefers them.
 pub const COVERS: &str = "covers";
 pub const SCREENSHOTS: &str = "screenshots";
@@ -99,6 +123,36 @@ pub async fn fetch(
     let path = dir.join(format!("{stem}.{}", extension_of(server_path)));
     std::fs::write(&path, &bytes).with_context(|| format!("writing {}", path.display()))?;
     path.canonicalize().or(Ok(path))
+}
+
+/// Fetch one ES-DE media file from the server, trying the extensions that
+/// type actually uses.
+///
+/// This path needs no authentication (RomM serves `/assets` openly), so it
+/// works even before the client has credentials.
+pub async fn ensure_esde(
+    client: Option<&api::Client>,
+    media_root: &Path,
+    platform: &str,
+    stem: &str,
+    kind: &str,
+) -> Option<PathBuf> {
+    if let Some(local) = find_local(media_root, platform, stem, kind) {
+        return Some(local);
+    }
+    let client = client?;
+    let exts = ESDE_TYPES.iter().find(|(k, _)| *k == kind).map(|(_, e)| *e)?;
+
+    for ext in exts {
+        let server_path = format!("{ESDE_BASE}/{platform}/{kind}/{stem}.{ext}");
+        match fetch(client, &server_path, media_root, platform, stem, kind).await {
+            Ok(p) => return Some(p),
+            // A miss here is ordinary: not every game has every media type,
+            // and we are probing extensions.
+            Err(_) => continue,
+        }
+    }
+    None
 }
 
 /// Grid thumbnail: the small cover if the server has one, otherwise whatever

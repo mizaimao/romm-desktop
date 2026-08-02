@@ -20,6 +20,8 @@ pub struct Config {
     pub theme: ThemeCfg,
     #[serde(default)]
     pub cores: CoresCfg,
+    #[serde(default)]
+    pub shaders: ShadersCfg,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -77,6 +79,24 @@ pub struct CoresCfg {
     /// MAME 2003-Plus set will not run under current MAME.
     #[serde(default)]
     pub overrides: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShadersCfg {
+    /// Master switch. Off means no shader is applied and RetroArch's own
+    /// setting is left alone.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Platform slug -> preset path under `shaders_slang/` (no extension), or
+    /// `"none"` to force no shader for that platform.
+    #[serde(default)]
+    pub by_platform: BTreeMap<String, String>,
+}
+
+impl Default for ShadersCfg {
+    fn default() -> Self {
+        Self { enabled: true, by_platform: BTreeMap::new() }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -175,4 +195,59 @@ impl Config {
     pub fn themes_dir(&self) -> PathBuf {
         PathBuf::from(&self.library.local_root).join("themes")
     }
+}
+
+
+/// Set `key = "value"` inside `[table]` in a TOML file, creating the table if
+/// needed.
+///
+/// A targeted text edit rather than parse-and-reserialise: the config carries
+/// hand-written comments explaining non-obvious choices (which arcade core and
+/// why, what the shader groups mean), and round-tripping through a serialiser
+/// would delete all of them.
+pub fn set_table_entry(path: &str, table: &str, key: &str, value: &str) -> Result<()> {
+    let file = Path::new(path);
+    let original = std::fs::read_to_string(file).unwrap_or_default();
+    let header = format!("[{table}]");
+    let entry = format!("{key} = \"{value}\"");
+
+    let mut lines: Vec<String> = original.lines().map(str::to_owned).collect();
+
+    // Locate the table, and the key within it.
+    let table_at = lines.iter().position(|l| l.trim() == header);
+    let Some(start) = table_at else {
+        // No such table yet: append it.
+        if !lines.is_empty() && !lines.last().is_some_and(|l| l.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push(header);
+        lines.push(entry);
+        std::fs::write(file, lines.join("\n") + "\n")
+            .with_context(|| format!("writing {}", file.display()))?;
+        return Ok(());
+    };
+
+    // The table ends at the next header line.
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map(|i| start + 1 + i)
+        .unwrap_or(lines.len());
+
+    let existing = lines[start + 1..end]
+        .iter()
+        .position(|l| {
+            l.split('=')
+                .next()
+                .is_some_and(|k| k.trim() == key)
+        })
+        .map(|i| start + 1 + i);
+
+    match existing {
+        Some(i) => lines[i] = entry,
+        None => lines.insert(end, entry),
+    }
+    std::fs::write(file, lines.join("\n") + "\n")
+        .with_context(|| format!("writing {}", file.display()))?;
+    Ok(())
 }

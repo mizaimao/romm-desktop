@@ -14,6 +14,7 @@ export async function showPlatforms() {
   el.sidebarBtn.hidden = true;
   el.zoomWrap.hidden = false; // the platform grid scales too
   el.themesBtn.classList.remove("active");
+  el.systemsBtn.classList.remove("active");
   coverObserver?.disconnect();
   el.title.textContent = "Platforms";
 

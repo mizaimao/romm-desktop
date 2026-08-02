@@ -76,6 +76,7 @@ export async function selectRom(id) {
         <dt>Core</dt><dd>${d.core_label ? escapeHtml(d.core_label) : "<em>none installed</em>"}</dd>
         <dt>Local</dt><dd>${d.downloaded ? "yes" : "no"}</dd>
       </dl>
+      ${artStrip(d)}
       ${
         d.manual || d.youtube_id
           ? `<div class="extras">
@@ -101,6 +102,32 @@ export async function selectRom(id) {
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
 }
 
+/// Human labels for ES-DE media types, in the order worth showing.
+const ART_ORDER = [
+  ["miximages", "Mix"],
+  ["3dboxes", "3D box"],
+  ["backcovers", "Back"],
+  ["titlescreens", "Title"],
+  ["marquees", "Marquee"],
+  ["physicalmedia", "Cart/disc"],
+  ["fanart", "Fan art"],
+];
+
+/// Thumbnail row of everything ES-DE has for this game beyond the cover.
+function artStrip(d) {
+  const items = ART_ORDER.filter(([k]) => d.art && d.art[k]);
+  if (!items.length) return "";
+  return `<div class="artstrip">${items
+    .map(
+      ([k, label]) =>
+        `<figure data-art="${k}" title="${label}">
+           <img src="${convertFileSrc(d.art[k])}" alt="${label}" loading="lazy" />
+           <figcaption>${label}</figcaption>
+         </figure>`
+    )
+    .join("")}</div>`;
+}
+
 /// Clicking artwork opens it full size, starting at what was clicked.
 function wireArtwork(d) {
   const media = detailMedia(d);
@@ -119,6 +146,13 @@ function wireArtwork(d) {
   el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.caption === "Cover"));
   el.detail.querySelectorAll("video").forEach((v) =>
     v.addEventListener("dblclick", openAt((m) => m.kind === "video"))
+  );
+  el.detail.querySelectorAll(".artstrip figure").forEach((fig) =>
+    fig.addEventListener("click", () => {
+      const kind = fig.dataset.art;
+      const label = ART_ORDER.find(([k]) => k === kind)?.[1] ?? kind;
+      openLightbox([{ src: convertFileSrc(d.art[kind]), kind: "image", caption: label }], 0);
+    })
   );
   document.getElementById("manual")?.addEventListener("click", () =>
     openLightbox([{ src: convertFileSrc(d.manual), kind: "pdf", caption: "Manual" }], 0)

@@ -28,6 +28,7 @@ use crate::coremap::CoreMap;
 use crate::download;
 use crate::retroarch::RetroArch;
 use crate::util::human;
+use crate::shaders;
 
 /// Live state of a download, shared between the worker task and the UI.
 #[derive(Default)]
@@ -62,6 +63,8 @@ pub struct App {
     map: CoreMap,
     core_overrides: std::collections::BTreeMap<String, String>,
     user_ra_cfg: PathBuf,
+    shaders_enabled: bool,
+    shader_overrides: std::collections::BTreeMap<String, String>,
     quit: bool,
     /// Set while a download is in flight; cleared once the UI reports it.
     progress: Option<Arc<Mutex<Progress>>>,
@@ -108,6 +111,12 @@ impl App {
                 .unwrap_or_default(),
             user_ra_cfg: crate::config::Config::load()
                 .map(|c| c.user_retroarch_config())
+                .unwrap_or_default(),
+            shaders_enabled: crate::config::Config::load()
+                .map(|c| c.shaders.enabled)
+                .unwrap_or(true),
+            shader_overrides: crate::config::Config::load()
+                .map(|c| c.shaders.by_platform)
                 .unwrap_or_default(),
             quit: false,
             progress: None,
@@ -221,7 +230,15 @@ impl App {
         let overrides = self
             .local_roms
             .parent()
-            .and_then(|lib| ra.write_overrides_with(lib, Some(&self.user_ra_cfg)).ok());
+            .and_then(|lib| {
+                let shader_cfg = if self.shaders_enabled {
+                    let preset = shaders::preset_for(&self.shader_overrides, &rom.platform_slug);
+                    shaders::config_lines(ra, preset.as_deref())
+                } else {
+                    String::new()
+                };
+                ra.write_overrides_full(lib, Some(&self.user_ra_cfg), &shader_cfg).ok()
+            });
 
         restore_terminal(term)?;
         let result = ra.launch_with(&core, &path, false, overrides.as_deref());
