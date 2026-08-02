@@ -45,6 +45,9 @@ pub struct Target<'a> {
     pub expected_size: Option<u64>,
     pub md5: Option<&'a str>,
     pub sha1: Option<&'a str>,
+    /// Folder ROM (multi-disc). The server zips the folder for transfer, so
+    /// the bytes on the wire are not the ROM and must be unpacked.
+    pub multi_file: bool,
 }
 
 fn urlencode_path(s: &str) -> String {
@@ -275,6 +278,40 @@ fn verify(path: &Path, target: &Target<'_>) -> Result<Verified> {
     )
 }
 
+/// Extract a downloaded folder-ROM zip into `dest`, flattening any wrapper
+/// directory the archive carries.
+fn unpack_folder_rom(zip_path: &Path, dest: &Path) -> Result<()> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file))
+        .with_context(|| format!("reading {}", zip_path.display()))?;
+
+    if dest.exists() {
+        std::fs::remove_dir_all(dest).ok();
+    }
+    std::fs::create_dir_all(dest)?;
+
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i)?;
+        if entry.is_dir() {
+            continue;
+        }
+        // Keep only the leaf: entries may be prefixed with the folder name,
+        // and we already have a directory for it.
+        let name = Path::new(entry.name())
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        let out = dest.join(&name);
+        let mut w = std::fs::File::create(&out)
+            .with_context(|| format!("writing {}", out.display()))?;
+        std::io::copy(&mut entry, &mut w)?;
+    }
+    Ok(())
+}
+
 /// Download `target` into `<library_roms>/<platform>/<fs_name>`.
 ///
 /// `progress` is called with `(downloaded_so_far, total_or_0)`.
@@ -304,7 +341,15 @@ pub async fn fetch(
     let final_path = dir.join(target.fs_name);
     let part_path = dir.join(format!("{}.part", target.fs_name));
 
-    if final_path.is_file() {
+    if target.multi_file {
+        // Hashes describe the folder's contents, not the transferred zip, so
+        // presence of the unpacked directory is the check available here.
+        if final_path.is_dir()
+            && std::fs::read_dir(&final_path).map(|d| d.count() > 0).unwrap_or(false)
+        {
+            return Ok(Outcome::AlreadyHave(final_path));
+        }
+    } else if final_path.is_file() {
         // Trust it only if it still matches; otherwise fall through and refetch.
         if verify(&final_path, target).is_ok() {
             return Ok(Outcome::AlreadyHave(final_path));
@@ -358,7 +403,11 @@ pub async fn fetch(
     file.flush()?;
     drop(file);
 
+    // A folder ROM is transferred as a zip of its contents, so the bytes on
+    // the wire never equal `fs_size_bytes` (which is the sum of the files).
+    // Zip overhead alone makes them differ by a few hundred bytes.
     if let Some(expected) = target.expected_size
+        && !target.multi_file
         && written != expected
     {
         bail!(
@@ -368,13 +417,31 @@ pub async fn fetch(
         );
     }
 
-    let verified = match verify(&part_path, target) {
-        Ok(v) => v,
-        Err(e) => {
-            // Keep the bad file for inspection rather than silently deleting.
-            bail!("{e}\n  bad download left at {}", part_path.display());
+    let verified = if target.multi_file {
+        // The server hashed the folder's contents; we hold a zip of them.
+        Verified::SizeOnly
+    } else {
+        match verify(&part_path, target) {
+            Ok(v) => v,
+            Err(e) => {
+                // Keep the bad file for inspection rather than silently deleting.
+                bail!("{e}\n  bad download left at {}", part_path.display());
+            }
         }
     };
+
+    // Folder ROMs arrive as a zip of the directory. Unpack it so the layout
+    // matches the server's and the .m3u inside points at real neighbours.
+    if target.multi_file {
+        unpack_folder_rom(&part_path, &final_path)?;
+        std::fs::remove_file(&part_path).ok();
+        return Ok(Outcome::Downloaded {
+            path: final_path,
+            bytes: written,
+            resumed_from: started_at,
+            verified,
+        });
+    }
 
     std::fs::rename(&part_path, &final_path)
         .with_context(|| format!("renaming into {}", final_path.display()))?;

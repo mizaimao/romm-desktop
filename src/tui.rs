@@ -61,6 +61,7 @@ pub struct App {
     ra: Option<RetroArch>,
     map: CoreMap,
     core_overrides: std::collections::BTreeMap<String, String>,
+    user_ra_cfg: PathBuf,
     quit: bool,
     /// Set while a download is in flight; cleared once the UI reports it.
     progress: Option<Arc<Mutex<Progress>>>,
@@ -104,6 +105,9 @@ impl App {
             map,
             core_overrides: crate::config::Config::load()
                 .map(|c| c.cores.overrides)
+                .unwrap_or_default(),
+            user_ra_cfg: crate::config::Config::load()
+                .map(|c| c.user_retroarch_config())
                 .unwrap_or_default(),
             quit: false,
             progress: None,
@@ -217,7 +221,7 @@ impl App {
         let overrides = self
             .local_roms
             .parent()
-            .and_then(|lib| ra.write_overrides(lib, None).ok());
+            .and_then(|lib| ra.write_overrides_with(lib, Some(&self.user_ra_cfg)).ok());
 
         restore_terminal(term)?;
         let result = ra.launch_with(&core, &path, false, overrides.as_deref());
@@ -264,6 +268,7 @@ impl App {
                 expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
                 md5: rom.md5_hash.as_deref(),
                 sha1: rom.sha1_hash.as_deref(),
+                multi_file: rom.multi_file,
             };
             let sink = shared.clone();
             let result = download::fetch(

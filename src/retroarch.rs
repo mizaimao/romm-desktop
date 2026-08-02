@@ -11,6 +11,50 @@ use anyhow::{Context, Result, bail};
 
 use crate::util::expand_tilde;
 
+/// Seed for the user's own RetroArch settings.
+///
+/// Everything is commented out: this file is appended last at launch, so an
+/// uncommented line takes effect immediately and silently changing someone's
+/// controls would be worse than doing nothing.
+const USER_CONFIG_TEMPLATE: &str = r#"# Your RetroArch settings, applied every time this app launches a game.
+#
+# Same format as retroarch.cfg: key = "value". Appended AFTER our defaults, so
+# anything here wins. Your own retroarch.cfg is never modified.
+#
+# Find the exact key for a setting by changing it once in RetroArch's menu and
+# diffing its retroarch.cfg, or see docs.libretro.com.
+
+# ---- Video filters / shaders ----
+# video_shader_enable = "true"
+# video_shader = "~/Data/Games/Emulators/RetroArch/shaders/shaders_glsl/crt/crt-geom.glslp"
+# video_smooth = "false"
+# video_scale_integer = "true"
+
+# ---- Controls ----
+# Player 1, RetroPad button -> your device's button index.
+# input_player1_a_btn = "1"
+# input_player1_b_btn = "0"
+# input_player1_x_btn = "3"
+# input_player1_y_btn = "2"
+# input_player1_l_btn = "4"
+# input_player1_r_btn = "5"
+# input_player1_start_btn = "9"
+# input_player1_select_btn = "8"
+# input_player1_up_btn = "h0up"
+# input_player1_down_btn = "h0down"
+# input_player1_left_btn = "h0left"
+# input_player1_right_btn = "h0right"
+
+# ---- Hotkeys ----
+# input_enable_hotkey_btn = "8"
+# input_exit_emulator_btn = "9"
+# input_menu_toggle_btn = "2"
+
+# ---- Anything else ----
+# audio_latency = "64"
+# fastforward_ratio = "3.0"
+"#;
+
 /// A located RetroArch install.
 #[derive(Debug)]
 pub struct RetroArch {
@@ -33,11 +77,21 @@ const CANDIDATE_ROOTS: &[&str] = &[
 impl RetroArch {
     /// Locate an install. `configured` wins; otherwise probe known roots.
     pub fn locate(configured: Option<&str>) -> Result<Self> {
+        Self::locate_in(&configured.map(str::to_owned).into_iter().collect::<Vec<_>>())
+    }
+
+    /// Try each path in order and take the first that holds RetroArch.
+    ///
+    /// An empty list means "probe the usual places". Ordering is the point:
+    /// it lets a portable build take precedence over a system one without
+    /// uninstalling anything.
+    pub fn locate_in(paths: &[String]) -> Result<Self> {
         let mut tried: Vec<PathBuf> = Vec::new();
 
-        let candidates: Vec<PathBuf> = match configured {
-            Some(c) => vec![expand_tilde(c)],
-            None => CANDIDATE_ROOTS.iter().map(|c| expand_tilde(c)).collect(),
+        let candidates: Vec<PathBuf> = if paths.is_empty() {
+            CANDIDATE_ROOTS.iter().map(|c| expand_tilde(c)).collect()
+        } else {
+            paths.iter().map(|p| expand_tilde(p)).collect()
         };
 
         for root in candidates {
@@ -146,13 +200,60 @@ config_save_on_exit = \"false\"
     /// support assets, which broke every arcade launch when tried. BIOS sets
     /// are handled by [`Self::install_bios`] instead.
     pub fn write_overrides(&self, dir: &Path, _system_dir: Option<&Path>) -> Result<PathBuf> {
+        self.write_overrides_with(dir, None)
+    }
+
+    /// As above, appending the user's own settings last so they win.
+    ///
+    /// RetroArch applies `--appendconfig` entries in order, later overriding
+    /// earlier, so anything in `user_config` beats our defaults. That is how a
+    /// pinned button map or video filter survives without editing RetroArch's
+    /// own config or opening its menu.
+    pub fn write_overrides_with(
+        &self,
+        dir: &Path,
+        user_config: Option<&Path>,
+    ) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
-        let body = Self::OVERRIDES;
+        let mut body = Self::OVERRIDES.to_owned();
+
+        if let Some(user) = user_config {
+            match std::fs::read_to_string(user) {
+                Ok(extra) => {
+                    body.push_str(&format!(
+                        "\n# ---- from {} (yours; overrides everything above) ----\n",
+                        user.display()
+                    ));
+                    body.push_str(&extra);
+                    if !extra.ends_with('\n') {
+                        body.push('\n');
+                    }
+                }
+                Err(e) => eprintln!("warning: could not read {}: {e}", user.display()),
+            }
+        }
+
         let path = dir.join("retroarch-overrides.cfg");
-        std::fs::write(&path, body)
+        std::fs::write(&path, &body)
             .with_context(|| format!("writing {}", path.display()))?;
         Ok(path)
+    }
+
+    /// Write a starter user-settings file if none exists yet.
+    ///
+    /// Seeded with commented examples rather than active values: silently
+    /// changing someone's controls is worse than leaving them alone.
+    pub fn ensure_user_config(path: &Path) -> Result<bool> {
+        if path.exists() {
+            return Ok(false);
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        std::fs::write(path, USER_CONFIG_TEMPLATE)
+            .with_context(|| format!("writing {}", path.display()))?;
+        Ok(true)
     }
 
     /// RetroArch's own system directory, where cores look for BIOS files.

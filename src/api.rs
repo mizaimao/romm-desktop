@@ -78,6 +78,10 @@ pub struct Rom {
     pub path_manual: Option<String>,
     #[serde(default)]
     pub youtube_video_id: Option<String>,
+    /// True for folder ROMs (multi-disc games). The content endpoint serves
+    /// these as a zip of the folder, not the ROM itself.
+    #[serde(default)]
+    pub has_multiple_files: bool,
 }
 
 // Mirrors the server schema rather than only the fields read today.
@@ -223,6 +227,14 @@ impl Client {
             path.push_str(&format!("&updated_after={}", urlencode(ts)));
         }
         self.get_json(&path).await
+    }
+
+    /// Every ROM id the server currently has.
+    ///
+    /// Cheap (one array of ints for ~10k roms) and the only way to notice
+    /// deletions: `updated_after` reports changes, never removals.
+    pub async fn rom_identifiers(&self) -> Result<Vec<i64>> {
+        self.get_json("/api/roms/identifiers").await
     }
 
     /// Server settings that affect how we interpret its data.

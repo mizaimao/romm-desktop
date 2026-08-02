@@ -26,10 +26,28 @@ password = ""
 local_root = "./library"
 
 [retroarch]
-# Directory containing RetroArch.app. In portable mode (portable.txt sitting
-# beside the bundle) this is also where cores/, saves/, states/ and config/
-# live. Leave unset to probe /Applications and ~/Applications.
-root = "~/Data/Games/Emulators/RetroArch"
+# Where your own RetroArch settings live — button maps, video filters, hotkeys.
+# Appended at launch AFTER our defaults, so anything in it wins. Your real
+# retroarch.cfg is never touched. Created with commented examples on first run.
+user_config = "./library/retroarch-user.cfg"
+
+# Installs are tried top to bottom, like a boot order: the first enabled entry
+# that actually contains RetroArch is used. Disable one without deleting it by
+# setting enabled = false.
+[[retroarch.installs]]
+label = "Portable (Data/Games)"
+path = "~/Data/Games/Emulators/RetroArch"
+enabled = true
+
+[[retroarch.installs]]
+label = "Applications"
+path = "/Applications"
+enabled = true
+
+[[retroarch.installs]]
+label = "User Applications"
+path = "~/Applications"
+enabled = true
 
 [cores.overrides]
 # Platform slug -> libretro core, overriding the ES-DE default.

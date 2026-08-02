@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS roms (
     alt_names_json TEXT,
     regions_json   TEXT,
     manual_path    TEXT,
-    youtube_id     TEXT
+    youtube_id     TEXT,
+    multi_file     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS roms_platform ON roms(platform_slug);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -77,6 +78,7 @@ pub struct RomRow {
     pub regions_json: Option<String>,
     pub manual_path: Option<String>,
     pub youtube_id: Option<String>,
+    pub multi_file: bool,
 }
 
 /// Columns every `RomRow` query selects, in order.
@@ -84,7 +86,8 @@ const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name
                            fs_name, COALESCE(fs_size_bytes, 0), md5_hash, sha1_hash, \
                            cover_path, screenshot_path, screenshots_json, \
                            cover_small_path, summary, meta_json, alt_names_json, \
-                           regions_json, manual_path, youtube_id";
+                           regions_json, manual_path, youtube_id, \
+                           COALESCE(multi_file, 0)";
 
 fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
     Ok(RomRow {
@@ -105,6 +108,16 @@ fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
         regions_json: r.get(14)?,
         manual_path: r.get(15)?,
         youtube_id: r.get(16)?,
+        // Read tolerantly: the migration adds columns as TEXT, so an older
+        // cache stores this as "0"/"1" while a freshly created one stores an
+        // integer. Both must work without forcing a rebuild.
+        multi_file: match r.get_ref(17)? {
+            rusqlite::types::ValueRef::Integer(i) => i != 0,
+            rusqlite::types::ValueRef::Text(b) => {
+                !matches!(std::str::from_utf8(b).unwrap_or("0"), "0" | "" | "false")
+            }
+            _ => false,
+        },
     })
 }
 
@@ -134,12 +147,14 @@ impl Cache {
         conn.execute_batch(SCHEMA).context("creating schema")?;
         // Older caches predate the artwork columns; add them in place rather
         // than forcing a full resync.
-        for col in [
-            "cover_path", "screenshot_path", "screenshots_json", "cover_small_path",
-            "summary", "meta_json", "alt_names_json", "regions_json", "manual_path",
-            "youtube_id",
+        for (col, ty) in [
+            ("cover_path", "TEXT"), ("screenshot_path", "TEXT"),
+            ("screenshots_json", "TEXT"), ("cover_small_path", "TEXT"),
+            ("summary", "TEXT"), ("meta_json", "TEXT"), ("alt_names_json", "TEXT"),
+            ("regions_json", "TEXT"), ("manual_path", "TEXT"),
+            ("youtube_id", "TEXT"), ("multi_file", "INTEGER NOT NULL DEFAULT 0"),
         ] {
-            let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} TEXT"), []);
+            let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} {ty}"), []);
         }
         Ok(Self { conn })
     }
@@ -256,6 +271,35 @@ impl Cache {
         Ok(rows)
     }
 
+    /// Drop cached roms the server no longer has.
+    ///
+    /// Incremental sync only ever learns about additions and changes, so
+    /// without this a deleted rom lingers forever — as happened when 18
+    /// multi-disc playlist stubs were replaced by folder ROMs and both showed
+    /// up in the UI.
+    pub fn prune_missing(&mut self, live_ids: &[i64]) -> Result<usize> {
+        if live_ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS live_ids(id INTEGER PRIMARY KEY);
+             DELETE FROM live_ids;",
+        )?;
+        {
+            let mut stmt = tx.prepare("INSERT OR IGNORE INTO live_ids(id) VALUES(?1)")?;
+            for id in live_ids {
+                stmt.execute([id])?;
+            }
+        }
+        let removed = tx.execute(
+            "DELETE FROM roms WHERE id NOT IN (SELECT id FROM live_ids)",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
     /// Pull platforms and ROMs from the server into the cache.
     ///
     /// Returns `(platforms, roms_upserted, was_incremental)`.
@@ -312,9 +356,9 @@ impl Cache {
                                           screenshot_path, screenshots_json,
                                           cover_small_path, summary, meta_json,
                                           alt_names_json, regions_json,
-                                          manual_path, youtube_id)
+                                          manual_path, youtube_id, multi_file)
                          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
-                                ?14,?15,?16,?17,?18,?19)
+                                ?14,?15,?16,?17,?18,?19,?20)
                          ON CONFLICT(id) DO UPDATE SET
                             platform_slug = excluded.platform_slug,
                             name          = excluded.name,
@@ -333,7 +377,8 @@ impl Cache {
                             alt_names_json = excluded.alt_names_json,
                             regions_json   = excluded.regions_json,
                             manual_path    = excluded.manual_path,
-                            youtube_id     = excluded.youtube_id",
+                            youtube_id     = excluded.youtube_id,
+                            multi_file     = excluded.multi_file",
                         params![
                             rom.id,
                             rom.platform_fs_slug.clone().unwrap_or_default(),
@@ -354,6 +399,7 @@ impl Cache {
                             serde_json::to_string(&rom.regions).ok(),
                             rom.path_manual,
                             rom.youtube_video_id,
+                            rom.has_multiple_files as i64,
                         ],
                     )?;
                 }

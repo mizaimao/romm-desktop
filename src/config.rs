@@ -89,8 +89,54 @@ pub struct ThemeCfg {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct RetroArchCfg {
-    /// Directory containing RetroArch.app. Unset means probe known locations.
+    /// Single install. Kept for older configs; `installs` supersedes it.
     pub root: Option<String>,
+
+    /// Ordered list of installs, tried top to bottom like a boot order. The
+    /// first enabled entry that actually contains RetroArch wins, so a
+    /// portable build can shadow a system one without deleting either.
+    #[serde(default)]
+    pub installs: Vec<RetroArchInstall>,
+
+    /// Extra RetroArch settings appended at launch, on top of ours.
+    ///
+    /// Path to a file in RetroArch's own `key = "value"` format. Anything here
+    /// wins, so button maps and video filters can be pinned without ever
+    /// opening RetroArch's menu.
+    pub user_config: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetroArchInstall {
+    /// Directory containing `RetroArch.app` (macOS) or `retroarch.exe`.
+    pub path: String,
+    /// Shown in Settings; defaults to the path when absent.
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl RetroArchCfg {
+    /// Install paths to try, in order, honouring `enabled`.
+    ///
+    /// Falls back to the legacy single `root` so an existing config keeps
+    /// working untouched.
+    pub fn ordered_paths(&self) -> Vec<String> {
+        if !self.installs.is_empty() {
+            return self
+                .installs
+                .iter()
+                .filter(|i| i.enabled)
+                .map(|i| i.path.clone())
+                .collect();
+        }
+        self.root.clone().into_iter().collect()
+    }
 }
 
 impl Config {
@@ -114,6 +160,14 @@ impl Config {
 
     pub fn media_dir(&self) -> PathBuf {
         PathBuf::from(&self.library.local_root).join("downloaded_media")
+    }
+
+    /// The user's own RetroArch settings file, appended at launch.
+    pub fn user_retroarch_config(&self) -> PathBuf {
+        match &self.retroarch.user_config {
+            Some(p) => crate::util::expand_tilde(p),
+            None => PathBuf::from(&self.library.local_root).join("retroarch-user.cfg"),
+        }
     }
 
     /// Where downloaded ES-DE themes go. Inside the library folder so the

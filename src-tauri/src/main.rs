@@ -33,6 +33,7 @@ struct AppState {
     theme_root: Option<String>,
     themes_dir: PathBuf,
     core_overrides: std::collections::BTreeMap<String, String>,
+    user_retroarch_cfg: PathBuf,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
@@ -340,6 +341,7 @@ async fn download_rom(
         expected_size: (row.fs_size_bytes > 0).then_some(row.fs_size_bytes as u64),
         md5: row.md5_hash.as_deref(),
         sha1: row.sha1_hash.as_deref(),
+        multi_file: row.multi_file,
     };
 
     let mut last = std::time::Instant::now();
@@ -387,7 +389,7 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     let overrides = state
         .roms_dir
         .parent()
-        .and_then(|lib| ra.write_overrides(lib, None).ok());
+        .and_then(|lib| ra.write_overrides_with(lib, Some(&state.user_retroarch_cfg)).ok());
     let status = ra
         .launch_with(&core, &path, false, overrides.as_deref())
         .map_err(err)?;
@@ -634,7 +636,7 @@ fn main() {
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
         .ok()
         .map(Arc::new);
-    let retroarch = RetroArch::locate(cfg.retroarch.root.as_deref()).ok();
+    let retroarch = RetroArch::locate_in(&cfg.retroarch.ordered_paths()).ok();
     let roms_dir = cfg.local_roms_dir();
     let media_dir = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
 
@@ -649,6 +651,7 @@ fn main() {
             theme_root: cfg.theme.root.clone(),
             themes_dir: cfg.themes_dir(),
             core_overrides: cfg.cores.overrides.clone(),
+            user_retroarch_cfg: cfg.user_retroarch_config(),
             icon_style: AtomicU8::new(0),
         })
         .invoke_handler(tauri::generate_handler![

@@ -18,30 +18,36 @@ use romm_desktop::{
 use romm_desktop::config::Config;
 use romm_desktop::coremap::{self, CoreMap};
 use romm_desktop::retroarch::{self, RetroArch};
+use romm_desktop::retroarch_install;
 use romm_desktop::util::human;
 
 const CORE_MAP: &str = "data/esde-core-map.json";
 
 /// `[retroarch] root` from config.toml, if set.
-fn configured_root() -> Option<String> {
-    Config::load().ok().and_then(|c| c.retroarch.root)
+/// Locate RetroArch using the configured boot order.
+fn locate_retroarch(cfg: &Config) -> Result<RetroArch> {
+    RetroArch::locate_in(&cfg.retroarch.ordered_paths())
 }
 
-/// Infer the RomM platform slug from a ROM path inside `library/roms/<slug>/`.
+/// Infer the RomM platform slug from a ROM path under `.../roms/<slug>/...`.
 ///
-/// Multi-disc members live one level deeper in `MultiDisk/` (or `MuliDisk/`,
-/// misspelled in the 3do source), so step back up when we land in one.
+/// Walks up to the directory whose parent is `roms`, so it works at any depth:
+/// a plain ROM, a disc inside a `MultiDisk/` folder, or a file inside a
+/// per-game folder ROM (`roms/dc/Shenmue (USA)/Shenmue (USA).m3u`).
 fn platform_from_path(rom: &Path) -> Option<String> {
     let mut dir = rom.parent()?;
-    let name = dir.file_name()?.to_str()?;
-    if name.eq_ignore_ascii_case("MultiDisk") || name.eq_ignore_ascii_case("MuliDisk") {
-        dir = dir.parent()?;
+    loop {
+        let parent = dir.parent()?;
+        if parent.file_name().is_some_and(|n| n == "roms") {
+            return Some(dir.file_name()?.to_str()?.to_owned());
+        }
+        dir = parent;
     }
-    Some(dir.file_name()?.to_str()?.to_owned())
 }
 
 fn cmd_doctor() -> Result<()> {
-    let ra = RetroArch::locate(configured_root().as_deref())?;
+    let cfg = Config::load()?;
+    let ra = locate_retroarch(&cfg)?;
     println!("RetroArch");
     println!("  root      {}", ra.root.display());
     println!("  binary    {}", ra.binary.display());
@@ -147,8 +153,13 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     {
         println!("installed {n} BIOS file(s) into {}", ra.system_dir().display());
     }
+    // Seed the user's settings file on first run so it is discoverable.
+    let user_cfg = cfg.user_retroarch_config();
+    if RetroArch::ensure_user_config(&user_cfg).unwrap_or(false) {
+        println!("created {} — put your button map / filters there", user_cfg.display());
+    }
     let overrides = ra
-        .write_overrides(Path::new(&cfg.library.local_root), None)
+        .write_overrides_with(Path::new(&cfg.library.local_root), Some(&user_cfg))
         .ok();
     let cmd = ra.launch_command_with(&core, rom, fullscreen, overrides.as_deref())?;
     let label = map
@@ -176,9 +187,10 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
 
 /// List one launchable ROM per platform that has an installed core.
 fn cmd_suggest() -> Result<()> {
-    let ra = RetroArch::locate(configured_root().as_deref())?;
+    let cfg = Config::load()?;
+    let ra = locate_retroarch(&cfg)?;
     let map = CoreMap::load(Path::new(CORE_MAP))?;
-    let roms = Config::load()?.local_roms_dir();
+    let roms = cfg.local_roms_dir();
     if !roms.is_dir() {
         bail!(
             "{} not found — build it with tools/build_test_library.py",
@@ -270,9 +282,53 @@ async fn cmd_check() -> Result<()> {
     Ok(())
 }
 
+/// Download and install RetroArch itself.
+async fn cmd_install_retroarch(version: Option<&str>) -> Result<()> {
+    let cfg = Config::load()?;
+    if let Ok(existing) = locate_retroarch(&cfg) {
+        println!("already installed: {}", existing.root.display());
+        println!("(installing again would add a second entry; remove it first if that is what you want)");
+        return Ok(());
+    }
+
+    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let version = match version {
+        Some(v) => v.to_owned(),
+        None => retroarch_install::latest_available(&http).await?,
+    };
+    // Alongside the rest of our data, so one folder still holds everything.
+    let dest = PathBuf::from(&cfg.library.local_root).join("RetroArch");
+    println!("installing RetroArch {version} into {}", dest.display());
+
+    let started = std::time::Instant::now();
+    let mut last = std::time::Instant::now();
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let root = retroarch_install::install(&http, &version, &dest, |done, total| {
+        if !interactive || last.elapsed().as_millis() < 200 {
+            return;
+        }
+        last = std::time::Instant::now();
+        let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+        print!("\r  {pct:5.1}%  {} / {}   ", human(done), human(total));
+        use std::io::Write as _;
+        std::io::stdout().flush().ok();
+    })
+    .await?;
+
+    println!("\ninstalled in {:.0}s -> {}", started.elapsed().as_secs_f64(), root.display());
+    println!("\nAdd it to your boot order in config.toml:");
+    println!("  [[retroarch.installs]]");
+    println!("  label = \"Downloaded\"");
+    println!("  path = \"{}\"", root.display());
+    println!("  enabled = true");
+    println!("\nThen `cores --install` to fetch the libretro cores.");
+    Ok(())
+}
+
 /// Stage 0.5 — install missing cores from the buildbot.
 async fn cmd_cores(install: bool) -> Result<()> {
-    let ra = RetroArch::locate(configured_root().as_deref())?;
+    let cfg = Config::load()?;
+    let ra = locate_retroarch(&cfg)?;
     let map = CoreMap::load(Path::new(CORE_MAP))?;
     let segment = cores::platform_segment()?;
 
@@ -374,6 +430,17 @@ async fn cmd_sync(full: bool) -> Result<()> {
     let before = store.rom_count().unwrap_or(0);
     let started = std::time::Instant::now();
     let (platforms, upserted, incremental) = store.sync(&client, full).await?;
+    // Removals never show up in an incremental pull, so reconcile against the
+    // server's full id list.
+    match client.rom_identifiers().await {
+        Ok(ids) => match store.prune_missing(&ids) {
+            Ok(n) if n > 0 => println!("pruned {n} rom(s) the server no longer has"),
+            Ok(_) => {}
+            Err(e) => eprintln!("warning: prune failed ({e})"),
+        },
+        Err(e) => eprintln!("warning: could not list server rom ids ({e}); skipped pruning"),
+    }
+
     let after = store.rom_count().unwrap_or(0);
 
     println!(
@@ -429,6 +496,7 @@ async fn cmd_get(needle: &str) -> Result<()> {
         expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
         md5: rom.md5_hash.as_deref(),
         sha1: rom.sha1_hash.as_deref(),
+        multi_file: rom.multi_file,
     };
 
     let started = std::time::Instant::now();
@@ -436,6 +504,9 @@ async fn cmd_get(needle: &str) -> Result<()> {
     // Bytes already on disk when we started, so the rate reflects what this
     // session actually transferred rather than crediting us with the resume.
     let mut baseline: Option<u64> = None;
+    // Carriage-return progress only makes sense on a terminal; piped or
+    // redirected it produces thousands of lines of noise.
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let outcome = download::fetch(
         client.http(),
         client.base(),
@@ -444,6 +515,9 @@ async fn cmd_get(needle: &str) -> Result<()> {
         &roms_dir,
         |done, total| {
             let base = *baseline.get_or_insert(done);
+            if !interactive {
+                return;
+            }
             // Throttle so the terminal isn't the bottleneck on a fast transfer.
             if last_tick.elapsed().as_millis() < 200 {
                 return;
@@ -832,6 +906,12 @@ enum Command {
     },
     /// Show what is installed and which platforms can launch
     Doctor,
+    /// Download and install RetroArch itself
+    InstallRetroarch {
+        /// Pin a release instead of taking the newest known one
+        #[arg(long)]
+        version: Option<String>,
+    },
     /// List or install missing libretro cores
     Cores {
         /// Download the missing cores from the libretro buildbot
@@ -893,6 +973,7 @@ async fn main() -> Result<()> {
             _ => cmd_themes(install),
         },
         Command::Doctor => cmd_doctor(),
+        Command::InstallRetroarch { version } => cmd_install_retroarch(version.as_deref()).await,
         Command::Cores { install } => cmd_cores(install).await,
         Command::Suggest => cmd_suggest(),
         Command::Launch {
