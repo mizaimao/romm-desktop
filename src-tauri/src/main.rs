@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use serde::Serialize;
 use tauri::{Emitter, State};
@@ -31,6 +32,9 @@ struct AppState {
     media_dir: PathBuf,
     theme_root: Option<String>,
     themes_dir: PathBuf,
+    /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
+    /// taking any lock the render path also needs.
+    icon_style: AtomicU8,
 }
 
 #[derive(Serialize)]
@@ -67,7 +71,8 @@ struct RomDetail {
     /// Local media, as `asset:` URLs the webview can load directly.
     cover: Option<String>,
     video: Option<String>,
-    screenshot: Option<String>,
+    /// Every screenshot we could resolve; the UI cycles through them.
+    screenshots: Vec<String>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -84,7 +89,7 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
         .into_iter()
         .map(|p| PlatformView {
             playable: resolve_core(&state, &p.fs_slug).is_some(),
-            logo: theme::installed_logo(&state.media_dir, &p.fs_slug)
+            logo: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
                 .map(|p| p.display().to_string()),
             slug: p.fs_slug,
             name: p.display_name,
@@ -157,9 +162,9 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         client.as_deref(), &media_root, &row.platform_slug, &stem,
         media::COVERS, row.cover_path.as_deref(),
     ).await;
-    let screenshot = media::ensure(
+    let screenshots = media::ensure_set(
         client.as_deref(), &media_root, &row.platform_slug, &stem,
-        media::SCREENSHOTS, row.screenshot_path.as_deref(),
+        &row.screenshots(),
     ).await;
     // No server-side video exists on this deployment; local only.
     let video = media::find_local(&media_root, &row.platform_slug, &stem, media::VIDEOS);
@@ -167,7 +172,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     Ok(RomDetail {
         cover: as_url(cover),
         video: as_url(video),
-        screenshot: as_url(screenshot),
+        screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
         id: row.id,
         name: row.name,
@@ -394,6 +399,47 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
     })
 }
 
+fn current_style(state: &State<'_, AppState>) -> theme::IconStyle {
+    let i = state.icon_style.load(Ordering::Relaxed) as usize;
+    theme::IconStyle::ALL[i.min(theme::IconStyle::ALL.len() - 1)]
+}
+
+#[derive(Serialize)]
+struct IconStyleView {
+    key: String,
+    label: String,
+    /// How many of our platforms have art in this style.
+    available: usize,
+    selected: bool,
+}
+
+/// The per-system art styles ES-DE themes provide, with coverage counts.
+#[tauri::command]
+fn icon_styles(state: State<'_, AppState>) -> CmdResult<Vec<IconStyleView>> {
+    let slugs: Vec<String> = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
+    };
+    let cur = current_style(&state);
+    Ok(theme::installed_counts(&state.media_dir, &slugs)
+        .into_iter()
+        .map(|(style, available)| IconStyleView {
+            key: style.key().to_owned(),
+            label: style.label().to_owned(),
+            available,
+            selected: style == cur,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn set_icon_style(state: State<'_, AppState>, key: String) -> CmdResult<String> {
+    let style = theme::IconStyle::parse(&key).ok_or_else(|| format!("unknown style {key}"))?;
+    let idx = theme::IconStyle::ALL.iter().position(|s| *s == style).unwrap_or(0);
+    state.icon_style.store(idx as u8, Ordering::Relaxed);
+    Ok(style.label().to_owned())
+}
+
 fn abs(p: &Path) -> String {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf()).display().to_string()
 }
@@ -487,6 +533,7 @@ fn main() {
             media_dir,
             theme_root: cfg.theme.root.clone(),
             themes_dir: cfg.themes_dir(),
+            icon_style: AtomicU8::new(0),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,
@@ -499,6 +546,8 @@ fn main() {
             themes_available,
             theme_download,
             theme_remove,
+            icon_styles,
+            set_icon_style,
             status
         ])
         .run(tauri::generate_context!())

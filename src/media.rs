@@ -97,6 +97,49 @@ pub async fn fetch(
     path.canonicalize().or(Ok(path))
 }
 
+/// Resolve a set of screenshots: any already local, plus anything the server
+/// has that we do not.
+///
+/// Extras are stored as `<stem>-2.jpg`, `<stem>-3.jpg` … because the ES-DE
+/// convention only names one screenshot per game, and we do not want to
+/// collide with an imported one.
+pub async fn ensure_set(
+    client: Option<&api::Client>,
+    media_root: &Path,
+    platform: &str,
+    stem: &str,
+    server_paths: &[String],
+) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for (i, server) in server_paths.iter().enumerate() {
+        let name = if i == 0 {
+            stem.to_owned()
+        } else {
+            format!("{stem}-{}", i + 1)
+        };
+        if let Some(p) = ensure(
+            client,
+            media_root,
+            platform,
+            &name,
+            SCREENSHOTS,
+            Some(server.as_str()),
+        )
+        .await
+        {
+            out.push(p);
+        }
+    }
+    // No server list at all (or nothing fetched): fall back to whatever is on
+    // disk under the plain stem.
+    if out.is_empty()
+        && let Some(p) = find_local(media_root, platform, stem, SCREENSHOTS)
+    {
+        out.push(p);
+    }
+    out
+}
+
 /// Local file if present, else fetch from the server and cache it.
 ///
 /// Returns `None` when there is nothing local *and* the server has no artwork

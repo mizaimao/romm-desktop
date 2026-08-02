@@ -137,11 +137,31 @@ async function showThemes() {
     el.list.innerHTML = `<div class="empty">Could not load the themes list.<br>${escapeHtml(String(e))}</div>`;
     return;
   }
-  renderThemes(themes);
+  let styles = [];
+  try {
+    styles = await invoke("icon_styles");
+  } catch (e) {
+    /* non-fatal: the picker just won't show */
+  }
+  renderThemes(themes, styles);
 }
 
-function renderThemes(themes) {
-  el.list.innerHTML = `<div class="themes">${themes
+function renderThemes(themes, styles = []) {
+  const bar = styles.length
+    ? `<div class="stylebar">
+         <span class="lbl">Console icons:</span>
+         ${styles
+           .map(
+             (s) =>
+               `<button data-style="${s.key}" class="${s.selected ? "on" : ""}" ${
+                 s.available ? "" : "disabled"
+               }>${escapeHtml(s.label)} <span style="opacity:.6">${s.available}</span></button>`
+           )
+           .join("")}
+       </div>`
+    : "";
+
+  el.list.innerHTML = bar + `<div class="themes">${themes
     .map(
       (t) => `
       <div class="tcard ${t.installed ? "on" : ""}" data-repo="${t.reponame}">
@@ -167,6 +187,20 @@ function renderThemes(themes) {
       </div>`
     )
     .join("")}</div>`;
+
+  el.list.querySelectorAll(".stylebar button").forEach((b) =>
+    b.addEventListener("click", async () => {
+      try {
+        const label = await invoke("set_icon_style", { key: b.dataset.style });
+        el.list.querySelectorAll(".stylebar button").forEach((x) =>
+          x.classList.toggle("on", x === b)
+        );
+        toast(`Console icons: ${label}`);
+      } catch (e) {
+        toast(String(e), 6000);
+      }
+    })
+  );
 
   el.list.querySelectorAll(".tcard button").forEach((b) =>
     b.addEventListener("click", (ev) => {
@@ -207,17 +241,43 @@ async function selectRom(id) {
   );
 
   const d = await invoke("rom_detail", { id });
-  const media = [];
-  if (d.video) media.push(`<video src="${convertFileSrc(d.video)}" controls muted loop></video>`);
-  if (d.cover) media.push(`<img src="${convertFileSrc(d.cover)}" alt="" />`);
-  if (!d.video && d.screenshot)
-    media.push(`<img src="${convertFileSrc(d.screenshot)}" alt="" />`);
+  const shots = d.screenshots || [];
+
+  // Screenshots on top (cycled if there is more than one), cover below.
+  const top = shots.length
+    ? `<div class="shots" id="shots">
+         ${shots
+           .map(
+             (s, i) =>
+               `<img src="${convertFileSrc(s)}" class="${i === 0 ? "on" : ""}" alt="" />`
+           )
+           .join("")}
+         ${
+           shots.length > 1
+             ? `<div class="dots">${shots
+                 .map((_, i) => `<span class="${i === 0 ? "on" : ""}"></span>`)
+                 .join("")}</div>
+                <button class="nav prev">‹</button><button class="nav next">›</button>`
+             : ""
+         }
+       </div>`
+    : d.video
+      ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
+      : "";
+
+  const bottom = d.cover ? `<img class="cover" src="${convertFileSrc(d.cover)}" alt="" />` : "";
+  const vid =
+    shots.length && d.video
+      ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
+      : "";
 
   el.detail.hidden = false;
   el.detail.innerHTML = `
     <h2>${escapeHtml(d.name)}</h2>
     <div class="sub">${escapeHtml(d.fs_name)}</div>
-    ${media.join("")}
+    ${top}
+    ${bottom}
+    ${vid}
     <dl>
       <dt>Platform</dt><dd>${d.platform}</dd>
       <dt>Size</dt><dd>${human(d.size_bytes)}</dd>
@@ -230,8 +290,38 @@ async function selectRom(id) {
     </div>
     <progress id="prog" hidden></progress>`;
 
+  if (shots.length > 1) startSlideshow(shots.length);
+
   document.getElementById("play").addEventListener("click", () => play(d));
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
+}
+
+let slideTimer;
+function startSlideshow(count) {
+  clearInterval(slideTimer);
+  const box = document.getElementById("shots");
+  if (!box) return;
+  const imgs = [...box.querySelectorAll("img")];
+  const dots = [...box.querySelectorAll(".dots span")];
+  let i = 0;
+
+  const show = (n) => {
+    i = (n + count) % count;
+    imgs.forEach((im, k) => im.classList.toggle("on", k === i));
+    dots.forEach((dt, k) => dt.classList.toggle("on", k === i));
+  };
+  const auto = () => {
+    clearInterval(slideTimer);
+    slideTimer = setInterval(() => show(i + 1), 3500);
+  };
+
+  box.querySelector(".prev")?.addEventListener("click", () => { show(i - 1); auto(); });
+  box.querySelector(".next")?.addEventListener("click", () => { show(i + 1); auto(); });
+  dots.forEach((dt, k) => dt.addEventListener("click", () => { show(k); auto(); }));
+  // Pause while the pointer is over the image, so it can be studied.
+  box.addEventListener("mouseenter", () => clearInterval(slideTimer));
+  box.addEventListener("mouseleave", auto);
+  auto();
 }
 
 async function download(id, thenPlay) {

@@ -31,6 +31,46 @@ const THEME_ROOTS: &[&str] = &[
 
 const ICON_EXTENSIONS: &[&str] = &["svg", "png", "webp", "jpg"];
 
+/// Which piece of per-system art to use for the platform grid.
+///
+/// ES-DE themes ship several. In the bundled slate theme: 201 `logo.svg`
+/// (wordmarks), 89 `consolegame.svg` (console with a game), 69
+/// `controller.svg`. Coverage varies by theme and system, so callers should be
+/// ready to fall back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconStyle {
+    /// Stylised wordmark. Best coverage.
+    Logo,
+    /// The console itself, usually with a cartridge or disc.
+    ConsoleGame,
+    /// The system's controller.
+    Controller,
+}
+
+impl IconStyle {
+    pub const ALL: [IconStyle; 3] = [Self::Logo, Self::ConsoleGame, Self::Controller];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Logo => "logo",
+            Self::ConsoleGame => "consolegame",
+            Self::Controller => "controller",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Logo => "Logos",
+            Self::ConsoleGame => "Consoles",
+            Self::Controller => "Controllers",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == s.to_ascii_lowercase())
+    }
+}
+
 fn expand_tilde(p: &str) -> PathBuf {
     match p.strip_prefix("~/") {
         Some(rest) => std::env::var_os("HOME")
@@ -125,16 +165,33 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
 /// enough to check directly; anything else is found by the generic sweep in
 /// [`logo_by_sweep`].
 pub fn logo_for(theme: &Theme, esde_system: &str) -> Option<PathBuf> {
+    art_for(theme, esde_system, IconStyle::Logo)
+}
+
+/// Locate one style of per-system art within a theme.
+pub fn art_for(theme: &Theme, esde_system: &str, style: IconStyle) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     for ext in ICON_EXTENSIONS {
-        // slate-es-de and many community themes
-        candidates.push(theme.path.join(esde_system).join("images").join(format!("logo.{ext}")));
-        // linear-es-de
-        candidates.push(theme.path.join("system").join("logos").join(format!("{esde_system}.{ext}")));
-        // canvas-es-de and relatives
-        candidates.push(theme.path.join("_inc").join("system-logo").join(format!("{esde_system}.{ext}")));
+        // slate-es-de and many community themes keep every style side by side.
+        candidates.push(
+            theme.path.join(esde_system).join("images").join(format!("{}.{ext}", style.key())),
+        );
     }
-    first_existing(&candidates).or_else(|| logo_by_sweep(theme, esde_system))
+    if style == IconStyle::Logo {
+        for ext in ICON_EXTENSIONS {
+            // linear-es-de
+            candidates.push(theme.path.join("system").join("logos").join(format!("{esde_system}.{ext}")));
+            // canvas-es-de and relatives
+            candidates.push(theme.path.join("_inc").join("system-logo").join(format!("{esde_system}.{ext}")));
+        }
+    }
+    let found = first_existing(&candidates);
+    match (found, style) {
+        (Some(p), _) => Some(p),
+        // Only the sweep knows about unusual layouts, and it only knows logos.
+        (None, IconStyle::Logo) => logo_by_sweep(theme, esde_system),
+        (None, _) => None,
+    }
 }
 
 /// Fallback: look for `<system>.<ext>` inside any directory whose name mentions
@@ -183,10 +240,16 @@ fn logo_by_sweep(theme: &Theme, esde_system: &str) -> Option<PathBuf> {
 ///
 /// Falling through theme by theme rather than requiring a single complete
 /// theme means a sparse custom theme still contributes what it has.
-pub fn logos(
+pub fn logos(themes: &[Theme], map: &CoreMap, slugs: &[String]) -> BTreeMap<String, PathBuf> {
+    art(themes, map, slugs, IconStyle::Logo)
+}
+
+/// As [`logos`], for a specific art style.
+pub fn art(
     themes: &[Theme],
     map: &CoreMap,
     slugs: &[String],
+    style: IconStyle,
 ) -> BTreeMap<String, PathBuf> {
     let names = slug_to_esde(map);
     let mut out = BTreeMap::new();
@@ -197,7 +260,7 @@ pub fn logos(
             .unwrap_or_else(|| vec![slug.clone()]);
         for theme in themes {
             for esde in &candidates {
-                if let Some(p) = logo_for(theme, esde) {
+                if let Some(p) = art_for(theme, esde, style) {
                     out.insert(slug.clone(), p);
                     continue 'slug;
                 }
@@ -215,10 +278,27 @@ pub fn install(
     slugs: &[String],
     media_root: &Path,
 ) -> Result<usize> {
-    let dir = media_root.join("_platforms");
+    let mut total = 0;
+    for style in IconStyle::ALL {
+        total += install_style(themes, map, slugs, media_root, style)?;
+    }
+    Ok(total)
+}
+
+/// Install one art style into `_platforms/<style>/`.
+///
+/// Styles are kept side by side so switching in the UI needs no re-download.
+pub fn install_style(
+    themes: &[Theme],
+    map: &CoreMap,
+    slugs: &[String],
+    media_root: &Path,
+    style: IconStyle,
+) -> Result<usize> {
+    let dir = media_root.join("_platforms").join(style.key());
     std::fs::create_dir_all(&dir)?;
     let mut n = 0;
-    for (slug, src) in logos(themes, map, slugs) {
+    for (slug, src) in art(themes, map, slugs, style) {
         let ext = src
             .extension()
             .map(|e| e.to_string_lossy().to_string())
@@ -231,14 +311,40 @@ pub fn install(
     Ok(n)
 }
 
-/// Installed logo for a platform, if one has been copied in.
-pub fn installed_logo(media_root: &Path, slug: &str) -> Option<PathBuf> {
-    let dir = media_root.join("_platforms");
-    for ext in ICON_EXTENSIONS {
-        let p = dir.join(format!("{slug}.{ext}"));
-        if p.is_file() {
-            return p.canonicalize().ok();
+/// Installed art for a platform in the requested style, falling back to
+/// `Logo` when that style has no art for this system.
+pub fn installed_logo(media_root: &Path, slug: &str, style: IconStyle) -> Option<PathBuf> {
+    let base = media_root.join("_platforms");
+    let mut styles = vec![style];
+    if style != IconStyle::Logo {
+        styles.push(IconStyle::Logo);
+    }
+    for s in styles {
+        for ext in ICON_EXTENSIONS {
+            let p = base.join(s.key()).join(format!("{slug}.{ext}"));
+            if p.is_file() {
+                return p.canonicalize().ok();
+            }
         }
     }
     None
+}
+
+/// How many platforms have art installed for each style.
+pub fn installed_counts(media_root: &Path, slugs: &[String]) -> Vec<(IconStyle, usize)> {
+    IconStyle::ALL
+        .into_iter()
+        .map(|style| {
+            let base = media_root.join("_platforms").join(style.key());
+            let n = slugs
+                .iter()
+                .filter(|slug| {
+                    ICON_EXTENSIONS
+                        .iter()
+                        .any(|ext| base.join(format!("{slug}.{ext}")).is_file())
+                })
+                .count();
+            (style, n)
+        })
+        .collect()
 }
