@@ -11,6 +11,7 @@
       <button id="back" hidden>‹</button>
       <h1 id="title">Platforms</h1>
       <input id="search" type="search" placeholder="Search all games…" />
+      <button id="sidebar-btn" hidden title="Show or hide the detail pane">Hide info</button>
       <button id="layout-btn" hidden>Grid</button>
       <button id="themes-btn" title="Console icon themes">Themes</button>
       <span id="status"></span>
@@ -20,6 +21,16 @@
       <section id="list"></section>
       <aside id="detail" hidden></aside>
     </main>
+
+    <div id="lightbox" hidden>
+      <button class="lb-close" title="Close (Esc)">×</button>
+      <button class="lb-nav lb-prev" title="Previous (←)">‹</button>
+      <figure>
+        <div class="lb-stage"></div>
+        <figcaption></figcaption>
+      </figure>
+      <button class="lb-nav lb-next" title="Next (→)">›</button>
+    </div>
 
     <footer id="toast" hidden></footer>
 

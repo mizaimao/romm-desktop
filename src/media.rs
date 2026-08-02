@@ -24,6 +24,7 @@ pub const VIDEOS: &str = "videos";
 /// Thumbnails for the grid. Not an ES-DE directory — ES-DE has no thumb
 /// concept — but kept in the same tree so one delete clears everything.
 pub const COVERS_THUMB: &str = "covers_thumb";
+pub const MANUALS: &str = "manuals";
 
 /// Look for an already-present media file, whatever its extension.
 pub fn find_local(media_root: &Path, platform: &str, stem: &str, kind: &str) -> Option<PathBuf> {
@@ -194,4 +195,86 @@ pub async fn ensure(
             None
         }
     }
+}
+
+
+/// Pixel dimensions of a PNG or JPEG, without decoding the image.
+///
+/// Only the header is read: PNG keeps them in IHDR, JPEG in the SOFn marker.
+/// Enough to work out a cover's aspect ratio cheaply.
+pub fn image_size(path: &Path) -> Option<(u32, u32)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 8];
+    f.read_exact(&mut head).ok()?;
+
+    if head == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        let mut ihdr = [0u8; 16];
+        f.read_exact(&mut ihdr).ok()?;
+        let w = u32::from_be_bytes(ihdr[8..12].try_into().ok()?);
+        let h = u32::from_be_bytes(ihdr[12..16].try_into().ok()?);
+        return (w > 0 && h > 0).then_some((w, h));
+    }
+
+    if head[0] == 0xFF && head[1] == 0xD8 {
+        f.seek(SeekFrom::Start(2)).ok()?;
+        let mut b = [0u8; 1];
+        loop {
+            // Scan to the next marker.
+            while f.read_exact(&mut b).is_ok() && b[0] != 0xFF {}
+            let mut marker = 0xFFu8;
+            while marker == 0xFF {
+                f.read_exact(&mut b).ok()?;
+                marker = b[0];
+            }
+            // SOF0..SOF15, skipping the non-frame markers in that range.
+            if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+                let mut sof = [0u8; 7];
+                f.read_exact(&mut sof).ok()?;
+                let h = u16::from_be_bytes([sof[3], sof[4]]) as u32;
+                let w = u16::from_be_bytes([sof[5], sof[6]]) as u32;
+                return (w > 0 && h > 0).then_some((w, h));
+            }
+            let mut len = [0u8; 2];
+            f.read_exact(&mut len).ok()?;
+            let skip = u16::from_be_bytes(len).saturating_sub(2) as i64;
+            f.seek(SeekFrom::Current(skip)).ok()?;
+        }
+    }
+    None
+}
+
+/// Typical cover aspect (width / height) for a platform, from the covers we
+/// already hold.
+///
+/// Box art varies enormously by system — measured here, PSP UMD cases are 0.58
+/// and SNES boxes 1.37 — so a single grid ratio crops most of them. Sampling
+/// real files keeps this correct without a hardcoded table to maintain.
+///
+/// Returns `None` until enough covers are cached to be confident.
+pub fn cover_aspect(media_root: &Path, platform: &str) -> Option<f32> {
+    let mut ratios: Vec<f32> = Vec::new();
+    for kind in [COVERS_THUMB, COVERS] {
+        let dir = media_root.join(platform).join(kind);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten().take(40) {
+            if let Some((w, h)) = image_size(&entry.path())
+                && h > 0
+            {
+                ratios.push(w as f32 / h as f32);
+            }
+        }
+        if ratios.len() >= 8 {
+            break;
+        }
+    }
+    if ratios.len() < 3 {
+        return None;
+    }
+    // Median: a few odd covers (a wide promo shot among box art) should not
+    // drag the whole grid.
+    ratios.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Some(ratios[ratios.len() / 2])
 }

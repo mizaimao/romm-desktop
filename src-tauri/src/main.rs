@@ -14,7 +14,7 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 
 use romm_desktop::{
-    api, cache, config::Config, coremap::CoreMap, download, media, retroarch::RetroArch,
+    api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
     theme, theme_remote,
 };
 
@@ -32,6 +32,7 @@ struct AppState {
     media_dir: PathBuf,
     theme_root: Option<String>,
     themes_dir: PathBuf,
+    core_overrides: std::collections::BTreeMap<String, String>,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
@@ -46,6 +47,9 @@ struct PlatformView {
     playable: bool,
     /// ES-DE theme logo, if one has been installed locally.
     logo: Option<String>,
+    /// Typical cover aspect (w/h) for this platform, so the grid can shape its
+    /// cards instead of cropping. Null until enough covers are cached.
+    cover_aspect: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -73,6 +77,31 @@ struct RomDetail {
     video: Option<String>,
     /// Every screenshot we could resolve; the UI cycles through them.
     screenshots: Vec<String>,
+
+    // Descriptive metadata, straight from RomM (which on this server got it
+    // from the ES-DE gamelist import).
+    summary: Option<String>,
+    genres: Vec<String>,
+    companies: Vec<String>,
+    franchises: Vec<String>,
+    game_modes: Vec<String>,
+    player_count: Option<String>,
+    /// 0-100 as RomM stores it.
+    rating: Option<f64>,
+    release_year: Option<i32>,
+    alt_names: Vec<String>,
+    regions: Vec<String>,
+    manual: Option<String>,
+    youtube_id: Option<String>,
+}
+
+/// Pull the useful bits out of RomM's merged `metadatum` blob.
+fn meta_strings(meta: &Option<serde_json::Value>, key: &str) -> Vec<String> {
+    meta.as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default()
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -91,6 +120,7 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             playable: resolve_core(&state, &p.fs_slug).is_some(),
             logo: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
                 .map(|p| p.display().to_string()),
+            cover_aspect: media::cover_aspect(&state.media_dir, &p.fs_slug),
             slug: p.fs_slug,
             name: p.display_name,
             rom_count: p.rom_count,
@@ -169,6 +199,28 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     // No server-side video exists on this deployment; local only.
     let video = media::find_local(&media_root, &row.platform_slug, &stem, media::VIDEOS);
 
+    // Manuals are PDFs, which the webview renders natively.
+    let manual = media::ensure(
+        client.as_deref(), &media_root, &row.platform_slug, &stem,
+        media::MANUALS, row.manual_path.as_deref(),
+    ).await;
+
+    let meta: Option<serde_json::Value> = row
+        .meta_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let json_list = |s: &Option<String>| -> Vec<String> {
+        s.as_deref()
+            .and_then(|v| serde_json::from_str::<Vec<String>>(v).ok())
+            .unwrap_or_default()
+    };
+    // RomM stores the release date as epoch milliseconds.
+    let release_year = meta
+        .as_ref()
+        .and_then(|m| m.get("first_release_date"))
+        .and_then(|v| v.as_f64())
+        .map(|ms| 1970 + (ms / 1000.0 / 31_556_952.0) as i32);
+
     Ok(RomDetail {
         cover: as_url(cover),
         video: as_url(video),
@@ -181,6 +233,25 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         size_bytes: row.fs_size_bytes,
         core,
         core_label,
+        summary: row.summary.clone().filter(|s| !s.is_empty()),
+        genres: meta_strings(&meta, "genres"),
+        companies: meta_strings(&meta, "companies"),
+        franchises: meta_strings(&meta, "franchises"),
+        game_modes: meta_strings(&meta, "game_modes"),
+        player_count: meta
+            .as_ref()
+            .and_then(|m| m.get("player_count"))
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        rating: meta
+            .as_ref()
+            .and_then(|m| m.get("average_rating"))
+            .and_then(|v| v.as_f64()),
+        release_year,
+        alt_names: json_list(&row.alt_names_json),
+        regions: json_list(&row.regions_json),
+        manual: manual.map(|p| p.display().to_string()),
+        youtube_id: row.youtube_id.clone().filter(|s| !s.is_empty()),
     })
 }
 
@@ -536,17 +607,7 @@ fn local_path(state: &State<'_, AppState>, platform: &str, fs_name: &str) -> Opt
 
 fn resolve_core(state: &State<'_, AppState>, platform: &str) -> Option<String> {
     let ra = state.retroarch.as_ref()?;
-    if let Some(default) = state.map.default_core(platform)
-        && ra.has_core(default)
-    {
-        return Some(default.to_owned());
-    }
-    state
-        .map
-        .alternatives(platform)
-        .into_iter()
-        .find(|c| ra.has_core(c))
-        .map(str::to_owned)
+    coremap::resolve_core(&state.map, &state.core_overrides, platform, |c| ra.has_core(c))
 }
 
 /// Find the project root and make it the working directory.
@@ -600,6 +661,7 @@ fn main() {
             media_dir,
             theme_root: cfg.theme.root.clone(),
             themes_dir: cfg.themes_dir(),
+            core_overrides: cfg.cores.overrides.clone(),
             icon_style: AtomicU8::new(0),
         })
         .invoke_handler(tauri::generate_handler![

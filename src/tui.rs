@@ -59,6 +59,7 @@ pub struct App {
     local_roms: PathBuf,
     ra: Option<RetroArch>,
     map: CoreMap,
+    core_overrides: std::collections::BTreeMap<String, String>,
     quit: bool,
     /// Set while a download is in flight; cleared once the UI reports it.
     progress: Option<Arc<Mutex<Progress>>>,
@@ -100,6 +101,9 @@ impl App {
             local_roms,
             ra,
             map,
+            core_overrides: crate::config::Config::load()
+                .map(|c| c.cores.overrides)
+                .unwrap_or_default(),
             quit: false,
             progress: None,
             launch_when_done: None,
@@ -167,16 +171,9 @@ impl App {
     /// Resolve the core for a ROM, preferring the mapped default but falling
     /// back to any installed alternative.
     fn resolve_core(&self, ra: &RetroArch, platform: &str) -> Option<String> {
-        if let Some(default) = self.map.default_core(platform)
-            && ra.has_core(default)
-        {
-            return Some(default.to_owned());
-        }
-        self.map
-            .alternatives(platform)
-            .into_iter()
-            .find(|c| ra.has_core(c))
-            .map(str::to_owned)
+        crate::coremap::resolve_core(&self.map, &self.core_overrides, platform, |c| {
+            ra.has_core(c)
+        })
     }
 
     /// Enter: play. Downloads first if the ROM is not local yet.

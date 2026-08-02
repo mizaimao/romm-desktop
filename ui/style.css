@@ -78,7 +78,7 @@ header h1 {
 }
 #search:focus { outline: none; border-color: var(--accent); }
 
-#layout-btn, #themes-btn {
+#sidebar-btn, #layout-btn, #themes-btn {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
@@ -87,7 +87,7 @@ header h1 {
   font-size: 13px;
   cursor: pointer;
 }
-#layout-btn:hover, #themes-btn:hover { border-color: var(--accent); }
+#sidebar-btn:hover, #layout-btn:hover, #themes-btn:hover { border-color: var(--accent); }
 #themes-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 #status { color: var(--dim); font-size: 12px; white-space: nowrap; }
@@ -186,12 +186,17 @@ main {
 /* Game grid — box art */
 .gcards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  /* Wider cards for landscape box art so a 1.37 cover is not tiny. */
+  grid-template-columns: repeat(auto-fill, minmax(clamp(132px, calc(132px * var(--ar, 0.75) / 0.75), 210px), 1fr));
   gap: 14px;
+  /* Default until the platform's real ratio is measured. */
+  --ar: 0.75;
 }
 .gcard { cursor: pointer; user-select: none; }
 .gcard .art {
-  aspect-ratio: 3 / 4;
+  /* Shaped to the platform's actual box art: PSP UMD cases are 0.58,
+     SNES boxes 1.37. A single ratio cropped most systems. */
+  aspect-ratio: var(--ar, 0.75);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -203,7 +208,13 @@ main {
 }
 .gcard:hover .art { border-color: var(--accent); transform: translateY(-2px); }
 .gcard.sel .art { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-.gcard .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gcard .art img {
+  width: 100%;
+  height: 100%;
+  /* contain, never cover: cropping box art was the original complaint. */
+  object-fit: contain;
+  display: block;
+}
 .gcard .art .ph {
   color: var(--dim);
   font-size: 26px;
@@ -243,6 +254,11 @@ main {
 .row .have { font-size: 12px; width: 14px; color: var(--ok); }
 
 /* Detail pane */
+/* `hidden` sets display:none via a UA attribute rule, which an id selector
+   with `display: flex` silently outranks — that is why the pane stayed visible
+   on the platform screen. Restore it explicitly. */
+#detail[hidden] { display: none; }
+
 #detail {
   width: 360px;
   flex-shrink: 0;
@@ -357,6 +373,31 @@ main {
 .stylebar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .stylebar button:disabled { opacity: .4; cursor: default; }
 
+#detail .summary {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  opacity: .85;
+  margin: 0 0 14px;
+}
+#detail .rating { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+#detail .rating .stars { color: #e0b13a; font-size: 15px; letter-spacing: 1px; }
+#detail .rating .num { color: var(--dim); font-size: 11px; }
+
+#detail .extras { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+#detail .link {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+#detail .link:hover { border-color: var(--accent); }
+
 #detail dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 16px; font-size: 12px; }
 #detail dt { color: var(--dim); }
 #detail dd { margin: 0; word-break: break-all; }
@@ -393,3 +434,98 @@ footer#toast {
   max-width: 70%;
   box-shadow: 0 4px 18px rgba(0,0,0,.3);
 }
+
+
+/* ------------------------------------------------------------------ */
+/* Lightbox — full-size artwork over a dimmed backdrop, in-window.     */
+/* ------------------------------------------------------------------ */
+
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 56px;
+  /* Dim + blur so the library behind reads as context, not clutter. */
+  background: rgba(10, 12, 15, .82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: lb-in .16s ease;
+}
+#lightbox[hidden] { display: none; }
+
+@keyframes lb-in { from { opacity: 0; } to { opacity: 1; } }
+
+#lightbox figure {
+  margin: 0;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+#lightbox .lb-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  max-height: calc(100vh - 130px);
+}
+#lightbox img,
+#lightbox video,
+#lightbox iframe {
+  max-width: 100%;
+  /* Bounded so tall box art cannot push the caption off-screen. */
+  max-height: calc(100vh - 130px);
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .6);
+  background: #000;
+}
+#lightbox figcaption {
+  color: #cfd4dc;
+  font-size: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+#lightbox iframe {
+  width: min(900px, 92vw);
+  height: calc(100vh - 130px);
+  border: none;
+  background: #fff;
+}
+
+#lightbox .lb-close,
+#lightbox .lb-nav {
+  background: rgba(255, 255, 255, .09);
+  border: 1px solid rgba(255, 255, 255, .16);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#lightbox .lb-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  font-size: 20px;
+  line-height: 1;
+}
+#lightbox .lb-nav { width: 40px; height: 72px; font-size: 26px; }
+#lightbox .lb-close:hover,
+#lightbox .lb-nav:hover { background: rgba(255, 255, 255, .2); }
+#lightbox .lb-nav[disabled] { opacity: 0; pointer-events: none; }
+
+/* Signal that sidebar artwork is clickable. */
+#detail .shots,
+#detail img.cover,
+#detail video { cursor: zoom-in; }

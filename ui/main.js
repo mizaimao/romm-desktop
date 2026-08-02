@@ -17,6 +17,8 @@ const el = {
   toast: document.getElementById("toast"),
   themesBtn: document.getElementById("themes-btn"),
   layoutBtn: document.getElementById("layout-btn"),
+  sidebarBtn: document.getElementById("sidebar-btn"),
+  lb: document.getElementById("lightbox"),
 };
 
 let state = {
@@ -27,6 +29,10 @@ let state = {
   downloading: new Map(), // rom id -> {done, total}
   // Grid shows box art, list is denser. Remembered across launches.
   layout: localStorage.getItem("layout") || "grid",
+  aspects: {}, // platform slug -> cover w/h
+
+  // Detail pane visibility, remembered. Shown by default.
+  sidebar: localStorage.getItem("sidebar") !== "off",
 };
 
 const human = (b) => {
@@ -49,6 +55,7 @@ async function showPlatforms() {
   state.view = "platforms";
   el.themesBtn.classList.remove("active");
   el.layoutBtn.hidden = true;
+  el.sidebarBtn.hidden = true;
   coverObserver?.disconnect();
   state.platform = null;
   state.selected = null;
@@ -57,6 +64,7 @@ async function showPlatforms() {
   el.title.textContent = "Platforms";
 
   const items = await invoke("platforms");
+  for (const p of items) if (p.cover_aspect) state.aspects[p.slug] = p.cover_aspect;
   el.list.innerHTML = `<div class="grid">${items
     .map(
       (p) => `
@@ -88,6 +96,7 @@ async function showRoms(slug) {
   const rows = await invoke("roms", { platform: slug });
   state.rows = rows;
   el.layoutBtn.hidden = false;
+  el.sidebarBtn.hidden = false;
   el.title.textContent = `${slug} — ${rows.length} games`;
   renderRows(rows, false);
 }
@@ -101,6 +110,7 @@ async function runSearch(term) {
   const rows = await invoke("search", { term });
   state.rows = rows;
   el.layoutBtn.hidden = false;
+  el.sidebarBtn.hidden = false;
   el.title.textContent = `Search “${term}” — ${rows.length}`;
   renderRows(rows, true);
 }
@@ -147,10 +157,18 @@ function listMarkup(rows, showPlatform) {
 }
 
 function gridMarkup(rows) {
-  return `<div class="gcards">${rows
+  // One shared ratio per view when the platform is uniform; mixed results
+  // (search across platforms) fall back to per-card ratios.
+  const uniform = state.view !== "search" ? state.aspects[state.platform] : null;
+  const style = uniform ? ` style="--ar:${uniform.toFixed(3)}"` : "";
+  return `<div class="gcards"${style}>${rows
     .map(
       (r) => `
-      <div class="gcard" data-id="${r.id}">
+      <div class="gcard" data-id="${r.id}"${
+        state.view === "search" && state.aspects[r.platform]
+          ? ` style="--ar:${state.aspects[r.platform].toFixed(3)}"`
+          : ""
+      }>
         <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
         <div class="gname">${escapeHtml(r.name)}</div>
         <div class="gmeta">${r.downloaded ? "▣ " : ""}${human(r.size_bytes)}</div>
@@ -199,6 +217,15 @@ async function flushCovers() {
   if (coverQueue.length) setTimeout(flushCovers, 30);
 }
 
+function setSidebar(on) {
+  state.sidebar = on;
+  localStorage.setItem("sidebar", on ? "on" : "off");
+  el.sidebarBtn.textContent = on ? "Hide info" : "Show info";
+  // Never show the pane on the platform screen — there is no game selected.
+  const allowed = state.view === "roms" || state.view === "search";
+  el.detail.hidden = !(on && allowed && state.selected !== null);
+}
+
 function setLayout(next) {
   state.layout = next;
   localStorage.setItem("layout", next);
@@ -206,6 +233,87 @@ function setLayout(next) {
   el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
   if (state.rows.length) renderRows(state.rows, state.view === "search");
 }
+
+// --- lightbox ------------------------------------------------------------
+//
+// Full-size artwork over a dimmed backdrop, inside the main window rather than
+// a second OS window: no dock icon, no window management, and Esc closes it.
+
+const lb = {
+  items: [],   // [{src, kind: "image"|"video", caption}]
+  index: 0,
+  open: false,
+};
+
+function openLightbox(items, index = 0) {
+  if (!items.length) return;
+  lb.items = items;
+  lb.index = index;
+  lb.open = true;
+  el.lb.hidden = false;
+  // Stop the slideshow so it cannot swap the image out from under the viewer.
+  clearInterval(slideTimer);
+  renderLightbox();
+}
+
+function closeLightbox() {
+  lb.open = false;
+  el.lb.hidden = true;
+  // Release the video so audio does not keep playing behind the closed view.
+  el.lb.querySelector(".lb-stage").innerHTML = "";
+}
+
+function stepLightbox(delta) {
+  if (!lb.open || lb.items.length < 2) return;
+  lb.index = (lb.index + delta + lb.items.length) % lb.items.length;
+  renderLightbox();
+}
+
+function renderLightbox() {
+  const it = lb.items[lb.index];
+  const stage = el.lb.querySelector(".lb-stage");
+  stage.innerHTML =
+    it.kind === "video"
+      ? `<video src="${it.src}" controls autoplay loop></video>`
+      : it.kind === "pdf"
+        // WKWebView renders PDFs natively, so an iframe is the whole viewer.
+        ? `<iframe src="${it.src}" title="Manual"></iframe>`
+        : `<img src="${it.src}" alt="" />`;
+  el.lb.querySelector("figcaption").textContent =
+    lb.items.length > 1
+      ? `${it.caption} — ${lb.index + 1} of ${lb.items.length}`
+      : it.caption;
+  const multi = lb.items.length > 1;
+  el.lb.querySelector(".lb-prev").disabled = !multi;
+  el.lb.querySelector(".lb-next").disabled = !multi;
+}
+
+/// Everything in the detail pane, as one navigable set.
+function detailMedia(d) {
+  const items = (d.screenshots || []).map((s, i) => ({
+    src: convertFileSrc(s),
+    kind: "image",
+    caption: `Screenshot ${i + 1}`,
+  }));
+  if (d.cover) items.push({ src: convertFileSrc(d.cover), kind: "image", caption: "Cover" });
+  if (d.video) items.push({ src: convertFileSrc(d.video), kind: "video", caption: "Video" });
+  return items;
+}
+
+el.lb.querySelector(".lb-close").addEventListener("click", closeLightbox);
+el.lb.querySelector(".lb-prev").addEventListener("click", () => stepLightbox(-1));
+el.lb.querySelector(".lb-next").addEventListener("click", () => stepLightbox(1));
+// Clicking the backdrop closes; clicking the artwork itself does not.
+el.lb.addEventListener("click", (ev) => {
+  if (ev.target === el.lb || ev.target.tagName === "FIGURE") closeLightbox();
+});
+
+window.addEventListener("keydown", (ev) => {
+  if (!lb.open) return;
+  if (ev.key === "Escape") closeLightbox();
+  else if (ev.key === "ArrowLeft") stepLightbox(-1);
+  else if (ev.key === "ArrowRight") stepLightbox(1);
+});
 
 // --- theme picker --------------------------------------------------------
 
@@ -215,6 +323,7 @@ async function showThemes() {
   el.detail.hidden = true;
   el.themesBtn.classList.add("active");
   el.layoutBtn.hidden = true;
+  el.sidebarBtn.hidden = true;
   el.title.textContent = "Console icon themes";
   el.list.innerHTML = `<div class="empty">Loading themes…</div>`;
 
@@ -359,7 +468,7 @@ async function selectRom(id) {
       ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
       : "";
 
-  el.detail.hidden = false;
+  el.detail.hidden = !state.sidebar;
   el.detail.innerHTML = `
     <div class="scroll">
       <h2>${escapeHtml(d.name)}</h2>
@@ -367,12 +476,31 @@ async function selectRom(id) {
       ${top}
       ${bottom}
       ${vid}
+      ${d.rating ? starBar(d.rating) : ""}
+      ${d.summary ? `<p class="summary">${escapeHtml(d.summary)}</p>` : ""}
       <dl>
+        ${row("Released", d.release_year)}
+        ${row("Genre", d.genres.join(", "))}
+        ${row("Developer", d.companies.join(", "))}
+        ${row("Series", d.franchises.join(", "))}
+        ${row("Players", d.player_count)}
+        ${row("Modes", d.game_modes.join(", "))}
+        ${row("Region", d.regions.join(", "))}
+        ${row("Also known as", d.alt_names.join(" · "))}
         <dt>Platform</dt><dd>${d.platform}</dd>
         <dt>Size</dt><dd>${human(d.size_bytes)}</dd>
         <dt>Core</dt><dd>${d.core_label ? escapeHtml(d.core_label) : "<em>none installed</em>"}</dd>
         <dt>Local</dt><dd>${d.downloaded ? "yes" : "no"}</dd>
       </dl>
+      ${
+        d.manual || d.youtube_id
+          ? `<div class="extras">
+               ${d.manual ? `<button class="link" id="manual">📖 Manual</button>` : ""}
+               ${d.youtube_id ? `<a class="link" target="_blank"
+                   href="https://www.youtube.com/watch?v=${encodeURIComponent(d.youtube_id)}">▶ Trailer</a>` : ""}
+             </div>`
+          : ""
+      }
     </div>
     <div class="pinned">
       <div class="actions">
@@ -384,8 +512,49 @@ async function selectRom(id) {
 
   if (shots.length > 1) startSlideshow(shots.length);
 
+  // Clicking any artwork opens it full size, positioned at what was clicked.
+  const media = detailMedia(d);
+  const openAt = (pred) => () => {
+    const i = media.findIndex(pred);
+    openLightbox(media, i < 0 ? 0 : i);
+  };
+  el.detail
+    .querySelector(".shots")
+    ?.addEventListener("click", (ev) => {
+      // Leave the slideshow's own arrows and dots alone.
+      if (ev.target.closest(".nav, .dots")) return;
+      const shown = el.detail.querySelector(".shots img.on");
+      const idx = [...el.detail.querySelectorAll(".shots img")].indexOf(shown);
+      openLightbox(media, Math.max(idx, 0));
+    });
+  el.detail
+    .querySelector("img.cover")
+    ?.addEventListener("click", openAt((m) => m.caption === "Cover"));
+  el.detail.querySelectorAll("video").forEach((v) =>
+    v.addEventListener("dblclick", openAt((m) => m.kind === "video"))
+  );
+  document.getElementById("manual")?.addEventListener("click", () =>
+    openLightbox([{ src: convertFileSrc(d.manual), kind: "pdf", caption: "Manual" }], 0)
+  );
+
   document.getElementById("play").addEventListener("click", () => play(d));
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
+}
+
+// Omit a row entirely when the field is empty, rather than showing a blank.
+function row(label, value) {
+  if (value === null || value === undefined || value === "") return "";
+  return `<dt>${label}</dt><dd>${escapeHtml(String(value))}</dd>`;
+}
+
+/// RomM stores ratings 0-100; show five stars plus the raw number.
+function starBar(rating) {
+  const n = Math.round((rating / 100) * 5 * 2) / 2;
+  const full = Math.floor(n);
+  const half = n - full >= 0.5;
+  const stars = "★".repeat(full) + (half ? "⯨" : "") + "☆".repeat(5 - full - (half ? 1 : 0));
+  return `<div class="rating"><span class="stars">${stars}</span>
+          <span class="num">${Math.round(rating)}/100</span></div>`;
 }
 
 let slideTimer;
@@ -459,6 +628,8 @@ el.back.addEventListener("click", () => {
   showPlatforms();
 });
 
+el.sidebarBtn.addEventListener("click", () => setSidebar(!state.sidebar));
+
 el.layoutBtn.addEventListener("click", () =>
   setLayout(state.layout === "grid" ? "list" : "grid")
 );
@@ -506,6 +677,8 @@ listen("download-progress", ({ payload }) => {
     el.status.textContent = "backend error";
   }
   setLayout(state.layout);
+  setSidebar(state.sidebar);
   el.layoutBtn.hidden = true;
+  el.sidebarBtn.hidden = true;
   await showPlatforms();
 })();

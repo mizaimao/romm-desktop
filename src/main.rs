@@ -16,7 +16,7 @@ use romm_desktop::{
     api, cache, cores, download, media, parity, saves, theme, theme_remote, tui,
 };
 use romm_desktop::config::Config;
-use romm_desktop::coremap::CoreMap;
+use romm_desktop::coremap::{self, CoreMap};
 use romm_desktop::retroarch::{self, RetroArch};
 
 const CORE_MAP: &str = "data/esde-core-map.json";
@@ -105,28 +105,14 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         None => {
             let platform = platform_from_path(rom)
                 .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
-            let default = map
-                .default_core(&platform)
-                .with_context(|| format!("no core mapped for platform {platform:?}"))?;
-            // Fall back to any installed alternative rather than dying.
-            if ra.has_core(default) {
-                default.to_owned()
-            } else {
-                match map
-                    .alternatives(&platform)
-                    .into_iter()
-                    .find(|c| ra.has_core(c))
-                {
-                    Some(alt) => {
-                        eprintln!("note: default core {default:?} not installed, using {alt:?}");
-                        alt.to_owned()
-                    }
-                    None => bail!(
-                        "no installed core for platform {platform:?} (default {default:?}).\n\
-                         Install it, or pass --core <name>."
-                    ),
-                }
-            }
+            let cfg = Config::load().unwrap_or_default();
+            coremap::resolve_core(&map, &cfg.cores.overrides, &platform, |c| ra.has_core(c))
+                .with_context(|| {
+                    format!(
+                        "no installed core for platform {platform:?}.\n\
+                         Install one, set [cores.overrides] in config.toml, or pass --core."
+                    )
+                })?
         }
     };
 

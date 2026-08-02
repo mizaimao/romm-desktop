@@ -1,5 +1,6 @@
 //! `config.toml` — see `config.example.toml` for the documented template.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -17,6 +18,8 @@ pub struct Config {
     pub saves: SavesCfg,
     #[serde(default)]
     pub theme: ThemeCfg,
+    #[serde(default)]
+    pub cores: CoresCfg,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -63,6 +66,17 @@ impl Default for SavesCfg {
 
 fn default_saves_root() -> String {
     "./Saves".to_owned()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CoresCfg {
+    /// Platform slug -> libretro core stem, overriding the ES-DE default.
+    ///
+    /// Needed when a collection's ROMs do not match what the default core
+    /// expects — arcade romsets in particular are version-locked, and a
+    /// MAME 2003-Plus set will not run under current MAME.
+    #[serde(default)]
+    pub overrides: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -29,6 +29,33 @@ pub struct Emulator {
     pub core: Option<String>,
 }
 
+/// Pick the core for a platform: an explicit config override, else the ES-DE
+/// default, else any installed alternative.
+///
+/// `has_core` lets callers supply their own installed-check without this
+/// module depending on the RetroArch locator.
+pub fn resolve_core(
+    map: &CoreMap,
+    overrides: &std::collections::BTreeMap<String, String>,
+    platform: &str,
+    has_core: impl Fn(&str) -> bool,
+) -> Option<String> {
+    // An override is a deliberate choice; honour it even if not installed, so
+    // the failure names the core the user asked for.
+    if let Some(core) = overrides.get(platform) {
+        return Some(core.clone());
+    }
+    if let Some(default) = map.default_core(platform)
+        && has_core(default)
+    {
+        return Some(default.to_owned());
+    }
+    map.alternatives(platform)
+        .into_iter()
+        .find(|c| has_core(c))
+        .map(str::to_owned)
+}
+
 impl CoreMap {
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)

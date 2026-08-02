@@ -30,3 +30,12 @@ local_root = "./library"
 # beside the bundle) this is also where cores/, saves/, states/ and config/
 # live. Leave unset to probe /Applications and ~/Applications.
 root = "~/Data/Games/Emulators/RetroArch"
+
+[cores.overrides]
+# Platform slug -> libretro core, overriding the ES-DE default.
+#
+# Arcade romsets are version-locked to a specific MAME release. This
+# collection is a MAME 2003-Plus set: current "mame" reports
+# "Required files are missing", while mame2003_plus / fbneo / mame2003 run it.
+arcade = "mame2003_plus"
+mame = "mame2003_plus"

@@ -31,7 +31,13 @@ CREATE TABLE IF NOT EXISTS roms (
     cover_path     TEXT,
     screenshot_path TEXT,
     screenshots_json TEXT,
-    cover_small_path TEXT
+    cover_small_path TEXT,
+    summary        TEXT,
+    meta_json      TEXT,
+    alt_names_json TEXT,
+    regions_json   TEXT,
+    manual_path    TEXT,
+    youtube_id     TEXT
 );
 CREATE INDEX IF NOT EXISTS roms_platform ON roms(platform_slug);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -64,13 +70,21 @@ pub struct RomRow {
     /// Every screenshot the server has, JSON-encoded. Games range from 0 to 12.
     pub screenshots_json: Option<String>,
     pub cover_small_path: Option<String>,
+    pub summary: Option<String>,
+    /// RomM's merged metadata: genres, companies, player count, rating…
+    pub meta_json: Option<String>,
+    pub alt_names_json: Option<String>,
+    pub regions_json: Option<String>,
+    pub manual_path: Option<String>,
+    pub youtube_id: Option<String>,
 }
 
 /// Columns every `RomRow` query selects, in order.
 const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name), \
                            fs_name, COALESCE(fs_size_bytes, 0), md5_hash, sha1_hash, \
                            cover_path, screenshot_path, screenshots_json, \
-                           cover_small_path";
+                           cover_small_path, summary, meta_json, alt_names_json, \
+                           regions_json, manual_path, youtube_id";
 
 fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
     Ok(RomRow {
@@ -85,6 +99,12 @@ fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
         screenshot_path: r.get(8)?,
         screenshots_json: r.get(9)?,
         cover_small_path: r.get(10)?,
+        summary: r.get(11)?,
+        meta_json: r.get(12)?,
+        alt_names_json: r.get(13)?,
+        regions_json: r.get(14)?,
+        manual_path: r.get(15)?,
+        youtube_id: r.get(16)?,
     })
 }
 
@@ -114,7 +134,11 @@ impl Cache {
         conn.execute_batch(SCHEMA).context("creating schema")?;
         // Older caches predate the artwork columns; add them in place rather
         // than forcing a full resync.
-        for col in ["cover_path", "screenshot_path", "screenshots_json", "cover_small_path"] {
+        for col in [
+            "cover_path", "screenshot_path", "screenshots_json", "cover_small_path",
+            "summary", "meta_json", "alt_names_json", "regions_json", "manual_path",
+            "youtube_id",
+        ] {
             let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} TEXT"), []);
         }
         Ok(Self { conn })
@@ -262,8 +286,11 @@ impl Cache {
                                           fs_size_bytes, md5_hash, sha1_hash,
                                           crc_hash, updated_at, cover_path,
                                           screenshot_path, screenshots_json,
-                                          cover_small_path)
-                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                                          cover_small_path, summary, meta_json,
+                                          alt_names_json, regions_json,
+                                          manual_path, youtube_id)
+                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
+                                ?14,?15,?16,?17,?18,?19)
                          ON CONFLICT(id) DO UPDATE SET
                             platform_slug = excluded.platform_slug,
                             name          = excluded.name,
@@ -276,7 +303,13 @@ impl Cache {
                             cover_path    = excluded.cover_path,
                             screenshot_path = excluded.screenshot_path,
                             screenshots_json = excluded.screenshots_json,
-                            cover_small_path = excluded.cover_small_path",
+                            cover_small_path = excluded.cover_small_path,
+                            summary        = excluded.summary,
+                            meta_json      = excluded.meta_json,
+                            alt_names_json = excluded.alt_names_json,
+                            regions_json   = excluded.regions_json,
+                            manual_path    = excluded.manual_path,
+                            youtube_id     = excluded.youtube_id",
                         params![
                             rom.id,
                             rom.platform_fs_slug.clone().unwrap_or_default(),
@@ -291,6 +324,12 @@ impl Cache {
                             rom.merged_screenshots.first(),
                             serde_json::to_string(&rom.merged_screenshots).ok(),
                             rom.path_cover_small,
+                            rom.summary,
+                            rom.metadatum.as_ref().and_then(|m| serde_json::to_string(m).ok()),
+                            serde_json::to_string(&rom.alternative_names).ok(),
+                            serde_json::to_string(&rom.regions).ok(),
+                            rom.path_manual,
+                            rom.youtube_video_id,
                         ],
                     )?;
                 }

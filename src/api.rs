@@ -61,6 +61,21 @@ pub struct Rom {
     pub path_cover_small: Option<String>,
     #[serde(default)]
     pub merged_screenshots: Vec<String>,
+
+    // Descriptive metadata. `metadatum` is RomM's merged view across whatever
+    // sources were enabled; on this server that is the ES-DE gamelist import.
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub metadatum: Option<serde_json::Value>,
+    #[serde(default)]
+    pub alternative_names: Vec<String>,
+    #[serde(default)]
+    pub regions: Vec<String>,
+    #[serde(default)]
+    pub path_manual: Option<String>,
+    #[serde(default)]
+    pub youtube_video_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
