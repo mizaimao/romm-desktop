@@ -314,7 +314,13 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     let core = resolve_core(&state, &row.platform_slug)
         .ok_or_else(|| format!("no installed core for {}", row.platform_slug))?;
 
-    let status = ra.launch(&core, &path, false).map_err(err)?;
+    let overrides = state
+        .roms_dir
+        .parent()
+        .and_then(|lib| ra.write_overrides(lib).ok());
+    let status = ra
+        .launch_with(&core, &path, false, overrides.as_deref())
+        .map_err(err)?;
     Ok(if status.success() {
         format!("{} exited cleanly", row.name)
     } else {

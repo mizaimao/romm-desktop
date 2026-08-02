@@ -154,7 +154,8 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         }
     }
 
-    let cmd = ra.launch_command(&core, rom, fullscreen)?;
+    let overrides = ra.write_overrides(Path::new(&Config::load()?.library.local_root)).ok();
+    let cmd = ra.launch_command_with(&core, rom, fullscreen, overrides.as_deref())?;
     let label = map
         .label_for(&core)
         .map(|l| format!(" ({l})"))
@@ -169,7 +170,7 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     }
 
     println!("\nlaunching…");
-    let status = ra.launch(&core, rom, fullscreen)?;
+    let status = ra.launch_with(&core, rom, fullscreen, overrides.as_deref())?;
     match status.code() {
         Some(0) => println!("RetroArch exited cleanly (0)"),
         Some(c) => println!("RetroArch exited with status {c}"),

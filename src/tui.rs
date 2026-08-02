@@ -213,8 +213,15 @@ impl App {
 
         // Hand the terminal back before spawning, or the emulator and the TUI
         // fight over it; restore afterwards.
+        // Overrides neutralise handheld-oriented settings (pause-when-unfocused,
+        // bezel overlays) without touching the user's retroarch.cfg.
+        let overrides = self
+            .local_roms
+            .parent()
+            .and_then(|lib| ra.write_overrides(lib).ok());
+
         restore_terminal(term)?;
-        let result = ra.launch(&core, &path, false);
+        let result = ra.launch_with(&core, &path, false, overrides.as_deref());
         setup_terminal(term)?;
 
         self.status = match result {
