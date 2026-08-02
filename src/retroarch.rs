@@ -140,13 +140,46 @@ config_save_on_exit = \"false\"
     ///
     /// Regenerated every launch so edits to `OVERRIDES` take effect without
     /// the user having to clear anything.
-    pub fn write_overrides(&self, dir: &Path) -> Result<PathBuf> {
+    ///
+    /// `system_dir` is accepted but deliberately NOT written as
+    /// `system_directory`: redirecting it stops cores finding RetroArch's own
+    /// support assets, which broke every arcade launch when tried. BIOS sets
+    /// are handled by [`Self::install_bios`] instead.
+    pub fn write_overrides(&self, dir: &Path, _system_dir: Option<&Path>) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
+        let body = Self::OVERRIDES;
         let path = dir.join("retroarch-overrides.cfg");
-        std::fs::write(&path, Self::OVERRIDES)
+        std::fs::write(&path, body)
             .with_context(|| format!("writing {}", path.display()))?;
         Ok(path)
+    }
+
+    /// RetroArch's own system directory, where cores look for BIOS files.
+    pub fn system_dir(&self) -> PathBuf {
+        self.root.join("system")
+    }
+
+    /// Copy known BIOS sets sitting beside a ROM into RetroArch's system
+    /// directory.
+    ///
+    /// MAME-family cores look for BIOS only in the system directory, so a
+    /// `neogeo.zip` downloaded alongside the games is invisible to them —
+    /// "Neo Geo BIOS required" even though the file is right there. Copying is
+    /// cheap (a couple of MB) and leaves the download layout untouched.
+    pub fn install_bios(&self, rom_dir: &Path) -> Result<usize> {
+        const BIOS: &[&str] = &["neogeo.zip", "neocdz.zip", "pgm.zip", "decocass.zip"];
+        let dest = self.system_dir();
+        std::fs::create_dir_all(&dest).ok();
+        let mut n = 0;
+        for name in BIOS {
+            let src = rom_dir.join(name);
+            let dst = dest.join(name);
+            if src.is_file() && !dst.is_file() && std::fs::copy(&src, &dst).is_ok() {
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// Build the launch command. Does not spawn.

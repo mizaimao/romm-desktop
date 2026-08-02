@@ -34,8 +34,12 @@ root = "~/Data/Games/Emulators/RetroArch"
 [cores.overrides]
 # Platform slug -> libretro core, overriding the ES-DE default.
 #
-# Arcade romsets are version-locked to a specific MAME release. This
-# collection is a MAME 2003-Plus set: current "mame" reports
-# "Required files are missing", while mame2003_plus / fbneo / mame2003 run it.
+# Arcade romsets are version-locked to a specific MAME release, and no single
+# core runs this whole collection. mame2003_plus matches the romset vintage
+# (the source carried MAME2003PLUS_cache6.db) and is the default.
+#
+# Neo Geo titles need neogeo.zip in RetroArch's system directory; the launcher
+# copies it there automatically when it sits beside the ROMs. Blazing Star runs
+# under fbneo. Use `launch --core <name>` for anything the default refuses.
 arcade = "mame2003_plus"
 mame = "mame2003_plus"

@@ -141,7 +141,15 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         }
     }
 
-    let overrides = ra.write_overrides(Path::new(&cfg.library.local_root)).ok();
+    if let Some(dir) = rom.parent()
+        && let Ok(n) = ra.install_bios(dir)
+        && n > 0
+    {
+        println!("installed {n} BIOS file(s) into {}", ra.system_dir().display());
+    }
+    let overrides = ra
+        .write_overrides(Path::new(&cfg.library.local_root), None)
+        .ok();
     let cmd = ra.launch_command_with(&core, rom, fullscreen, overrides.as_deref())?;
     let label = map
         .label_for(&core)
@@ -223,6 +231,27 @@ async fn cmd_check() -> Result<()> {
 
     let me = client.me().await?;
     println!("server    {}", cfg.server.url);
+    match client.heartbeat().await {
+        Ok(hb) => {
+            let v = &hb.system.version;
+            let note = if v == romm_desktop::VERIFIED_AGAINST {
+                "verified".to_owned()
+            } else {
+                format!("UNVERIFIED — client was checked against {}", romm_desktop::VERIFIED_AGAINST)
+            };
+            println!("version   RomM {v} ({note})");
+        }
+        Err(e) => println!("version   unknown ({e})"),
+    }
+    match client.config().await {
+        Ok(sc) => println!(
+            "hashing   {} excluded names, {} excluded exts{}",
+            sc.default_excluded_files.len(),
+            sc.default_excluded_extensions.len(),
+            if sc.skip_hash_calculation { ", SKIP_HASH_CALCULATION set" } else { "" }
+        ),
+        Err(e) => println!("hashing   could not read /api/config ({e})"),
+    }
     println!("user      {} (id {}, role {})", me.username, me.id, me.role);
 
     let count = client.rom_count().await?;
@@ -311,6 +340,37 @@ async fn cmd_sync(full: bool) -> Result<()> {
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
     let mut store = cache::Cache::open(Path::new(CACHE_DB))?;
 
+    // Refresh the settings that govern how we hash and verify, so a server
+    // config change cannot silently corrupt later verification.
+    match client.config().await {
+        Ok(cfg) => {
+            if cfg.skip_hash_calculation {
+                println!(
+                    "note: server has SKIP_HASH_CALCULATION set — it stores no hashes, \n\
+                     so downloads can only be size-checked."
+                );
+            }
+            store.save_server_config(&cfg).ok();
+        }
+        Err(e) => eprintln!("warning: could not read /api/config ({e}); using last known values"),
+    }
+    if let Ok(hb) = client.heartbeat().await {
+        let v = hb.system.version;
+        if !v.is_empty() {
+            if store.server_version().as_deref() != Some(v.as_str())
+                && v != romm_desktop::VERIFIED_AGAINST
+            {
+                eprintln!(
+                    "warning: server is RomM {v}, but this client's server-specific behaviour\n\
+                     (archive hashing, query params) was verified against {}. Re-check\n\
+                     `hash-parity` and a download or two.",
+                    romm_desktop::VERIFIED_AGAINST
+                );
+            }
+            store.set_server_version(&v).ok();
+        }
+    }
+
     let before = store.rom_count().unwrap_or(0);
     let started = std::time::Instant::now();
     let (platforms, upserted, incremental) = store.sync(&client, full).await?;
@@ -332,6 +392,7 @@ async fn cmd_sync(full: bool) -> Result<()> {
 async fn cmd_get(needle: &str) -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    romm_desktop::apply_cached_server_config(&store);
     let matches = store.search(needle, 25)?;
 
     let rom = match matches.len() {
@@ -415,9 +476,6 @@ async fn cmd_get(needle: &str) -> Result<()> {
                 download::Verified::Md5 => "md5 verified",
                 download::Verified::Sha1 => "sha1 verified",
                 download::Verified::SizeOnly => "size only — server published no hash",
-                download::Verified::ArchiveSizeOnly => {
-                    "size only — server hash matches neither the archive nor its members"
-                }
             };
             if resumed_from > 0 {
                 println!("resumed from {}", human(resumed_from));
@@ -685,6 +743,10 @@ fn cmd_hashcheck(path: &Path) -> Result<()> {
     let (md5, sha1) = download::hash_file(path)?;
     println!("file        md5 {md5}");
     println!("            sha1 {sha1}");
+    if let Some((m, s)) = download::hash_archive_composite(path) {
+        println!("composite   md5 {m}");
+        println!("            sha1 {s}");
+    }
     for (name, md5, sha1) in download::hash_archive_members(path) {
         println!("member      {name}");
         println!("            md5 {md5}");

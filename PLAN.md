@@ -150,6 +150,30 @@ cannot run there at all) and save/state sync with real conflict detection across
   `/api/roms/{id}/convert-to-folder`). Affects ~19 games across psx/gc/dreamcast/3do.
   **The client must detect tiny `.m3u` ROMs and refuse them with a clear message.**
 
+### Archive hashing — RomM hashes a composite, not the file
+
+Read out of the running server (`handler/filesystem/roms_handler.py` via SSH),
+not inferred. For any archive, RomM streams the decompressed bytes of **every**
+eligible member, in ASCII order of the internal path, through one running
+digest:
+
+```python
+for name, size, chunks in ARCHIVE_READERS[rom_ext](...):
+    for chunk in chunks:
+        md5_h.update(chunk)      # one hash across all members
+```
+
+Members are skipped when the basename matches `DEFAULT_EXCLUDED_FILES`
+(`.DS_Store`, `.localized`, `.Trashes`, `.stfolder`, `@SynoResource`,
+`gamelist.xml`, `metadata.pegasus.txt`) or the extension is in
+`DEFAULT_EXCLUDED_EXTENSIONS` (`db ini tmp bak lock log cache crdownload`).
+
+This explains what looked like broken metadata: a **single**-member zip appears
+to match "the file inside" because with one member the concatenation *is* that
+member, while multi-member romsets match neither the container nor any member.
+`download::hash_archive_composite` reproduces it — verified 10/10 against
+arcade romsets — so archive downloads are strictly verified again.
+
 ### Identification: prefer hashes over filenames
 
 The server stores `crc_hash`, `md5_hash`, `sha1_hash`, and `ra_hash` per ROM, and

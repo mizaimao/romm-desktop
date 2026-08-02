@@ -159,6 +159,30 @@ impl Cache {
         Ok(())
     }
 
+    /// Remember server settings that change how we interpret its data, so a
+    /// download verifies identically when the server is unreachable.
+    pub fn save_server_config(&self, cfg: &api::ServerConfig) -> Result<()> {
+        self.meta_set("excluded_files", &serde_json::to_string(&cfg.default_excluded_files)?)?;
+        self.meta_set("excluded_exts", &serde_json::to_string(&cfg.default_excluded_extensions)?)?;
+        self.meta_set("skip_hash", &cfg.skip_hash_calculation.to_string())?;
+        Ok(())
+    }
+
+    /// `(excluded_files, excluded_extensions)` as last seen, if ever fetched.
+    pub fn server_exclusions(&self) -> Option<(Vec<String>, Vec<String>)> {
+        let files = serde_json::from_str(&self.meta_get("excluded_files")?).ok()?;
+        let exts = serde_json::from_str(&self.meta_get("excluded_exts")?).ok()?;
+        Some((files, exts))
+    }
+
+    pub fn server_version(&self) -> Option<String> {
+        self.meta_get("server_version")
+    }
+
+    pub fn set_server_version(&self, v: &str) -> Result<()> {
+        self.meta_set("server_version", v)
+    }
+
     /// High-water mark of `updated_at` across everything we've stored.
     ///
     /// Using the max row timestamp rather than "now" avoids losing rows to

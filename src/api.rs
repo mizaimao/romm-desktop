@@ -90,6 +90,46 @@ pub struct RomPage {
     pub total: i64,
 }
 
+/// Server-side settings that change how we must treat its data.
+///
+/// Fetched rather than assumed: the exclusion lists feed our archive-hash
+/// reproduction, and they are configurable per deployment and per RomM
+/// version. Hardcoding them means silently computing the wrong hash the day
+/// someone edits `config.yml`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConfig {
+    #[serde(default)]
+    pub default_excluded_files: Vec<String>,
+    #[serde(default)]
+    pub default_excluded_extensions: Vec<String>,
+    /// When true the server stores no hashes at all, so downloads can only be
+    /// size-checked. Worth surfacing rather than discovering per-file.
+    #[serde(default)]
+    pub skip_hash_calculation: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawConfig {
+    #[serde(rename = "DEFAULT_EXCLUDED_FILES", default)]
+    files: Vec<String>,
+    #[serde(rename = "DEFAULT_EXCLUDED_EXTENSIONS", default)]
+    exts: Vec<String>,
+    #[serde(rename = "SKIP_HASH_CALCULATION", default)]
+    skip_hash: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Heartbeat {
+    #[serde(rename = "SYSTEM")]
+    pub system: HeartbeatSystem,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HeartbeatSystem {
+    #[serde(rename = "VERSION", default)]
+    pub version: String,
+}
+
 pub struct Client {
     http: reqwest::Client,
     base: String,
@@ -183,6 +223,21 @@ impl Client {
             path.push_str(&format!("&updated_after={}", urlencode(ts)));
         }
         self.get_json(&path).await
+    }
+
+    /// Server settings that affect how we interpret its data.
+    pub async fn config(&self) -> Result<ServerConfig> {
+        let raw: RawConfig = self.get_json("/api/config").await?;
+        Ok(ServerConfig {
+            default_excluded_files: raw.files,
+            default_excluded_extensions: raw.exts,
+            skip_hash_calculation: raw.skip_hash,
+        })
+    }
+
+    /// Unauthenticated; also the cheapest reachability check.
+    pub async fn heartbeat(&self) -> Result<Heartbeat> {
+        self.get_json("/api/heartbeat").await
     }
 
     /// Total ROM count, without pulling any rows we don't need.

@@ -213,10 +213,11 @@ impl App {
         // fight over it; restore afterwards.
         // Overrides neutralise handheld-oriented settings (pause-when-unfocused,
         // bezel overlays) without touching the user's retroarch.cfg.
+        if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
         let overrides = self
             .local_roms
             .parent()
-            .and_then(|lib| ra.write_overrides(lib).ok());
+            .and_then(|lib| ra.write_overrides(lib, None).ok());
 
         restore_terminal(term)?;
         let result = ra.launch_with(&core, &path, false, overrides.as_deref());

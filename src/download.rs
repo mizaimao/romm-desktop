@@ -35,9 +35,6 @@ pub enum Verified {
     Sha1,
     /// Server published no hash for this ROM — size was all we could check.
     SizeOnly,
-    /// An archive whose recorded hash matches neither the container nor any
-    /// member. Size still matched. See `verify` for why this is tolerated.
-    ArchiveSizeOnly,
 }
 
 /// What we need to fetch and check one ROM.
@@ -80,17 +77,120 @@ pub fn hash_file(path: &Path) -> Result<(String, String)> {
     Ok((hex::encode(md5.finalize()), hex::encode(sha1.finalize())))
 }
 
-/// Hash every ROM inside an archive.
+/// Fallback exclusion lists, used only until the server's are fetched.
 ///
-/// RomM records the hash of the *content*, not the container: for
-/// `Contra III (USA).zip` its `md5_hash` is the md5 of the `.sfc` inside. Most
-/// of this library is archived (2,413 arcade zips, 467 sfc 7z), so verifying
-/// against the archive bytes alone would reject essentially every archive
-/// download.
+/// These are RomM 5.0.0's defaults. They are configurable per deployment, so
+/// the live values from `/api/config` take precedence — see [`set_exclusions`].
+const FALLBACK_NAMES: &[&str] = &[
+    ".DS_Store", ".localized", ".Trashes", ".stfolder", "@SynoResource",
+    "gamelist.xml", "metadata.pegasus.txt",
+];
+const FALLBACK_EXTS: &[&str] =
+    &["db", "ini", "tmp", "bak", "lock", "log", "cache", "crdownload"];
+
+/// Exclusions in force for archive hashing.
+static EXCLUSIONS: std::sync::OnceLock<(Vec<String>, Vec<String>)> = std::sync::OnceLock::new();
+
+/// Adopt the server's exclusion lists. Call once, before verifying downloads.
 ///
-/// All members are hashed rather than just one, because archives here are not
-/// always single-ROM — `Dear Boys (Japan).7z` holds both a clean dump and a
-/// hacked variant, and RomM recorded the hash of one of them.
+/// Ignored if already set — the first caller (startup) wins, so a later refresh
+/// cannot change hashing semantics mid-run.
+pub fn set_exclusions(names: Vec<String>, exts: Vec<String>) {
+    if names.is_empty() && exts.is_empty() {
+        return;
+    }
+    let _ = EXCLUSIONS.set((names, exts));
+}
+
+fn exclusions() -> (Vec<String>, Vec<String>) {
+    EXCLUSIONS.get().cloned().unwrap_or_else(|| {
+        (
+            FALLBACK_NAMES.iter().map(|s| s.to_string()).collect(),
+            FALLBACK_EXTS.iter().map(|s| s.to_string()).collect(),
+        )
+    })
+}
+
+fn excluded(name: &str) -> bool {
+    let (names, exts) = exclusions();
+    let base = name.rsplit('/').next().unwrap_or(name);
+    let lower = base.to_ascii_lowercase();
+    exts.iter().any(|e| lower.ends_with(&format!(".{e}")))
+        || names.iter().any(|n| base == n)
+}
+
+/// Reproduce RomM's composite archive hash.
+///
+/// RomM does not hash the archive bytes, nor any single member: it streams the
+/// decompressed contents of **every** eligible member, in ASCII order of the
+/// internal path, through one running digest. From
+/// `handler/filesystem/roms_handler.py`:
+///
+/// ```python
+/// for name, size, chunks in ARCHIVE_READERS[rom_ext](...):
+///     for chunk in chunks:
+///         md5_h.update(chunk)     # one hash across all members
+/// ```
+///
+/// That is why a single-member zip appears to match "the file inside" (with one
+/// member the concatenation *is* that member) while multi-member romsets match
+/// nothing simpler.
+pub fn hash_archive_composite(path: &Path) -> Option<(String, String)> {
+    let mut md5 = md5::Md5::new();
+    let mut sha1 = sha1::Sha1::new();
+    let mut any = false;
+
+    if let Ok(file) = std::fs::File::open(path)
+        && let Ok(mut zip) = zip::ZipArchive::new(std::io::BufReader::new(file))
+    {
+        let mut names: Vec<String> = Vec::new();
+        for i in 0..zip.len() {
+            if let Ok(e) = zip.by_index(i)
+                && !e.is_dir()
+            {
+                names.push(e.name().to_owned());
+            }
+        }
+        // ASCII order of the full internal path, as the server sorts.
+        names.sort();
+        for name in names {
+            if excluded(&name) {
+                continue;
+            }
+            let Ok(mut entry) = zip.by_name(&name) else { continue };
+            let mut buf = Vec::new();
+            if std::io::Read::read_to_end(&mut entry, &mut buf).is_ok() {
+                md5.update(&buf);
+                sha1.update(&buf);
+                any = true;
+            }
+        }
+        return any.then(|| (hex::encode(md5.finalize()), hex::encode(sha1.finalize())));
+    }
+
+    let mut archive = sevenz_rust2::ArchiveReader::open(path, Default::default()).ok()?;
+    let mut names: Vec<String> = archive
+        .archive()
+        .files
+        .iter()
+        .filter(|e| e.has_stream())
+        .map(|e| e.name().to_owned())
+        .collect();
+    names.sort();
+    for name in names {
+        if excluded(&name) {
+            continue;
+        }
+        if let Ok(buf) = archive.read_file(&name) {
+            md5.update(&buf);
+            sha1.update(&buf);
+            any = true;
+        }
+    }
+    any.then(|| (hex::encode(md5.finalize()), hex::encode(sha1.finalize())))
+}
+
+/// Per-member hashes, for diagnostics (`hashcheck`).
 pub fn hash_archive_members(path: &Path) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
 
@@ -156,32 +256,23 @@ fn verify(path: &Path, target: &Target<'_>) -> Result<Verified> {
     if let Some(v) = matches(&got_md5, &got_sha1) {
         return Ok(v);
     }
-    // Fall back to the archive's members, one of which is what RomM hashed.
+    // Archives: RomM hashes the concatenated contents of every member.
+    if let Some((c_md5, c_sha1)) = hash_archive_composite(path)
+        && let Some(v) = matches(&c_md5, &c_sha1)
+    {
+        return Ok(v);
+    }
     let members = hash_archive_members(path);
-    for (_, m_md5, m_sha1) in &members {
-        if let Some(v) = matches(m_md5, m_sha1) {
-            return Ok(v);
-        }
-    }
-
-    // Archives get a pass when nothing matches.
-    //
-    // RomM's recorded hash for multi-file archives is not reproducible from
-    // the bytes it serves: sampling 12 arcade romsets, none matched either the
-    // zip itself or any member. Single-member archives do match, so the check
-    // above is still worth running. Hard-failing here would make 2,413 arcade
-    // games and most of sfc permanently undownloadable over what is a
-    // server-side metadata problem.
-    //
-    // Size is still enforced by the caller, which catches truncation — the
-    // realistic failure mode. Non-archives keep the strict check, because
-    // their hashes verify reliably.
-    if !members.is_empty() {
-        return Ok(Verified::ArchiveSizeOnly);
-    }
 
     let want = want_md5.unwrap_or_else(|| want_sha1.unwrap_or(""));
-    bail!("hash mismatch: server {want}, downloaded {got_md5}")
+    bail!(
+        "hash mismatch: server {want}, downloaded {got_md5}{}",
+        if members.is_empty() {
+            String::new()
+        } else {
+            format!(" (composite of {} archive member(s) also checked)", members.len())
+        }
+    )
 }
 
 /// Download `target` into `<library_roms>/<platform>/<fs_name>`.

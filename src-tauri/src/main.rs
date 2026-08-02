@@ -383,10 +383,11 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     let core = resolve_core(&state, &row.platform_slug)
         .ok_or_else(|| format!("no installed core for {}", row.platform_slug))?;
 
+    if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
     let overrides = state
         .roms_dir
         .parent()
-        .and_then(|lib| ra.write_overrides(lib).ok());
+        .and_then(|lib| ra.write_overrides(lib, None).ok());
     let status = ra
         .launch_with(&core, &path, false, overrides.as_deref())
         .map_err(err)?;
@@ -626,6 +627,9 @@ fn main() {
     anchor_to_project_root();
     let cfg = Config::load().unwrap_or_default();
     let store = cache::Cache::open(Path::new(CACHE_DB)).expect("opening metadata cache");
+    // Archive verification depends on the server's exclusion lists; load the
+    // cached copy before anything can download.
+    romm_desktop::apply_cached_server_config(&store);
     let map = CoreMap::load(Path::new(CORE_MAP)).expect("loading core map");
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
         .ok()
