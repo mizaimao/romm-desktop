@@ -42,10 +42,41 @@ CREATE TABLE IF NOT EXISTS roms (
 );
 CREATE INDEX IF NOT EXISTS roms_platform ON roms(platform_slug);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Collections mirror the server rather than being a local invention: this is a
+-- RomM client, so whatever RomM groups games into is what we show.
+CREATE TABLE IF NOT EXISTS collections (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    grp         TEXT NOT NULL,
+    description TEXT,
+    rom_count   INTEGER NOT NULL DEFAULT 0,
+    is_favorite INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS collection_roms (
+    collection_id TEXT NOT NULL,
+    rom_id        INTEGER NOT NULL,
+    PRIMARY KEY (collection_id, rom_id)
+);
+CREATE INDEX IF NOT EXISTS collection_roms_rom ON collection_roms(rom_id);
+CREATE INDEX IF NOT EXISTS collections_grp ON collections(grp);
 "#;
 
 pub struct Cache {
     conn: Connection,
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectionRow {
+    pub id: String,
+    pub name: String,
+    /// `user`, `smart`, or a virtual kind such as `genre` / `franchise`.
+    pub group: String,
+    pub description: Option<String>,
+    pub rom_count: i64,
+    pub is_favorite: bool,
+    /// A few member ROM ids, so the card can show real cover art through the
+    /// same local cache the game grids use.
+    pub sample_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +188,118 @@ impl Cache {
             let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} {ty}"), []);
         }
         Ok(Self { conn })
+    }
+
+    /// Replace the stored collections wholesale.
+    ///
+    /// Virtual collections are recomputed by the server from scratch and their
+    /// ids are derived from name+type, so a rename silently orphans the old
+    /// row. Rebuilding is cheaper and more correct than reconciling.
+    pub fn replace_collections(&mut self, items: &[api::Collection]) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM collection_roms", [])?;
+        tx.execute("DELETE FROM collections", [])?;
+        {
+            let mut ins = tx.prepare(
+                "INSERT OR REPLACE INTO collections
+                 (id, name, grp, description, rom_count, is_favorite)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            let mut link = tx.prepare(
+                "INSERT OR IGNORE INTO collection_roms(collection_id, rom_id) VALUES (?1, ?2)",
+            )?;
+            for c in items {
+                // Trust the member list over the server's count: the two
+                // disagree when a member rom has since been deleted.
+                ins.execute(params![
+                    c.id,
+                    c.name,
+                    c.group(),
+                    c.description,
+                    c.rom_ids.len() as i64,
+                    c.is_favorite as i64,
+                ])?;
+                for rom_id in &c.rom_ids {
+                    link.execute(params![c.id, rom_id])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(items.len())
+    }
+
+    /// Collection groups present, with how many collections each holds.
+    ///
+    /// Counts only collections that still have at least one ROM we know about,
+    /// so a group cannot advertise entries that open empty.
+    pub fn collection_groups(&self) -> Result<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.grp, COUNT(*) FROM collections c
+             WHERE EXISTS (SELECT 1 FROM collection_roms cr JOIN roms r ON r.id = cr.rom_id
+                           WHERE cr.collection_id = c.id)
+             GROUP BY c.grp ORDER BY COUNT(*) DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Collections in one group, largest first, skipping any that would open
+    /// empty against the ROMs actually in the cache.
+    pub fn collections_in(&self, group: &str) -> Result<Vec<CollectionRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.grp, c.description,
+                    (SELECT COUNT(*) FROM collection_roms cr JOIN roms r ON r.id = cr.rom_id
+                     WHERE cr.collection_id = c.id) AS live,
+                    c.is_favorite,
+                    (SELECT group_concat(rom_id) FROM
+                       (SELECT cr.rom_id FROM collection_roms cr JOIN roms r ON r.id = cr.rom_id
+                        WHERE cr.collection_id = c.id LIMIT 4))
+             FROM collections c
+             WHERE c.grp = ?1 AND live > 0
+             ORDER BY live DESC, c.name COLLATE NOCASE",
+        )?;
+        let rows = stmt
+            .query_map([group], |r| {
+                Ok(CollectionRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    group: r.get(2)?,
+                    description: r.get(3)?,
+                    rom_count: r.get(4)?,
+                    is_favorite: r.get::<_, i64>(5)? != 0,
+                    sample_ids: r
+                        .get::<_, Option<String>>(6)?
+                        .unwrap_or_default()
+                        .split(',')
+                        .filter_map(|s| s.parse().ok())
+                        .collect(),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// ROMs belonging to one collection.
+    pub fn roms_in_collection(&self, id: &str) -> Result<Vec<RomRow>> {
+        let sql = format!(
+            "SELECT {ROM_COLUMNS} FROM roms r
+             JOIN collection_roms cr ON cr.rom_id = r.id
+             WHERE cr.collection_id = ?1
+             ORDER BY COALESCE(NULLIF(r.name, ''), r.fs_name) COLLATE NOCASE"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([id], rom_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn collection_count(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM collections", [], |r| r.get(0))?)
     }
 
     fn meta_get(&self, key: &str) -> Option<String> {

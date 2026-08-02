@@ -78,7 +78,7 @@ header h1 {
 }
 #search:focus { outline: none; border-color: var(--accent); }
 
-#systems-btn, #settings-btn, #sidebar-btn, #layout-btn, #themes-btn {
+#systems-btn, #settings-btn, #sidebar-btn, #layout-btn, #themes-btn, #collections-btn {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
@@ -91,6 +91,7 @@ header h1 {
 #systems-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 #settings-btn { padding: 6px 10px; }
 #themes-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#collections-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 #zoom-wrap { display: flex; align-items: center; }
 #zoom {
@@ -190,6 +191,34 @@ main {
 .card .logo .ph { color: var(--dim); font-size: 12px; letter-spacing: .05em; }
 .card .name { font-weight: 600; margin-bottom: 4px; }
 .card .meta { color: var(--dim); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+
+/* Collection cards show real cover art, not a white-on-transparent logo, so
+   they must escape the light-mode invert applied to ES-DE logos above. */
+.card .logo.mosaic { height: 92px; }
+.card .logo.mosaic img {
+  height: 100%;
+  border-radius: 4px;
+  object-fit: cover;
+  filter: none;
+}
+@media (prefers-color-scheme: light) {
+  .card .logo.mosaic img { filter: none; }
+}
+
+/* Local filter for a long collection list — distinct from the header search,
+   which searches games. */
+.filter {
+  width: 100%;
+  max-width: 340px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+}
+.filter:focus { outline: none; border-color: var(--accent); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
 .dot.on { background: var(--ok); }

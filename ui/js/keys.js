@@ -4,7 +4,7 @@
 // selectable elements are `.card` (platforms), `.gcard`/`.row` (games) and
 // `.tcard` (themes), so one implementation serves every view.
 
-import { el, state, invoke } from "./state.js";
+import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play } from "./detail.js";
 import { showPlatforms, showRoms, setLayout } from "./library.js";
 import { showThemes } from "./themes.js";
@@ -53,13 +53,21 @@ function activate() {
   if (!node) return;
   if (node.dataset.slug) showRoms(node.dataset.slug);
   else if (node.dataset.id) invoke("rom_detail", { id: Number(node.dataset.id) }).then(play);
+  // Collection cards already carry the navigation in their click handler,
+  // which knows the group it came from; reuse it rather than duplicating.
+  else if (node.dataset.cid || node.dataset.group) node.click();
   else if (node.dataset.repo) node.querySelector('button[data-act="icons"]')?.click();
 }
 
 function goBack() {
   if (state.view === "platforms") return;
   el.search.value = "";
+  // Same one-level-at-a-time walk the Back button does, so a controller
+  // behaves identically inside collections.
+  const up = trail.pop();
+  if (up) return up();
   el.themesBtn.classList.remove("active");
+  el.collectionsBtn.classList.remove("active");
   showPlatforms();
 }
 
@@ -137,8 +145,16 @@ export function installKeys() {
       return help.remove();
     }
 
+    // Any other text field (the collection filter) owns the keyboard outright,
+    // otherwise typing a name would fire single-key shortcuts.
+    const focused = document.activeElement;
+    if (focused !== el.search && focused?.tagName === "INPUT" && focused.type !== "range") {
+      if (ev.key === "Escape") focused.blur();
+      return;
+    }
+
     // Typing in the search box: only Esc and Enter mean anything.
-    if (document.activeElement === el.search) {
+    if (focused === el.search) {
       if (ev.key === "Escape") {
         el.search.value = "";
         el.search.blur();

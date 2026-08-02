@@ -157,6 +157,88 @@ fn roms(state: State<'_, AppState>, platform: String) -> CmdResult<Vec<RomView>>
     Ok(to_views(&state, rows))
 }
 
+/// One collection group — `genre`, `franchise`, `user`, …
+#[derive(serde::Serialize)]
+struct GroupView {
+    group: String,
+    /// Human label; the raw group name is a server-side slug.
+    label: String,
+    count: i64,
+}
+
+#[derive(serde::Serialize)]
+struct CollectionView {
+    id: String,
+    name: String,
+    rom_count: i64,
+    is_favorite: bool,
+    /// A few member ROM ids — the card fetches their covers through the same
+    /// local cache the game grids use, so this works offline too.
+    sample_ids: Vec<i64>,
+}
+
+/// Plural label for a group, since the server's names are singular slugs.
+fn group_label(group: &str) -> String {
+    match group {
+        "user" => "My collections".to_owned(),
+        "smart" => "Smart collections".to_owned(),
+        "collection" => "Series".to_owned(),
+        "genre" => "Genres".to_owned(),
+        "franchise" => "Franchises".to_owned(),
+        "company" => "Companies".to_owned(),
+        "mode" => "Player modes".to_owned(),
+        "age_rating" => "Age ratings".to_owned(),
+        // Unknown kinds still appear rather than being hidden — a RomM that
+        // grows a new one should show up without a client change.
+        other => {
+            let mut c = other.replace('_', " ");
+            c[..1].make_ascii_uppercase();
+            c
+        }
+    }
+}
+
+#[tauri::command]
+fn collection_groups(state: State<'_, AppState>) -> CmdResult<Vec<GroupView>> {
+    let cache = state.cache.lock().map_err(err)?;
+    Ok(cache
+        .collection_groups()
+        .map_err(err)?
+        .into_iter()
+        .map(|(group, count)| GroupView {
+            label: group_label(&group),
+            group,
+            count,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn collections_in(state: State<'_, AppState>, group: String) -> CmdResult<Vec<CollectionView>> {
+    let cache = state.cache.lock().map_err(err)?;
+    Ok(cache
+        .collections_in(&group)
+        .map_err(err)?
+        .into_iter()
+        .map(|c| CollectionView {
+            sample_ids: c.sample_ids,
+            id: c.id,
+            name: c.name,
+            rom_count: c.rom_count,
+            is_favorite: c.is_favorite,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn collection_roms(state: State<'_, AppState>, id: String) -> CmdResult<Vec<RomView>> {
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.roms_in_collection(&id).map_err(err)?
+    };
+    Ok(to_views(&state, rows))
+}
+
 #[tauri::command]
 fn search(state: State<'_, AppState>, term: String) -> CmdResult<Vec<RomView>> {
     let rows = {
@@ -358,8 +440,16 @@ async fn download_rom(
         .ok_or("no server connection — check config.toml")?;
     let roms_dir = state.roms_dir.clone();
 
+    // Folder ROMs verify per member; the rom-level hash is not reproducible.
+    let members = if row.multi_file {
+        client.member_hashes(row.id).await
+    } else {
+        Vec::new()
+    };
+
     let target = download::Target {
         rom_id: row.id,
+        members: &members,
         fs_name: &row.fs_name,
         platform_slug: &row.platform_slug,
         expected_size: (row.fs_size_bytes > 0).then_some(row.fs_size_bytes as u64),
@@ -390,7 +480,9 @@ async fn download_rom(
     let _ = app.emit("download-progress", (id, 1u64, 1u64));
     Ok(match outcome {
         download::Outcome::AlreadyHave(p) => format!("already had {}", p.display()),
-        download::Outcome::Downloaded { path, .. } => format!("downloaded {}", path.display()),
+        download::Outcome::Downloaded { path, verified, .. } => {
+            format!("downloaded {} ({})", path.display(), verified.describe())
+        }
     })
 }
 
@@ -856,6 +948,9 @@ fn main() {
             platforms,
             roms,
             search,
+            collection_groups,
+            collections_in,
+            collection_roms,
             rom_detail,
             download_rom,
             rom_covers,

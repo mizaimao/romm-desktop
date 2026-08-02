@@ -1,18 +1,24 @@
 // Entry point: wire the header controls and load the first view.
 
-import { el, state, invoke, listen } from "./state.js";
+import { el, state, trail, invoke, listen } from "./state.js";
 import { human } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
 import { setSidebar } from "./detail.js";
 import { showThemes } from "./themes.js";
 import { showSystems } from "./systems.js";
+import { showCollectionGroups } from "./collections.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
+  // Collections are three levels deep, so step back through them rather than
+  // dropping straight to the platform grid.
+  const up = trail.pop();
+  if (up) return up();
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");
+  el.collectionsBtn.classList.remove("active");
   showPlatforms();
 });
 
@@ -26,6 +32,10 @@ el.sidebarBtn.addEventListener("click", () => setSidebar(!state.sidebar));
 
 el.systemsBtn.addEventListener("click", () =>
   state.view === "systems" ? showPlatforms() : showSystems()
+);
+
+el.collectionsBtn.addEventListener("click", () =>
+  state.view.startsWith("collection") ? showPlatforms() : showCollectionGroups()
 );
 
 el.themesBtn.addEventListener("click", () =>

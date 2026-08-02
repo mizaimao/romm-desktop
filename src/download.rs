@@ -35,11 +35,18 @@ pub enum Verified {
     Sha1,
     /// Server published no hash for this ROM — size was all we could check.
     SizeOnly,
+    /// Folder ROM: `checked` of `total` unpacked files matched their own md5.
+    /// The two differ when the server listed no hash for some member, which
+    /// is worth saying rather than reporting a clean bill of health.
+    Members { checked: usize, total: usize },
 }
 
 /// What we need to fetch and check one ROM.
 pub struct Target<'a> {
     pub rom_id: i64,
+    /// For folder ROMs: `(file_name, md5)` per member, used to verify each
+    /// file after unpacking.
+    pub members: &'a [(String, String)],
     pub fs_name: &'a str,
     pub platform_slug: &'a str,
     pub expected_size: Option<u64>,
@@ -242,6 +249,23 @@ pub fn hash_archive_members(path: &Path) -> Vec<(String, String, String)> {
 
 /// Compare against whichever hash the server published. Returns which one was
 /// used, or an error describing the mismatch.
+impl Verified {
+    /// How the file was checked, in words, for whichever front-end is asking.
+    pub fn describe(&self) -> String {
+        match *self {
+            Verified::Md5 => "md5 verified".to_owned(),
+            Verified::Sha1 => "sha1 verified".to_owned(),
+            Verified::SizeOnly => "size only — server published no hash".to_owned(),
+            Verified::Members { checked, total } if checked == total => {
+                format!("all {total} files md5-checked")
+            }
+            Verified::Members { checked, total } => format!(
+                "{checked} of {total} files md5-checked — server listed no hash for the rest"
+            ),
+        }
+    }
+}
+
 fn verify(path: &Path, target: &Target<'_>) -> Result<Verified> {
     let want_md5 = target.md5.filter(|h| !h.is_empty());
     let want_sha1 = target.sha1.filter(|h| !h.is_empty());
@@ -276,6 +300,89 @@ fn verify(path: &Path, target: &Target<'_>) -> Result<Verified> {
             format!(" (composite of {} archive member(s) also checked)", members.len())
         }
     )
+}
+
+/// First file named `name` anywhere under `dir`.
+fn find_by_name(dir: &Path, name: &str) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            if let Some(hit) = find_by_name(&p, name) {
+                return Some(hit);
+            }
+        } else if p.file_name().is_some_and(|f| f == name) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Verify each file of an unpacked folder ROM against its own hash.
+///
+/// The rom-level `md5_hash` is a composite hashed in `os.walk` order on the
+/// server — filesystem-dependent, so no client can reproduce it. Per-member
+/// hashes are exact, and identify *which* file is wrong rather than just that
+/// something is.
+///
+/// Returns `(verified, files on disk)`, or the first mismatch.
+pub fn verify_members(dir: &Path, members: &[(String, String)]) -> Result<(usize, usize)> {
+    let mut checked = 0;
+    for (name, want_md5) in members {
+        if want_md5.is_empty() {
+            continue;
+        }
+        // The server names members by leaf; a zip may nest them a level deep,
+        // so fall back to a search before calling it missing.
+        let direct = dir.join(name);
+        let path = if direct.is_file() {
+            direct
+        } else {
+            match find_by_name(dir, name) {
+                Some(p) => p,
+                None => bail!("missing after unpack: {name}"),
+            }
+        };
+        let (got, _) = hash_file(&path)?;
+        if got.eq_ignore_ascii_case(want_md5) {
+            checked += 1;
+            continue;
+        }
+        // A member may itself be an archive, and RomM hashes an archive's
+        // contents rather than its bytes — the same rule as the single-file
+        // path, applied one level down.
+        if let Some((c_md5, _)) = hash_archive_composite(&path)
+            && c_md5.eq_ignore_ascii_case(want_md5)
+        {
+            checked += 1;
+            continue;
+        }
+        bail!("{name}: md5 mismatch (server {want_md5}, unpacked {got})");
+    }
+    let listed: std::collections::HashSet<&str> =
+        members.iter().map(|(n, _)| n.as_str()).collect();
+    Ok((checked, count_members(dir, &listed)))
+}
+
+/// Files under `dir` that ought to have been verified.
+///
+/// An `.m3u` the server never listed is one RomM synthesised into the zip for
+/// multi-disc launching — it has no counterpart on disk there, so counting it
+/// as unverified would report a shortfall that does not exist.
+fn count_members(dir: &Path, listed: &std::collections::HashSet<&str>) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    entries
+        .flatten()
+        .map(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                return count_members(&p, listed);
+            }
+            let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let generated = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("m3u"))
+                && !listed.contains(name.as_str());
+            usize::from(!generated)
+        })
+        .sum()
 }
 
 /// Extract a downloaded folder-ROM zip into `dest`, flattening any wrapper
@@ -342,10 +449,12 @@ pub async fn fetch(
     let part_path = dir.join(format!("{}.part", target.fs_name));
 
     if target.multi_file {
-        // Hashes describe the folder's contents, not the transferred zip, so
-        // presence of the unpacked directory is the check available here.
+        // Per-member hashes make this a real check rather than a presence
+        // test: a folder with a corrupted file refetches instead of being
+        // reported as verified.
         if final_path.is_dir()
             && std::fs::read_dir(&final_path).map(|d| d.count() > 0).unwrap_or(false)
+            && verify_members(&final_path, target.members).is_ok()
         {
             return Ok(Outcome::AlreadyHave(final_path));
         }
@@ -435,6 +544,14 @@ pub async fn fetch(
     if target.multi_file {
         unpack_folder_rom(&part_path, &final_path)?;
         std::fs::remove_file(&part_path).ok();
+        // Now the files exist individually, each can be checked properly.
+        let verified = match verify_members(&final_path, target.members) {
+            Ok((0, _)) => Verified::SizeOnly,
+            Ok((checked, total)) => Verified::Members { checked, total },
+            Err(e) => {
+                bail!("{e}\n  unpacked files left at {}", final_path.display());
+            }
+        };
         return Ok(Outcome::Downloaded {
             path: final_path,
             bytes: written,

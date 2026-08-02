@@ -82,10 +82,27 @@ pub struct Rom {
     /// these as a zip of the folder, not the ROM itself.
     #[serde(default)]
     pub has_multiple_files: bool,
+    /// Populated only when the request asks for `with_files=true`.
+    #[serde(default)]
+    pub files: Vec<RomFile>,
 }
 
-// Mirrors the server schema rather than only the fields read today.
+/// One file inside a multi-file (folder) ROM.
+///
+/// Mirrors the server schema rather than only the fields read today.
 #[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct RomFile {
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub file_size_bytes: Option<u64>,
+    #[serde(default)]
+    pub md5_hash: Option<String>,
+    #[serde(default)]
+    pub sha1_hash: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RomPage {
     #[serde(default)]
@@ -229,6 +246,33 @@ impl Client {
         self.get_json(&path).await
     }
 
+    /// One ROM with its member files.
+    ///
+    /// Folder ROMs need this: the rom-level hash is a composite computed in
+    /// filesystem order on the server and cannot be reproduced elsewhere, but
+    /// each member carries its own md5, which verifies precisely.
+    pub async fn rom_with_files(&self, id: i64) -> Result<Rom> {
+        self.get_json(&format!("/api/roms/{id}?with_files=true")).await
+    }
+
+    /// `(file_name, md5)` for each member of a folder ROM.
+    ///
+    /// Tolerant by design: this only ever *strengthens* verification, so a
+    /// server that cannot answer costs us the per-file check rather than the
+    /// download. (`/api/roms/{id}/files` returns 500 on 5.0.0; the rom
+    /// endpoint with `with_files=true` is the working route.)
+    pub async fn member_hashes(&self, id: i64) -> Vec<(String, String)> {
+        match self.rom_with_files(id).await {
+            Ok(rom) => rom
+                .files
+                .into_iter()
+                .filter_map(|f| Some((f.file_name, f.md5_hash?)))
+                .filter(|(n, m)| !n.is_empty() && !m.is_empty())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Every ROM id the server currently has.
     ///
     /// Cheap (one array of ints for ~10k roms) and the only way to notice
@@ -270,4 +314,116 @@ fn urlencode(s: &str) -> String {
         }
     }
     out
+}
+
+/// A RomM collection: hand-made, smart (a saved filter), or virtual
+/// (auto-grouped by genre, franchise, company…).
+///
+/// One struct covers all three because the server returns the same shape for
+/// each; only `is_virtual`/`is_smart` and the presence of `type` differ.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Collection {
+    /// Hand-made collections have a numeric id, virtual ones a base64 string.
+    /// Kept as text so the two can share a table.
+    #[serde(deserialize_with = "id_as_string")]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub rom_ids: Vec<i64>,
+    #[serde(default)]
+    pub rom_count: i64,
+    #[serde(default)]
+    pub is_favorite: bool,
+    #[serde(default)]
+    pub is_virtual: bool,
+    #[serde(default)]
+    pub is_smart: bool,
+    /// Virtual collections only: `genre`, `franchise`, `company`, …
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
+    /// Covers of the first few members, for a mosaic thumbnail.
+    #[serde(default)]
+    pub path_covers_small: Vec<String>,
+}
+
+impl Collection {
+    /// Which of the three kinds this is, as a stable string for the cache.
+    pub fn group(&self) -> &str {
+        match () {
+            _ if self.is_virtual => self.kind.as_deref().unwrap_or("virtual"),
+            _ if self.is_smart => "smart",
+            _ => "user",
+        }
+    }
+}
+
+/// Accepts either a JSON number or string, since the two collection families
+/// disagree on the type of `id`.
+fn id_as_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => s,
+        serde_json::Value::Number(n) => n.to_string(),
+        other => other.to_string(),
+    })
+}
+
+impl Client {
+    /// Hand-made collections.
+    pub async fn collections(&self) -> Result<Vec<Collection>> {
+        self.get_json("/api/collections").await
+    }
+
+    /// Saved-filter collections.
+    pub async fn smart_collections(&self) -> Result<Vec<Collection>> {
+        self.get_json("/api/collections/smart").await
+    }
+
+    /// Auto-grouped collections of one kind.
+    pub async fn virtual_collections(&self, kind: &str) -> Result<Vec<Collection>> {
+        self.get_json(&format!("/api/collections/virtual?type={kind}")).await
+    }
+
+    /// Which virtual kinds this server actually has.
+    ///
+    /// Read from the identifiers list rather than hard-coded, so a RomM that
+    /// grows a new kind appears without a client change. Each identifier is
+    /// base64 of `{"name": ..., "type": ...}`.
+    pub async fn virtual_kinds(&self) -> Result<Vec<String>> {
+        let ids: Vec<String> = self.get_json("/api/collections/virtual/identifiers").await?;
+        let mut kinds: Vec<String> = Vec::new();
+        for id in ids {
+            // Pad: the server emits unpadded base64, and both alphabets occur.
+            let padded = format!("{id}{}", "=".repeat((4 - id.len() % 4) % 4));
+            let Some(raw) = base64::engine::general_purpose::URL_SAFE
+                .decode(&padded)
+                .or_else(|_| base64::engine::general_purpose::STANDARD.decode(&padded))
+                .ok()
+            else {
+                continue;
+            };
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&raw)
+                && let Some(k) = v.get("type").and_then(|t| t.as_str())
+                && !kinds.iter().any(|s| s == k)
+            {
+                kinds.push(k.to_owned());
+            }
+        }
+        Ok(kinds)
+    }
+
+    /// Every collection the server has, of all three families.
+    ///
+    /// Tolerant per family: a server with smart collections disabled, or a
+    /// virtual kind that errors, costs that group rather than the whole sync.
+    pub async fn all_collections(&self) -> Result<Vec<Collection>> {
+        let mut out = self.collections().await.unwrap_or_default();
+        out.extend(self.smart_collections().await.unwrap_or_default());
+        for kind in self.virtual_kinds().await.unwrap_or_default() {
+            out.extend(self.virtual_collections(&kind).await.unwrap_or_default());
+        }
+        Ok(out)
+    }
 }

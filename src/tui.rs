@@ -278,8 +278,17 @@ impl App {
 
         let roms_dir = self.local_roms.clone();
         self.rt.spawn(async move {
+            // Folder ROMs verify per member; the rom-level hash is a
+            // filesystem-ordered composite we cannot reproduce.
+            let members = if rom.multi_file {
+                client.member_hashes(rom.id).await
+            } else {
+                Vec::new()
+            };
+
             let target = download::Target {
                 rom_id: rom.id,
+                members: &members,
                 fs_name: &rom.fs_name,
                 platform_slug: &rom.platform_slug,
                 expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
@@ -307,6 +316,9 @@ impl App {
 
             if let Ok(mut p) = shared.lock() {
                 p.finished = Some(match result {
+                    Ok(download::Outcome::Downloaded { verified, .. }) => {
+                        Ok(format!("{} downloaded — {}", rom.name, verified.describe()))
+                    }
                     Ok(_) => Ok(format!("{} downloaded", rom.name)),
                     Err(e) => Err(format!("{}: {e}", rom.name)),
                 });

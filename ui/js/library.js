@@ -1,11 +1,12 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
-import { el, state, invoke, convertFileSrc } from "./state.js";
+import { el, state, trail, invoke, convertFileSrc } from "./state.js";
 import { human, escapeHtml } from "./util.js";
 import { selectRom, play } from "./detail.js";
 
 export async function showPlatforms() {
   state.view = "platforms";
+  trail.length = 0;
   state.platform = null;
   state.selected = null;
   el.back.hidden = true;
@@ -15,6 +16,7 @@ export async function showPlatforms() {
   el.zoomWrap.hidden = false; // the platform grid scales too
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");
+  el.collectionsBtn.classList.remove("active");
   coverObserver?.disconnect();
   el.title.textContent = "Platforms";
 

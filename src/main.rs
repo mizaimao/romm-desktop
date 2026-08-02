@@ -492,6 +492,16 @@ async fn cmd_sync(full: bool) -> Result<()> {
         Err(e) => eprintln!("warning: could not list server rom ids ({e}); skipped pruning"),
     }
 
+    // Collections come from the server wholesale — they are RomM's grouping,
+    // not ours, so there is nothing to merge.
+    match client.all_collections().await {
+        Ok(items) => match store.replace_collections(&items) {
+            Ok(n) => println!("collections: {n} synced"),
+            Err(e) => eprintln!("warning: storing collections failed ({e})"),
+        },
+        Err(e) => eprintln!("warning: could not fetch collections ({e}); kept the previous set"),
+    }
+
     let after = store.rom_count().unwrap_or(0);
 
     println!(
@@ -506,11 +516,54 @@ async fn cmd_sync(full: bool) -> Result<()> {
     Ok(())
 }
 
+/// Show the collection groups, or what is inside one.
+fn cmd_collections(group: Option<&str>) -> Result<()> {
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+
+    let Some(group) = group else {
+        let groups = store.collection_groups()?;
+        if groups.is_empty() {
+            bail!("no collections cached — run `sync` first");
+        }
+        println!("{:<14} {:>6}", "group", "count");
+        for (name, n) in &groups {
+            println!("{name:<14} {n:>6}");
+        }
+        println!("\n{} collections total", store.collection_count()?);
+        return Ok(());
+    };
+
+    let items = store.collections_in(group)?;
+    if items.is_empty() {
+        bail!("no collections in group {group:?} — try `collections` for the list");
+    }
+    println!("{:<46} {:>6}", format!("{group} collections"), "games");
+    for c in items.iter().take(60) {
+        println!(
+            "{:<46} {:>6}",
+            c.name.chars().take(44).collect::<String>(),
+            c.rom_count
+        );
+    }
+    if items.len() > 60 {
+        println!("… and {} more", items.len() - 60);
+    }
+    Ok(())
+}
+
 /// Stage 4 — download a ROM by search term.
 async fn cmd_get(needle: &str) -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
     romm_desktop::apply_cached_server_config(&store);
+    // A bare number is an id: with several platforms carrying identically
+    // named folders, a search term alone cannot always name one ROM.
+    if let Ok(id) = needle.parse::<i64>()
+        && let Some(rom) = store.rom_by_id(id)?
+    {
+        return download_one(rom, &cfg).await;
+    }
+
     let matches = store.search(needle, 25)?;
 
     let rom = match matches.len() {
@@ -530,6 +583,11 @@ async fn cmd_get(needle: &str) -> Result<()> {
         }
     };
 
+    download_one(rom, &cfg).await
+}
+
+/// Fetch one resolved ROM, reporting progress and how it was verified.
+async fn download_one(rom: cache::RomRow, cfg: &Config) -> Result<()> {
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
     let roms_dir = cfg.local_roms_dir();
 
@@ -540,8 +598,16 @@ async fn cmd_get(needle: &str) -> Result<()> {
         human(rom.fs_size_bytes as u64)
     );
 
+    // Folder ROMs verify per member; the rom-level hash is not reproducible.
+    let members = if rom.multi_file {
+        client.member_hashes(rom.id).await
+    } else {
+        Vec::new()
+    };
+
     let target = download::Target {
         rom_id: rom.id,
+        members: &members,
         fs_name: &rom.fs_name,
         platform_slug: &rom.platform_slug,
         expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
@@ -597,11 +663,7 @@ async fn cmd_get(needle: &str) -> Result<()> {
     match outcome? {
         download::Outcome::AlreadyHave(p) => println!("already downloaded and verified: {}", p.display()),
         download::Outcome::Downloaded { path, bytes, resumed_from, verified } => {
-            let how = match verified {
-                download::Verified::Md5 => "md5 verified",
-                download::Verified::Sha1 => "sha1 verified",
-                download::Verified::SizeOnly => "size only — server published no hash",
-            };
+            let how = verified.describe();
             if resumed_from > 0 {
                 println!("resumed from {}", human(resumed_from));
             }
@@ -939,6 +1001,11 @@ enum Command {
     },
     /// Terminal library browser
     Browse,
+    /// List collections mirrored from the server
+    Collections {
+        /// Show the collections inside one group, e.g. `genre`
+        group: Option<String>,
+    },
     /// Download a ROM (resumable, hash-verified)
     Get {
         /// Name or filename to search for
@@ -1016,6 +1083,7 @@ async fn main() -> Result<()> {
         Command::Check => cmd_check().await,
         Command::Sync { full } => cmd_sync(full).await,
         Command::Browse => cmd_browse(),
+        Command::Collections { group } => cmd_collections(group.as_deref()),
         Command::Get { term } => cmd_get(&term).await,
         Command::HashParity => {
             let cfg = Config::load()?;

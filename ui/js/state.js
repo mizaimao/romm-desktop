@@ -4,7 +4,7 @@
 // reads the same handful of fields.
 
 export const state = {
-  view: "platforms", // platforms | roms | search | themes
+  view: "platforms", // platforms | roms | search | themes | collections | collection-roms
   platform: null,
   rows: [],
   selected: null,
@@ -17,6 +17,11 @@ export const state = {
   gamepad: null,
 };
 
+/// Where "back" goes, as a stack. Collections browse three levels deep while
+/// every other view returns straight to the platform grid. Lives here rather
+/// than in collections.js so library.js can clear it without an import cycle.
+export const trail = [];
+
 export const el = {
   list: document.getElementById("list"),
   detail: document.getElementById("detail"),
@@ -26,6 +31,7 @@ export const el = {
   status: document.getElementById("status"),
   toast: document.getElementById("toast"),
   themesBtn: document.getElementById("themes-btn"),
+  collectionsBtn: document.getElementById("collections-btn"),
   systemsBtn: document.getElementById("systems-btn"),
   layoutBtn: document.getElementById("layout-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),

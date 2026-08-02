@@ -290,13 +290,6 @@ which fetches `<stem>_libretro.dylib.zip` from the buildbot and unzips into
 Note: `dolphin` *is* built for macOS arm64, contrary to older reports of it being x86_64
 only.
 
-### Stage 3 (original) — Core mapping
-
-Scan installed cores, match against a platform→core table, and report platforms with no
-installed core rather than failing at launch.
-
-**Done when:** every game in `library/` either launches or names the core to install.
-
 ### Stage 4 — Download + cache
 
 Streaming, resumable via HTTP Range (`HEAD` is supported), verified against the server's
@@ -309,6 +302,46 @@ Verified: interrupting a 1.5 GB transfer at 305 MB and re-running resumes from e
 that offset and still passes md5 — so a resumed file is byte-correct. Deliberately
 planting a corrupt `.part` is caught by the hash and refused rather than renamed into
 place. Tiny `.m3u` stubs are rejected before any transfer.
+
+#### Folder ROMs verify per member, not as a whole
+
+A folder ROM's own `md5_hash` **cannot be reproduced by any client**, and this is not a
+limitation worth working around — it is a property of how the server computes it.
+`roms_handler.py` streams the folder's files through one digest in the order
+`utils/filesystem.iter_files` yields them, and that function uses `os.walk`:
+
+```python
+for root, _, files in os.walk(path, topdown=True):
+    for file in files:
+        yield Path(root), file
+```
+
+`os.walk` returns whatever order the filesystem hands back — for `snes/Aftermarket` that
+is neither sorted nor creation order. Reproducing it would mean reproducing the server's
+directory layout, and the value would change if the files were ever rewritten.
+
+The way out is that **each member carries its own hash**. `GET /api/roms/{id}?with_files=true`
+returns `md5_hash`/`sha1_hash` per file, so every unpacked file is checked individually.
+That is strictly better than a composite: it says *which* file is wrong, not merely that
+something is.
+
+Two rules matter when checking members:
+
+- A member that is itself an archive is hashed by its **contents**, not its bytes — the
+  same rule as the top-level single-file path, applied one level down. Half the members of
+  `snes/Aftermarket` are `.zip`, and the raw-bytes hash matches none of them.
+- RomM synthesises an `.m3u` playlist *into the download zip* that does not exist on the
+  server. It is not in the file list and must not be counted as an unverified member.
+  (Playlists we created server-side for multi-disc games *are* listed, and do get checked.)
+
+Verified end to end — `nes/Battle City` 26 files, `nes/Multicarts` 22, `snes/Aftermarket`
+13, `gba/Aftermarket` 25, `psx/Heart of Darkness (USA)` 3 (704 MB): all report
+*all N files md5-checked*. Corrupting one member causes a refetch instead of the previous
+"already downloaded and verified", which was a false claim — the old code only tested that
+the directory was non-empty.
+
+Where the server lists no hash for some member, the count says so
+(`13 of 14 files md5-checked`) rather than reporting a clean bill of health.
 
 ### Stage 5 — Save sync
 
@@ -755,5 +788,63 @@ than picking one alphabetically.
 - Token refresh/expiry — `expires_at` is returned, no refresh endpoint spotted. The
   existing `personal_token` expires 2026-08-29.
 - `/api/saves/{id}/track`, `/untrack`, `/downloaded`, `/visibility` — purpose unknown.
-- Whether to fix multi-disc server-side via `convert-to-folder` or work around it client-side.
-- Whether 3.8 MB/s on large files is a network or server-disk ceiling.
+- Arcade core compatibility — no single core runs everything, and the testing that
+  suggested otherwise was not reproducible (see §10). `mame2003_plus` remains the default.
+
+Settled since:
+
+- ~~Multi-disc: server-side or client-side?~~ **Server-side.** 18 games were restructured
+  into per-game folders and rescanned; the 18 stale `.m3u` stubs were deleted. The client
+  gained cache pruning, zip unpacking and a platform-inference fix alongside.
+- ~~Is 3.8 MB/s on large files a network or server-disk ceiling?~~ **Neither** — it was
+  ~95% dead-DNS timeout (§3). Actual throughput is ~115 MB/s.
+
+## 14. Collections — mirrored, not invented
+
+We are a RomM client, so collections are the server's groupings rather than a local
+feature. `sync` replaces the whole set each time; nothing is merged, because virtual
+collection ids are derived from name+type and a rename would silently orphan the old row.
+
+Three families, one shape (`id, name, rom_ids, rom_count, is_favorite`), so one table
+holds all of them:
+
+| family | endpoint | on this server |
+|---|---|---|
+| hand-made | `/api/collections` | 0 |
+| smart (saved filter) | `/api/collections/smart` | 0 |
+| virtual (auto-grouped) | `/api/collections/virtual?type=…` | **1,920** |
+
+Virtual breaks down as company 1,040 · series 511 · franchise 307 · genre 55 · mode 7.
+The whole set is ~8 MB and ~46,600 memberships, fetched in about 2 seconds — no reason
+to be selective.
+
+Details worth remembering:
+
+- **Ids are not integers.** Hand-made collections use a number, virtual ones a base64
+  blob of `{"name":…, "type":…}`. Stored as TEXT so both share a table. This is also why
+  collection cards use `data-cid` in the UI: the keyboard code treats any `data-id` as a
+  ROM id and would call `Number()` on base64.
+- **Kinds are discovered, not hardcoded** — read from `/collections/virtual/identifiers`,
+  so a RomM that grows a new kind appears without a client change. The identifiers are
+  unpadded base64 in both alphabets; decoding has to tolerate that.
+- **Counts come from the join, not the server's `rom_count`.** The two disagree once a
+  member ROM is deleted, and a collection that opens empty is worse than one that is
+  absent — so empty ones are hidden entirely.
+- **Card art reuses the local cover cache** (`rom_covers` on a few member ids) rather
+  than the server's `path_covers_small`. Hotlinking would break offline browsing, and
+  `/assets` being unauthenticated is not something to build on.
+- Collection cards must **escape the light-mode invert** applied to ES-DE logos — that
+  filter exists for white-on-transparent SVGs and destroys real cover art.
+
+## 15. Known upstream bug
+
+`GET /api/roms/{id}/files` returns 500 for every valid `RomFile.id` on 5.0.0 and on
+`master`: serialising `RomFileSchema` needs `is_top_level`, which lazy-loads `RomFile.rom`
+after the session has closed → `DetachedInstanceError`. `get_rom_file_by_id` eager-loads
+only `track_meta`.
+
+We do not depend on it — `GET /api/roms/{id}?with_files=true` returns the same per-file
+data and works. Note the differing ids: `/files` takes a `RomFile.id`, the other a `Rom.id`.
+
+A write-up ready to post is in [`docs/upstream-romfile-500.md`](docs/upstream-romfile-500.md).
+Not filed: `gh` is not authenticated here, and posting is Frank's call.
