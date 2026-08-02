@@ -1,8 +1,8 @@
-//! Stage 4 — ROM download with resume and hash verification.
+//! ROM download with resume and hash verification.
 //!
-//! Large transfers run ~3.8 MB/s (PLAN.md §3), so a 4.7 GB PSP image is a
-//! ~20 minute download. Resume is not a nicety here: it is the difference
-//! between an interrupted transfer costing seconds or twenty minutes.
+//! Transfers run at wire speed (~115 MB/s measured, PLAN.md §3), so resume
+//! exists for reliability rather than to rescue a slow transfer: a dropped
+//! connection part-way through a 1.5 GB disc image should not start over.
 //!
 //! Bytes land in `<name>.part` and are only renamed into place once the hash
 //! matches, so a partial file can never be mistaken for a complete ROM.
@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use futures_util::StreamExt;
+// md5 and sha1 both implement `digest::Digest`, so importing the trait once
+// brings `::digest()` into scope for both.
 use md5::Digest as _;
-use sha1::Digest as _;
 
 /// Outcome of a download attempt.
 #[derive(Debug)]
@@ -134,11 +135,6 @@ pub fn hash_archive_members(path: &Path) -> Vec<(String, String, String)> {
         }
     }
     out
-}
-
-#[allow(dead_code)]
-fn hash_archive_member_unused(_path: &Path) -> Option<(String, String)> {
-    None
 }
 
 /// Compare against whichever hash the server published. Returns which one was

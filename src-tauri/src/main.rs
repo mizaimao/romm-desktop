@@ -15,7 +15,7 @@ use tauri::{Emitter, State};
 
 use romm_desktop::{
     api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
-    theme, theme_remote,
+    theme, theme_remote, util,
 };
 
 const CACHE_DB: &str = "cache.sqlite3";
@@ -128,38 +128,36 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
         .collect())
 }
 
-#[tauri::command]
-fn roms(state: State<'_, AppState>, platform: String) -> CmdResult<Vec<RomView>> {
-    let cache = state.cache.lock().map_err(err)?;
-    let rows = cache.roms_for(&platform).map_err(err)?;
-    Ok(rows
-        .into_iter()
+/// Shape cache rows for the list/grid, marking what is already on disk.
+fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomView> {
+    rows.into_iter()
         .map(|r| RomView {
-            downloaded: local_path(&state, &r.platform_slug, &r.fs_name).is_some(),
+            downloaded: local_path(state, &r.platform_slug, &r.fs_name).is_some(),
             id: r.id,
             name: r.name,
             fs_name: r.fs_name,
             platform: r.platform_slug,
             size_bytes: r.fs_size_bytes,
         })
-        .collect())
+        .collect()
+}
+
+#[tauri::command]
+fn roms(state: State<'_, AppState>, platform: String) -> CmdResult<Vec<RomView>> {
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.roms_for(&platform).map_err(err)?
+    };
+    Ok(to_views(&state, rows))
 }
 
 #[tauri::command]
 fn search(state: State<'_, AppState>, term: String) -> CmdResult<Vec<RomView>> {
-    let cache = state.cache.lock().map_err(err)?;
-    let rows = cache.search(&term, 200).map_err(err)?;
-    Ok(rows
-        .into_iter()
-        .map(|r| RomView {
-            downloaded: local_path(&state, &r.platform_slug, &r.fs_name).is_some(),
-            id: r.id,
-            name: r.name,
-            fs_name: r.fs_name,
-            platform: r.platform_slug,
-            size_bytes: r.fs_size_bytes,
-        })
-        .collect())
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.search(&term, 200).map_err(err)?
+    };
+    Ok(to_views(&state, rows))
 }
 
 #[tauri::command]
@@ -533,7 +531,7 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
         roms_cached: cache.rom_count().unwrap_or(0),
         roms_dir: abs(&state.roms_dir),
         media_dir: abs(&state.media_dir),
-        disk_bytes: dir_size(&state.roms_dir) + dir_size(&state.media_dir),
+        disk_bytes: util::dir_size(&state.roms_dir) + util::dir_size(&state.media_dir),
     })
 }
 
@@ -582,21 +580,6 @@ fn abs(p: &Path) -> String {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf()).display().to_string()
 }
 
-/// Recursive size of everything we have downloaded, so the UI can say how much
-/// disk this app is using before you go looking for it.
-fn dir_size(dir: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .map(|e| match e.file_type() {
-            Ok(t) if t.is_dir() => dir_size(&e.path()),
-            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
-            Err(_) => 0,
-        })
-        .sum()
-}
 
 // --- helpers -------------------------------------------------------------
 

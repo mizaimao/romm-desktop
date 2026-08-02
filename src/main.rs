@@ -1,16 +1,16 @@
-//! Stage 0 launch spike — see PLAN.md §5.
+//! Command-line entry point.
 //!
-//! Goal: prove a game boots in RetroArch from a local ROM and that we cleanly
-//! detect the exit. Everything else in the client depends on this working.
+//! The CLI and TUI here, and the Tauri GUI in `src-tauri/`, are three frontends
+//! over the same `romm_desktop` library. Run with no arguments for the command
+//! list.
 //!
-//!     cargo run -- doctor                 # what's installed, what can launch
-//!     cargo run -- suggest                # list launchable ROMs in library/
-//!     cargo run -- launch <rom>           # resolve + print the command
-//!     cargo run -- launch <rom> --go      # actually spawn it
+//! Commands that touch the server (`check`, `sync`, `get`, `hash-parity`) need
+//! `config.toml`; the rest work offline against the local cache.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use clap::{Parser, Subcommand};
 
 use romm_desktop::{
     api, cache, cores, download, media, parity, saves, theme, theme_remote, tui,
@@ -18,6 +18,7 @@ use romm_desktop::{
 use romm_desktop::config::Config;
 use romm_desktop::coremap::{self, CoreMap};
 use romm_desktop::retroarch::{self, RetroArch};
+use romm_desktop::util::human;
 
 const CORE_MAP: &str = "data/esde-core-map.json";
 
@@ -97,7 +98,8 @@ fn cmd_doctor() -> Result<()> {
 }
 
 fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: bool) -> Result<()> {
-    let ra = RetroArch::locate(configured_root().as_deref())?;
+    let cfg = Config::load()?;
+    let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?;
     let map = CoreMap::load(Path::new(CORE_MAP))?;
 
     let core = match core_override {
@@ -105,7 +107,6 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         None => {
             let platform = platform_from_path(rom)
                 .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
-            let cfg = Config::load().unwrap_or_default();
             coremap::resolve_core(&map, &cfg.cores.overrides, &platform, |c| ra.has_core(c))
                 .with_context(|| {
                     format!(
@@ -140,7 +141,7 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         }
     }
 
-    let overrides = ra.write_overrides(Path::new(&Config::load()?.library.local_root)).ok();
+    let overrides = ra.write_overrides(Path::new(&cfg.library.local_root)).ok();
     let cmd = ra.launch_command_with(&core, rom, fullscreen, overrides.as_deref())?;
     let label = map
         .label_for(&core)
@@ -325,18 +326,6 @@ async fn cmd_sync(full: bool) -> Result<()> {
         println!("watermark {w}");
     }
     Ok(())
-}
-
-fn human(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut v = bytes as f64;
-    for (i, u) in UNITS.iter().enumerate() {
-        if v < 1024.0 || i == UNITS.len() - 1 {
-            return format!("{v:.1} {u}");
-        }
-        v /= 1024.0;
-    }
-    unreachable!()
 }
 
 /// Stage 4 — download a ROM by search term.
@@ -728,82 +717,129 @@ fn cmd_browse() -> Result<()> {
     )
 }
 
+/// Frontends over one library: this CLI/TUI, and the Tauri GUI in `src-tauri/`.
+#[derive(Parser)]
+#[command(
+    name = "romm-desktop",
+    about = "Browse, download and launch a self-hosted RomM library",
+    version
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Verify server auth and that the library is reachable
+    Check,
+    /// Pull metadata into the local cache
+    Sync {
+        /// Ignore the watermark and re-fetch everything
+        #[arg(long)]
+        full: bool,
+    },
+    /// Terminal library browser
+    Browse,
+    /// Download a ROM (resumable, hash-verified)
+    Get {
+        /// Name or filename to search for
+        term: String,
+    },
+    /// Check our content_hash implementation against the server's
+    HashParity,
+    /// Inspect local saves and states
+    Scan,
+    /// ES-DE theme logos for the console grid
+    Themes {
+        /// Copy logos from installed themes into the media tree
+        #[arg(long)]
+        install: bool,
+        /// List downloadable themes, optionally filtered
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        available: Option<String>,
+        /// Download or update one theme by name
+        #[arg(long, value_name = "NAME")]
+        get: Option<String>,
+        /// With --get: keep only the platform icons and delete the checkout
+        #[arg(long)]
+        logos_only: bool,
+        /// Update every downloaded theme
+        #[arg(long)]
+        update: bool,
+    },
+    /// Show what is installed and which platforms can launch
+    Doctor,
+    /// List or install missing libretro cores
+    Cores {
+        /// Download the missing cores from the libretro buildbot
+        #[arg(long)]
+        install: bool,
+    },
+    /// List one launchable ROM per platform
+    Suggest,
+    /// Resolve a ROM's core and print the launch command
+    Launch {
+        rom: PathBuf,
+        /// Override the core rather than resolving one
+        #[arg(long, value_name = "NAME")]
+        core: Option<String>,
+        /// Launch fullscreen instead of windowed
+        #[arg(long)]
+        fullscreen: bool,
+        /// Actually spawn the emulator; without this it is a dry run
+        #[arg(long)]
+        go: bool,
+    },
+    /// Resolve a ROM's artwork, fetching from the server if needed
+    Art {
+        term: String,
+    },
+    /// Show how a file hashes, whole and as archive members
+    Hashcheck {
+        file: PathBuf,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let go = args.iter().any(|a| a == "--go");
-    let fullscreen = args.iter().any(|a| a == "--fullscreen");
-    let install = args.iter().any(|a| a == "--install");
-    let core = args
-        .iter()
-        .position(|a| a == "--core")
-        .and_then(|i| args.get(i + 1))
-        .map(String::as_str);
-
-    match args.first().map(String::as_str) {
-        Some("doctor") => cmd_doctor(),
-        Some("suggest") => cmd_suggest(),
-        Some("check") => cmd_check().await,
-        Some("cores") => cmd_cores(install).await,
-        Some("sync") => cmd_sync(args.iter().any(|a| a == "--full")).await,
-        Some("browse") => cmd_browse(),
-        Some("scan") => cmd_scan(),
-        Some("themes") => {
-            let arg = |flag: &str| args.iter().position(|a| a == flag)
-                .and_then(|i| args.get(i + 1)).map(String::as_str);
-            if args.iter().any(|a| a == "--available") {
-                cmd_themes_available(arg("--available")).await
-            } else if let Some(name) = arg("--get") {
-                cmd_themes_get(name, args.iter().any(|a| a == "--logos-only")).await
-            } else if args.iter().any(|a| a == "--update") {
-                cmd_themes_update().await
-            } else {
-                cmd_themes(install)
-            }
-        }
-        Some("hashcheck") => {
-            let f = args.get(1).context("usage: hashcheck <file>")?;
-            cmd_hashcheck(Path::new(f))
-        }
-        Some("art") => {
-            let n = args.get(1).filter(|a| !a.starts_with("--")).context("usage: art <term>")?;
-            cmd_art(n).await
-        }
-        Some("hash-parity") => {
+    match Cli::parse().command {
+        Command::Check => cmd_check().await,
+        Command::Sync { full } => cmd_sync(full).await,
+        Command::Browse => cmd_browse(),
+        Command::Get { term } => cmd_get(&term).await,
+        Command::HashParity => {
             let cfg = Config::load()?;
-            let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+            let client =
+                api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
             parity::run(&client).await
         }
-        Some("get") => {
-            let needle = args.get(1).filter(|a| !a.starts_with("--"))
-                .context("usage: get <search term>")?;
-            cmd_get(needle).await
-        }
-        Some("launch") => {
-            let rom = args
-                .get(1)
-                .filter(|a| !a.starts_with("--"))
-                .context("usage: launch <rom-path> [--core <name>] [--fullscreen] [--go]")?;
-            cmd_launch(Path::new(rom), go, core, fullscreen)
-        }
-        _ => {
-            eprintln!("usage:");
-            eprintln!("  check                            verify server auth + library reach");
-            eprintln!("  sync [--full]                    pull metadata into the local cache");
-            eprintln!("  browse                           TUI library browser");
-            eprintln!("  get <term>                       download a ROM (resumable, verified)");
-            eprintln!("  hash-parity                      verify content_hash matches the server");
-            eprintln!("  scan                             inspect local saves/states");
-            eprintln!("  themes [--install]               ES-DE theme logos for the console grid");
-            eprintln!("  themes --available [filter]      list downloadable ES-DE themes");
-            eprintln!("  themes --get <name> [--logos-only]  download a theme (or just its icons)");
-            eprintln!("  themes --update                  update all downloaded themes");
-            eprintln!("  doctor                           what's installed, what can launch");
-            eprintln!("  cores [--install]                list/install missing libretro cores");
-            eprintln!("  suggest                          list launchable ROMs in library/");
-            eprintln!("  launch <rom> [--core c]          resolve and print the command");
-            eprintln!("        [--fullscreen] [--go]      --go spawns; windowed unless --fullscreen");
-            Ok(())
-        }
+        Command::Scan => cmd_scan(),
+        Command::Themes {
+            install,
+            available,
+            get,
+            logos_only,
+            update,
+        } => match (available, get, update) {
+            // An empty string means --available was given with no filter.
+            (Some(filter), _, _) => {
+                cmd_themes_available(Some(filter.as_str()).filter(|f| !f.is_empty())).await
+            }
+            (_, Some(name), _) => cmd_themes_get(&name, logos_only).await,
+            (_, _, true) => cmd_themes_update().await,
+            _ => cmd_themes(install),
+        },
+        Command::Doctor => cmd_doctor(),
+        Command::Cores { install } => cmd_cores(install).await,
+        Command::Suggest => cmd_suggest(),
+        Command::Launch {
+            rom,
+            core,
+            fullscreen,
+            go,
+        } => cmd_launch(&rom, go, core.as_deref(), fullscreen),
+        Command::Art { term } => cmd_art(&term).await,
+        Command::Hashcheck { file } => cmd_hashcheck(&file),
     }
 }

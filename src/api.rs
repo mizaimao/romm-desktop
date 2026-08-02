@@ -6,14 +6,12 @@
 //! ~300x, which `reqwest`'s pool gives us for free as long as one Client is
 //! shared.
 
-// These structs mirror the server's schemas rather than only what today's
-// commands read, so later stages don't have to re-derive the shape.
-#![allow(dead_code)]
-
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;
 use serde::Deserialize;
 
+// Mirrors the server schema rather than only the fields read today.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct User {
     pub id: i64,
@@ -21,6 +19,8 @@ pub struct User {
     pub role: String,
 }
 
+// Mirrors the server schema rather than only the fields read today.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct Platform {
     pub id: i64,
@@ -31,6 +31,8 @@ pub struct Platform {
     pub rom_count: i64,
 }
 
+// Mirrors the server schema rather than only the fields read today.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct Rom {
     pub id: i64,
@@ -78,6 +80,8 @@ pub struct Rom {
     pub youtube_video_id: Option<String>,
 }
 
+// Mirrors the server schema rather than only the fields read today.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct RomPage {
     #[serde(default)]

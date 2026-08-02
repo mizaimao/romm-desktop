@@ -27,6 +27,7 @@ use crate::cache::{Cache, PlatformRow, RomRow};
 use crate::coremap::CoreMap;
 use crate::download;
 use crate::retroarch::RetroArch;
+use crate::util::human;
 
 /// Live state of a download, shared between the worker task and the UI.
 #[derive(Default)]
@@ -369,18 +370,6 @@ impl App {
     }
 }
 
-fn human(bytes: i64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut v = bytes as f64;
-    for (i, u) in UNITS.iter().enumerate() {
-        if v < 1024.0 || i == UNITS.len() - 1 {
-            return format!("{v:.1} {u}");
-        }
-        v /= 1024.0;
-    }
-    unreachable!()
-}
-
 fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -422,7 +411,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
             )))
             .gauge_style(Style::default().fg(Color::Green))
             .ratio(ratio)
-            .label(format!("{} / {}", human(p.done as i64), human(p.total as i64)));
+            .label(format!("{} / {}", human(p.done), human(p.total)));
         f.render_widget(gauge, chunks[2]);
     }
 
@@ -502,7 +491,7 @@ fn draw_roms(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                 ),
                 Span::raw(format!("{:<52}", truncate(&r.name, 52))),
                 Span::styled(
-                    format!("{:>10}", human(r.fs_size_bytes)),
+                    format!("{:>10}", human(r.fs_size_bytes.max(0) as u64)),
                     Style::default().fg(Color::DarkGray),
                 ),
             ]))

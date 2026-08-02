@@ -1,0 +1,33 @@
+// Shared UI state and cached element handles.
+//
+// A plain mutable object rather than a store: the app is small and every view
+// reads the same handful of fields.
+
+export const state = {
+  view: "platforms", // platforms | roms | search | themes
+  platform: null,
+  rows: [],
+  selected: null,
+  /// Platform slug -> cover aspect (w/h), measured by the backend.
+  aspects: {},
+  layout: localStorage.getItem("layout") || "grid",
+  sidebar: localStorage.getItem("sidebar") !== "off",
+};
+
+export const el = {
+  list: document.getElementById("list"),
+  detail: document.getElementById("detail"),
+  title: document.getElementById("title"),
+  back: document.getElementById("back"),
+  search: document.getElementById("search"),
+  status: document.getElementById("status"),
+  toast: document.getElementById("toast"),
+  themesBtn: document.getElementById("themes-btn"),
+  layoutBtn: document.getElementById("layout-btn"),
+  sidebarBtn: document.getElementById("sidebar-btn"),
+  lb: document.getElementById("lightbox"),
+};
+
+// Tauri globals, exposed once so modules do not each reach into window.
+export const { invoke, convertFileSrc } = window.__TAURI__.core;
+export const { listen } = window.__TAURI__.event;

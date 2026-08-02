@@ -6,17 +6,22 @@
 //! third party for every console icon. Themes are local, offline, SVG, and
 //! already match the frontend you use.
 //!
-//! Two directory conventions exist in the wild and both are handled:
+//! Themes disagree on where per-system art lives. Three conventions are
+//! checked directly, and anything else is found by a depth-limited sweep for
+//! a directory whose name contains "logo":
 //!
 //! ```text
-//! <theme>/<system>/images/logo.svg      slate-es-de, most community themes
-//! <theme>/system/logos/<system>.svg     linear-es-de
+//! <theme>/<system>/images/<style>.svg     slate-es-de, most community themes
+//! <theme>/system/logos/<system>.svg       linear-es-de
+//! <theme>/_inc/system-logo/<system>.svg   canvas-es-de
 //! ```
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+
+use crate::util::expand_tilde;
 
 use crate::coremap::CoreMap;
 
@@ -68,15 +73,6 @@ impl IconStyle {
 
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|v| v.key() == s.to_ascii_lowercase())
-    }
-}
-
-fn expand_tilde(p: &str) -> PathBuf {
-    match p.strip_prefix("~/") {
-        Some(rest) => std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(rest))
-            .unwrap_or_else(|| PathBuf::from(p)),
-        None => PathBuf::from(p),
     }
 }
 

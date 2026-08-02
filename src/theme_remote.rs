@@ -165,16 +165,4 @@ pub fn remove(dir_name: &str, themes_dir: &Path) -> Result<()> {
 }
 
 /// Recursive size on disk, for reporting what a theme costs.
-pub fn size_of(dir: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .map(|e| match e.file_type() {
-            Ok(t) if t.is_dir() => size_of(&e.path()),
-            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
-            Err(_) => 0,
-        })
-        .sum()
-}
+pub use crate::util::dir_size as size_of;

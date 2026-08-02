@@ -9,6 +9,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use crate::util::expand_tilde;
+
 /// A located RetroArch install.
 #[derive(Debug)]
 pub struct RetroArch {
@@ -27,16 +29,6 @@ const CANDIDATE_ROOTS: &[&str] = &[
     "~/Applications",
     "~/Data/Games/Emulators/RetroArch",
 ];
-
-fn expand_tilde(p: &str) -> PathBuf {
-    match p.strip_prefix("~/") {
-        Some(rest) => match std::env::var_os("HOME") {
-            Some(home) => PathBuf::from(home).join(rest),
-            None => PathBuf::from(p),
-        },
-        None => PathBuf::from(p),
-    }
-}
 
 impl RetroArch {
     /// Locate an install. `configured` wins; otherwise probe known roots.
@@ -159,13 +151,12 @@ config_save_on_exit = \"false\"
 
     /// Build the launch command. Does not spawn.
     ///
-    /// The existing portable `config/retroarch.cfg` is used deliberately — we
-    /// do not pass `-c` yet, so the spike tests launching against a known-good
-    /// setup rather than a config we invented.
+    /// The user's own `retroarch.cfg` is used as the base, with our session
+    /// overrides layered on via `--appendconfig` (see [`Self::OVERRIDES`]) —
+    /// their setup is read, never rewritten.
     ///
-    /// `fullscreen` adds `-f`. It defaults to off at the call site: RetroArch's
-    /// own config decides otherwise, and taking over the display uninvited is
-    /// obnoxious.
+    /// `fullscreen` adds `-f`, and defaults to off at every call site: taking
+    /// over the display uninvited is obnoxious.
     pub fn launch_command(&self, core: &str, rom: &Path, fullscreen: bool) -> Result<Command> {
         self.launch_command_with(core, rom, fullscreen, None)
     }

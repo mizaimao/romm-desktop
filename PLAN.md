@@ -3,7 +3,18 @@
 A native desktop client for a self-hosted [RomM](https://romm.app) server. Browse the
 library, download ROMs on demand, launch them in RetroArch, and sync saves/states back.
 
-Status: **pre-implementation.** Test library built, server protocol verified, stack chosen.
+Status: **working client.** Browse, download and launch all function through a
+Tauri GUI, a TUI, and a CLI over one shared Rust library. Save sync (§5 stage 5)
+is the remaining piece — its `content_hash` gate passes, the scanner works, and
+negotiation is not yet wired up.
+
+```
+src/            core library — api, cache, download, media, theme, retroarch
+src/main.rs     CLI + TUI frontend
+src-tauri/      Tauri GUI shell (thin; delegates to the library)
+ui/             static frontend, no bundler
+tools/          one-shot extraction scripts
+```
 
 ---
 

@@ -16,3 +16,4 @@ pub mod theme;
 pub mod theme_remote;
 pub mod saves;
 pub mod tui;
+pub mod util;
