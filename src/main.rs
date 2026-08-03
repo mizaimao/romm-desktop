@@ -19,6 +19,7 @@ use romm_desktop::config::Config;
 use romm_desktop::coremap::{self, CoreMap};
 use romm_desktop::retroarch::{self, RetroArch};
 use romm_desktop::retroarch_install;
+use romm_desktop::launch;
 use romm_desktop::probe;
 use romm_desktop::shaders;
 use romm_desktop::util::human;
@@ -116,97 +117,37 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?;
     let map = CoreMap::load(Path::new(CORE_MAP))?;
 
-    let core = match core_override {
-        Some(c) => c.to_owned(),
-        None => {
-            let platform = platform_from_path(rom)
-                .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
-            let fs_name = rom.file_name().and_then(|n| n.to_str());
-            coremap::resolve_core_for(
-                &map,
-                &cfg.cores.overrides,
-                &cfg.cores.per_game,
-                &platform,
-                fs_name,
-                |c| ra.has_core(c),
-            )
-                .with_context(|| {
-                    format!(
-                        "no installed core for platform {platform:?}.\n\
-                         Install one, set [cores.overrides] in config.toml, or pass --core."
-                    )
-                })?
-        }
-    };
-
-    // A multi-disc .m3u whose discs were never indexed is a stub; refuse it
-    // here rather than failing deep inside the emulator. See PLAN.md §3.
-    if rom.extension().is_some_and(|e| e == "m3u") {
-        let size = std::fs::metadata(rom).map(|m| m.len()).unwrap_or(0);
-        let dir = rom.parent().unwrap_or(Path::new("."));
-        let text = std::fs::read_to_string(rom).unwrap_or_default();
-        let missing: Vec<&str> = text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .filter(|l| !dir.join(l).is_file())
-            .collect();
-        if !missing.is_empty() {
-            bail!(
-                "playlist is incomplete ({size} bytes); missing disc(s):\n{}",
-                missing
-                    .iter()
-                    .map(|m| format!("  {m}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            );
-        }
-    }
-
-    if let Some(dir) = rom.parent()
-        && let Ok(n) = ra.install_bios(dir)
-        && n > 0
-    {
-        println!("installed {n} BIOS file(s) into {}", ra.system_dir().display());
-    }
-    // Seed the user's settings file on first run so it is discoverable.
+    let platform = platform_from_path(rom)
+        .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
     let user_cfg = cfg.user_retroarch_config();
-    if RetroArch::ensure_user_config(&user_cfg).unwrap_or(false) {
-        println!("created {} — put your button map / filters there", user_cfg.display());
-    }
-    let mut shader_path = None;
-    let shader_cfg = if cfg.shaders.enabled {
-        let platform = platform_from_path(rom).unwrap_or_default();
-        let preset = shaders::preset_for(&cfg.shaders.by_platform, &platform);
-        if let Some(p) = &preset {
-            println!("shader  {} ({p})", shaders::label_of(p));
-        }
-        shader_path = preset.as_deref().and_then(|p| shaders::resolve(&ra, p));
-        shaders::config_lines(&ra, preset.as_deref())
-    } else {
-        String::new()
+    let req = launch::Request {
+        rom,
+        platform: &platform,
+        fs_name: rom.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
+        library_root: Path::new(&cfg.library.local_root),
+        user_cfg: &user_cfg,
+        shaders_enabled: cfg.shaders.enabled,
+        shader_overrides: &cfg.shaders.by_platform,
+        core_overrides: &cfg.cores.overrides,
+        core_per_game: &cfg.cores.per_game,
+        core_override,
     };
-    let platform = platform_from_path(rom).unwrap_or_default();
-    if let Some(note) = romm_desktop::tweaks::describe(&platform, &core) {
-        println!("tweaks  {note}");
+    let plan = launch::plan(&ra, &map, &req)?;
+
+    for note in &plan.notes {
+        println!("{note}");
     }
-    let extra = format!(
-        "{shader_cfg}{}",
-        ra.prepare_tweaks(Path::new(&cfg.library.local_root), &platform, &core)
-    );
-    let overrides = ra
-        .write_overrides_full(Path::new(&cfg.library.local_root), Some(&user_cfg), &extra)
-        .ok();
-    let cmd = ra.launch_command_full(
-        &core, rom, fullscreen, overrides.as_deref(), shader_path.as_deref(),
-    )?;
-    let label = map
-        .label_for(&core)
+    if let Some(label) = &plan.shader_label {
+        println!("shader  {label}");
+    }
+    let core_label = plan
+        .core_label
+        .as_ref()
         .map(|l| format!(" ({l})"))
         .unwrap_or_default();
-    println!("core    {core}{label}");
+    println!("core    {}{core_label}", plan.core);
     println!("rom     {}", rom.display());
-    println!("command {}", retroarch::render(&cmd));
+    println!("command {}", retroarch::render(&plan.command(&ra, rom, fullscreen)?));
 
     if !go {
         println!("\n(dry run — pass --go to actually launch)");
@@ -214,9 +155,7 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     }
 
     println!("\nlaunching…");
-    let status = ra.launch_full(
-        &core, rom, fullscreen, overrides.as_deref(), shader_path.as_deref(),
-    )?;
+    let status = plan.run(&ra, rom, fullscreen)?;
     match status.code() {
         Some(0) => println!("RetroArch exited cleanly (0)"),
         Some(c) => println!("RetroArch exited with status {c}"),
@@ -339,12 +278,12 @@ fn cmd_shaders(platform: Option<&str>) -> Result<()> {
             let mark = if current.as_deref() == Some(opt.path) { "*" } else { " " };
             println!("  {mark} {:<28} {:<34} {}", opt.label, opt.path, opt.note);
         }
-        println!("  {} {:<28} {}", if current.is_none() { "*" } else { " " }, "None", "no shader");
+        println!("  {} {:<28} no shader", if current.is_none() { "*" } else { " " }, "None");
         println!("\nSet in config.toml:\n  [shaders.by_platform]\n  {slug} = \"crt/crt-geom\"");
         return Ok(());
     }
 
-    println!("{:<17} {:<11} {}", "platform", "display", "shader");
+    println!("{:<17} {:<11} shader", "platform", "display");
     for p in store.platforms()? {
         let d = match shaders::display_of(&p.fs_slug) {
             shaders::Display::Crt => "CRT",
@@ -608,7 +547,7 @@ async fn cmd_get_platform(slug: &str, jobs: usize) -> Result<()> {
             if let Err(e) = r {
                 failed.lock().unwrap().push(format!("{}: {e}", rom.fs_name));
             }
-            if n % 25 == 0 || n == count {
+            if n.is_multiple_of(25) || n == count {
                 let secs = started.elapsed().as_secs_f64();
                 println!("  {n}/{count} in {secs:.0}s");
             }
@@ -751,7 +690,7 @@ async fn cmd_probe(
         }
     }
 
-    println!("\n{:<22}{:>8}  {}", "core", "ran", "share");
+    println!("\n{:<22}{:>8}  share", "core", "ran");
     let mut ranked: Vec<_> = tally.into_iter().collect();
     ranked.sort_by_key(|(_, (ok, _))| std::cmp::Reverse(*ok));
     for (core, (ok, total)) in &ranked {

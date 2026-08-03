@@ -97,11 +97,6 @@ pub struct Theme {
     pub path: PathBuf,
 }
 
-/// All themes found on this machine, deduplicated by name.
-pub fn discover(extra_root: Option<&str>) -> Vec<Theme> {
-    discover_with(extra_root, None)
-}
-
 /// As [`discover`], but also searching a downloaded-themes directory first.
 pub fn discover_with(extra_root: Option<&str>, downloaded: Option<&Path>) -> Vec<Theme> {
     let mut roots: Vec<PathBuf> = Vec::new();
@@ -168,15 +163,6 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
         .iter()
         .find(|p| p.is_file())
         .and_then(|p| p.canonicalize().ok())
-}
-
-/// Locate a system logo within one theme.
-///
-/// Themes do not agree on where logos live. Three conventions are common
-/// enough to check directly; anything else is found by the generic sweep in
-/// [`logo_by_sweep`].
-pub fn logo_for(theme: &Theme, esde_system: &str) -> Option<PathBuf> {
-    art_for(theme, esde_system, IconStyle::Logo)
 }
 
 /// Locate one style of per-system art within a theme.

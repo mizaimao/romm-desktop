@@ -28,7 +28,6 @@ use crate::coremap::CoreMap;
 use crate::download;
 use crate::retroarch::RetroArch;
 use crate::util::human;
-use crate::shaders;
 
 /// Live state of a download, shared between the worker task and the UI.
 #[derive(Default)]
@@ -236,41 +235,34 @@ impl App {
             self.status = format!("not downloaded: {}", rom.fs_name);
             return Ok(());
         };
-        let Some(core) = self.resolve_core_for(ra, &rom.platform_slug, Some(&rom.fs_name)) else {
-            self.status = format!("no installed core for {}", rom.platform_slug);
-            return Ok(());
-        };
 
         // Hand the terminal back before spawning, or the emulator and the TUI
         // fight over it; restore afterwards.
         // Overrides neutralise handheld-oriented settings (pause-when-unfocused,
         // bezel overlays) without touching the user's retroarch.cfg.
-        if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
-        let preset = self
-            .shaders_enabled
-            .then(|| shaders::preset_for(&self.shader_overrides, &rom.platform_slug))
-            .flatten();
-        let shader_path = preset.as_deref().and_then(|p| shaders::resolve(ra, p));
-        let overrides = self
-            .local_roms
-            .parent()
-            .and_then(|lib| {
-                let shader_cfg = if self.shaders_enabled {
-                    shaders::config_lines(ra, preset.as_deref())
-                } else {
-                    String::new()
-                };
-                let extra = format!(
-                    "{shader_cfg}{}",
-                    ra.prepare_tweaks(lib, &rom.platform_slug, &core)
-                );
-                ra.write_overrides_full(lib, Some(&self.user_ra_cfg), &extra).ok()
-            });
+        let cfg_core_overrides = self.core_overrides.clone();
+        let req = crate::launch::Request {
+            rom: &path,
+            platform: &rom.platform_slug,
+            fs_name: &rom.fs_name,
+            library_root: self.local_roms.parent().unwrap_or(Path::new(".")),
+            user_cfg: &self.user_ra_cfg,
+            shaders_enabled: self.shaders_enabled,
+            shader_overrides: &self.shader_overrides,
+            core_overrides: &cfg_core_overrides,
+            core_per_game: &self.core_per_game,
+            core_override: None,
+        };
+        let plan = match crate::launch::plan(ra, &self.map, &req) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status = format!("{}: {e}", rom.name);
+                return Ok(());
+            }
+        };
 
         restore_terminal(term)?;
-        let result = ra.launch_full(
-            &core, &path, false, overrides.as_deref(), shader_path.as_deref(),
-        );
+        let result = plan.run(ra, &path, false);
         setup_terminal(term)?;
 
         self.status = match result {

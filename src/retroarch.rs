@@ -189,20 +189,6 @@ video_aspect_ratio_auto = \"true\"
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
 ";
-
-    /// Write the override file and return its path.
-    ///
-    /// Regenerated every launch so edits to `OVERRIDES` take effect without
-    /// the user having to clear anything.
-    ///
-    /// `system_dir` is accepted but deliberately NOT written as
-    /// `system_directory`: redirecting it stops cores finding RetroArch's own
-    /// support assets, which broke every arcade launch when tried. BIOS sets
-    /// are handled by [`Self::install_bios`] instead.
-    pub fn write_overrides(&self, dir: &Path, _system_dir: Option<&Path>) -> Result<PathBuf> {
-        self.write_overrides_with(dir, None)
-    }
-
     /// As above, appending the user's own settings last so they win.
     ///
     /// RetroArch applies `--appendconfig` entries in order, later overriding
@@ -294,19 +280,6 @@ config_save_on_exit = \"false\"
         }
         Ok(n)
     }
-
-    /// Build the launch command. Does not spawn.
-    ///
-    /// The user's own `retroarch.cfg` is used as the base, with our session
-    /// overrides layered on via `--appendconfig` (see [`Self::OVERRIDES`]) —
-    /// their setup is read, never rewritten.
-    ///
-    /// `fullscreen` adds `-f`, and defaults to off at every call site: taking
-    /// over the display uninvited is obnoxious.
-    pub fn launch_command(&self, core: &str, rom: &Path, fullscreen: bool) -> Result<Command> {
-        self.launch_command_with(core, rom, fullscreen, None)
-    }
-
     /// As [`Self::launch_command`], additionally appending an override config.
     pub fn launch_command_with(
         &self,
@@ -421,27 +394,18 @@ config_save_on_exit = \"false\"
             }
         }
 
-        format!(
-            "{}",
-            [
+        [
                 "",
                 "# Project-local core options and remaps, so the user's own",
                 "# config/<Core>/<Core>.opt is never touched. global_core_options",
                 "# is required: without it the per-core file wins and this is ignored.",
-                &format!("global_core_options = \"true\""),
+                "global_core_options = \"true\"",
                 &format!("core_options_path = \"{}\"", opts_path.display()),
                 &format!("input_remapping_directory = \"{}\"", remaps_dir.display()),
                 "",
             ]
-            .join("\n")
-        )
+            .join("\n").to_string()
     }
-
-    /// Spawn and block until the emulator exits.
-    pub fn launch(&self, core: &str, rom: &Path, fullscreen: bool) -> Result<std::process::ExitStatus> {
-        self.launch_with(core, rom, fullscreen, None)
-    }
-
     /// As [`Self::launch`], with an override config appended.
     pub fn launch_with(
         &self,

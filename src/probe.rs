@@ -10,11 +10,13 @@
 //!
 //! * `--max-frames=N` runs exactly N frames and exits. No timers, no killing.
 //! * `--log-file` + `--verbose` record what the core actually did.
-//! **This is not headless.** `video_driver = "null"` silences rendering, but on
-//! macOS RetroArch's Cocoa frontend creates its window before the video driver
-//! is chosen, so a window still appears for every single probe. There is no way
-//! around that here. Probing N games against M cores opens N*M windows, so this
-//! is gated behind an explicit flag and must never be run unasked.
+//! * null audio and video drivers keep it quiet and stop it rendering.
+//!
+//! It is **not** headless, though. `video_driver = "null"` silences rendering,
+//! but on macOS RetroArch's Cocoa frontend creates its window before the video
+//! driver is chosen, so a window still appears for every probe. Probing N games
+//! against M cores opens N*M windows, so this is gated behind an explicit flag
+//! and never run unasked.
 //!
 //! **The exit code is 0 whether or not the content loaded**, which is the trap
 //! the old method fell into. The verdict comes from the log alone.

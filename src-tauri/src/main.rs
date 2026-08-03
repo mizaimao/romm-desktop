@@ -502,34 +502,25 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
     let path = local_path(&state, &row.platform_slug, &row.fs_name)
         .ok_or("not downloaded yet")?;
-    let core = resolve_core_for(&state, &row.platform_slug, Some(&row.fs_name))
-        .ok_or_else(|| format!("no installed core for {}", row.platform_slug))?;
-
-    if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
-    // Per-platform shader, same as the CLI applies.
-    let preset = if state.shaders_enabled {
-        let m = state.shader_overrides.lock().map_err(err)?;
-        shaders::preset_for(&m, &row.platform_slug)
-    } else {
-        None
+    // One shared planner for GUI, CLI and TUI — see launch.rs for why.
+    let overrides = state.core_overrides.lock().map_err(err)?.clone();
+    let per_game = state.core_per_game.lock().map_err(err)?.clone();
+    let shader_overrides = state.shader_overrides.lock().map_err(err)?.clone();
+    let lib = state.roms_dir.parent().unwrap_or(Path::new("."));
+    let req = romm_desktop::launch::Request {
+        rom: &path,
+        platform: &row.platform_slug,
+        fs_name: &row.fs_name,
+        library_root: lib,
+        user_cfg: &state.user_retroarch_cfg,
+        shaders_enabled: state.shaders_enabled,
+        shader_overrides: &shader_overrides,
+        core_overrides: &overrides,
+        core_per_game: &per_game,
+        core_override: None,
     };
-    let shader_path = preset.as_deref().and_then(|p| shaders::resolve(ra, p));
-    let shader_cfg = if state.shaders_enabled {
-        shaders::config_lines(ra, preset.as_deref())
-    } else {
-        String::new()
-    };
-    let overrides = state.roms_dir.parent().and_then(|lib| {
-        let extra = format!(
-            "{shader_cfg}{}",
-            ra.prepare_tweaks(lib, &row.platform_slug, &core)
-        );
-        ra.write_overrides_full(lib, Some(&state.user_retroarch_cfg), &extra)
-            .ok()
-    });
-    let status = ra
-        .launch_full(&core, &path, false, overrides.as_deref(), shader_path.as_deref())
-        .map_err(err)?;
+    let plan = romm_desktop::launch::plan(ra, &state.map, &req).map_err(err)?;
+    let status = plan.run(ra, &path, false).map_err(err)?;
     Ok(if status.success() {
         format!("{} exited cleanly", row.name)
     } else {

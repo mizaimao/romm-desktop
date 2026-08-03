@@ -172,11 +172,10 @@ pub async fn ensure_thumb(
     if let Some(p) = find_local(media_root, platform, stem, COVERS) {
         return Some(p);
     }
-    if small.is_some() {
-        if let Some(p) = ensure(client, media_root, platform, stem, COVERS_THUMB, small).await {
+    if small.is_some()
+        && let Some(p) = ensure(client, media_root, platform, stem, COVERS_THUMB, small).await {
             return Some(p);
         }
-    }
     ensure(client, media_root, platform, stem, COVERS, large).await
 }
 

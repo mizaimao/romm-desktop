@@ -9,7 +9,7 @@
 //! offering it, so a missing format degrades to "no shader" rather than a
 //! black screen.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::retroarch::RetroArch;
 
@@ -147,15 +147,7 @@ pub fn label_of(preset: &str) -> &str {
         .unwrap_or(preset)
 }
 
-/// True when the path looks like a preset we know how to resolve.
-pub fn is_known(preset: &str) -> bool {
-    CATALOGUE.iter().any(|o| o.path == preset)
-}
-
 /// Every platform slug we ship a default for, paired with its display kind.
 pub fn describe(platform: &str) -> (Display, Option<&'static str>) {
     (display_of(platform), default_for(platform))
 }
-
-#[allow(dead_code)]
-fn _unused(_: &Path) {}
