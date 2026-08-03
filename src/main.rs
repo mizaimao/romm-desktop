@@ -27,9 +27,11 @@ use romm_desktop::util::human;
 const CORE_MAP: &str = "data/esde-core-map.json";
 
 /// `[retroarch] root` from config.toml, if set.
-/// Locate RetroArch using the configured boot order.
+/// Locate RetroArch using the configured boot order, with BIOS pointed at the
+/// library's synced system folder.
 fn locate_retroarch(cfg: &Config) -> Result<RetroArch> {
-    RetroArch::locate_in(&cfg.retroarch.ordered_paths())
+    Ok(RetroArch::locate_in(&cfg.retroarch.ordered_paths())?
+        .with_system_dir(Some(cfg.system_dir())))
 }
 
 /// Infer the RomM platform slug from a ROM path under `.../roms/<slug>/...`.
@@ -114,7 +116,8 @@ fn cmd_doctor() -> Result<()> {
 
 fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: bool) -> Result<()> {
     let cfg = Config::load()?;
-    let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?;
+    let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?
+        .with_system_dir(Some(cfg.system_dir()));
     let map = CoreMap::load(Path::new(CORE_MAP))?;
 
     let platform = platform_from_path(rom)
@@ -586,7 +589,7 @@ async fn cmd_probe(
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
     let map = CoreMap::load(Path::new(CORE_MAP))?;
-    let ra = RetroArch::locate_in(&cfg.retroarch.ordered_paths())?;
+    let ra = locate_retroarch(&cfg)?;
     let scratch = probe::scratch_dir(&cfg.library.local_root);
 
     let roms = match (term, platform) {
@@ -1154,7 +1157,7 @@ fn cmd_browse() -> Result<()> {
     }
     let map = CoreMap::load(Path::new(CORE_MAP))?;
     // Missing RetroArch is not fatal; browsing still works, launching doesn't.
-    let ra = RetroArch::locate(cfg.retroarch.root.as_deref()).ok();
+    let ra = locate_retroarch(&cfg).ok();
     // Likewise a missing server only disables downloading.
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
         .ok()

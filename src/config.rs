@@ -22,6 +22,8 @@ pub struct Config {
     pub cores: CoresCfg,
     #[serde(default)]
     pub shaders: ShadersCfg,
+    #[serde(default)]
+    pub icons: IconsCfg,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -93,6 +95,29 @@ pub struct CoresCfg {
 /// Config key for a single game's core override.
 pub fn game_key(platform: &str, fs_name: &str) -> String {
     format!("{platform}/{fs_name}")
+}
+
+/// Which per-system artwork the platform grid shows.
+#[derive(Debug, Deserialize)]
+pub struct IconsCfg {
+    /// One of `logo`, `consolegame`, `controller`, `systemart`,
+    /// `systemart_legacy`.
+    ///
+    /// Defaults to hardware renders, not `logo`. ES-DE's "logo" art is the
+    /// system's *name* set as a wordmark — it is a picture of text, which is
+    /// exactly what the grid is supposed to avoid.
+    #[serde(default = "default_icon_style")]
+    pub style: String,
+}
+
+fn default_icon_style() -> String {
+    "systemart".to_owned()
+}
+
+impl Default for IconsCfg {
+    fn default() -> Self {
+        Self { style: default_icon_style() }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,6 +227,13 @@ impl Config {
             Some(p) => crate::util::expand_tilde(p),
             None => PathBuf::from(&self.library.local_root).join("retroarch-user.cfg"),
         }
+    }
+
+    /// The BIOS folder synced from the server, used as RetroArch's system
+    /// directory when it exists. Inside `library/` so one visible folder still
+    /// holds everything this app downloads.
+    pub fn system_dir(&self) -> PathBuf {
+        PathBuf::from(&self.library.local_root).join("system")
     }
 
     /// Where downloaded ES-DE themes go. Inside the library folder so the

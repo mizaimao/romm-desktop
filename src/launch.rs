@@ -156,8 +156,9 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     }
 
     let extra = format!(
-        "{}{}",
+        "{}{}{}",
         shaders::config_lines(ra, preset.as_deref()),
+        ra.system_dir_line(),
         ra.prepare_tweaks(req.library_root, req.platform, &core)
     );
     let overrides = ra

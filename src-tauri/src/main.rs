@@ -52,8 +52,12 @@ struct PlatformView {
     rom_count: i64,
     /// Whether a libretro core for this platform is actually installed.
     playable: bool,
-    /// ES-DE theme logo, if one has been installed locally.
+    /// ES-DE theme art, if any has been installed locally.
     logo: Option<String>,
+    /// True only for the `logo` style, whose art is a white-on-transparent
+    /// wordmark and therefore needs inverting on a light page. Hardware and
+    /// console art is full colour and must not be touched.
+    logo_wordmark: bool,
     /// Typical cover aspect (w/h) for this platform, so the grid can shape its
     /// cards instead of cropping. Null until enough covers are cached.
     cover_aspect: Option<f32>,
@@ -130,6 +134,7 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             playable: resolve_core(&state, &p.fs_slug).is_some(),
             logo: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
                 .map(|p| p.display().to_string()),
+            logo_wordmark: current_style(&state) == theme::IconStyle::Logo,
             cover_aspect: media::cover_aspect(&state.media_dir, &p.fs_slug),
             slug: p.fs_slug,
             name: p.display_name,
@@ -924,6 +929,9 @@ fn set_icon_style(state: State<'_, AppState>, key: String) -> CmdResult<String> 
     let style = theme::IconStyle::parse(&key).ok_or_else(|| format!("unknown style {key}"))?;
     let idx = theme::IconStyle::ALL.iter().position(|s| *s == style).unwrap_or(0);
     state.icon_style.store(idx as u8, Ordering::Relaxed);
+    // Persist it, or the grid silently reverts to wordmarks on next launch.
+    romm_desktop::config::set_table_entry("config.toml", "icons", "style", style.key())
+        .map_err(err)?;
     Ok(style.label().to_owned())
 }
 
@@ -1036,7 +1044,9 @@ fn main() {
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
         .ok()
         .map(Arc::new);
-    let retroarch = RetroArch::locate_in(&cfg.retroarch.ordered_paths()).ok();
+    let retroarch = RetroArch::locate_in(&cfg.retroarch.ordered_paths())
+        .ok()
+        .map(|ra| ra.with_system_dir(Some(cfg.system_dir())));
     let roms_dir = cfg.local_roms_dir();
     let media_dir = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
 
@@ -1055,7 +1065,14 @@ fn main() {
             user_retroarch_cfg: cfg.user_retroarch_config(),
             shaders_enabled: cfg.shaders.enabled,
             shader_overrides: Mutex::new(cfg.shaders.by_platform.clone()),
-            icon_style: AtomicU8::new(0),
+            // From config, not hardcoded: index 0 is `logo`, which is ES-DE's
+            // wordmark art — a picture of the system's name. The grid wants
+            // hardware, and the user's choice has to survive a restart.
+            icon_style: AtomicU8::new(
+                theme::IconStyle::parse(&cfg.icons.style)
+                    .and_then(|s| theme::IconStyle::ALL.iter().position(|x| *x == s))
+                    .unwrap_or(3) as u8,
+            ),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,

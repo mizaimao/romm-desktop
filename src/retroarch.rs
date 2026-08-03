@@ -58,6 +58,9 @@ const USER_CONFIG_TEMPLATE: &str = r#"# Your RetroArch settings, applied every t
 /// A located RetroArch install.
 #[derive(Debug)]
 pub struct RetroArch {
+    /// Set when BIOS should be read from somewhere other than
+    /// `<root>/system`; see [`Self::with_system_dir`].
+    pub system_override: Option<PathBuf>,
     /// Directory containing `RetroArch.app`. In portable mode this is also the
     /// root for `cores/`, `saves/`, `states/`, `system/`, `config/`.
     pub root: PathBuf,
@@ -113,6 +116,7 @@ impl RetroArch {
                     root,
                     binary,
                     portable,
+                    system_override: None,
                 });
             }
         }
@@ -256,7 +260,26 @@ config_save_on_exit = \"false\"
 
     /// RetroArch's own system directory, where cores look for BIOS files.
     pub fn system_dir(&self) -> PathBuf {
-        self.root.join("system")
+        self.system_override.clone().unwrap_or_else(|| self.root.join("system"))
+    }
+
+    /// Point BIOS lookups at a folder we control instead of RetroArch's own.
+    ///
+    /// The canonical BIOS set is kept on the server and synced into the visible
+    /// library folder, so a second machine gets an identical set by copying one
+    /// directory. RetroArch's own `system/` is left alone.
+    ///
+    /// An earlier attempt at this set `system_directory` to the *ROM's* folder
+    /// and broke every arcade launch, because the MAME BIOS romsets were not
+    /// there. The folder handed to this must be a superset — arcade BIOS
+    /// included — or the same breakage returns.
+    pub fn with_system_dir(mut self, dir: Option<PathBuf>) -> Self {
+        // Absolute, always: RetroArch resolves a relative `system_directory`
+        // against its own working directory rather than ours.
+        self.system_override = dir
+            .filter(|d| d.is_dir())
+            .map(|d| d.canonicalize().unwrap_or(d));
+        self
     }
 
     /// Copy known BIOS sets sitting beside a ROM into RetroArch's system
@@ -344,6 +367,17 @@ config_save_on_exit = \"false\"
     /// Returns an empty string when the platform needs neither, so the
     /// redirect stays off and every other core keeps using the user's own
     /// per-core settings untouched.
+    /// Config line pointing BIOS lookups at our folder, when one is set.
+    pub fn system_dir_line(&self) -> String {
+        match &self.system_override {
+            Some(d) => format!(
+                "\n# BIOS come from the library folder, synced from the server, so a\n                 # second machine gets an identical set by copying one directory.\n                 system_directory = \"{}\"\n",
+                d.display()
+            ),
+            None => String::new(),
+        }
+    }
+
     pub fn prepare_tweaks(&self, library_root: &Path, platform: &str, core: &str) -> String {
         let opts = crate::tweaks::core_options(platform, core);
         let remap = crate::tweaks::remap(platform, core);

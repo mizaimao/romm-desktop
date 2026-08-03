@@ -29,7 +29,7 @@ export async function showPlatforms() {
       <div class="card" data-slug="${p.slug}">
         <div class="logo">${
           p.logo
-            ? `<img src="${convertFileSrc(p.logo)}" alt="" />`
+            ? `<img class="${p.logo_wordmark ? "wordmark" : "art"}" src="${convertFileSrc(p.logo)}" alt="" />`
             : `<span class="ph">${escapeHtml(p.slug)}</span>`
         }</div>
         <div class="name">${escapeHtml(p.name)}</div>
