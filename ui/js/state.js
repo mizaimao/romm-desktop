@@ -6,6 +6,9 @@
 export const state = {
   view: "platforms", // platforms | roms | search | themes | collections | collection-roms
   platform: null,
+  /// The console last opened, so returning to the grid puts the cursor back on
+  /// it instead of the top-left card.
+  lastPlatform: localStorage.getItem("lastPlatform") || null,
   rows: [],
   selected: null,
   /// Platform slug -> cover aspect (w/h), measured by the backend.

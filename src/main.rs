@@ -348,11 +348,15 @@ async fn cmd_install_retroarch(version: Option<&str>) -> Result<()> {
 }
 
 /// Stage 0.5 — install missing cores from the buildbot.
-async fn cmd_cores(install: bool) -> Result<()> {
+async fn cmd_cores(install: bool, update: bool) -> Result<()> {
     let cfg = Config::load()?;
     let ra = locate_retroarch(&cfg)?;
     let map = CoreMap::load(Path::new(CORE_MAP))?;
     let segment = cores::platform_segment()?;
+
+    if update {
+        return update_cores(&ra, segment).await;
+    }
 
     // Unique cores we need but don't have, and which platforms want them.
     let mut wanted: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
@@ -709,6 +713,95 @@ async fn cmd_probe(
 
 fn short(s: &str) -> String {
     s.chars().take(42).collect()
+}
+
+/// Re-download every installed core at the current nightly.
+///
+/// Each existing library is copied aside first. Core updates are not always
+/// improvements: MAME-family and FBNeo cores are tied to particular romset
+/// vintages, and a newer build can stop accepting a set that works today. A
+/// rollback copy makes that recoverable instead of a re-download-and-hope.
+async fn update_cores(ra: &RetroArch, segment: &str) -> Result<()> {
+    let installed = ra.installed_cores();
+    if installed.is_empty() {
+        bail!("no cores installed at {}", ra.cores_dir().display());
+    }
+
+    let dest = ra.cores_dir();
+    let backup = dest.parent().unwrap_or(&dest).join("cores-previous");
+    std::fs::create_dir_all(&backup)?;
+    println!(
+        "updating {} core(s) from {segment}\n  into    {}\n  rollback {}\n",
+        installed.len(),
+        dest.display(),
+        backup.display()
+    );
+
+    let client = reqwest::Client::builder()
+        .user_agent("romm-desktop/0.1")
+        .timeout(std::time::Duration::from_secs(180))
+        .build()?;
+
+    let mut updated = Vec::new();
+    let mut unchanged = 0;
+    let mut failed = Vec::new();
+
+    for core in &installed {
+        print!("  {core:<22} ");
+        use std::io::Write as _;
+        std::io::stdout().flush().ok();
+
+        let path = ra.core_path(core);
+        let before = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        // Keep the working copy until the replacement is on disk.
+        let saved = backup.join(path.file_name().unwrap_or_default());
+        std::fs::copy(&path, &saved).ok();
+
+        match cores::install(&client, core, &dest, segment).await {
+            Ok(_) => {
+                let after = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                if after == before {
+                    println!("unchanged");
+                    unchanged += 1;
+                } else {
+                    let d = after as i64 - before as i64;
+                    println!("updated ({:+.0} KB)", d as f64 / 1024.0);
+                    updated.push(core.clone());
+                }
+            }
+            Err(e) => {
+                // Put the working core back; a failed update must not leave a
+                // hole where a core used to be.
+                std::fs::copy(&saved, &path).ok();
+                println!("FAILED ({})", e.to_string().lines().next().unwrap_or(""));
+                failed.push(core.clone());
+            }
+        }
+    }
+
+    println!(
+        "\n{} updated, {unchanged} already current, {} failed",
+        updated.len(),
+        failed.len()
+    );
+    if !failed.is_empty() {
+        println!("failed (previous version kept): {}", failed.join(", "));
+    }
+    let risky: Vec<&String> = updated
+        .iter()
+        .filter(|c| c.starts_with("mame") || c.starts_with("fbneo") || c.contains("neo"))
+        .collect();
+    if !risky.is_empty() {
+        println!(
+            "\nArcade cores changed: {}.\n\
+             Romsets are version-locked, so re-check a few arcade games. To roll\n\
+             back, copy the file(s) from {} back over {}.",
+            risky.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+            backup.display(),
+            dest.display()
+        );
+    }
+    Ok(())
 }
 
 /// Show the collection groups, or what is inside one.
@@ -1278,6 +1371,9 @@ enum Command {
         /// Download the missing cores from the libretro buildbot
         #[arg(long)]
         install: bool,
+        /// Re-download every installed core at the current nightly
+        #[arg(long)]
+        update: bool,
     },
     /// List one launchable ROM per platform
     Suggest,
@@ -1351,7 +1447,7 @@ async fn main() -> Result<()> {
         Command::Doctor => cmd_doctor(),
         Command::Shaders { platform } => cmd_shaders(platform.as_deref()),
         Command::InstallRetroarch { version } => cmd_install_retroarch(version.as_deref()).await,
-        Command::Cores { install } => cmd_cores(install).await,
+        Command::Cores { install, update } => cmd_cores(install, update).await,
         Command::Suggest => cmd_suggest(),
         Command::Launch {
             rom,

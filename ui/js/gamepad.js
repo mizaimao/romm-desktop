@@ -66,12 +66,17 @@ function poll() {
     for (const [index, action] of Object.entries(BUTTONS)) {
       if (pad.buttons[index]?.pressed) pressed.add(action);
     }
-    // Left stick doubles as a d-pad.
+    // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
+    // diagonally it would otherwise report left+up in the same frame and move
+    // twice, which reads as the cursor jumping around on its own.
     const [x = 0, y = 0] = pad.axes;
-    if (x < -STICK_DEADZONE) pressed.add("left");
-    if (x > STICK_DEADZONE) pressed.add("right");
-    if (y < -STICK_DEADZONE) pressed.add("up");
-    if (y > STICK_DEADZONE) pressed.add("down");
+    if (Math.abs(x) > Math.abs(y)) {
+      if (x < -STICK_DEADZONE) pressed.add("left");
+      if (x > STICK_DEADZONE) pressed.add("right");
+    } else {
+      if (y < -STICK_DEADZONE) pressed.add("up");
+      if (y > STICK_DEADZONE) pressed.add("down");
+    }
   }
 
   for (const action of pressed) fire(action, now);

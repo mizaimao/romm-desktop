@@ -241,6 +241,9 @@ main {
 /* Grouped search results: one section per console. The header sticks so the
    console stays identifiable while scrolling a long group. */
 .pgroup + .pgroup { margin-top: 22px; }
+/* scrollIntoView("nearest") would otherwise park a focused card underneath the
+   sticky console header. */
+.pgroup .gcard, .pgroup .row { scroll-margin-top: 44px; }
 .ghead {
   position: sticky;
   top: 0;

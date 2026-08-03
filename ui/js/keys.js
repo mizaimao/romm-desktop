@@ -15,36 +15,104 @@ function items() {
   return [...el.list.querySelectorAll(".card, .gcard, .row, .tcard")];
 }
 
-/// Columns in the current grid, so arrows mean what they look like. Derived
-/// from rendered positions rather than CSS, which uses auto-fill and varies
-/// with window width.
-function columns(nodes) {
-  if (nodes.length < 2) return 1;
-  const top = nodes[0].getBoundingClientRect().top;
-  const n = nodes.findIndex((el) => el.getBoundingClientRect().top > top + 1);
-  return n <= 0 ? nodes.length : n;
+// Rows are derived from where things actually landed, not from a column count.
+//
+// The previous version measured the first row, then moved by +/- that number
+// with the result clamped into range. Three things fell out of that: Up on the
+// top row clamped to index 0, so you jumped to the first card instead of
+// staying put; Down on the last row clamped to the final card the same way;
+// and Left/Right ran off the end of a row into the next one. Grouped search
+// results made it worse, since each console section can have its own card
+// shape and the single column count no longer described the page.
+//
+// `offsetTop`/`offsetLeft` rather than getBoundingClientRect: they are
+// relative to the layout, so the map stays valid while scrolling and only
+// needs rebuilding when the list itself changes.
+let rowCache = null;
+
+export function resetNav() {
+  rowCache = null;
+}
+window.addEventListener("resize", resetNav);
+
+function rows() {
+  const nodes = items();
+  if (rowCache && rowCache.count === nodes.length && rowCache.width === el.list.clientWidth) {
+    return rowCache.rows;
+  }
+  const buckets = [];
+  for (const n of nodes) {
+    const top = n.offsetTop;
+    // A few px of jitter is normal between cards of differing height.
+    let b = buckets.find((x) => Math.abs(x.top - top) <= 6);
+    if (!b) {
+      b = { top, nodes: [] };
+      buckets.push(b);
+    }
+    b.nodes.push(n);
+  }
+  buckets.sort((a, b) => a.top - b.top);
+  const out = buckets.map((b) => b.nodes.sort((x, y) => x.offsetLeft - y.offsetLeft));
+  rowCache = { rows: out, count: nodes.length, width: el.list.clientWidth };
+  return out;
 }
 
-function focusedIndex(nodes) {
-  const i = nodes.findIndex((n) => n.classList.contains("sel"));
-  return i < 0 ? -1 : i;
+function locate() {
+  const grid = rows();
+  for (let r = 0; r < grid.length; r++) {
+    const c = grid[r].findIndex((n) => n.classList.contains("sel"));
+    if (c >= 0) return { grid, r, c };
+  }
+  return { grid, r: -1, c: -1 };
 }
 
-function focus(nodes, index) {
-  const node = nodes[Math.max(0, Math.min(index, nodes.length - 1))];
+function focusNode(node) {
   if (!node) return;
   // Games own their selection (it drives the detail pane); other views just
   // need the highlight.
   if (node.dataset.id) selectRom(Number(node.dataset.id));
-  else nodes.forEach((n) => n.classList.toggle("sel", n === node));
+  else items().forEach((n) => n.classList.toggle("sel", n === node));
   node.scrollIntoView({ block: "nearest" });
 }
 
-function move(delta) {
+/// Left/right within the current row. Stops at the ends rather than spilling
+/// into the neighbouring row, which is what made this feel random.
+function moveX(step) {
+  const { grid, r, c } = locate();
+  if (!grid.length) return;
+  if (r < 0) return focusNode(grid[0][0]);
+  const row = grid[r];
+  focusNode(row[Math.max(0, Math.min(c + step, row.length - 1))]);
+}
+
+/// Up/down a row, keeping the column you were in.
+///
+/// Matched on horizontal centre rather than index, so a short last row, a
+/// row of differently-shaped cards, or the next console's section all land
+/// somewhere that looks directly above or below where you were.
+function moveY(step) {
+  const { grid, r, c } = locate();
+  if (!grid.length) return;
+  if (r < 0) return focusNode(grid[0][0]);
+  const target = r + step;
+  if (target < 0 || target >= grid.length) return; // stay put at the edges
+  const from = grid[r][c];
+  const x = from.offsetLeft + from.offsetWidth / 2;
+  let best = grid[target][0];
+  let bestDist = Infinity;
+  for (const n of grid[target]) {
+    const d = Math.abs(n.offsetLeft + n.offsetWidth / 2 - x);
+    if (d < bestDist) {
+      bestDist = d;
+      best = n;
+    }
+  }
+  focusNode(best);
+}
+
+function edge(last) {
   const nodes = items();
-  if (!nodes.length) return;
-  const cur = focusedIndex(nodes);
-  focus(nodes, cur < 0 ? 0 : cur + delta);
+  focusNode(last ? nodes[nodes.length - 1] : nodes[0]);
 }
 
 function activate() {
@@ -86,16 +154,16 @@ function toggleHelp() {
 }
 
 export const HANDLERS = {
-  left: () => move(-1),
-  right: () => move(1),
-  // A list is one column, so vertical movement steps one row there and a full
-  // row in a grid.
-  up: (cols) => move(-cols),
-  down: (cols) => move(cols),
-  pageUp: (cols) => move(-cols * 3),
-  pageDown: (cols) => move(cols * 3),
-  first: () => focus(items(), 0),
-  last: () => { const n = items(); focus(n, n.length - 1); },
+  // Movement is grid-aware now, so none of these need a column count: a list
+  // is simply a grid one card wide and behaves correctly without a special case.
+  left: () => moveX(-1),
+  right: () => moveX(1),
+  up: () => moveY(-1),
+  down: () => moveY(1),
+  pageUp: () => moveY(-3),
+  pageDown: () => moveY(3),
+  first: () => edge(false),
+  last: () => edge(true),
   activate,
   back: goBack,
   back2: goBack,
@@ -118,7 +186,7 @@ export const HANDLERS = {
 /// Run an action by id, as the keyboard would. Shared with the gamepad.
 export function runAction(id) {
   const handler = HANDLERS[id];
-  if (handler) handler(columns(items()));
+  if (handler) handler();
 }
 
 export function installKeys() {
@@ -178,6 +246,6 @@ export function installKeys() {
     const handler = action && HANDLERS[action];
     if (!handler) return;
     ev.preventDefault();
-    handler(columns(items()));
+    handler();
   });
 }

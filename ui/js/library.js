@@ -1,6 +1,7 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
 import { el, state, trail, invoke, convertFileSrc } from "./state.js";
+import { resetNav } from "./keys.js";
 import { human, escapeHtml } from "./util.js";
 import { selectRom, play } from "./detail.js";
 
@@ -44,11 +45,25 @@ export async function showPlatforms() {
   el.list.querySelectorAll(".card").forEach((c) =>
     c.addEventListener("click", () => showRoms(c.dataset.slug))
   );
+  resetNav();
+
+  // Put the cursor back on the console you were just in. Coming out of a game
+  // list to find the selection reset to the top-left corner means re-finding
+  // your place every single time.
+  const back = state.lastPlatform
+    ? el.list.querySelector(`.card[data-slug="${CSS.escape(state.lastPlatform)}"]`)
+    : null;
+  if (back) {
+    back.classList.add("sel");
+    back.scrollIntoView({ block: "center" });
+  }
 }
 
 export async function showRoms(slug) {
   state.view = "roms";
   state.platform = slug;
+  state.lastPlatform = slug;
+  localStorage.setItem("lastPlatform", slug);
   el.back.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;
@@ -84,6 +99,7 @@ export function renderRows(rows, showPlatform) {
   // Search spans every console, so a flat list of 200 hits buries the ones you
   // meant. Grouping also lets each console keep its own cover shape, which a
   // single mixed grid cannot.
+  resetNav();
   el.list.innerHTML = showPlatform
     ? groupedMarkup(rows)
     : state.layout === "grid"
