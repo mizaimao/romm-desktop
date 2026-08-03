@@ -220,6 +220,47 @@ main {
 }
 .filter:focus { outline: none; border-color: var(--accent); }
 
+/* Core picker in the detail pane — sits inside a <dd>, so it must not blow
+   out the two-column metadata grid. */
+#core-pick {
+  max-width: 100%;
+  padding: 2px 4px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+#core-pick:focus { outline: none; border-color: var(--accent); }
+
+/* Grouped search results: one section per console. The header sticks so the
+   console stays identifiable while scrolling a long group. */
+.pgroup + .pgroup { margin-top: 22px; }
+.ghead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 6px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ghead .gcount {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dim);
+  opacity: .75;
+}
+
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
 .dot.on { background: var(--ok); }
 

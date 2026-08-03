@@ -1,7 +1,7 @@
 // The sidebar: artwork, metadata, and the play/download actions.
 
 import { el, state, invoke, convertFileSrc } from "./state.js";
-import { human, escapeHtml, row, starBar } from "./util.js";
+import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, detailMedia, setOpenHook } from "./lightbox.js";
 import { launch, download } from "./actions.js";
 
@@ -13,8 +13,10 @@ export function setSidebar(on) {
   state.sidebar = on;
   localStorage.setItem("sidebar", on ? "on" : "off");
   el.sidebarBtn.textContent = on ? "Hide info" : "Show info";
-  // Never show the pane on the platform screen — nothing is selected there.
-  const allowed = state.view === "roms" || state.view === "search";
+  // Never show the pane on the platform or collection-list screens — nothing
+  // is selected there. Games reached through a collection do get it.
+  const allowed =
+    state.view === "roms" || state.view === "search" || state.view === "collection-roms";
   el.detail.hidden = !(on && allowed && state.selected !== null);
 }
 
@@ -24,7 +26,13 @@ export async function selectRom(id) {
     r.classList.toggle("sel", Number(r.dataset.id) === id)
   );
 
-  const d = await invoke("rom_detail", { id });
+  const [d, cores] = await Promise.all([
+    invoke("rom_detail", { id }),
+    // Never fatal: a missing core list should not blank the whole pane.
+    invoke("game_cores", { id }).catch(() => []),
+  ]);
+  // A later click may have superseded this one; do not paint a stale game.
+  if (state.selected !== id) return;
   const shots = d.screenshots || [];
 
   // Screenshots on top (cycled when there are several), cover below.
@@ -73,7 +81,7 @@ export async function selectRom(id) {
         ${row("Also known as", d.alt_names.join(" · "))}
         <dt>Platform</dt><dd>${d.platform}</dd>
         <dt>Size</dt><dd>${human(d.size_bytes)}</dd>
-        <dt>Core</dt><dd>${d.core_label ? escapeHtml(d.core_label) : "<em>none installed</em>"}</dd>
+        <dt>Core</dt><dd>${corePicker(cores, d)}</dd>
         <dt>Local</dt><dd>${d.downloaded ? "yes" : "no"}</dd>
       </dl>
       ${artStrip(d)}
@@ -100,6 +108,42 @@ export async function selectRom(id) {
 
   document.getElementById("play").addEventListener("click", () => play(d));
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
+  wireCorePicker(d.id);
+}
+
+/// A dropdown of the cores this game can run under.
+///
+/// Per-game rather than per-platform because arcade romsets are mixed: the
+/// platform default is a best guess, and individual games need to escape it.
+function corePicker(cores, d) {
+  if (!cores.length) {
+    return d.core_label ? escapeHtml(d.core_label) : "<em>none installed</em>";
+  }
+  const pinned = cores.some((c) => c.pinned);
+  return `<select id="core-pick" title="Core used to launch this game">
+      <option value=""${pinned ? "" : " selected"}>Platform default</option>
+      ${cores
+        .map(
+          (c) => `<option value="${escapeHtml(c.core)}"${c.pinned ? " selected" : ""}>
+            ${escapeHtml(c.label)}${c.installed ? "" : " (not installed)"}${
+              c.current && !c.pinned ? " — default" : ""
+            }</option>`
+        )
+        .join("")}
+    </select>`;
+}
+
+function wireCorePicker(id) {
+  const pick = document.getElementById("core-pick");
+  if (!pick) return;
+  pick.addEventListener("change", async () => {
+    try {
+      const msg = await invoke("set_game_core", { id, core: pick.value });
+      toast(msg);
+    } catch (e) {
+      toast(String(e));
+    }
+  });
 }
 
 /// Human labels for ES-DE media types, in the order worth showing.

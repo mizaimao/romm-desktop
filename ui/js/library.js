@@ -69,7 +69,10 @@ export async function runSearch(term) {
   el.sidebarBtn.hidden = false;
   el.zoomWrap.hidden = state.layout !== "grid";
   state.rows = await invoke("search", { term });
-  el.title.textContent = `Search “${term}” — ${state.rows.length}`;
+  const consoles = new Set(state.rows.map((r) => r.platform)).size;
+  el.title.textContent =
+    `Search “${term}” — ${state.rows.length}` +
+    (consoles > 1 ? ` across ${consoles} consoles` : "");
   renderRows(state.rows, true);
 }
 
@@ -78,8 +81,14 @@ export function renderRows(rows, showPlatform) {
     el.list.innerHTML = `<div class="empty">Nothing here.</div>`;
     return;
   }
-  el.list.innerHTML =
-    state.layout === "grid" ? gridMarkup(rows) : listMarkup(rows, showPlatform);
+  // Search spans every console, so a flat list of 200 hits buries the ones you
+  // meant. Grouping also lets each console keep its own cover shape, which a
+  // single mixed grid cannot.
+  el.list.innerHTML = showPlatform
+    ? groupedMarkup(rows)
+    : state.layout === "grid"
+      ? gridMarkup(rows)
+      : listMarkup(rows, showPlatform);
 
   el.list.querySelectorAll("[data-id]").forEach((n) => {
     const id = Number(n.dataset.id);
@@ -96,6 +105,31 @@ export function renderRows(rows, showPlatform) {
   if (rows.length) selectRom(rows[0].id);
 }
 
+/// Search results, split into one section per console, biggest group first.
+function groupedMarkup(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (!groups.has(r.platform)) groups.set(r.platform, []);
+    groups.get(r.platform).push(r);
+  }
+  const ordered = [...groups.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])
+  );
+
+  return ordered
+    .map(
+      ([platform, items]) => `
+      <section class="pgroup">
+        <h2 class="ghead">
+          <span class="gslug">${escapeHtml(platform)}</span>
+          <span class="gcount">${items.length}</span>
+        </h2>
+        ${state.layout === "grid" ? gridMarkup(items, platform) : listMarkup(items, false)}
+      </section>`
+    )
+    .join("");
+}
+
 function listMarkup(rows, showPlatform) {
   return `<div class="rows">${rows
     .map(
@@ -110,16 +144,17 @@ function listMarkup(rows, showPlatform) {
     .join("")}</div>`;
 }
 
-function gridMarkup(rows) {
-  // One ratio for the whole grid when the platform is uniform; search results
-  // mix platforms, so those get per-card ratios.
-  const uniform = state.view !== "search" ? state.aspects[state.platform] : null;
+function gridMarkup(rows, platform) {
+  // One ratio per grid. Grouped search passes its console in, so each section
+  // is uniform even though the results as a whole are not.
+  const slug = platform ?? (state.view !== "search" ? state.platform : null);
+  const uniform = slug ? state.aspects[slug] : null;
   const style = uniform ? ` style="--ar:${uniform.toFixed(3)}"` : "";
   return `<div class="gcards"${style}>${rows
     .map(
       (r) => `
       <div class="gcard" data-id="${r.id}"${
-        state.view === "search" && state.aspects[r.platform]
+        !uniform && state.aspects[r.platform]
           ? ` style="--ar:${state.aspects[r.platform].toFixed(3)}"`
           : ""
       }>

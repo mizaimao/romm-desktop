@@ -427,3 +427,273 @@ impl Client {
         Ok(out)
     }
 }
+
+// --- Saves and sync ---------------------------------------------------------
+//
+// The protocol, read out of the running server (`/backend/endpoints/saves.py`)
+// rather than inferred from the spec, which documents none of it:
+//
+// * `POST /api/saves` with `overwrite=false` (the default) returns **409** when
+//   the server's copy changed since this device last synced. That is real
+//   conflict detection, so we always upload with overwrite off and surface the
+//   409 rather than clobbering another machine's progress.
+// * The server dedupes on `content_hash`: an identical save is discarded and
+//   the existing record returned. This is why `savehash.rs` had to reproduce
+//   RomM's hash byte-for-byte — get it wrong and every save re-uploads forever.
+// * `autocleanup` keeps only the newest `autocleanup_limit` saves per
+//   (rom, slot) and deletes the rest. Only applies when a slot is given.
+// * `/api/sync/negotiate` covers **saves only** — its payload has no states
+//   array. States have their own endpoints and no negotiation.
+
+/// A device registered with the server; sync is scoped to one.
+///
+/// `POST /api/devices` answers with `device_id` while `GET /api/devices` lists
+/// `id`, so both spellings are accepted rather than silently deserialising to
+/// nothing.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct Device {
+    #[serde(alias = "device_id")]
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct Save {
+    pub id: i64,
+    pub rom_id: i64,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub file_size_bytes: i64,
+    #[serde(default)]
+    pub content_hash: Option<String>,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
+    pub emulator: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// What the client believes it has, for one save.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ClientSaveState {
+    pub rom_id: i64,
+    pub file_name: String,
+    pub slot: Option<String>,
+    pub emulator: Option<String>,
+    pub content_hash: String,
+    pub updated_at: String,
+    pub file_size_bytes: i64,
+}
+
+/// What the server tells us to do about one save.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncOperation {
+    /// `upload`, `download`, `conflict` or `no_op`.
+    pub action: String,
+    pub rom_id: i64,
+    #[serde(default)]
+    pub save_id: Option<i64>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
+    pub emulator: Option<String>,
+    /// Why the server chose this action — worth showing verbatim.
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub server_content_hash: Option<String>,
+    #[serde(default)]
+    pub server_updated_at: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncPlan {
+    #[serde(default)]
+    pub session_id: Option<i64>,
+    #[serde(default)]
+    pub operations: Vec<SyncOperation>,
+    #[serde(default)]
+    pub total_upload: i64,
+    #[serde(default)]
+    pub total_download: i64,
+    #[serde(default)]
+    pub total_conflict: i64,
+    #[serde(default)]
+    pub total_no_op: i64,
+}
+
+/// Upload rejected because the server's copy moved on since our last sync.
+#[derive(Debug)]
+pub struct Conflict {
+    pub detail: String,
+}
+
+impl Client {
+    async fn post_json<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base, path);
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Basic {}", self.auth))
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("POST {url} -> {status}\n  {}", body.chars().take(300).collect::<String>());
+        }
+        resp.json::<T>().await.with_context(|| format!("decoding {url}"))
+    }
+
+    pub async fn devices(&self) -> Result<Vec<Device>> {
+        self.get_json("/api/devices").await
+    }
+
+    /// Register this machine, or return its existing registration.
+    ///
+    /// **`hostname` is load-bearing.** The server deduplicates on a fingerprint
+    /// of `(mac_address, hostname, platform)` — verified in
+    /// `/backend/endpoints/device.py`. It ignores `client_device_identifier`
+    /// on create entirely. Registering without a hostname fingerprints as
+    /// all-nulls, matches nothing, and mints a brand new device every call;
+    /// each new device starts with empty sync bookkeeping, so every save then
+    /// looks like a first-time upload.
+    pub async fn register_device(&self, name: &str, hostname: &str) -> Result<Device> {
+        self.post_json(
+            "/api/devices",
+            &serde_json::json!({
+                "name": name,
+                "hostname": hostname,
+                "platform": std::env::consts::OS,
+                "client": "romm-desktop",
+                "client_version": env!("CARGO_PKG_VERSION"),
+                "allow_existing": true,
+            }),
+        )
+        .await
+    }
+
+    /// Saves the server holds, optionally for one ROM.
+    pub async fn saves(&self, rom_id: Option<i64>) -> Result<Vec<Save>> {
+        let path = match rom_id {
+            Some(id) => format!("/api/saves?rom_id={id}"),
+            None => "/api/saves".to_owned(),
+        };
+        self.get_json(&path).await
+    }
+
+    /// Ask the server what to do, given everything we hold locally.
+    pub async fn negotiate(&self, device_id: &str, saves: &[ClientSaveState]) -> Result<SyncPlan> {
+        self.post_json(
+            "/api/sync/negotiate",
+            &serde_json::json!({ "device_id": device_id, "saves": saves }),
+        )
+        .await
+    }
+
+    /// Download one save's bytes.
+    pub async fn save_content(&self, save_id: i64, device_id: &str) -> Result<Vec<u8>> {
+        let url = format!("{}/api/saves/{save_id}/content?device_id={device_id}", self.base);
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Basic {}", self.auth))
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        if !resp.status().is_success() {
+            bail!("GET {url} -> {}", resp.status());
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
+    /// Tell the server a download landed, so its per-device bookkeeping stays
+    /// accurate and the file is not offered again next time.
+    pub async fn confirm_download(&self, save_id: i64) -> Result<()> {
+        let url = format!("{}/api/saves/{save_id}/downloaded", self.base);
+        self.http
+            .post(&url)
+            .header("Authorization", format!("Basic {}", self.auth))
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        Ok(())
+    }
+
+    /// Upload a save. `Ok(Err(Conflict))` means the server refused because its
+    /// copy is newer — a real outcome to show the user, not an error.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upload_save(
+        &self,
+        rom_id: i64,
+        file_name: &str,
+        bytes: Vec<u8>,
+        slot: Option<&str>,
+        emulator: Option<&str>,
+        device_id: &str,
+        session_id: Option<i64>,
+    ) -> Result<std::result::Result<Save, Conflict>> {
+        let mut url = format!("/api/saves?rom_id={rom_id}&device_id={device_id}");
+        if let Some(s) = slot {
+            url.push_str(&format!("&slot={}", urlencode(s)));
+        }
+        if let Some(e) = emulator {
+            url.push_str(&format!("&emulator={}", urlencode(e)));
+        }
+        if let Some(s) = session_id {
+            url.push_str(&format!("&session_id={s}"));
+        }
+        // overwrite stays off: that is what makes the server detect conflicts.
+
+        let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name.to_owned());
+        let form = reqwest::multipart::Form::new().part("saveFile", part);
+
+        let full = format!("{}{}", self.base, url);
+        let resp = self
+            .http
+            .post(&full)
+            .header("Authorization", format!("Basic {}", self.auth))
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("POST {full}"))?;
+
+        if resp.status() == reqwest::StatusCode::CONFLICT {
+            let detail = resp.text().await.unwrap_or_default();
+            return Ok(Err(Conflict { detail }));
+        }
+        if !resp.status().is_success() {
+            let s = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("POST {full} -> {s}\n  {}", body.chars().take(300).collect::<String>());
+        }
+        Ok(Ok(resp.json().await.context("decoding uploaded save")?))
+    }
+
+    /// Close a sync session so the server stops counting it as in flight.
+    pub async fn complete_session(&self, session_id: i64) -> Result<()> {
+        let url = format!("{}/api/sync/sessions/{session_id}/complete", self.base);
+        self.http
+            .post(&url)
+            .header("Authorization", format!("Basic {}", self.auth))
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        Ok(())
+    }
+}

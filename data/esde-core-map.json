@@ -47,9 +47,22 @@
     "sfc": "snes9x",
     "snes": "snes9x",
     "wonderswan": "mednafen_wswan",
-    "wonderswancolor": "mednafen_wswan"
+    "wonderswancolor": "mednafen_wswan",
+    "naomi": "flycast",
+    "saturn": "mednafen_saturn",
+    "wii": "dolphin",
+    "easyrpg": "easyrpg",
+    "pico8": "retro8",
+    "g-and-w": "gw"
   },
-  "romm_platforms_without_mapping": [],
+  "romm_platforms_without_mapping": [
+    "new-nintendo-3ds",
+    "ps2",
+    "ps3",
+    "switch",
+    "wiiu",
+    "xbox360"
+  ],
   "systems": {
     "3do": {
       "fullname": "3DO Interactive Multiplayer",
@@ -3935,5 +3948,50 @@
   },
   "relevant_settings": {
     "AlternativeEmulatorPerGame": "true"
+  },
+  "default_core_source": {
+    "_comment": "Defaults come from the Android ES-DE export first — that device is known to work, so its choices win. Platforms the export never covered fall back to community consensus (libretro docs / ES-DE defaults) and are listed under community_consensus so the two are never confused.",
+    "android_export": [
+      "3do",
+      "arcade",
+      "dc",
+      "famicom",
+      "gamegear",
+      "gb",
+      "gba",
+      "gbc",
+      "mame",
+      "mastersystem",
+      "megadrive",
+      "n64",
+      "nds",
+      "neo-geo-pocket",
+      "neogeoaes",
+      "nes",
+      "ngc",
+      "pcengine",
+      "psp",
+      "psx",
+      "sfc",
+      "snes",
+      "wonderswan",
+      "wonderswancolor"
+    ],
+    "community_consensus": {
+      "naomi": "flycast",
+      "saturn": "mednafen_saturn",
+      "wii": "dolphin",
+      "easyrpg": "easyrpg",
+      "pico8": "retro8",
+      "g-and-w": "gw"
+    },
+    "no_libretro_core": {
+      "ps2": "LRPS2 has no usable macOS build; PCSX2 is standalone",
+      "ps3": "RPCS3 is standalone, no libretro core",
+      "switch": "no libretro core exists",
+      "wiiu": "no libretro core exists",
+      "xbox360": "no libretro core exists",
+      "new-nintendo-3ds": "Citra cores are unmaintained and absent for macOS arm64"
+    }
   }
 }

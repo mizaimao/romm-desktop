@@ -40,6 +40,26 @@ pub fn resolve_core(
     platform: &str,
     has_core: impl Fn(&str) -> bool,
 ) -> Option<String> {
+    resolve_core_for(map, overrides, &Default::default(), platform, None, has_core)
+}
+
+/// As [`resolve_core`], but a per-game override wins over the platform one.
+///
+/// Arcade is why this exists: no single core runs a mixed romset, so the
+/// platform default is a best guess and individual games need to escape it.
+pub fn resolve_core_for(
+    map: &CoreMap,
+    overrides: &std::collections::BTreeMap<String, String>,
+    per_game: &std::collections::BTreeMap<String, String>,
+    platform: &str,
+    fs_name: Option<&str>,
+    has_core: impl Fn(&str) -> bool,
+) -> Option<String> {
+    if let Some(fs_name) = fs_name
+        && let Some(core) = per_game.get(&crate::config::game_key(platform, fs_name))
+    {
+        return Some(core.clone());
+    }
     // An override is a deliberate choice; honour it even if not installed, so
     // the failure names the core the user asked for.
     if let Some(core) = overrides.get(platform) {

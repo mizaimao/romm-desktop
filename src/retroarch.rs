@@ -315,6 +315,26 @@ config_save_on_exit = \"false\"
         fullscreen: bool,
         overrides: Option<&Path>,
     ) -> Result<Command> {
+        self.launch_command_full(core, rom, fullscreen, overrides, None)
+    }
+
+    /// The full form, including an explicit shader preset.
+    ///
+    /// `--set-shader` rather than the `video_shader` config key. Writing the
+    /// key into an `--appendconfig` file looked right and did nothing: for
+    /// RetroArch that key is remembered *state*, and what actually loads a
+    /// preset with content is this flag, which its own help describes as
+    /// "loaded each time content is loaded, effectively overrides automatic
+    /// shader presets". Passing an empty string disables shaders explicitly,
+    /// so a preset set for the previous game cannot leak into this one.
+    pub fn launch_command_full(
+        &self,
+        core: &str,
+        rom: &Path,
+        fullscreen: bool,
+        overrides: Option<&Path>,
+        shader: Option<&Path>,
+    ) -> Result<Command> {
         let core_path = self.core_path(core);
         if !core_path.is_file() {
             bail!(
@@ -330,6 +350,14 @@ config_save_on_exit = \"false\"
         cmd.arg("-L").arg(&core_path).arg(rom);
         if let Some(cfg) = overrides {
             cmd.arg("--appendconfig").arg(cfg);
+        }
+        match shader {
+            Some(p) => {
+                cmd.arg(format!("--set-shader={}", p.display()));
+            }
+            None => {
+                cmd.arg("--set-shader=");
+            }
         }
         if fullscreen {
             cmd.arg("-f");
@@ -350,7 +378,19 @@ config_save_on_exit = \"false\"
         fullscreen: bool,
         overrides: Option<&Path>,
     ) -> Result<std::process::ExitStatus> {
-        let mut cmd = self.launch_command_with(core, rom, fullscreen, overrides)?;
+        self.launch_full(core, rom, fullscreen, overrides, None)
+    }
+
+    /// As [`Self::launch_with`], with an explicit shader preset.
+    pub fn launch_full(
+        &self,
+        core: &str,
+        rom: &Path,
+        fullscreen: bool,
+        overrides: Option<&Path>,
+        shader: Option<&Path>,
+    ) -> Result<std::process::ExitStatus> {
+        let mut cmd = self.launch_command_full(core, rom, fullscreen, overrides, shader)?;
         let status = cmd
             .status()
             .with_context(|| format!("spawning {}", self.binary.display()))?;

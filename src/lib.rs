@@ -10,6 +10,7 @@ pub mod cores;
 pub mod download;
 pub mod media;
 pub mod parity;
+pub mod probe;
 pub mod retroarch;
 pub mod retroarch_install;
 pub mod savehash;

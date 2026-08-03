@@ -19,6 +19,7 @@ use romm_desktop::config::Config;
 use romm_desktop::coremap::{self, CoreMap};
 use romm_desktop::retroarch::{self, RetroArch};
 use romm_desktop::retroarch_install;
+use romm_desktop::probe;
 use romm_desktop::shaders;
 use romm_desktop::util::human;
 
@@ -71,11 +72,17 @@ fn cmd_doctor() -> Result<()> {
     let map = CoreMap::load(Path::new(CORE_MAP))?;
     let mut ready = Vec::new();
     let mut missing = Vec::new();
-    for (platform, core) in &map.default_core_by_romm_platform {
-        if ra.has_core(core) {
-            ready.push((platform, core));
+    // Resolve the same way a launch does, so this reports what would actually
+    // run rather than the ES-DE map's default — the two differ wherever
+    // [cores.overrides] applies, which was silently misreported before.
+    for platform in map.default_core_by_romm_platform.keys() {
+        let core = coremap::resolve_core(&map, &cfg.cores.overrides, platform, |c| ra.has_core(c))
+            .or_else(|| map.default_core(platform).map(str::to_owned));
+        let Some(core) = core else { continue };
+        if ra.has_core(&core) {
+            ready.push((platform.clone(), core));
         } else {
-            missing.push((platform, core));
+            missing.push((platform.clone(), core));
         }
     }
 
@@ -114,7 +121,15 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         None => {
             let platform = platform_from_path(rom)
                 .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
-            coremap::resolve_core(&map, &cfg.cores.overrides, &platform, |c| ra.has_core(c))
+            let fs_name = rom.file_name().and_then(|n| n.to_str());
+            coremap::resolve_core_for(
+                &map,
+                &cfg.cores.overrides,
+                &cfg.cores.per_game,
+                &platform,
+                fs_name,
+                |c| ra.has_core(c),
+            )
                 .with_context(|| {
                     format!(
                         "no installed core for platform {platform:?}.\n\
@@ -159,12 +174,14 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     if RetroArch::ensure_user_config(&user_cfg).unwrap_or(false) {
         println!("created {} — put your button map / filters there", user_cfg.display());
     }
+    let mut shader_path = None;
     let shader_cfg = if cfg.shaders.enabled {
         let platform = platform_from_path(rom).unwrap_or_default();
         let preset = shaders::preset_for(&cfg.shaders.by_platform, &platform);
         if let Some(p) = &preset {
             println!("shader  {} ({p})", shaders::label_of(p));
         }
+        shader_path = preset.as_deref().and_then(|p| shaders::resolve(&ra, p));
         shaders::config_lines(&ra, preset.as_deref())
     } else {
         String::new()
@@ -172,7 +189,9 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     let overrides = ra
         .write_overrides_full(Path::new(&cfg.library.local_root), Some(&user_cfg), &shader_cfg)
         .ok();
-    let cmd = ra.launch_command_with(&core, rom, fullscreen, overrides.as_deref())?;
+    let cmd = ra.launch_command_full(
+        &core, rom, fullscreen, overrides.as_deref(), shader_path.as_deref(),
+    )?;
     let label = map
         .label_for(&core)
         .map(|l| format!(" ({l})"))
@@ -187,7 +206,9 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     }
 
     println!("\nlaunching…");
-    let status = ra.launch_with(&core, rom, fullscreen, overrides.as_deref())?;
+    let status = ra.launch_full(
+        &core, rom, fullscreen, overrides.as_deref(), shader_path.as_deref(),
+    )?;
     match status.code() {
         Some(0) => println!("RetroArch exited cleanly (0)"),
         Some(c) => println!("RetroArch exited with status {c}"),
@@ -514,6 +535,230 @@ async fn cmd_sync(full: bool) -> Result<()> {
         println!("watermark {w}");
     }
     Ok(())
+}
+
+/// Download every ROM of one platform, several at a time.
+///
+/// Sequential transfers waste most of the wall clock on per-request latency
+/// when the files are small — an arcade set averages 4.5 MB.
+async fn cmd_get_platform(slug: &str, jobs: usize) -> Result<()> {
+    use futures_util::StreamExt as _;
+
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    romm_desktop::apply_cached_server_config(&store);
+    let rows = store.roms_for(slug)?;
+    if rows.is_empty() {
+        bail!("no cached roms for platform {slug:?} — try `sync` first");
+    }
+
+    let roms_dir = cfg.local_roms_dir();
+    let client = std::sync::Arc::new(api::Client::new(
+        &cfg.server.url,
+        &cfg.server.username,
+        &cfg.server.password,
+    )?);
+
+    let total: i64 = rows.iter().map(|r| r.fs_size_bytes.max(0)).sum();
+    println!("{} games, {} — {jobs} at a time", rows.len(), human(total as u64));
+    let started = std::time::Instant::now();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let failed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let count = rows.len();
+
+    futures_util::stream::iter(rows.into_iter().map(|rom| {
+        let client = client.clone();
+        let roms_dir = roms_dir.clone();
+        let done = done.clone();
+        let failed = failed.clone();
+        async move {
+            let members = if rom.multi_file {
+                client.member_hashes(rom.id).await
+            } else {
+                Vec::new()
+            };
+            let target = download::Target {
+                rom_id: rom.id,
+                members: &members,
+                fs_name: &rom.fs_name,
+                platform_slug: &rom.platform_slug,
+                expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
+                md5: rom.md5_hash.as_deref(),
+                sha1: rom.sha1_hash.as_deref(),
+                multi_file: rom.multi_file,
+            };
+            let r = download::fetch(
+                client.http(),
+                client.base(),
+                client.auth(),
+                &target,
+                &roms_dir,
+                |_, _| {},
+            )
+            .await;
+            let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if let Err(e) = r {
+                failed.lock().unwrap().push(format!("{}: {e}", rom.fs_name));
+            }
+            if n % 25 == 0 || n == count {
+                let secs = started.elapsed().as_secs_f64();
+                println!("  {n}/{count} in {secs:.0}s");
+            }
+        }
+    }))
+    .buffer_unordered(jobs.max(1))
+    .collect::<Vec<_>>()
+    .await;
+
+    let failed = failed.lock().unwrap();
+    println!(
+        "\n{}/{count} downloaded in {:.0}s",
+        count - failed.len(),
+        started.elapsed().as_secs_f64()
+    );
+    for f in failed.iter().take(15) {
+        println!("  failed: {f}");
+    }
+    if failed.len() > 15 {
+        println!("  … and {} more", failed.len() - 15);
+    }
+    Ok(())
+}
+
+/// Find out which cores actually run something, by running them.
+///
+/// Downloads what it needs first: a verdict about a game we do not have is
+/// worthless, and arcade ROMs are small.
+async fn cmd_probe(
+    term: Option<&str>,
+    platform: Option<&str>,
+    sample: usize,
+    cores: Option<&str>,
+    frames: u32,
+) -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let ra = RetroArch::locate_in(&cfg.retroarch.ordered_paths())?;
+    let scratch = probe::scratch_dir(&cfg.library.local_root);
+
+    let roms = match (term, platform) {
+        (Some(t), _) => {
+            let found = if let Ok(id) = t.parse::<i64>() {
+                store.rom_by_id(id)?.into_iter().collect()
+            } else {
+                store.search(t, 5)?
+            };
+            if found.is_empty() {
+                bail!("nothing matches {t:?}");
+            }
+            found
+        }
+        (None, Some(p)) => {
+            let mut all = store.roms_for(p)?;
+            if all.is_empty() {
+                bail!("no cached roms for platform {p:?}");
+            }
+            // Spread the sample across the alphabet rather than taking the
+            // first N, which on this library would be all numeric titles.
+            let step = (all.len() / sample.max(1)).max(1);
+            all = all.into_iter().step_by(step).take(sample).collect();
+            all
+        }
+        (None, None) => bail!("give a game, or --platform <slug>"),
+    };
+
+    let slug = roms[0].platform_slug.clone();
+    let candidates: Vec<String> = match cores {
+        Some(list) => list.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect(),
+        None => {
+            let mut v: Vec<String> = map.alternatives(&slug).into_iter().map(str::to_owned).collect();
+            if let Some(d) = map.default_core(&slug)
+                && !v.iter().any(|c| c == d)
+            {
+                v.insert(0, d.to_owned());
+            }
+            v
+        }
+    };
+    if candidates.is_empty() {
+        bail!("no candidate cores for platform {slug:?}; pass --cores");
+    }
+
+    println!(
+        "probing {} game(s) against {}: {}\n",
+        roms.len(),
+        candidates.len(),
+        candidates.join(", ")
+    );
+
+    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password).ok();
+    let roms_dir = cfg.local_roms_dir();
+    let mut tally: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+
+    for rom in &roms {
+        let local = roms_dir.join(&rom.platform_slug).join(&rom.fs_name);
+        if !local.exists() {
+            let Some(client) = client.as_ref() else {
+                println!("{:<44} skipped (not downloaded, no server)", short(&rom.name));
+                continue;
+            };
+            let members = if rom.multi_file { client.member_hashes(rom.id).await } else { Vec::new() };
+            let target = download::Target {
+                rom_id: rom.id,
+                members: &members,
+                fs_name: &rom.fs_name,
+                platform_slug: &rom.platform_slug,
+                expected_size: (rom.fs_size_bytes > 0).then_some(rom.fs_size_bytes as u64),
+                md5: rom.md5_hash.as_deref(),
+                sha1: rom.sha1_hash.as_deref(),
+                multi_file: rom.multi_file,
+            };
+            if let Err(e) =
+                download::fetch(client.http(), client.base(), client.auth(), &target, &roms_dir, |_, _| {})
+                    .await
+            {
+                println!("{:<44} skipped ({e})", short(&rom.name));
+                continue;
+            }
+        }
+        // Neo Geo and similar need their BIOS in RetroArch's system dir, or
+        // every core refuses the content for a reason unrelated to the core.
+        if let Some(d) = local.parent() {
+            let _ = ra.install_bios(d);
+        }
+
+        let results = probe::probe_cores(&ra, &local, &candidates, frames, &scratch)?;
+        let marks: Vec<String> = results
+            .iter()
+            .map(|r| format!("{:>7}", if r.verdict.ok() { "ok" } else { "-" }))
+            .collect();
+        println!("{:<44}{}", short(&rom.name), marks.join(""));
+        for r in &results {
+            let e = tally.entry(r.core.clone()).or_default();
+            e.1 += 1;
+            if r.verdict.ok() {
+                e.0 += 1;
+            }
+        }
+    }
+
+    println!("\n{:<22}{:>8}  {}", "core", "ran", "share");
+    let mut ranked: Vec<_> = tally.into_iter().collect();
+    ranked.sort_by_key(|(_, (ok, _))| std::cmp::Reverse(*ok));
+    for (core, (ok, total)) in &ranked {
+        println!(
+            "{core:<22}{:>8}  {:.0}%",
+            format!("{ok}/{total}"),
+            if *total > 0 { *ok as f64 / *total as f64 * 100.0 } else { 0.0 }
+        );
+    }
+    println!("\ncolumns are the cores in the order listed above");
+    Ok(())
+}
+
+fn short(s: &str) -> String {
+    s.chars().take(42).collect()
 }
 
 /// Show the collection groups, or what is inside one.
@@ -1001,6 +1246,32 @@ enum Command {
     },
     /// Terminal library browser
     Browse,
+    /// Test which cores actually run a game, or a sample of a platform.
+    ///
+    /// OPENS A RETROARCH WINDOW PER PROBE. On macOS `video_driver = "null"`
+    /// silences rendering but does NOT stop the window appearing, so N games x
+    /// M cores means N*M windows. Requires --i-know-it-opens-windows.
+    Probe {
+        /// ROM id, or a search term
+        term: Option<String>,
+        /// Probe a sample of this platform instead of one game
+        #[arg(long)]
+        platform: Option<String>,
+        /// How many games to sample from the platform
+        #[arg(long, default_value_t = 12)]
+        sample: usize,
+        /// Cores to try, comma separated. Defaults to every core the map
+        /// knows for the platform.
+        #[arg(long)]
+        cores: Option<String>,
+        /// Frames to run before exiting. 180 is about three seconds.
+        #[arg(long, default_value_t = 180)]
+        frames: u32,
+        /// Required. Each probe opens a RetroArch window; there is no headless
+        /// mode on macOS.
+        #[arg(long)]
+        i_know_it_opens_windows: bool,
+    },
     /// List collections mirrored from the server
     Collections {
         /// Show the collections inside one group, e.g. `genre`
@@ -1009,7 +1280,13 @@ enum Command {
     /// Download a ROM (resumable, hash-verified)
     Get {
         /// Name or filename to search for
-        term: String,
+        term: Option<String>,
+        /// Download an entire platform instead of one game
+        #[arg(long)]
+        platform: Option<String>,
+        /// Concurrent transfers when fetching a whole platform
+        #[arg(long, default_value_t = 6)]
+        jobs: usize,
     },
     /// Check our content_hash implementation against the server's
     HashParity,
@@ -1084,7 +1361,21 @@ async fn main() -> Result<()> {
         Command::Sync { full } => cmd_sync(full).await,
         Command::Browse => cmd_browse(),
         Command::Collections { group } => cmd_collections(group.as_deref()),
-        Command::Get { term } => cmd_get(&term).await,
+        Command::Probe { term, platform, sample, cores, frames, i_know_it_opens_windows } => {
+            if !i_know_it_opens_windows {
+                bail!(
+                    "probe opens one RetroArch window per game per core, and macOS has no\n\
+                     headless mode for it. Re-run with --i-know-it-opens-windows if that is\n\
+                     what you want."
+                );
+            }
+            cmd_probe(term.as_deref(), platform.as_deref(), sample, cores.as_deref(), frames).await
+        }
+        Command::Get { term, platform, jobs } => match (term, platform) {
+            (_, Some(slug)) => cmd_get_platform(&slug, jobs).await,
+            (Some(t), None) => cmd_get(&t).await,
+            (None, None) => bail!("give a search term, or --platform <slug>"),
+        },
         Command::HashParity => {
             let cfg = Config::load()?;
             let client =

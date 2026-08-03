@@ -32,10 +32,14 @@ struct AppState {
     media_dir: PathBuf,
     theme_root: Option<String>,
     themes_dir: PathBuf,
-    core_overrides: std::collections::BTreeMap<String, String>,
+    /// Behind mutexes so a choice made in the UI takes effect on the next
+    /// launch rather than the next restart. `config.toml` stays the source of
+    /// truth; these are the live copy.
+    core_overrides: Mutex<std::collections::BTreeMap<String, String>>,
+    core_per_game: Mutex<std::collections::BTreeMap<String, String>>,
     user_retroarch_cfg: PathBuf,
     shaders_enabled: bool,
-    shader_overrides: std::collections::BTreeMap<String, String>,
+    shader_overrides: Mutex<std::collections::BTreeMap<String, String>>,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
@@ -256,7 +260,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     }
     .ok_or_else(|| format!("no rom with id {id}"))?;
 
-    let core = resolve_core(&state, &row.platform_slug);
+    let core = resolve_core_for(&state, &row.platform_slug, Some(&row.fs_name));
     let core_label = core
         .as_deref()
         .and_then(|c| state.map.label_for(c))
@@ -498,13 +502,19 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
     let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
     let path = local_path(&state, &row.platform_slug, &row.fs_name)
         .ok_or("not downloaded yet")?;
-    let core = resolve_core(&state, &row.platform_slug)
+    let core = resolve_core_for(&state, &row.platform_slug, Some(&row.fs_name))
         .ok_or_else(|| format!("no installed core for {}", row.platform_slug))?;
 
     if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
     // Per-platform shader, same as the CLI applies.
+    let preset = if state.shaders_enabled {
+        let m = state.shader_overrides.lock().map_err(err)?;
+        shaders::preset_for(&m, &row.platform_slug)
+    } else {
+        None
+    };
+    let shader_path = preset.as_deref().and_then(|p| shaders::resolve(ra, p));
     let shader_cfg = if state.shaders_enabled {
-        let preset = shaders::preset_for(&state.shader_overrides, &row.platform_slug);
         shaders::config_lines(ra, preset.as_deref())
     } else {
         String::new()
@@ -514,7 +524,7 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
             .ok()
     });
     let status = ra
-        .launch_with(&core, &path, false, overrides.as_deref())
+        .launch_full(&core, &path, false, overrides.as_deref(), shader_path.as_deref())
         .map_err(err)?;
     Ok(if status.success() {
         format!("{} exited cleanly", row.name)
@@ -685,7 +695,10 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
             SystemView {
                 core: resolve_core(&state, &slug),
                 shader: if state.shaders_enabled {
-                    shaders::preset_for(&state.shader_overrides, &slug)
+                    shaders::preset_for(
+                        &state.shader_overrides.lock().unwrap_or_else(|e| e.into_inner()),
+                        &slug,
+                    )
                 } else {
                     None
                 },
@@ -722,15 +735,106 @@ fn set_system_choice(
     };
     romm_desktop::config::set_table_entry("config.toml", table, &slug, &value).map_err(err)?;
 
-    // Reflect it immediately; the file is the source of truth on next launch.
+    // Reflect it in the live copy too, so the next launch uses it without a
+    // restart. config.toml remains authoritative on startup.
     match field.as_str() {
         "core" => {
-            let mut m = state.core_overrides.clone();
-            m.insert(slug.clone(), value.clone());
+            state.core_overrides.lock().map_err(err)?.insert(slug.clone(), value.clone());
+        }
+        "shader" => {
+            state.shader_overrides.lock().map_err(err)?.insert(slug.clone(), value.clone());
         }
         _ => {}
     }
-    Ok(format!("{slug}: {field} = {value} (restart to apply everywhere)"))
+    Ok(format!("{slug}: {field} = {value}"))
+}
+
+/// Cores this game could run under, with the one in force marked.
+///
+/// Arcade is the reason this is per-game rather than per-platform: a mixed
+/// romset has no single correct core, so individual games must be able to
+/// escape the platform default.
+#[derive(Serialize)]
+struct CoreChoice {
+    core: String,
+    label: String,
+    installed: bool,
+    /// True for the core this game would launch with right now.
+    current: bool,
+    /// True when that is because of a per-game override rather than the
+    /// platform default.
+    pinned: bool,
+}
+
+#[tauri::command]
+fn game_cores(state: State<'_, AppState>, id: i64) -> CmdResult<Vec<CoreChoice>> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+
+    let current = resolve_core_for(&state, &row.platform_slug, Some(&row.fs_name));
+    let pinned = state
+        .core_per_game
+        .lock()
+        .map_err(err)?
+        .contains_key(&romm_desktop::config::game_key(&row.platform_slug, &row.fs_name));
+
+    let mut cores: Vec<String> = state
+        .map
+        .alternatives(&row.platform_slug)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    // The platform default and whatever is in force are always offered, even
+    // if ES-DE never listed them for this system.
+    for extra in [state.map.default_core(&row.platform_slug).map(str::to_owned), current.clone()]
+        .into_iter()
+        .flatten()
+    {
+        if !cores.contains(&extra) {
+            cores.push(extra);
+        }
+    }
+
+    Ok(cores
+        .into_iter()
+        .map(|core| CoreChoice {
+            label: state.map.label_for(&core).unwrap_or(&core).to_owned(),
+            installed: state.retroarch.as_ref().is_some_and(|ra| ra.has_core(&core)),
+            current: current.as_deref() == Some(core.as_str()),
+            pinned: pinned && current.as_deref() == Some(core.as_str()),
+            core,
+        })
+        .collect())
+}
+
+/// Pin a core to one game, or clear the pin with an empty `core`.
+#[tauri::command]
+fn set_game_core(state: State<'_, AppState>, id: i64, core: String) -> CmdResult<String> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+
+    let key = romm_desktop::config::game_key(&row.platform_slug, &row.fs_name);
+    if core.is_empty() {
+        romm_desktop::config::clear_table_entry("config.toml", "cores.per_game", &key)
+            .map_err(err)?;
+    } else {
+        romm_desktop::config::set_table_entry("config.toml", "cores.per_game", &key, &core)
+            .map_err(err)?;
+    }
+
+    let mut live = state.core_per_game.lock().map_err(err)?;
+    if core.is_empty() {
+        live.remove(&key);
+        return Ok(format!("{}: back to the {} default", row.name, row.platform_slug));
+    }
+    live.insert(key, core.clone());
+    Ok(format!("{}: pinned to {core}", row.name))
 }
 
 /// Copy system logos out of an installed ES-DE theme into the media tree.
@@ -841,8 +945,21 @@ fn local_path(state: &State<'_, AppState>, platform: &str, fs_name: &str) -> Opt
 }
 
 fn resolve_core(state: &State<'_, AppState>, platform: &str) -> Option<String> {
+    resolve_core_for(state, platform, None)
+}
+
+/// As [`resolve_core`], honouring a per-game override when the file is known.
+fn resolve_core_for(
+    state: &State<'_, AppState>,
+    platform: &str,
+    fs_name: Option<&str>,
+) -> Option<String> {
     let ra = state.retroarch.as_ref()?;
-    coremap::resolve_core(&state.map, &state.core_overrides, platform, |c| ra.has_core(c))
+    let overrides = state.core_overrides.lock().ok()?;
+    let per_game = state.core_per_game.lock().ok()?;
+    coremap::resolve_core_for(&state.map, &overrides, &per_game, platform, fs_name, |c| {
+        ra.has_core(c)
+    })
 }
 
 /// Find the data root and make it the working directory.
@@ -938,10 +1055,11 @@ fn main() {
             media_dir,
             theme_root: cfg.theme.root.clone(),
             themes_dir: cfg.themes_dir(),
-            core_overrides: cfg.cores.overrides.clone(),
+            core_overrides: Mutex::new(cfg.cores.overrides.clone()),
+            core_per_game: Mutex::new(cfg.cores.per_game.clone()),
             user_retroarch_cfg: cfg.user_retroarch_config(),
             shaders_enabled: cfg.shaders.enabled,
-            shader_overrides: cfg.shaders.by_platform.clone(),
+            shader_overrides: Mutex::new(cfg.shaders.by_platform.clone()),
             icon_style: AtomicU8::new(0),
         })
         .invoke_handler(tauri::generate_handler![
@@ -963,6 +1081,8 @@ fn main() {
             set_icon_style,
             systems,
             set_system_choice,
+            game_cores,
+            set_game_core,
             status
         ])
         .run(tauri::generate_context!())

@@ -62,6 +62,7 @@ pub struct App {
     ra: Option<RetroArch>,
     map: CoreMap,
     core_overrides: std::collections::BTreeMap<String, String>,
+    core_per_game: std::collections::BTreeMap<String, String>,
     user_ra_cfg: PathBuf,
     shaders_enabled: bool,
     shader_overrides: std::collections::BTreeMap<String, String>,
@@ -108,6 +109,9 @@ impl App {
             map,
             core_overrides: crate::config::Config::load()
                 .map(|c| c.cores.overrides)
+                .unwrap_or_default(),
+            core_per_game: crate::config::Config::load()
+                .map(|c| c.cores.per_game)
                 .unwrap_or_default(),
             user_ra_cfg: crate::config::Config::load()
                 .map(|c| c.user_retroarch_config())
@@ -185,9 +189,24 @@ impl App {
     /// Resolve the core for a ROM, preferring the mapped default but falling
     /// back to any installed alternative.
     fn resolve_core(&self, ra: &RetroArch, platform: &str) -> Option<String> {
-        crate::coremap::resolve_core(&self.map, &self.core_overrides, platform, |c| {
-            ra.has_core(c)
-        })
+        self.resolve_core_for(ra, platform, None)
+    }
+
+    /// As `resolve_core`, honouring a per-game override when the file is known.
+    fn resolve_core_for(
+        &self,
+        ra: &RetroArch,
+        platform: &str,
+        fs_name: Option<&str>,
+    ) -> Option<String> {
+        crate::coremap::resolve_core_for(
+            &self.map,
+            &self.core_overrides,
+            &self.core_per_game,
+            platform,
+            fs_name,
+            |c| ra.has_core(c),
+        )
     }
 
     /// Enter: play. Downloads first if the ROM is not local yet.
@@ -217,7 +236,7 @@ impl App {
             self.status = format!("not downloaded: {}", rom.fs_name);
             return Ok(());
         };
-        let Some(core) = self.resolve_core(ra, &rom.platform_slug) else {
+        let Some(core) = self.resolve_core_for(ra, &rom.platform_slug, Some(&rom.fs_name)) else {
             self.status = format!("no installed core for {}", rom.platform_slug);
             return Ok(());
         };
@@ -227,12 +246,16 @@ impl App {
         // Overrides neutralise handheld-oriented settings (pause-when-unfocused,
         // bezel overlays) without touching the user's retroarch.cfg.
         if let Some(d) = path.parent() { let _ = ra.install_bios(d); }
+        let preset = self
+            .shaders_enabled
+            .then(|| shaders::preset_for(&self.shader_overrides, &rom.platform_slug))
+            .flatten();
+        let shader_path = preset.as_deref().and_then(|p| shaders::resolve(ra, p));
         let overrides = self
             .local_roms
             .parent()
             .and_then(|lib| {
                 let shader_cfg = if self.shaders_enabled {
-                    let preset = shaders::preset_for(&self.shader_overrides, &rom.platform_slug);
                     shaders::config_lines(ra, preset.as_deref())
                 } else {
                     String::new()
@@ -241,7 +264,9 @@ impl App {
             });
 
         restore_terminal(term)?;
-        let result = ra.launch_with(&core, &path, false, overrides.as_deref());
+        let result = ra.launch_full(
+            &core, &path, false, overrides.as_deref(), shader_path.as_deref(),
+        );
         setup_terminal(term)?;
 
         self.status = match result {

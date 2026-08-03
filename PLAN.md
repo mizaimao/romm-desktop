@@ -788,10 +788,16 @@ than picking one alphabetically.
 - Token refresh/expiry — `expires_at` is returned, no refresh endpoint spotted. The
   existing `personal_token` expires 2026-08-29.
 - `/api/saves/{id}/track`, `/untrack`, `/downloaded`, `/visibility` — purpose unknown.
-- Arcade core compatibility — no single core runs everything, and the testing that
-  suggested otherwise was not reproducible (see §10). `mame2003_plus` remains the default.
-
 Settled since:
+
+- ~~Arcade core compatibility.~~ **Resolved.** The three arcade platforms are three
+  different romset vintages and want different cores: `arcade`→fbneo, `mame`→mame2003_plus,
+  `neogeoaes`→fbneo. Measuring them as one thing is why every earlier attempt contradicted
+  itself. 97% of 3,295 games now launch; see [docs/arcade-coverage.md](docs/arcade-coverage.md).
+  Method: CRC32 comparison against each core's DAT, validated 14/14 against real launches.
+  Two traps: romset *name* matching proves nothing (MAME knows `sfiii` and still refuses
+  it — the set needs a CHD), and requiring a full BIOS set marks every Neo Geo game broken
+  when only one of its many regional BIOSes is needed.
 
 - ~~Multi-disc: server-side or client-side?~~ **Server-side.** 18 games were restructured
   into per-game folders and rescanned; the 18 stale `.m3u` stubs were deleted. The client
