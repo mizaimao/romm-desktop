@@ -365,6 +365,78 @@ config_save_on_exit = \"false\"
         Ok(cmd)
     }
 
+    /// Write project-local core options and remaps for this platform, and
+    /// return the config lines that point RetroArch at them.
+    ///
+    /// Returns an empty string when the platform needs neither, so the
+    /// redirect stays off and every other core keeps using the user's own
+    /// per-core settings untouched.
+    pub fn prepare_tweaks(&self, library_root: &Path, platform: &str, core: &str) -> String {
+        let opts = crate::tweaks::core_options(platform, core);
+        let remap = crate::tweaks::remap(platform, core);
+        if opts.is_empty() && remap.is_empty() {
+            return String::new();
+        }
+
+        let Some(label) = crate::tweaks::core_dir_name(core) else {
+            return String::new();
+        };
+        let dir = library_root.join("retroarch");
+        if std::fs::create_dir_all(&dir).is_err() {
+            return String::new();
+        }
+        // Absolute: RetroArch resolves a relative path against its own working
+        // directory, not ours, so "./library/..." would silently miss.
+        let dir = dir.canonicalize().unwrap_or(dir);
+
+        // Seed from the user's own options for this core so their choices —
+        // palette, aspect, sound quality — survive the redirect. Only the keys
+        // we care about are then overwritten.
+        let user_opt = self
+            .root
+            .join("config")
+            .join(label)
+            .join(format!("{label}.opt"));
+        let mut lines: Vec<String> = std::fs::read_to_string(&user_opt)
+            .map(|s| s.lines().map(str::to_owned).filter(|l| !l.trim().is_empty()).collect())
+            .unwrap_or_default();
+        for (k, v) in opts {
+            lines.retain(|l| l.split('=').next().is_none_or(|key| key.trim() != *k));
+            lines.push(format!("{k} = \"{v}\""));
+        }
+        lines.sort();
+        let opts_path = dir.join("core-options.cfg");
+        if std::fs::write(&opts_path, lines.join("\n") + "\n").is_err() {
+            return String::new();
+        }
+
+        let remaps_dir = dir.join("remaps");
+        if !remap.is_empty() {
+            let core_dir = remaps_dir.join(label);
+            if std::fs::create_dir_all(&core_dir).is_ok() {
+                let _ = std::fs::write(
+                    core_dir.join(format!("{label}.rmp")),
+                    remap.join("\n") + "\n",
+                );
+            }
+        }
+
+        format!(
+            "{}",
+            [
+                "",
+                "# Project-local core options and remaps, so the user's own",
+                "# config/<Core>/<Core>.opt is never touched. global_core_options",
+                "# is required: without it the per-core file wins and this is ignored.",
+                &format!("global_core_options = \"true\""),
+                &format!("core_options_path = \"{}\"", opts_path.display()),
+                &format!("input_remapping_directory = \"{}\"", remaps_dir.display()),
+                "",
+            ]
+            .join("\n")
+        )
+    }
+
     /// Spawn and block until the emulator exits.
     pub fn launch(&self, core: &str, rom: &Path, fullscreen: bool) -> Result<std::process::ExitStatus> {
         self.launch_with(core, rom, fullscreen, None)

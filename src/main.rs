@@ -186,8 +186,16 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     } else {
         String::new()
     };
+    let platform = platform_from_path(rom).unwrap_or_default();
+    if let Some(note) = romm_desktop::tweaks::describe(&platform, &core) {
+        println!("tweaks  {note}");
+    }
+    let extra = format!(
+        "{shader_cfg}{}",
+        ra.prepare_tweaks(Path::new(&cfg.library.local_root), &platform, &core)
+    );
     let overrides = ra
-        .write_overrides_full(Path::new(&cfg.library.local_root), Some(&user_cfg), &shader_cfg)
+        .write_overrides_full(Path::new(&cfg.library.local_root), Some(&user_cfg), &extra)
         .ok();
     let cmd = ra.launch_command_full(
         &core, rom, fullscreen, overrides.as_deref(), shader_path.as_deref(),

@@ -260,7 +260,11 @@ impl App {
                 } else {
                     String::new()
                 };
-                ra.write_overrides_full(lib, Some(&self.user_ra_cfg), &shader_cfg).ok()
+                let extra = format!(
+                    "{shader_cfg}{}",
+                    ra.prepare_tweaks(lib, &rom.platform_slug, &core)
+                );
+                ra.write_overrides_full(lib, Some(&self.user_ra_cfg), &extra).ok()
             });
 
         restore_terminal(term)?;

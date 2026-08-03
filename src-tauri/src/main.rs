@@ -520,7 +520,11 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
         String::new()
     };
     let overrides = state.roms_dir.parent().and_then(|lib| {
-        ra.write_overrides_full(lib, Some(&state.user_retroarch_cfg), &shader_cfg)
+        let extra = format!(
+            "{shader_cfg}{}",
+            ra.prepare_tweaks(lib, &row.platform_slug, &core)
+        );
+        ra.write_overrides_full(lib, Some(&state.user_retroarch_cfg), &extra)
             .ok()
     });
     let status = ra
