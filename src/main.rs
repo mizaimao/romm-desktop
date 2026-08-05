@@ -120,7 +120,13 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         .with_system_dir(Some(cfg.system_dir()));
     let map = CoreMap::load(Path::new(CORE_MAP))?;
 
-    let platform = platform_from_path(rom)
+    // Ask the index first: it knows exactly where each game came from, which
+    // path inference cannot for an ES-DE tree whose directories are ES-DE
+    // system names rather than RomM slugs.
+    let platform = cache::Cache::open(Path::new(CACHE_DB))
+        .ok()
+        .and_then(|c| c.platform_for_path(rom))
+        .or_else(|| platform_from_path(rom))
         .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
     let user_cfg = cfg.user_retroarch_config();
     let req = launch::Request {
@@ -808,6 +814,50 @@ async fn update_cores(ra: &RetroArch, segment: &str) -> Result<()> {
     Ok(())
 }
 
+/// Index a local ES-DE library into the cache.
+fn cmd_scan_esde(root: Option<&str>, roms: Option<&str>) -> Result<()> {
+    let cfg = Config::load()?;
+    let layout = match root {
+        Some(r) => romm_desktop::esde::Layout::new(
+            &romm_desktop::util::expand_tilde(r),
+            roms.map(romm_desktop::util::expand_tilde).as_deref(),
+        ),
+        None => cfg.esde.layout().context(
+            "no ES-DE library configured — pass --root, or set [esde] root in config.toml",
+        )?,
+    };
+
+    println!("roms       {}", layout.roms.display());
+    println!("gamelists  {}", layout.gamelists.display());
+    println!("media      {}", layout.media.display());
+
+    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let started = std::time::Instant::now();
+    let games = romm_desktop::esde::scan(&layout, &map)?;
+    if games.is_empty() {
+        bail!("found no games under {}", layout.roms.display());
+    }
+
+    let mut store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let n = store.replace_from_esde(&games)?;
+
+    let mut by_platform: std::collections::BTreeMap<&str, usize> = Default::default();
+    let mut with_art = 0;
+    for g in &games {
+        *by_platform.entry(g.platform_slug.as_str()).or_default() += 1;
+        if romm_desktop::esde::media_path(&layout, &g.system, 
+            g.fs_name.rsplit_once('.').map_or(g.fs_name.as_str(), |(s, _)| s), "covers").is_some() {
+            with_art += 1;
+        }
+    }
+    println!("\n{n} games in {:.1}s, {with_art} with cover art\n", started.elapsed().as_secs_f64());
+    println!("{:<16}{:>7}", "platform", "games");
+    for (slug, count) in &by_platform {
+        println!("{slug:<16}{count:>7}");
+    }
+    Ok(())
+}
+
 /// Show the collection groups, or what is inside one.
 fn cmd_collections(group: Option<&str>) -> Result<()> {
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
@@ -1319,6 +1369,15 @@ enum Command {
         #[arg(long)]
         i_know_it_opens_windows: bool,
     },
+    /// Index a local ES-DE library instead of a RomM server
+    ScanEsde {
+        /// ES-DE data directory (holds gamelists/ and downloaded_media/)
+        #[arg(long)]
+        root: Option<String>,
+        /// ROMs directory, if not <root>/ROMs
+        #[arg(long)]
+        roms: Option<String>,
+    },
     /// List collections mirrored from the server
     Collections {
         /// Show the collections inside one group, e.g. `genre`
@@ -1411,6 +1470,7 @@ async fn main() -> Result<()> {
         Command::Sync { full } => cmd_sync(full).await,
         Command::Browse => cmd_browse(),
         Command::Collections { group } => cmd_collections(group.as_deref()),
+        Command::ScanEsde { root, roms } => cmd_scan_esde(root.as_deref(), roms.as_deref()),
         Command::Probe { term, platform, sample, cores, frames, i_know_it_opens_windows } => {
             if !i_know_it_opens_windows {
                 bail!(

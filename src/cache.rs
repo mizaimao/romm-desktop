@@ -184,6 +184,9 @@ impl Cache {
             ("summary", "TEXT"), ("meta_json", "TEXT"), ("alt_names_json", "TEXT"),
             ("regions_json", "TEXT"), ("manual_path", "TEXT"),
             ("youtube_id", "TEXT"), ("multi_file", "INTEGER NOT NULL DEFAULT 0"),
+            // ES-DE libraries live wherever the user put them, so a game's
+            // location cannot be derived from <roms>/<slug>/<fs_name>.
+            ("local_path", "TEXT"), ("esde_system", "TEXT"),
         ] {
             let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} {ty}"), []);
         }
@@ -338,6 +341,59 @@ impl Cache {
         Ok(n)
     }
 
+    /// Replace the library with what was found in a local ES-DE install.
+    ///
+    /// Wholesale rather than incremental: there is no server watermark to
+    /// diff against, and a local scan is fast enough that reconciling would
+    /// be more code for no gain. Collections are left untouched — they belong
+    /// to RomM and mean nothing here.
+    pub fn replace_from_esde(&mut self, games: &[crate::esde::Game]) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM roms", [])?;
+        tx.execute("DELETE FROM platforms", [])?;
+        {
+            let mut ins = tx.prepare(
+                "INSERT INTO roms (id, platform_slug, name, fs_name, fs_size_bytes,
+                                   summary, meta_json, local_path, esde_system, multi_file)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )?;
+            let mut plat = tx.prepare(
+                "INSERT OR REPLACE INTO platforms (id, fs_slug, display_name, rom_count)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            let mut counts: std::collections::BTreeMap<&str, i64> = Default::default();
+
+            for (i, g) in games.iter().enumerate() {
+                // Local ids are positional; nothing here refers to RomM's.
+                let id = i as i64 + 1;
+                let meta = serde_json::json!({
+                    "genres": g.genres,
+                    "player_count": g.players,
+                    "average_rating": g.rating,
+                    "first_release_date": g.release_year,
+                });
+                ins.execute(params![
+                    id,
+                    g.platform_slug,
+                    g.name,
+                    g.fs_name,
+                    g.size_bytes,
+                    g.summary,
+                    meta.to_string(),
+                    g.path.to_string_lossy(),
+                    g.system,
+                    i64::from(g.path.is_dir()),
+                ])?;
+                *counts.entry(g.platform_slug.as_str()).or_default() += 1;
+            }
+            for (i, (slug, n)) in counts.iter().enumerate() {
+                plat.execute(params![i as i64 + 1, slug, slug, n])?;
+            }
+        }
+        tx.commit()?;
+        Ok(games.len())
+    }
+
     pub fn collection_count(&self) -> Result<i64> {
         Ok(self
             .conn
@@ -433,6 +489,23 @@ impl Cache {
             .query_map([platform_slug], rom_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// The platform a file on disk belongs to, by exact path.
+    ///
+    /// Path inference expects `<roms>/<slug>/<file>`, which an ES-DE library
+    /// does not satisfy: its directories are ES-DE system names (`dreamcast`,
+    /// `neogeo`), not RomM slugs. Asking the index is exact and works for any
+    /// layout.
+    pub fn platform_for_path(&self, path: &Path) -> Option<String> {
+        let p = path.to_string_lossy().to_string();
+        self.conn
+            .query_row(
+                "SELECT platform_slug FROM roms WHERE local_path = ?1 LIMIT 1",
+                [&p],
+                |r| r.get(0),
+            )
+            .ok()
     }
 
     pub fn rom_by_id(&self, id: i64) -> Result<Option<RomRow>> {

@@ -9,6 +9,7 @@ pub mod config;
 pub mod coremap;
 pub mod cores;
 pub mod download;
+pub mod esde;
 pub mod launch;
 pub mod media;
 pub mod parity;

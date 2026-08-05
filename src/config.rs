@@ -24,6 +24,8 @@ pub struct Config {
     pub shaders: ShadersCfg,
     #[serde(default)]
     pub icons: IconsCfg,
+    #[serde(default)]
+    pub esde: EsdeCfg,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -95,6 +97,30 @@ pub struct CoresCfg {
 /// Config key for a single game's core override.
 pub fn game_key(platform: &str, fs_name: &str) -> String {
     format!("{platform}/{fs_name}")
+}
+
+/// A local ES-DE library, used instead of a RomM server.
+///
+/// When `root` is set the app indexes that tree directly: nothing is
+/// downloaded, because the ROMs and artwork are already on disk.
+#[derive(Debug, Default, Deserialize)]
+pub struct EsdeCfg {
+    /// ES-DE data directory — the one holding `gamelists/` and
+    /// `downloaded_media/`.
+    #[serde(default)]
+    pub root: Option<String>,
+    /// ROMs directory, if it is not `<root>/ROMs`. ES-DE keeps this separate
+    /// and configurable, so it usually is.
+    #[serde(default)]
+    pub roms: Option<String>,
+}
+
+impl EsdeCfg {
+    pub fn layout(&self) -> Option<crate::esde::Layout> {
+        let root = crate::util::expand_tilde(self.root.as_deref()?);
+        let roms = self.roms.as_deref().map(crate::util::expand_tilde);
+        Some(crate::esde::Layout::new(&root, roms.as_deref()))
+    }
 }
 
 /// Which per-system artwork the platform grid shows.

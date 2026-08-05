@@ -61,3 +61,22 @@ enabled = true
 # under fbneo. Use `launch --core <name>` for anything the default refuses.
 arcade = "mame2003_plus"
 mame = "mame2003_plus"
+
+# ---------------------------------------------------------------------------
+# Local ES-DE library (optional)
+#
+# Set `root` to index an ES-DE install on a local or external disk instead of a
+# RomM server. Nothing is downloaded — the ROMs and artwork are already there.
+#
+#   romm-desktop scan-esde
+#
+# `root` is the ES-DE data directory, the one holding `gamelists/` and
+# `downloaded_media/`. `roms` is only needed when the ROMs live elsewhere,
+# which is the usual arrangement (ES-DE keeps that path configurable).
+#
+# What you lose against a RomM server: collections and save sync, both of
+# which are RomM features with no local equivalent.
+# ---------------------------------------------------------------------------
+# [esde]
+# root = "~/ES-DE"
+# roms = "/Volumes/Games/ROMs"
