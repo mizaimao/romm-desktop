@@ -57,3 +57,12 @@ src-tauri/icons/icon.iconset/
 
 # Generated RetroArch core options and remaps (regenerated per launch).
 /library/retroarch/
+
+# A stray cache the GUI creates when it is run with src-tauri as the working
+# directory. Always empty, always regenerated.
+/src-tauri/cache.sqlite3
+
+# Loose ROMs dropped in the project root for inspection.
+/*.zip
+/*.7z
+/*.chd
