@@ -3,6 +3,7 @@
 //! a window, not a second implementation.
 
 pub mod api;
+pub mod arcade;
 pub mod cache;
 pub mod config;
 pub mod coremap;

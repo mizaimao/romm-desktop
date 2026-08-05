@@ -56,6 +56,10 @@ export async function showPlatforms() {
   if (back) {
     back.classList.add("sel");
     back.scrollIntoView({ block: "center" });
+  } else {
+    // Always leave something selected, so the controller's A button has a
+    // target the moment the grid appears.
+    el.list.querySelector(".card")?.classList.add("sel");
   }
 }
 

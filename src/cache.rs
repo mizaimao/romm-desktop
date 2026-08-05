@@ -296,6 +296,48 @@ impl Cache {
         Ok(rows)
     }
 
+    /// Replace bare romset names with the real titles from the DAT map.
+    ///
+    /// Run after a sync, because a sync rewrites `name` from the server and
+    /// would otherwise put `kof98` back.
+    pub fn apply_arcade_names(
+        &mut self,
+        names: &std::collections::BTreeMap<String, String>,
+    ) -> Result<usize> {
+        if names.is_empty() {
+            return Ok(0);
+        }
+        let rows: Vec<(i64, String, String)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, COALESCE(name, ''), fs_name FROM roms WHERE platform_slug IN
+                 (SELECT value FROM json_each(?1))",
+            )?;
+            let list = serde_json::to_string(crate::arcade::ARCADE_PLATFORMS)?;
+            stmt.query_map([list], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        let tx = self.conn.transaction()?;
+        let mut n = 0;
+        {
+            let mut up = tx.prepare("UPDATE roms SET name = ?1 WHERE id = ?2")?;
+            for (id, name, fs_name) in rows {
+                if !crate::arcade::is_bare_romset(&name, &fs_name) {
+                    continue;
+                }
+                let stem = fs_name.rsplit_once('.').map_or(fs_name.as_str(), |(s, _)| s);
+                if let Some(title) = names.get(stem)
+                    && !title.eq_ignore_ascii_case(&name)
+                {
+                    up.execute(params![title, id])?;
+                    n += 1;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     pub fn collection_count(&self) -> Result<i64> {
         Ok(self
             .conn
@@ -363,7 +405,11 @@ impl Cache {
                     COALESCE(NULLIF(p.display_name, ''), p.fs_slug),
                     (SELECT COUNT(*) FROM roms r WHERE r.platform_slug = p.fs_slug)
              FROM platforms p
-             ORDER BY 3 DESC, 1 ASC",
+             -- By display name. It was ordered by ROM count, which put arcade
+             -- and megadrive first and scattered everything else with no
+             -- visible logic; alphabetical means a console is where you expect
+             -- it. COLLATE NOCASE so casing does not split the order.
+             ORDER BY 2 COLLATE NOCASE ASC",
         )?;
         let rows = stmt
             .query_map([], |r| {

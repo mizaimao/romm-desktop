@@ -117,8 +117,12 @@ function edge(last) {
 
 function activate() {
   const nodes = items();
-  const node = nodes[focusedIndex(nodes)];
-  if (!node) return;
+  if (!nodes.length) return;
+  // With nothing selected, focusedIndex is -1 and `nodes[-1]` is undefined, so
+  // this used to return silently — pressing A on a freshly opened grid did
+  // nothing at all until you nudged the stick first. Fall back to the first
+  // item so the button always does something.
+  const node = nodes[focusedIndex(nodes)] ?? nodes[0];
   if (node.dataset.slug) showRoms(node.dataset.slug);
   else if (node.dataset.id) invoke("rom_detail", { id: Number(node.dataset.id) }).then(play);
   // Collection cards already carry the navigation in their click handler,

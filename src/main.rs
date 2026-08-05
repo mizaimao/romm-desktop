@@ -475,6 +475,15 @@ async fn cmd_sync(full: bool) -> Result<()> {
         Err(e) => eprintln!("warning: could not fetch collections ({e}); kept the previous set"),
     }
 
+    // A sync rewrites names from the server, so restore the real arcade titles
+    // afterwards rather than before.
+    let names = romm_desktop::arcade::names(Path::new("data/arcade-names.json"));
+    match store.apply_arcade_names(&names) {
+        Ok(n) if n > 0 => println!("arcade titles: {n} romset names replaced"),
+        Ok(_) => {}
+        Err(e) => eprintln!("warning: arcade renaming failed ({e})"),
+    }
+
     let after = store.rom_count().unwrap_or(0);
 
     println!(

@@ -58,6 +58,7 @@ export async function showCollectionGroups() {
       showCollectionsIn(g.group, g.label);
     })
   );
+  el.list.querySelector(".card")?.classList.add("sel");
 }
 
 export async function showCollectionsIn(group, label) {
@@ -92,6 +93,9 @@ export async function showCollectionsIn(group, label) {
         showCollectionRoms(c.id, c.name);
       })
     );
+    // Leave a selection so the controller can act immediately, as the
+    // platform grid does.
+    grid.querySelector(".card")?.classList.add("sel");
     loadMosaics(list.slice(0, 60));
   }
 
