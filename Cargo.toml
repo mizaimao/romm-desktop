@@ -25,7 +25,14 @@ futures-util = "0.3.33"
 hex = "0.4.3"
 md-5 = "0.11.0"
 ratatui = "0.30.2"
-reqwest = { version = "0.13.4", features = ["json", "stream", "gzip", "multipart"] }
+# rustls with *ring* rather than the default aws-lc backend. aws-lc-sys is a
+# large C library whose build script needs a full cross toolchain for the
+# target, which makes Windows and Linux builds fail on a machine that only has
+# a host compiler. ring builds cleanly across all three.
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "json", "stream", "gzip", "multipart", "http2", "rustls-no-provider",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

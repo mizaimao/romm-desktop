@@ -805,7 +805,37 @@ Settled since:
 - ~~Is 3.8 MB/s on large files a network or server-disk ceiling?~~ **Neither** — it was
   ~95% dead-DNS timeout (§3). Actual throughput is ~115 MB/s.
 
-## 14. Collections — mirrored, not invented
+## 14. Platform support
+
+macOS, Windows and Linux. What actually differs, and where:
+
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| RetroArch binary | `RetroArch.app/Contents/MacOS/RetroArch` | `retroarch.exe` in root | `bin/retroarch` or on the prefix |
+| Core suffix | `.dylib` | `.dll` | `.so` |
+| `portable.txt` | honoured | honoured | **ignored by RetroArch** (§6) |
+| Data root | `~/Library/Application Support/RetroArch` | `%APPDATA%\\RetroArch` | `$XDG_CONFIG_HOME/retroarch` |
+| Cores when not portable | data root `/cores` | data root `\\cores` | also `/usr/lib/*/libretro` |
+| Shaders | data root `/shaders` | data root `\\shaders` | also `/usr/share/libretro/shaders` |
+| Install helper | mounts the `.dmg` | extracts the `.7z` | refuses, and names the package options |
+
+`portable.txt` being Linux-irrelevant is not an oversight — RetroArch genuinely
+ignores it there and always follows XDG, so the flag is never even read.
+
+**TLS backend is `rustls` + `ring`, deliberately.** reqwest's default pulls
+`aws-lc-sys`, a large C library whose build script demands a full cross
+toolchain; it makes a Windows or Linux build fail on a machine that only has a
+host compiler. `ring` is lighter and every HTTP client is built through
+`util::http_client`, which installs the provider once — reqwest panics if
+nothing does.
+
+**Cross-compiling still needs a target C compiler** (`x86_64-linux-gnu-gcc`,
+`x86_64-w64-mingw32-gcc`) because `ring` has C and assembly. Build on the
+target platform or in CI; that is the normal arrangement, not a defect. The
+platform-specific branches themselves are verified to type-check for all three
+targets.
+
+## 15. Collections — mirrored, not invented
 
 We are a RomM client, so collections are the server's groupings rather than a local
 feature. `sync` replaces the whole set each time; nothing is merged, because virtual
@@ -842,7 +872,7 @@ Details worth remembering:
 - Collection cards must **escape the light-mode invert** applied to ES-DE logos — that
   filter exists for white-on-transparent SVGs and destroys real cover art.
 
-## 15. Known upstream bug
+## 16. Known upstream bug
 
 `GET /api/roms/{id}/files` returns 500 for every valid `RomFile.id` on 5.0.0 and on
 `master`: serialising `RomFileSchema` needs `is_top_level`, which lazy-loads `RomFile.rom`

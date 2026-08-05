@@ -40,6 +40,14 @@ fn artifact(version: &str) -> Result<(String, &'static str)> {
             format!("{STABLE_BASE}/{version}/windows/x86_64/RetroArch.7z"),
             "7z",
         ),
+        // Linux has no single official binary: RetroArch ships through distro
+        // packages, Flatpak and AppImage, and each puts cores and config
+        // somewhere different. Naming them beats a generic failure.
+        "linux" => bail!(
+            "RetroArch is not downloaded automatically on Linux — install it with your \n\
+             package manager, Flatpak (`flatpak install flathub org.libretro.RetroArch`),\n\
+             or an AppImage, then set [retroarch] root in config.toml if it is not found."
+        ),
         os => bail!("no RetroArch download configured for {os}; install it manually"),
     })
 }

@@ -89,7 +89,7 @@ pub fn default_for(platform: &str) -> Option<&'static str> {
 }
 
 fn shader_root(ra: &RetroArch) -> PathBuf {
-    ra.root.join("shaders").join("shaders_slang")
+    ra.shaders_dir().join("shaders_slang")
 }
 
 /// Absolute path of a preset, if this install actually has it.

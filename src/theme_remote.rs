@@ -87,10 +87,7 @@ impl RemoteTheme {
 /// Themes are browsable with no RomM server configured, so this does not
 /// depend on the API client existing.
 pub async fn list_default() -> Result<Vec<RemoteTheme>> {
-    let http = reqwest::Client::builder()
-        .user_agent("romm-desktop/0.1")
-        .build()
-        .context("building HTTP client")?;
+    let http = crate::util::http_client(None).context("building HTTP client")?;
     list(&http).await
 }
 

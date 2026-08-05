@@ -162,10 +162,7 @@ impl Client {
         if base_url.is_empty() {
             bail!("server.url is empty — copy config.example.toml to config.toml");
         }
-        let http = reqwest::Client::builder()
-            .user_agent("romm-desktop/0.1")
-            .build()
-            .context("building HTTP client")?;
+        let http = crate::util::http_client(None).context("building HTTP client")?;
         let auth = base64::engine::general_purpose::STANDARD
             .encode(format!("{username}:{password}"));
         Ok(Self {

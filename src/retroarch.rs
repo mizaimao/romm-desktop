@@ -71,11 +71,81 @@ pub struct RetroArch {
 }
 
 /// Roots checked when config.toml does not name one.
+/// Where RetroArch usually lives, per OS, in probe order.
+///
+/// The shape of an install differs enough between platforms that one list will
+/// not do: macOS ships an `.app` bundle, Windows a directory with
+/// `retroarch.exe`, and Linux normally installs to a system prefix with cores
+/// under `~/.config` or `/usr/lib`.
 const CANDIDATE_ROOTS: &[&str] = &[
+    #[cfg(target_os = "macos")]
     "/Applications",
+    #[cfg(target_os = "macos")]
     "~/Applications",
+    #[cfg(target_os = "macos")]
     "~/Data/Games/Emulators/RetroArch",
+    #[cfg(target_os = "windows")]
+    "C:/RetroArch-Win64",
+    #[cfg(target_os = "windows")]
+    "C:/Program Files/RetroArch",
+    #[cfg(target_os = "windows")]
+    "C:/Program Files (x86)/RetroArch",
+    #[cfg(target_os = "windows")]
+    "~/RetroArch",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "/usr",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "/usr/local",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "/app",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "~/.local",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "~/RetroArch",
 ];
+
+/// Executable name for the host, and where it sits under the install root.
+///
+/// Returns `(subpath of the binary, subpath of the "root" we should record)`.
+/// macOS hides the binary inside the bundle and treats the *containing*
+/// directory as the root, because that is where `portable.txt` and `cores/`
+/// live. The other two put the executable in the root itself.
+/// First path that exists, preferring `primary`; falls back to the first
+/// `primary` entry so callers always get a usable path to report.
+fn first_existing(primary: &[PathBuf], extra: &[PathBuf]) -> PathBuf {
+    primary
+        .iter()
+        .chain(extra.iter())
+        .find(|p| p.is_dir())
+        .cloned()
+        .unwrap_or_else(|| primary[0].clone())
+}
+
+fn binary_candidates(root: &Path) -> Vec<(PathBuf, PathBuf)> {
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = if root.extension().is_some_and(|e| e == "app") {
+            root.to_path_buf()
+        } else {
+            root.join("RetroArch.app")
+        };
+        let recorded = bundle.parent().map(Path::to_path_buf).unwrap_or_else(|| root.to_path_buf());
+        vec![(bundle.join("Contents/MacOS/RetroArch"), recorded)]
+    }
+    #[cfg(target_os = "windows")]
+    {
+        vec![(root.join("retroarch.exe"), root.to_path_buf())]
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // A distro install puts the binary in <prefix>/bin but keeps cores and
+        // config elsewhere, so both layouts are worth trying.
+        vec![
+            (root.join("bin").join("retroarch"), root.to_path_buf()),
+            (root.join("retroarch"), root.to_path_buf()),
+        ]
+    }
+}
 
 impl RetroArch {
     /// Locate an install. `configured` wins; otherwise probe known roots.
@@ -98,22 +168,18 @@ impl RetroArch {
         };
 
         for root in candidates {
-            // Accept either the directory holding RetroArch.app, or the bundle.
-            let bundle = if root.extension().is_some_and(|e| e == "app") {
-                root.clone()
-            } else {
-                root.join("RetroArch.app")
-            };
-            tried.push(bundle.clone());
-            let binary = bundle.join("Contents/MacOS/RetroArch");
-            if binary.is_file() {
-                let root = bundle
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| root.clone());
-                let portable = root.join("portable.txt").is_file();
+            for (binary, recorded) in binary_candidates(&root) {
+                tried.push(binary.clone());
+                if !binary.is_file() {
+                    continue;
+                }
+                // portable.txt is a macOS and Windows mechanism; on Linux
+                // RetroArch always follows XDG and ignores the marker
+                // entirely (PLAN.md §6).
+                let portable = cfg!(not(target_os = "linux"))
+                    && recorded.join("portable.txt").is_file();
                 return Ok(Self {
-                    root,
+                    root: recorded,
                     binary,
                     portable,
                     system_override: None,
@@ -131,17 +197,74 @@ impl RetroArch {
         )
     }
 
-    /// Directory holding `*_libretro.dylib`.
+    /// Directory holding `*_libretro.<dylib|dll|so>`.
     ///
     /// Only correct for builds with `HAVE_UPDATE_CORES`, which is what the
     /// official download is; App Store builds keep cores inside the bundle.
     /// Verified against this machine's 1.20.0 install.
     pub fn cores_dir(&self) -> PathBuf {
-        self.root.join("cores")
+        first_existing(
+            &[self.data_dir().join("cores")],
+            // Distro packages drop cores in a system library directory instead
+            // of the user's data folder; Flatpak uses its own sandbox path.
+            &[
+                PathBuf::from("/usr/lib/x86_64-linux-gnu/libretro"),
+                PathBuf::from("/usr/lib/libretro"),
+                PathBuf::from("/usr/local/lib/libretro"),
+            ],
+        )
+    }
+
+    /// RetroArch's user-data root: where `retroarch.cfg`, `cores/`, `system/`
+    /// and `config/` all hang off.
+    ///
+    /// In portable mode that is the install directory. Otherwise it is the
+    /// platform's own location, which is the part that differs: macOS uses
+    /// Application Support, Windows uses APPDATA, and Linux follows XDG —
+    /// where `portable.txt` is ignored outright, so the marker is never even
+    /// consulted there.
+    pub fn data_dir(&self) -> PathBuf {
+        if self.portable {
+            return self.root.clone();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            crate::util::expand_tilde("~/Library/Application Support/RetroArch")
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::env::var_os("APPDATA")
+                .map(|a| PathBuf::from(a).join("RetroArch"))
+                .unwrap_or_else(|| self.root.clone())
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| crate::util::expand_tilde("~/.config"))
+                .join("retroarch")
+        }
+    }
+
+    /// Where per-core settings live: `<config>/<Core>/<Core>.opt`.
+    pub fn config_dir(&self) -> PathBuf {
+        self.data_dir().join("config")
+    }
+
+    /// Root of the shader trees (`shaders_slang`, `shaders_glsl`).
+    pub fn shaders_dir(&self) -> PathBuf {
+        first_existing(
+            &[self.data_dir().join("shaders"), self.root.join("shaders")],
+            &[
+                PathBuf::from("/usr/share/libretro/shaders"),
+                PathBuf::from("/usr/local/share/libretro/shaders"),
+            ],
+        )
     }
 
     pub fn core_path(&self, core: &str) -> PathBuf {
-        self.cores_dir().join(format!("{core}_libretro.dylib"))
+        self.cores_dir()
+            .join(format!("{core}_libretro.{}", crate::cores::lib_extension()))
     }
 
     pub fn has_core(&self, core: &str) -> bool {
@@ -158,7 +281,9 @@ impl RetroArch {
             .filter_map(|e| {
                 e.file_name()
                     .to_str()
-                    .and_then(|n| n.strip_suffix("_libretro.dylib"))
+                    .and_then(|n| {
+                        n.strip_suffix(&format!("_libretro.{}", crate::cores::lib_extension()))
+                    })
                     .map(str::to_owned)
             })
             .collect();
@@ -400,8 +525,7 @@ config_save_on_exit = \"false\"
         // palette, aspect, sound quality — survive the redirect. Only the keys
         // we care about are then overwritten.
         let user_opt = self
-            .root
-            .join("config")
+            .config_dir()
             .join(label)
             .join(format!("{label}.opt"));
         let mut lines: Vec<String> = std::fs::read_to_string(&user_opt)

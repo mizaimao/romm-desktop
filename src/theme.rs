@@ -27,11 +27,26 @@ use crate::coremap::CoreMap;
 
 /// Where ES-DE keeps themes, in probe order.
 const THEME_ROOTS: &[&str] = &[
-    // User-installed themes take precedence over the bundled set.
+    // User-installed themes take precedence over the bundled set, and these
+    // two locations are the same on every platform.
     "~/ES-DE/themes",
     "~/.emulationstation/themes",
+    // The bundled set ships inside the application, which is where the
+    // platforms diverge.
+    #[cfg(target_os = "macos")]
     "~/Data/Games/Emulators/ES-DE.app/Contents/Resources/themes",
+    #[cfg(target_os = "macos")]
     "/Applications/ES-DE.app/Contents/Resources/themes",
+    #[cfg(target_os = "windows")]
+    "C:/Program Files/ES-DE/themes",
+    #[cfg(target_os = "windows")]
+    "~/ES-DE/Application Data/themes",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "/usr/share/es-de/themes",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "/app/share/es-de/themes",
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    "~/.local/share/es-de/themes",
 ];
 
 // svg first (crisp at any size), then the raster formats themes use.

@@ -45,6 +45,28 @@ pub fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
+/// Build an HTTP client, installing the TLS backend on first use.
+///
+/// We select rustls without a bundled provider (`rustls-no-provider`) so the
+/// build does not drag in `aws-lc-sys`, a large C library whose build script
+/// needs a full cross toolchain and therefore breaks Windows and Linux builds.
+/// The cost is that *something* must install a provider before the first
+/// client is created — reqwest panics otherwise — so every client in this
+/// project is built here.
+pub fn http_client(timeout: Option<std::time::Duration>) -> anyhow::Result<reqwest::Client> {
+    static TLS: std::sync::Once = std::sync::Once::new();
+    TLS.call_once(|| {
+        // Only errors if a provider is already installed, which is harmless.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+    let mut b = reqwest::Client::builder()
+        .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")));
+    if let Some(d) = timeout {
+        b = b.timeout(d);
+    }
+    b.build().map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

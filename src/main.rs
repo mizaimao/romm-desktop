@@ -313,7 +313,7 @@ async fn cmd_install_retroarch(version: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let http = romm_desktop::util::http_client(None)?;
     let version = match version {
         Some(v) => v.to_owned(),
         None => retroarch_install::latest_available(&http).await?,
@@ -382,9 +382,7 @@ async fn cmd_cores(install: bool, update: bool) -> Result<()> {
         return Ok(());
     }
 
-    let client = reqwest::Client::builder()
-        .user_agent("romm-desktop/0.1")
-        .build()?;
+    let client = romm_desktop::util::http_client(None)?;
     let dest = ra.cores_dir();
     println!("\ninstalling into {}", dest.display());
 
@@ -737,10 +735,7 @@ async fn update_cores(ra: &RetroArch, segment: &str) -> Result<()> {
         backup.display()
     );
 
-    let client = reqwest::Client::builder()
-        .user_agent("romm-desktop/0.1")
-        .timeout(std::time::Duration::from_secs(180))
-        .build()?;
+    let client = romm_desktop::util::http_client(Some(std::time::Duration::from_secs(180)))?;
 
     let mut updated = Vec::new();
     let mut unchanged = 0;
@@ -1110,7 +1105,7 @@ fn cmd_themes(install: bool) -> Result<()> {
 
 /// List themes available from the official ES-DE themes list.
 async fn cmd_themes_available(filter: Option<&str>) -> Result<()> {
-    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let http = romm_desktop::util::http_client(None)?;
     let mut list = theme_remote::list(&http).await?;
     if let Some(f) = filter {
         list.retain(|t| t.matches(f));
@@ -1136,7 +1131,7 @@ async fn cmd_themes_available(filter: Option<&str>) -> Result<()> {
 /// Download (or update) a theme from the official list.
 async fn cmd_themes_get(needle: &str, logos_only: bool) -> Result<()> {
     let cfg = Config::load()?;
-    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let http = romm_desktop::util::http_client(None)?;
     let list = theme_remote::list(&http).await?;
 
     let hits: Vec<_> = list.iter().filter(|t| t.matches(needle)).collect();
@@ -1198,7 +1193,7 @@ async fn cmd_themes_get(needle: &str, logos_only: bool) -> Result<()> {
 async fn cmd_themes_update() -> Result<()> {
     let cfg = Config::load()?;
     let dir = cfg.themes_dir();
-    let http = reqwest::Client::builder().user_agent("romm-desktop/0.1").build()?;
+    let http = romm_desktop::util::http_client(None)?;
     let list = theme_remote::list(&http).await?;
 
     let Ok(entries) = std::fs::read_dir(&dir) else {
