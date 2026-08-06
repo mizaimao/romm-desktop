@@ -540,12 +540,49 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
         core_per_game: &per_game,
         core_override: None,
     };
+    // Fetch what is missing before planning. `plan` only ever picks among cores
+    // already on disk, so without this a fresh install — which has none — fails
+    // with "no installed core" even when the buildbot has it.
+    let wanted = coremap::resolve_core_for(
+        &state.map,
+        &overrides,
+        &per_game,
+        &row.platform_slug,
+        Some(&row.fs_name),
+        |_| true, // ignore what is installed; that is the point
+    );
+    let mut fetched = Vec::new();
+    // Reuses the API client's HTTP stack; without a configured server there is
+    // nothing to download from anyway.
+    if let (Some(core), Some(api)) = (wanted.as_deref(), state.client.as_ref()) {
+        let http = api.http();
+        match romm_desktop::cores::ensure(http, ra, core).await {
+            Ok(true) => fetched.push(format!("downloaded the {core} core")),
+            Ok(false) => {}
+            // Not fatal: an offline launch of an already-installed core should
+            // still work, and `plan` reports the real problem if it does not.
+            Err(e) => fetched.push(format!("could not fetch {core}: {e}")),
+        }
+        if state.shaders_enabled {
+            match shaders::ensure_pack(http, ra).await {
+                Ok(true) => fetched.push("downloaded the shader pack".to_owned()),
+                Ok(false) => {}
+                Err(e) => fetched.push(format!("could not fetch shaders: {e}")),
+            }
+        }
+    }
+
     let plan = romm_desktop::launch::plan(ra, &state.map, &req).map_err(err)?;
     let status = plan.run(ra, &path, false).map_err(err)?;
-    Ok(if status.success() {
-        format!("{} exited cleanly", row.name)
+    let prefix = if fetched.is_empty() {
+        String::new()
     } else {
-        format!("{} exited with {status}", row.name)
+        format!("{}; ", fetched.join("; "))
+    };
+    Ok(if status.success() {
+        format!("{prefix}{} exited cleanly", row.name)
+    } else {
+        format!("{prefix}{} exited with {status}", row.name)
     })
 }
 

@@ -106,3 +106,27 @@ pub async fn install(
     }
     Ok(written)
 }
+
+/// Install `core` if this RetroArch does not already have it.
+///
+/// Called on the launch path: a fresh install has no cores at all, and failing
+/// with "core not installed" when the buildbot has it one HTTP request away is
+/// a poor first run. Returns true when something was actually fetched.
+///
+/// Errors are deliberately not swallowed — a silent failure here surfaces later
+/// as the same confusing "core not installed", which is what this exists to
+/// avoid.
+pub async fn ensure(
+    client: &reqwest::Client,
+    ra: &crate::retroarch::RetroArch,
+    core: &str,
+) -> Result<bool> {
+    if ra.has_core(core) {
+        return Ok(false);
+    }
+    let dir = ra.cores_dir();
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("creating {}", dir.display()))?;
+    install(client, core, &dir, platform_segment()?).await?;
+    Ok(true)
+}

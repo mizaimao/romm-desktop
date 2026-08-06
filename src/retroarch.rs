@@ -317,7 +317,43 @@ video_aspect_ratio_auto = \"true\"
 
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
+
+# ---- Controller hotkeys ----
+# RetroArch ships keyboard hotkeys (F1 menu, Escape exit) but binds none for a
+# gamepad, so a handheld user has no way out of a game without a keyboard.
+# These give every install launched from here the same combinations.
+#
+# Select acts as the modifier, so none of these fire during normal play: a
+# hotkey needs Select held as well. Buttons are given by standard-mapping
+# index, which is what RetroArch reports for Xbox, DualSense, Switch Pro and
+# 8BitDo pads alike.
+input_enable_hotkey_btn = \"8\"          # Select / Share — modifier
+input_menu_toggle_btn = \"9\"            # + Start  -> RetroArch menu
+input_exit_emulator_btn = \"1\"          # + B/Circle -> quit
+input_save_state_btn = \"3\"             # + Y/Triangle
+input_load_state_btn = \"0\"             # + A/Cross
+input_screenshot_btn = \"2\"             # + X/Square
+input_pause_toggle_btn = \"10\"          # + L3
+input_hold_fast_forward_btn = \"5\"      # + R1
+input_rewind_btn = \"4\"                 # + L1
 ";
+
+    /// Windows-only additions, appended to `OVERRIDES` there.
+    #[cfg(target_os = "windows")]
+    const OVERRIDES_OS: &str = "\
+
+# ---- Windows ----
+# The GL driver flickers while a window is being resized, badly enough to look
+# broken. D3D11 does not, and is the driver the Windows build is tuned for.
+# Override this in your own settings file if your GPU prefers something else.
+video_driver = \"d3d11\"
+
+# Resizing tears without this once the driver is switched.
+video_vsync = \"true\"
+";
+
+    #[cfg(not(target_os = "windows"))]
+    const OVERRIDES_OS: &str = "";
     /// As above, appending the user's own settings last so they win.
     ///
     /// RetroArch applies `--appendconfig` entries in order, later overriding
@@ -343,6 +379,7 @@ config_save_on_exit = \"false\"
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
+        body.push_str(Self::OVERRIDES_OS);
         body.push_str(extra);
 
         if let Some(user) = user_config {

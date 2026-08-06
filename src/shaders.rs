@@ -151,3 +151,39 @@ pub fn label_of(preset: &str) -> &str {
 pub fn describe(platform: &str) -> (Display, Option<&'static str>) {
     (display_of(platform), default_for(platform))
 }
+
+/// URL of the slang shader pack, the same archive RetroArch's own
+/// "Update Slang Shaders" fetches.
+const SHADER_PACK: &str = "https://buildbot.libretro.com/assets/frontend/shaders_slang.zip";
+
+/// Download the slang shader pack if this install has none.
+///
+/// Presets are useless without it: `resolve` returns None for every entry, so
+/// shaders silently do nothing. The pack is a few megabytes and covers every
+/// preset in the catalogue, which is far simpler than fetching them one at a
+/// time — and RetroArch itself ships no shaders in the base download.
+///
+/// Returns true when it downloaded something.
+pub async fn ensure_pack(client: &reqwest::Client, ra: &RetroArch) -> anyhow::Result<bool> {
+    use anyhow::{Context, bail};
+
+    if shader_root(ra).is_dir() {
+        return Ok(false);
+    }
+    let dest = ra.shaders_dir();
+    std::fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
+
+    let resp = client.get(SHADER_PACK).send().await
+        .with_context(|| format!("requesting {SHADER_PACK}"))?;
+    if !resp.status().is_success() {
+        bail!("{SHADER_PACK} -> HTTP {}", resp.status());
+    }
+    let bytes = resp.bytes().await.context("reading the shader pack")?;
+
+    // The archive already contains a `shaders_slang/` directory, so extracting
+    // at shaders_dir() lands it exactly where shader_root expects.
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .context("opening the shader pack")?;
+    zip.extract(&dest).context("extracting the shader pack")?;
+    Ok(true)
+}
