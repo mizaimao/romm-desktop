@@ -1,6 +1,6 @@
 [package]
 name = "romm-desktop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 # The core is a library so the Tauri GUI (src-tauri/) and the CLI/TUI share one

@@ -113,4 +113,27 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
-          draft: true
+          # Not a draft: a draft is invisible on the Releases page and in the
+          # repo sidebar unless you are signed in as a maintainer, which makes
+          # it look like the build produced nothing.
+          draft: false
+          make_latest: true
+          name: ${{ github.ref_name }}
+          body: |
+            Download below. Nothing here needs installing unless you want it to.
+
+            **Windows** — `romm-gui-x86_64-pc-windows-msvc.exe` is the app,
+            portable: the whole UI is embedded in the binary, so just run it.
+            `*-setup.exe` is the installer if you would rather have a Start
+            menu entry. `romm-desktop-*.exe` is the CLI/TUI.
+
+            **Linux** — `romm-gui-x86_64-unknown-linux-gnu` is the app,
+            `*.AppImage` and `*.deb` are the packaged forms, and
+            `romm-desktop-*` is the CLI/TUI.
+
+            **macOS** is not built here on purpose: an unsigned bundle arrives
+            quarantined and needs an `xattr` call before it will open. Build it
+            on the Mac with `scripts/build-macos.sh`.
+
+            Copy `config.example.toml` to `config.toml` and set `[server]`
+            before first run.
