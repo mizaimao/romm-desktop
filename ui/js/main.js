@@ -1,7 +1,7 @@
 // Entry point: wire the header controls and load the first view.
 
 import { el, state, trail, invoke, listen } from "./state.js";
-import { human } from "./util.js";
+import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
 import { setSidebar } from "./detail.js";
 import { showThemes } from "./themes.js";
@@ -62,12 +62,23 @@ listen("download-progress", ({ payload }) => {
 (async function init() {
   try {
     const s = await invoke("status");
+    // "not set up" and "server unreachable" look identical otherwise — both
+    // give an empty library — so say which it is rather than leaving the user
+    // to guess whether the app is broken.
+    const server = !s.configured ? "no config.toml" : s.connected ? s.server : "offline";
     el.status.textContent = [
-      s.connected ? s.server : "offline",
+      server,
       `${s.roms_cached} roms`,
       s.retroarch ? `${s.cores_installed} cores` : "no RetroArch",
       `${human(s.disk_bytes)} on disk`,
     ].join(" · ");
+    // Both of these are only otherwise discovered by pressing play and having
+    // it fail, which is a poor way to learn the app was never configured.
+    if (!s.configured) {
+      toast("No config.toml — copy config.example.toml and add your server");
+    } else if (!s.retroarch) {
+      toast("RetroArch not found — set its location in Settings");
+    }
     el.status.title =
       `Downloads:  ${s.roms_dir}\nArtwork:    ${s.media_dir}\n\n` +
       `Everything this app downloads lives there. Delete that folder to reclaim the space.`;

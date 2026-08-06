@@ -234,6 +234,16 @@ impl Config {
         Self::load_from(Path::new("config.toml"))
     }
 
+    /// True when `load` fell back to defaults because no file was there.
+    ///
+    /// A missing config used to be indistinguishable from a configured one
+    /// pointing at a dead server: both produce an unreachable client and an
+    /// empty library, which reads as "the app is broken" rather than "nothing
+    /// has been set up yet". Callers use this to say which it is.
+    pub fn exists(path: &str) -> bool {
+        Path::new(path).is_file()
+    }
+
     pub fn load_from(path: &Path) -> Result<Self> {
         if !path.is_file() {
             // Absent config is fine for commands that don't touch the server.

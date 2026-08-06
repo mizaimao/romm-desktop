@@ -45,8 +45,29 @@ function poll() {
   if (!running) return;
   requestAnimationFrame(poll);
 
-  // The lightbox and settings own input while open, as with the keyboard.
-  if (!el.lb.hidden || document.getElementById("settings")) return;
+  // The lightbox owns input entirely while open, as with the keyboard.
+  if (!el.lb.hidden) return;
+
+  const map = padMap();
+
+  // Settings is different: the pad must still be able to close it, or a
+  // controller-only user is trapped the moment they open it. Everything else
+  // in there is bound by pressing buttons, which reads the pad directly.
+  if (document.getElementById("settings")) {
+    const backIndex = Object.entries(map).find(([, a]) => a === "back")?.[0];
+    const down = (navigator.getGamepads?.() ?? []).some(
+      (p) => p && backIndex !== undefined && p.buttons[backIndex]?.pressed
+    );
+    if (down) {
+      if (!held.has("closeSettings")) {
+        held.set("closeSettings", performance.now());
+        runAction("settings");
+      }
+    } else {
+      held.delete("closeSettings");
+    }
+    return;
+  }
 
   const pads = navigator.getGamepads?.() ?? [];
   const now = performance.now();
@@ -55,8 +76,10 @@ function poll() {
   for (const pad of pads) {
     if (!pad) continue;
 
-    for (const [index, action] of Object.entries(BUTTONS)) {
-      if (pad.buttons[index]?.pressed) pressed.add(action);
+    for (const [index, action] of Object.entries(map)) {
+      // A rebind clears the old slot by writing null, so skip those rather
+      // than dispatching an action of null.
+      if (action && pad.buttons[index]?.pressed) pressed.add(action);
     }
     // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
     // diagonally it would otherwise report left+up in the same frame and move

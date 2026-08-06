@@ -909,6 +909,9 @@ fn install_theme_logos(state: State<'_, AppState>) -> CmdResult<String> {
 struct Status {
     server: String,
     connected: bool,
+    /// False when there is no config.toml at all — a different problem from a
+    /// server that will not answer, and worth saying so in the UI.
+    configured: bool,
     retroarch: Option<String>,
     cores_installed: usize,
     roms_cached: i64,
@@ -928,6 +931,7 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
             .map(|c| c.base().to_owned())
             .unwrap_or_default(),
         connected: state.client.is_some(),
+        configured: Config::exists("config.toml"),
         retroarch: state
             .retroarch
             .as_ref()
@@ -1106,9 +1110,15 @@ fn anchor_to_data_root() {
     }
 
     // 2. Bundled: use a plainly-named folder in the user's home.
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    //
+    // Windows does not set HOME, so checking only that left an installed
+    // Windows build with no data directory at all — it fell back to whatever
+    // the shortcut's working directory happened to be.
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
     let Some(data_root) = home.map(|h| h.join("RomM")) else {
-        eprintln!("warning: no HOME; leaving the working directory alone");
+        eprintln!("warning: no HOME or USERPROFILE; leaving the working directory alone");
         return;
     };
     if let Err(e) = std::fs::create_dir_all(data_root.join("data")) {
