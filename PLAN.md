@@ -18,7 +18,7 @@ tools/          one-shot extraction scripts
 
 GUI keyboard: arrows move, Enter opens/plays, Esc/Backspace goes back, `/`
 searches, `?` lists what is bound. Every binding is configurable in Settings
-(⚙) and persisted; download / grid-list / info-pane / themes ship **unbound**,
+and persisted; download / grid-list / info-pane / themes ship **unbound**,
 since bare letters are easy to press by accident.
 
 ---

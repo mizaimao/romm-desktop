@@ -197,7 +197,8 @@ export function setZoom(px) {
 export function setLayout(next) {
   state.layout = next;
   localStorage.setItem("layout", next);
-  el.layoutBtn.textContent = next === "grid" ? "List" : "Grid";
+  el.layoutBtn.querySelector("span:not(.icon)").textContent = next === "grid" ? "List" : "Grid";
+  el.layoutBtn.querySelector(".icon").className = `icon icon-${next === "grid" ? "list" : "grid"}`;
   el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
   el.zoomWrap.hidden = next !== "grid" && state.view !== "platforms";
   if (state.rows.length) renderRows(state.rows, state.view === "search");

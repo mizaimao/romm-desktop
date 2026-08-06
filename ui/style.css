@@ -854,3 +854,50 @@ footer#toast {
   min-width: 13em;
   text-align: right;
 }
+
+/* ---- Lucide icons ----
+   Drawn as CSS masks rather than <img>: Lucide strokes use currentColor, which
+   an <img> cannot inherit, so a mask tinted with `background: currentColor` is
+   the only way to get an icon that follows the theme without inlining SVG or
+   shipping a light and dark copy of every file. */
+.icon {
+  display: inline-block;
+  width: 1.05em;
+  height: 1.05em;
+  vertical-align: -0.15em;
+  background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+  flex: none;
+}
+/* Icon sitting beside a word, rather than alone in a button. */
+button > .icon + span {
+  margin-left: 0.4em;
+}
+button:has(> .icon + span) {
+  display: inline-flex;
+  align-items: center;
+}
+
+.icon-back      { --icon: url("icons/chevron-left.svg"); }
+.icon-prev      { --icon: url("icons/chevron-left.svg"); }
+.icon-next      { --icon: url("icons/chevron-right.svg"); }
+.icon-close     { --icon: url("icons/x.svg"); }
+.icon-settings  { --icon: url("icons/settings.svg"); }
+.icon-collections { --icon: url("icons/library-big.svg"); }
+.icon-systems   { --icon: url("icons/sliders-horizontal.svg"); }
+.icon-themes    { --icon: url("icons/palette.svg"); }
+.icon-grid      { --icon: url("icons/layout-grid.svg"); }
+.icon-list      { --icon: url("icons/list.svg"); }
+.icon-info-on   { --icon: url("icons/panel-right-close.svg"); }
+.icon-info-off  { --icon: url("icons/panel-right-open.svg"); }
+.icon-play      { --icon: url("icons/play.svg"); }
+.icon-download  { --icon: url("icons/download.svg"); }
+.icon-search    { --icon: url("icons/search.svg"); }
+
+/* Glyph-only buttons were sized for a text character; a mask needs a box. */
+#back, #settings-btn, .lb-close, .lb-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

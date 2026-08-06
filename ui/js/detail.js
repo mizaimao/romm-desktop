@@ -12,7 +12,10 @@ setOpenHook(() => clearInterval(slideTimer));
 export function setSidebar(on) {
   state.sidebar = on;
   localStorage.setItem("sidebar", on ? "on" : "off");
-  el.sidebarBtn.textContent = on ? "Hide info" : "Show info";
+  // The button now holds an icon plus a label span; writing textContent on
+  // the button itself would wipe the icon out.
+  el.sidebarBtn.querySelector("span:not(.icon)").textContent = on ? "Hide info" : "Show info";
+  el.sidebarBtn.querySelector(".icon").className = `icon icon-info-${on ? "on" : "off"}`;
   // Never show the pane on the platform or collection-list screens — nothing
   // is selected there. Games reached through a collection do get it.
   const allowed =

@@ -8,18 +8,18 @@
   </head>
   <body>
     <header>
-      <button id="back" hidden>‹</button>
+      <button id="back" hidden title="Go back" aria-label="Go back"><span class="icon icon-back"></span></button>
       <h1 id="title">Platforms</h1>
       <input id="search" type="search" placeholder="Search all games…" />
-      <button id="sidebar-btn" hidden title="Show or hide the detail pane">Hide info</button>
+      <button id="sidebar-btn" hidden title="Show or hide the detail pane"><span class="icon icon-info-on"></span><span>Hide info</span></button>
       <label id="zoom-wrap" hidden title="Icon size">
         <input id="zoom" type="range" min="90" max="300" step="10" />
       </label>
-      <button id="layout-btn" hidden>Grid</button>
-      <button id="collections-btn" title="Browse RomM collections">Collections</button>
-      <button id="systems-btn" title="Per-system emulator and shader">Systems</button>
-      <button id="themes-btn" title="Console icon themes">Themes</button>
-      <button id="settings-btn" title="Settings">⚙</button>
+      <button id="layout-btn" hidden title="Grid or list"><span class="icon icon-grid"></span><span>Grid</span></button>
+      <button id="collections-btn" title="Browse RomM collections"><span class="icon icon-collections"></span><span>Collections</span></button>
+      <button id="systems-btn" title="Per-system emulator and shader"><span class="icon icon-systems"></span><span>Systems</span></button>
+      <button id="themes-btn" title="Console icon themes"><span class="icon icon-themes"></span><span>Themes</span></button>
+      <button id="settings-btn" title="Settings" aria-label="Settings"><span class="icon icon-settings"></span></button>
       <span id="status"></span>
     </header>
 
@@ -29,13 +29,13 @@
     </main>
 
     <div id="lightbox" hidden>
-      <button class="lb-close" title="Close (Esc)">×</button>
-      <button class="lb-nav lb-prev" title="Previous (←)">‹</button>
+      <button class="lb-close" title="Close (Esc)" aria-label="Close"><span class="icon icon-close"></span></button>
+      <button class="lb-nav lb-prev" title="Previous (←)" aria-label="Previous"><span class="icon icon-prev"></span></button>
       <figure>
         <div class="lb-stage"></div>
         <figcaption></figcaption>
       </figure>
-      <button class="lb-nav lb-next" title="Next (→)">›</button>
+      <button class="lb-nav lb-next" title="Next (→)" aria-label="Next"><span class="icon icon-next"></span></button>
     </div>
 
     <footer id="toast" hidden></footer>
