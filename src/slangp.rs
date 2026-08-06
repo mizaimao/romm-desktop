@@ -147,15 +147,24 @@ impl Preset {
     }
 }
 
-/// Resolve `value` against `dir` unless it is already absolute.
+/// Resolve `value` against `dir` unless it is already absolute, always with
+/// forward slashes.
+///
+/// `Path::join` uses the host separator, so on Windows this produced
+/// `D:\RetroArch\crt` + `shaders/lut/x.png` = a path mixing both. RetroArch
+/// accepts `/` on every platform and its own configs use it throughout, so
+/// normalising gives one form that works everywhere and a generated preset
+/// that reads the same wherever it was written.
 fn absolute(dir: &Path, value: &str) -> String {
     let p = Path::new(value);
-    if p.is_absolute() {
-        return value.to_owned();
-    }
-    // `..` segments are common in presets (`../stock.slang`) and RetroArch
-    // resolves them itself, so leaving them in the joined path is fine.
-    dir.join(p).to_string_lossy().into_owned()
+    let joined = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        // `..` segments are common in presets (`../stock.slang`) and RetroArch
+        // resolves them itself, so leaving them in the joined path is fine.
+        dir.join(p)
+    };
+    joined.to_string_lossy().replace('\\', "/")
 }
 
 /// Combine `base` with `extra` appended after it, as a single preset body.
@@ -266,6 +275,23 @@ parameters = "_ADPT_STROBE_STR"
         let p = Preset::parse("shaders = 1\nshader0 = /abs/x.slang\n", Path::new("/ra"));
         assert!(chain(&p, &Preset::parse("shaders = 0\n", Path::new("/ra")))
             .contains("shader0 = \"/abs/x.slang\""));
+    }
+
+    /// Paths must come out with forward slashes on every host. `Path::join`
+    /// uses the platform separator, which on Windows produced a path mixing
+    /// both -- and made this suite fail there while passing on macOS.
+    #[test]
+    fn separators_are_normalised_whatever_the_host() {
+        let base = Preset::parse(
+            "shaders = 1\nshader0 = shaders/guest/crt.slang\n",
+            // A Windows-shaped directory, so this is a real check there and a
+            // meaningful one everywhere else.
+            Path::new(r"D:\RetroArch\shaders\shaders_slang\crt"),
+        );
+        let out = chain(&base, &Preset::parse("shaders = 0", Path::new("/ra")));
+        let line = out.lines().find(|l| l.starts_with("shader0")).unwrap();
+        assert!(!line.contains('\\'), "no backslashes may survive: {line}");
+        assert!(line.ends_with("crt/shaders/guest/crt.slang\""), "got {line}");
     }
 
     /// Both lists must survive. Keeping only the base's would drop the
