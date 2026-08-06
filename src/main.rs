@@ -259,7 +259,7 @@ async fn cmd_check() -> Result<()> {
 
     let mut platforms = client.platforms().await?;
     platforms.retain(|p| p.rom_count > 0);
-    platforms.sort_by(|a, b| b.rom_count.cmp(&a.rom_count));
+    platforms.sort_by_key(|p| std::cmp::Reverse(p.rom_count));
     println!("platforms {} populated", platforms.len());
     for p in platforms.iter().take(8) {
         println!("    {:<18} {}", p.fs_slug, p.rom_count);

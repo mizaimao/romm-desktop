@@ -24,8 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # @master honours rust-toolchain.toml, so the runners use the pinned
+      # version rather than whatever `stable` resolves to that week.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.97.1"
           components: clippy
 
       - uses: Swatinem/rust-cache@v2

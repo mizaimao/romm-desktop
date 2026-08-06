@@ -20,6 +20,10 @@ pub fn platform_segment() -> Result<&'static str> {
         ("macos", "x86_64") => "apple/osx/x86_64",
         ("linux", "x86_64") => "linux/x86_64",
         ("linux", "aarch64") => "linux/arm64",
+        // The buildbot ships MSVC and MinGW trees for Windows; the MinGW one is
+        // what the official RetroArch download links against.
+        ("windows", "x86_64") => "windows/x86_64",
+        ("windows", "x86") => "windows/x86",
         (os, arch) => bail!("no buildbot mapping for {os}/{arch}"),
     })
 }
