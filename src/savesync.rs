@@ -163,6 +163,13 @@ pub fn client_states(candidates: &[Candidate]) -> (Vec<ClientSaveState>, usize) 
     let mut skipped = 0;
 
     for c in candidates {
+        // Save states go to /api/states, a different family of endpoints with
+        // no slot and no negotiation. Sending them here filed a freeze-frame
+        // snapshot on the server as if it were an in-game save. See
+        // crate::statesync, which handles them.
+        if c.kind == saves::Kind::State {
+            continue;
+        }
         let Resolution::Resolved { rom_id, .. } = c.resolution else {
             skipped += 1;
             continue;
@@ -567,6 +574,36 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Sync saves and save states together.
+///
+/// The two go to different endpoints and are compared in completely different
+/// ways — saves through the server's own `negotiate`, states by a local ledger
+/// because the server offers nothing to negotiate with — but nobody calling
+/// this cares about that. One call, one summary.
+pub async fn run_all(
+    client: &Client,
+    candidates: &[Candidate],
+    ra_root: &Path,
+    data_dir: &Path,
+    library_root: &Path,
+) -> Result<Summary> {
+    let mut summary = run(client, candidates, ra_root, data_dir, library_root).await?;
+
+    // States are best effort against the saves half: failing to sync a
+    // freeze-frame should not discard a successful battery-save sync.
+    match crate::statesync::run(client, candidates, ra_root, library_root, data_dir).await {
+        Ok(states) => {
+            summary.uploaded += states.uploaded;
+            summary.downloaded += states.downloaded;
+            summary.unchanged += states.unchanged;
+            summary.conflicts.extend(states.conflicts);
+            summary.notes.extend(states.notes);
+        }
+        Err(e) => summary.notes.push(format!("save states did not sync: {e}")),
+    }
+    Ok(summary)
 }
 
 #[cfg(test)]

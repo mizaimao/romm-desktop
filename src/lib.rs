@@ -27,6 +27,7 @@ pub mod theme_remote;
 pub mod savebackup;
 pub mod saves;
 pub mod savesync;
+pub mod statesync;
 pub mod tui;
 pub mod util;
 
@@ -35,7 +36,7 @@ pub mod util;
 /// Archive hashing, param names and the `/api/config` shape were all read out
 /// of this version. A different server may still work, but the mismatch is
 /// worth surfacing rather than debugging from first principles again.
-pub const VERIFIED_AGAINST: &str = "5.0.0";
+pub const VERIFIED_AGAINST: &str = "5.1.0";
 
 /// Load cached server settings into the modules that need them.
 ///

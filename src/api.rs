@@ -885,3 +885,87 @@ mod tests {
         assert!(parsed.skip_hash);
     }
 }
+
+// --- Save states ------------------------------------------------------------
+//
+// A separate family of endpoints from `/api/saves`, and deliberately simpler:
+// no slot, no device_id, no negotiate. `/api/sync/negotiate` covers saves only
+// — its payload has no states array — so the comparison for these has to be
+// done client-side. See `crate::statesync`.
+
+/// One save state on the server.
+///
+/// Note the absence of `content_hash`: unlike a save, the server publishes no
+/// digest for a state, so "has this changed" has to be answered from size and
+/// timestamp instead.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct SaveState {
+    pub id: i64,
+    pub rom_id: i64,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub file_size_bytes: i64,
+    #[serde(default)]
+    pub emulator: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+impl Client {
+    /// States the server holds for one ROM.
+    pub async fn states(&self, rom_id: i64) -> Result<Vec<SaveState>> {
+        self.get_json(&format!("/api/states?rom_id={rom_id}")).await
+    }
+
+    /// Download one state's bytes.
+    pub async fn state_content(&self, state_id: i64) -> Result<Vec<u8>> {
+        let url = format!("{}/api/states/{state_id}/content", self.base);
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", &self.auth)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        if !resp.status().is_success() {
+            bail!("GET {url} -> {}", resp.status());
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
+    /// Upload a state. There is no overwrite flag and no conflict response —
+    /// the server takes what it is given, which is why the decision about
+    /// whether to send has to be made before calling this.
+    pub async fn upload_state(
+        &self,
+        rom_id: i64,
+        file_name: &str,
+        bytes: Vec<u8>,
+        emulator: Option<&str>,
+    ) -> Result<SaveState> {
+        let mut url = format!("/api/states?rom_id={rom_id}");
+        if let Some(e) = emulator {
+            url.push_str(&format!("&emulator={}", urlencode(e)));
+        }
+        let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name.to_owned());
+        let form = reqwest::multipart::Form::new().part("stateFile", part);
+
+        let full = format!("{}{}", self.base, url);
+        let resp = self
+            .http
+            .post(&full)
+            .header("Authorization", &self.auth)
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("POST {full}"))?;
+        if !resp.status().is_success() {
+            let st = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("POST {full} -> {st}\n  {}", body.chars().take(300).collect::<String>());
+        }
+        resp.json().await.context("decoding uploaded state")
+    }
+}

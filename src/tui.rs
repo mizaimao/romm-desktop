@@ -351,7 +351,7 @@ impl App {
 
         let root = ra.root.clone();
         let result = self.rt.block_on(async move {
-            crate::savesync::run(&client, &candidates, &root, Path::new("."), &library_root).await
+            crate::savesync::run_all(&client, &candidates, &root, Path::new("."), &library_root).await
         });
 
         match result {

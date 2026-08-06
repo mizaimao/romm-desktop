@@ -1482,9 +1482,9 @@ async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
 
     if dry_run {
         let candidates = romm_desktop::savesync::scan(&store, &map, &ra.root)?;
-        let (states, skipped) = romm_desktop::savesync::client_states(&candidates);
-        println!("{} save(s) would be offered, {skipped} skipped", states.len());
-        for s in &states {
+        let (offered, skipped) = romm_desktop::savesync::client_states(&candidates);
+        println!("{} save(s) would be offered, {skipped} skipped", offered.len());
+        for s in &offered {
             println!(
                 "  rom {:>6}  {:<40} {:<10} {}",
                 s.rom_id,
@@ -1493,13 +1493,32 @@ async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
                 s.emulator.as_deref().unwrap_or("-")
             );
         }
+
+        // Save states go to a different endpoint and are compared differently,
+        // so they get their own line rather than being folded into the count.
+        let states: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.kind == saves::Kind::State && c.canonical)
+            .filter(|c| matches!(c.resolution, saves::Resolution::Resolved { .. }))
+            .collect();
+        println!("\n{} save state(s) would be compared against /api/states", states.len());
+        for c in &states {
+            let saves::Resolution::Resolved { rom_id, .. } = &c.resolution else { continue };
+            println!(
+                "  rom {:>6}  {:<40} {:<10} {}",
+                rom_id,
+                c.path.file_name().unwrap_or_default().to_string_lossy(),
+                c.slot,
+                c.core.as_deref().unwrap_or(&c.core_dir)
+            );
+        }
         return Ok(());
     }
 
     let client = cfg.server.client()?;
     let candidates = romm_desktop::savesync::scan(&store, &map, &ra.root)?;
     let summary =
-        romm_desktop::savesync::run(
+        romm_desktop::savesync::run_all(
             &client,
             &candidates,
             &ra.root,

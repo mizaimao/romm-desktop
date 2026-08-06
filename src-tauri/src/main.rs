@@ -716,7 +716,7 @@ async fn auto_sync(
         }
     };
 
-    match savesync::run(&client, &candidates, &ra.root, Path::new("."), &library_root).await {
+    match savesync::run_all(&client, &candidates, &ra.root, Path::new("."), &library_root).await {
         Ok(summary) => AutoSync {
             note: savesync::describe(when, &summary),
             conflicts: summary.conflicts,
@@ -976,7 +976,7 @@ async fn sync_saves(state: State<'_, AppState>) -> CmdResult<String> {
         romm_desktop::savesync::scan(&cache, &state.map, &root).map_err(err)?
     };
 
-    let summary = romm_desktop::savesync::run(
+    let summary = romm_desktop::savesync::run_all(
         &client,
         &candidates,
         &root,
