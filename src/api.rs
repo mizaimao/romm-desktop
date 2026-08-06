@@ -694,3 +694,129 @@ impl Client {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `updated_after` carries an ISO-8601 timestamp, whose `:` and `+` are
+    /// both meaningful in a query string. Sending them raw makes the server
+    /// read a different instant — or none — and the API ignores parameters it
+    /// cannot parse *silently*, so the symptom is a full re-sync every time
+    /// rather than an error.
+    #[test]
+    fn query_values_are_encoded_so_a_timestamp_survives() {
+        assert_eq!(
+            urlencode("2026-08-06T15:44:55+00:00"),
+            "2026-08-06T15%3A44%3A55%2B00%3A00"
+        );
+        // Unreserved characters must pass through, or every URL grows noise.
+        assert_eq!(urlencode("abc-DEF_123.x~y"), "abc-DEF_123.x~y");
+        assert_eq!(urlencode("a b"), "a%20b");
+    }
+
+    /// A save slot or emulator name reaches the server as a query value too.
+    #[test]
+    fn slot_and_emulator_names_are_encoded() {
+        assert_eq!(urlencode("state 3"), "state%203");
+        assert_eq!(urlencode("mame2003-plus"), "mame2003-plus");
+    }
+
+    /// An unset server is a configuration problem the user can fix, and saying
+    /// so beats a connection error against the empty string.
+    #[test]
+    fn an_empty_server_url_is_refused_with_advice() {
+        // Matched rather than `expect_err`: that needs `Client: Debug`, and
+        // deriving one would print the encoded credential in any debug output.
+        let err = match Client::new("", "u", "p") {
+            Ok(_) => panic!("an empty server url must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("config.toml"), "should say how to fix it: {err}");
+    }
+
+    /// A trailing slash in the configured URL would otherwise produce `//api/…`
+    /// on every request.
+    #[test]
+    fn a_trailing_slash_on_the_server_url_is_trimmed() {
+        let c = Client::new("http://dev.lan/", "u", "p").unwrap();
+        assert_eq!(c.base(), "http://dev.lan");
+    }
+
+    /// Credentials are pre-encoded once and reused, since streaming downloads
+    /// issue their own requests and need the same header.
+    #[test]
+    fn basic_credentials_are_encoded_once_for_reuse() {
+        let c = Client::new("http://dev.lan", "user", "pass").unwrap();
+        // "user:pass" in base64.
+        assert_eq!(c.auth(), "dXNlcjpwYXNz");
+    }
+
+    /// The three collection families share one struct because the server
+    /// returns one shape. `group` is what tells them apart in the cache, and
+    /// virtual has to win: a virtual collection can also carry `is_smart`.
+    #[test]
+    fn collection_grouping_puts_virtual_before_smart_before_user() {
+        let parse = |s: &str| serde_json::from_str::<Collection>(s).unwrap();
+
+        assert_eq!(parse(r#"{"id": 1, "name": "Mine"}"#).group(), "user");
+        assert_eq!(
+            parse(r#"{"id": 2, "name": "Filter", "is_smart": true}"#).group(),
+            "smart"
+        );
+        assert_eq!(
+            parse(r#"{"id": "x", "name": "RPG", "is_virtual": true, "type": "genre"}"#).group(),
+            "genre"
+        );
+        assert_eq!(
+            parse(r#"{"id": "x", "name": "Both", "is_virtual": true, "is_smart": true,
+                      "type": "franchise"}"#)
+                .group(),
+            "franchise",
+            "virtual wins, and takes its name from `type`"
+        );
+        // A virtual collection with no type still has to land somewhere.
+        assert_eq!(
+            parse(r#"{"id": "x", "name": "Odd", "is_virtual": true}"#).group(),
+            "virtual"
+        );
+    }
+
+    /// Absent fields must default rather than fail the whole page: one rom with
+    /// no cover would otherwise cost the entire sync.
+    #[test]
+    fn a_sparse_rom_still_deserialises() {
+        let rom: Rom = serde_json::from_str(r#"{"id": 1, "fs_name": "game.zip"}"#).unwrap();
+        assert_eq!(rom.fs_name, "game.zip");
+        assert!(rom.name.is_none());
+        assert!(!rom.has_multiple_files);
+        assert!(rom.merged_screenshots.is_empty());
+        assert!(rom.files.is_empty());
+    }
+
+    /// `POST /api/devices` answers with `device_id` while `GET /api/devices`
+    /// lists `id`. Accepting only one spelling deserialises to nothing and the
+    /// device is re-registered on every sync.
+    #[test]
+    fn a_device_is_read_under_either_id_spelling() {
+        let created: Device =
+            serde_json::from_str(r#"{"device_id": "abc", "name": "mac"}"#).unwrap();
+        assert_eq!(created.id, "abc");
+        let listed: Device = serde_json::from_str(r#"{"id": "abc"}"#).unwrap();
+        assert_eq!(listed.id, "abc");
+    }
+
+    /// The server's config keys are SCREAMING_CASE and nothing like our field
+    /// names; a rename here silently empties the exclusion lists and changes
+    /// how every archive hashes.
+    #[test]
+    fn server_config_maps_from_its_screaming_case_keys() {
+        let raw = r#"{"DEFAULT_EXCLUDED_FILES": ["gamelist.xml"],
+                      "DEFAULT_EXCLUDED_EXTENSIONS": ["db"],
+                      "SKIP_HASH_CALCULATION": true}"#;
+        let parsed: RawConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed.files, ["gamelist.xml"]);
+        assert_eq!(parsed.exts, ["db"]);
+        assert!(parsed.skip_hash);
+    }
+}

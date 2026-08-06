@@ -388,6 +388,102 @@ fn write_entry(path: &str, table: &str, key: &str, value: Option<&str>) -> Resul
 mod tests {
     use super::*;
 
+    /// The boot order is the point: a portable build can shadow a system one
+    /// without uninstalling either, and disabling an entry must skip it rather
+    /// than reorder anything.
+    #[test]
+    fn the_retroarch_boot_order_honours_position_and_enabled() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [[retroarch.installs]]
+            path = "/first"
+            [[retroarch.installs]]
+            path = "/disabled"
+            enabled = false
+            [[retroarch.installs]]
+            path = "/second"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.retroarch.ordered_paths(), ["/first", "/second"]);
+    }
+
+    /// An entry with no `enabled` key is on. Defaulting the other way would
+    /// silently disable every install in an existing config.
+    #[test]
+    fn an_install_is_enabled_unless_it_says_otherwise() {
+        let cfg: Config =
+            toml::from_str("[[retroarch.installs]]\npath = \"/ra\"\n").unwrap();
+        assert_eq!(cfg.retroarch.ordered_paths(), ["/ra"]);
+    }
+
+    /// `installs` supersedes the legacy single `root`, but an older config that
+    /// only sets `root` has to keep working untouched.
+    #[test]
+    fn the_legacy_single_root_still_works_and_is_superseded() {
+        let legacy: Config =
+            toml::from_str("[retroarch]\nroot = \"/old\"\n").unwrap();
+        assert_eq!(legacy.retroarch.ordered_paths(), ["/old"]);
+
+        let both: Config = toml::from_str(
+            "[retroarch]\nroot = \"/old\"\n[[retroarch.installs]]\npath = \"/new\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            both.retroarch.ordered_paths(),
+            ["/new"],
+            "the list wins; the old key is not appended"
+        );
+    }
+
+    /// Nothing configured means "probe the usual places", which is an empty
+    /// list rather than a list containing an empty path.
+    #[test]
+    fn no_retroarch_config_asks_for_the_default_probe() {
+        assert!(Config::default().retroarch.ordered_paths().is_empty());
+    }
+
+    /// A missing config is not an error — most commands work offline against
+    /// the local cache and should not require one.
+    #[test]
+    fn a_missing_config_loads_defaults_rather_than_failing() {
+        let cfg = Config::load_from(Path::new("/nonexistent/config.toml"))
+            .expect("absent config is fine");
+        assert_eq!(cfg.library.local_root, "./library");
+        assert!(cfg.server.url.is_empty());
+        assert!(cfg.shaders.enabled, "shaders default on");
+        assert!(!Config::exists("/nonexistent/config.toml"));
+    }
+
+    /// Malformed TOML must name the file. It used to surface as a bare parse
+    /// error with no indication of which file to go and look at.
+    #[test]
+    fn a_broken_config_says_which_file_it_is() {
+        let dir = std::env::temp_dir().join("romm-config-broken");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[server\nurl = ").unwrap();
+
+        let err = Config::load_from(&path).expect_err("not valid TOML").to_string();
+        assert!(err.contains("config.toml"), "got: {err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every derived path hangs off `library.local_root`, so one setting moves
+    /// the whole footprint — which is what makes "delete that folder" true.
+    #[test]
+    fn every_download_location_derives_from_one_setting() {
+        let cfg: Config =
+            toml::from_str("[library]\nlocal_root = \"/data/romm\"\n").unwrap();
+        for dir in [cfg.local_roms_dir(), cfg.media_dir(), cfg.system_dir(), cfg.themes_dir()] {
+            assert!(
+                dir.starts_with("/data/romm"),
+                "{} escaped the library root",
+                dir.display()
+            );
+        }
+    }
+
     /// Per-game keys are file paths, which TOML cannot express as bare keys.
     /// Round-tripping through a real parser is the only check that matters.
     #[test]

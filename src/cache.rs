@@ -699,3 +699,298 @@ impl Cache {
         Ok((platforms.len(), upserted, since.is_some()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cache on disk rather than in memory: `open` runs the migration path
+    /// too, which is where the tolerant column reads below come from.
+    fn cache(name: &str) -> Cache {
+        let dir = std::env::temp_dir().join(format!("romm-cache-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        Cache::open(&dir.join("c.sqlite3")).expect("opening a fresh cache")
+    }
+
+    fn add_platform(c: &Cache, id: i64, slug: &str, display: &str) {
+        c.conn
+            .execute(
+                "INSERT INTO platforms(id, fs_slug, display_name, rom_count) VALUES(?1,?2,?3,0)",
+                params![id, slug, display],
+            )
+            .unwrap();
+    }
+
+    fn add_rom(c: &Cache, id: i64, slug: &str, name: &str, fs_name: &str) {
+        c.conn
+            .execute(
+                "INSERT INTO roms(id, platform_slug, name, fs_name, fs_size_bytes)
+                 VALUES(?1,?2,?3,?4,0)",
+                params![id, slug, name, fs_name],
+            )
+            .unwrap();
+    }
+
+    /// The grid must never advertise a platform that opens empty. The count
+    /// comes from the roms actually held, not the server's figure, because the
+    /// two disagree the moment anything is pruned.
+    #[test]
+    fn platforms_with_no_roms_are_not_offered() {
+        let c = cache("empty-platforms");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        add_platform(&c, 2, "dc", "Dreamcast");
+        add_rom(&c, 10, "snes", "Chrono Trigger", "ct.sfc");
+
+        let got = c.platforms().unwrap();
+        assert_eq!(got.len(), 1, "dreamcast holds nothing and must not appear");
+        assert_eq!(got[0].fs_slug, "snes");
+        assert_eq!(got[0].rom_count, 1);
+    }
+
+    /// Alphabetical by display name, case-insensitively. It was ordered by ROM
+    /// count, which put the two biggest systems first and scattered the rest
+    /// with no visible logic.
+    #[test]
+    fn platforms_are_ordered_by_name_regardless_of_case() {
+        let c = cache("platform-order");
+        for (i, (slug, display)) in
+            [("z", "atari"), ("a", "Nintendo"), ("m", "Sega")].iter().enumerate()
+        {
+            add_platform(&c, i as i64 + 1, slug, display);
+            add_rom(&c, i as i64 + 100, slug, "g", "g.bin");
+        }
+        let names: Vec<String> =
+            c.platforms().unwrap().into_iter().map(|p| p.display_name).collect();
+        assert_eq!(names, ["atari", "Nintendo", "Sega"], "lowercase must not sort last");
+    }
+
+    /// Incremental sync never learns about deletions, so pruning is the only
+    /// thing that removes a stale row.
+    #[test]
+    fn pruning_drops_exactly_what_the_server_no_longer_has() {
+        let mut c = cache("prune");
+        add_rom(&c, 1, "snes", "Kept", "kept.sfc");
+        add_rom(&c, 2, "snes", "Gone", "gone.sfc");
+        add_rom(&c, 3, "snes", "Also gone", "gone2.sfc");
+
+        assert_eq!(c.prune_missing(&[1]).unwrap(), 2);
+        assert_eq!(c.rom_count().unwrap(), 1);
+        assert!(c.rom_by_id(1).unwrap().is_some());
+    }
+
+    /// The guard that matters most: an empty id list means the server call
+    /// failed, not that the server has nothing. Without this, one failed
+    /// request would empty the entire library.
+    #[test]
+    fn pruning_against_an_empty_list_deletes_nothing() {
+        let mut c = cache("prune-empty");
+        add_rom(&c, 1, "snes", "Kept", "kept.sfc");
+        assert_eq!(c.prune_missing(&[]).unwrap(), 0);
+        assert_eq!(c.rom_count().unwrap(), 1, "an empty list must never wipe the cache");
+    }
+
+    /// Only bare romset names on arcade platforms are replaced. A real title is
+    /// left alone, and a same-named file on another platform is not touched.
+    #[test]
+    fn arcade_renaming_only_touches_bare_romsets_on_arcade_platforms() {
+        let mut c = cache("arcade-names");
+        add_rom(&c, 1, "arcade", "kof98", "kof98.zip");
+        add_rom(&c, 2, "arcade", "Metal Slug", "mslug.zip");
+        add_rom(&c, 3, "snes", "kof98", "kof98.zip");
+
+        let names = std::collections::BTreeMap::from([
+            ("kof98".to_owned(), "The King of Fighters '98".to_owned()),
+            ("mslug".to_owned(), "Metal Slug".to_owned()),
+        ]);
+        assert_eq!(c.apply_arcade_names(&names).unwrap(), 1);
+
+        assert_eq!(c.rom_by_id(1).unwrap().unwrap().name, "The King of Fighters '98");
+        assert_eq!(c.rom_by_id(2).unwrap().unwrap().name, "Metal Slug", "already correct");
+        assert_eq!(c.rom_by_id(3).unwrap().unwrap().name, "kof98", "not an arcade platform");
+    }
+
+    /// An older cache stores this as TEXT because the migration adds columns
+    /// loosely; a fresh one stores an integer. Reading it strictly would make
+    /// every folder ROM in an existing cache look single-file, and download it
+    /// as an unusable zip.
+    #[test]
+    fn multi_file_reads_from_both_the_old_and_new_column_types() {
+        let c = cache("multifile");
+        add_rom(&c, 1, "psx", "Int", "a.chd");
+        add_rom(&c, 2, "psx", "Text", "b.chd");
+        add_rom(&c, 3, "psx", "Zero", "c.chd");
+        c.conn.execute("UPDATE roms SET multi_file = 1 WHERE id = 1", []).unwrap();
+        c.conn.execute("UPDATE roms SET multi_file = '1' WHERE id = 2", []).unwrap();
+        c.conn.execute("UPDATE roms SET multi_file = '0' WHERE id = 3", []).unwrap();
+
+        assert!(c.rom_by_id(1).unwrap().unwrap().multi_file, "integer 1");
+        assert!(c.rom_by_id(2).unwrap().unwrap().multi_file, "text \"1\"");
+        assert!(!c.rom_by_id(3).unwrap().unwrap().multi_file, "text \"0\"");
+    }
+
+    /// A row with no display name falls back to its filename, or the UI shows
+    /// a blank tile that cannot be identified or searched for.
+    #[test]
+    fn a_nameless_rom_falls_back_to_its_filename() {
+        let c = cache("noname");
+        add_rom(&c, 1, "snes", "", "Actraiser (USA).sfc");
+        assert_eq!(c.rom_by_id(1).unwrap().unwrap().name, "Actraiser (USA).sfc");
+    }
+
+    /// Search covers the filename as well as the title, because half this
+    /// library is known by one and half by the other.
+    #[test]
+    fn search_matches_title_or_filename_case_insensitively() {
+        let c = cache("search");
+        add_rom(&c, 1, "snes", "Chrono Trigger", "ct.sfc");
+        add_rom(&c, 2, "arcade", "kof98", "kof98.zip");
+
+        assert_eq!(c.search("chrono", 10).unwrap().len(), 1, "title, wrong case");
+        assert_eq!(c.search("ct.sfc", 10).unwrap().len(), 1, "filename");
+        assert_eq!(c.search("KOF", 10).unwrap().len(), 1);
+        assert_eq!(c.search("nothing here", 10).unwrap().len(), 0);
+    }
+
+    /// The newest schema stores every screenshot; older caches stored one. A
+    /// cache written before the list existed must still show its screenshot.
+    #[test]
+    fn screenshots_prefer_the_list_and_fall_back_to_the_single_column() {
+        let c = cache("shots");
+        add_rom(&c, 1, "snes", "Both", "a.sfc");
+        add_rom(&c, 2, "snes", "Legacy", "b.sfc");
+        c.conn
+            .execute(
+                "UPDATE roms SET screenshots_json = '[\"/one.png\",\"/two.png\"]',
+                                 screenshot_path = '/old.png' WHERE id = 1",
+                [],
+            )
+            .unwrap();
+        c.conn
+            .execute("UPDATE roms SET screenshot_path = '/old.png' WHERE id = 2", [])
+            .unwrap();
+
+        assert_eq!(
+            c.rom_by_id(1).unwrap().unwrap().screenshots(),
+            ["/one.png", "/two.png"]
+        );
+        assert_eq!(c.rom_by_id(2).unwrap().unwrap().screenshots(), ["/old.png"]);
+    }
+
+    /// An empty stored list must not shadow the legacy column, or a row that
+    /// synced before the list existed shows no artwork at all.
+    #[test]
+    fn an_empty_screenshot_list_falls_back_rather_than_showing_nothing() {
+        let c = cache("shots-empty");
+        add_rom(&c, 1, "snes", "Empty list", "a.sfc");
+        c.conn
+            .execute(
+                "UPDATE roms SET screenshots_json = '[]', screenshot_path = '/old.png'
+                 WHERE id = 1",
+                [],
+            )
+            .unwrap();
+        assert_eq!(c.rom_by_id(1).unwrap().unwrap().screenshots(), ["/old.png"]);
+    }
+
+    /// Collections come from the server as JSON, and the two families disagree
+    /// on the type of `id` — hand-made ones use a number, virtual ones a base64
+    /// string. Both have to land in the same table.
+    #[test]
+    fn collections_accept_both_numeric_and_string_ids() {
+        let numeric: crate::api::Collection =
+            serde_json::from_str(r#"{"id": 5, "name": "Favourites", "rom_ids": [1]}"#).unwrap();
+        assert_eq!(numeric.id, "5");
+        assert_eq!(numeric.group(), "user");
+
+        let virt: crate::api::Collection = serde_json::from_str(
+            r#"{"id": "eyJuYW1lIjoiUlBHIn0", "name": "RPG", "is_virtual": true,
+                "type": "genre", "rom_ids": [1]}"#,
+        )
+        .unwrap();
+        assert_eq!(virt.id, "eyJuYW1lIjoiUlBHIn0");
+        assert_eq!(virt.group(), "genre", "a virtual collection groups by its type");
+    }
+
+    /// A collection whose members are all gone would open empty, so it is not
+    /// offered — and neither is a group left with nothing in it.
+    #[test]
+    fn collections_that_would_open_empty_are_hidden() {
+        let mut c = cache("collections");
+        add_rom(&c, 1, "snes", "Chrono Trigger", "ct.sfc");
+
+        let live: crate::api::Collection =
+            serde_json::from_str(r#"{"id": 1, "name": "Live", "rom_ids": [1]}"#).unwrap();
+        // Every member of this one was pruned from the cache.
+        let dead: crate::api::Collection =
+            serde_json::from_str(r#"{"id": 2, "name": "Dead", "rom_ids": [999]}"#).unwrap();
+        c.replace_collections(&[live, dead]).unwrap();
+
+        let groups = c.collection_groups().unwrap();
+        assert_eq!(groups, [("user".to_owned(), 1)], "only the collection with a live member");
+
+        let items = c.collections_in("user").unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "Live");
+        assert_eq!(items[0].sample_ids, [1], "sample ids drive the cover mosaic");
+    }
+
+    /// Replacing is wholesale: virtual collection ids are derived from name and
+    /// type, so a rename orphans the old row rather than updating it.
+    #[test]
+    fn replacing_collections_clears_the_previous_set() {
+        let mut c = cache("collections-replace");
+        add_rom(&c, 1, "snes", "Game", "g.sfc");
+
+        let first: crate::api::Collection =
+            serde_json::from_str(r#"{"id": 1, "name": "Old name", "rom_ids": [1]}"#).unwrap();
+        c.replace_collections(&[first]).unwrap();
+        let renamed: crate::api::Collection =
+            serde_json::from_str(r#"{"id": 2, "name": "New name", "rom_ids": [1]}"#).unwrap();
+        c.replace_collections(&[renamed]).unwrap();
+
+        let items = c.collections_in("user").unwrap();
+        assert_eq!(items.len(), 1, "the orphaned row must be gone, not accumulated");
+        assert_eq!(items[0].name, "New name");
+    }
+
+    /// An ES-DE library lives wherever the user put it, so a game's location
+    /// cannot be derived from <roms>/<slug>/<file>. The index is asked instead.
+    #[test]
+    fn a_scanned_games_platform_is_found_by_its_absolute_path() {
+        let c = cache("path-lookup");
+        add_rom(&c, 1, "genesis", "Sonic", "sonic.md");
+        c.conn
+            .execute(
+                "UPDATE roms SET local_path = '/Volumes/SD/ROMs/megadrive/sonic.md' WHERE id = 1",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(
+            c.platform_for_path(Path::new("/Volumes/SD/ROMs/megadrive/sonic.md")).as_deref(),
+            Some("genesis")
+        );
+        assert_eq!(c.platform_for_path(Path::new("/nowhere/sonic.md")), None);
+    }
+
+    /// The exclusion lists govern archive hashing, so they must survive a
+    /// restart with the server unreachable — otherwise an offline verify uses
+    /// different rules from the download that produced the file.
+    #[test]
+    fn server_exclusions_round_trip_for_offline_use() {
+        let c = cache("server-config");
+        assert!(c.server_exclusions().is_none(), "nothing known before the first sync");
+
+        c.save_server_config(&crate::api::ServerConfig {
+            default_excluded_files: vec!["custom.nfo".to_owned()],
+            default_excluded_extensions: vec!["sav".to_owned()],
+            skip_hash_calculation: false,
+        })
+        .unwrap();
+
+        let (files, exts) = c.server_exclusions().expect("stored");
+        assert_eq!(files, ["custom.nfo"]);
+        assert_eq!(exts, ["sav"]);
+    }
+}

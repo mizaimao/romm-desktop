@@ -222,3 +222,68 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         notes,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romm-launch-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Anything that is not a playlist is none of this check's business.
+    #[test]
+    fn a_plain_rom_is_never_treated_as_a_playlist() {
+        let dir = scratch("not-m3u");
+        let rom = dir.join("Sonic.md");
+        std::fs::write(&rom, b"whatever").unwrap();
+        assert!(check_playlist(&rom).is_ok());
+        // Not even one that does not exist — the core's own error is better
+        // than a made-up one about discs.
+        assert!(check_playlist(&dir.join("Missing.md")).is_ok());
+    }
+
+    /// The extension check is case-insensitive; RomM's library carries both.
+    #[test]
+    fn a_complete_playlist_launches() {
+        let dir = scratch("complete");
+        std::fs::write(dir.join("d1.chd"), b"a").unwrap();
+        std::fs::write(dir.join("d2.chd"), b"b").unwrap();
+        for name in ["Game.m3u", "Game.M3U"] {
+            let m3u = dir.join(name);
+            std::fs::write(&m3u, "d1.chd\nd2.chd\n").unwrap();
+            assert!(check_playlist(&m3u).is_ok(), "{name} should pass");
+        }
+    }
+
+    /// The bug this exists for: RomM indexes .m3u files whose disc images it
+    /// never scanned, producing a few hundred bytes of text that cannot launch.
+    /// Caught here it names the discs; passed through it fails deep inside the
+    /// emulator with nothing useful on screen.
+    #[test]
+    fn an_incomplete_playlist_names_the_discs_that_are_missing() {
+        let dir = scratch("incomplete");
+        std::fs::write(dir.join("d1.chd"), b"a").unwrap();
+        let m3u = dir.join("Game.m3u");
+        std::fs::write(&m3u, "d1.chd\nd2.chd\nd3.chd\n").unwrap();
+
+        let err = check_playlist(&m3u).expect_err("two discs are absent").to_string();
+        assert!(err.contains("d2.chd"), "must name the missing disc: {err}");
+        assert!(err.contains("d3.chd"), "and all of them: {err}");
+        assert!(!err.contains("d1.chd"), "not the one that is present: {err}");
+    }
+
+    /// Comments and blank lines are structure, not filenames. Treating them as
+    /// discs would fail every playlist that has either.
+    #[test]
+    fn comments_and_blank_lines_are_not_discs() {
+        let dir = scratch("comments");
+        std::fs::write(dir.join("d1.chd"), b"a").unwrap();
+        let m3u = dir.join("Game.m3u");
+        std::fs::write(&m3u, "# Disc listing\n\n  d1.chd  \n\n#d2.chd\n").unwrap();
+        assert!(check_playlist(&m3u).is_ok(), "only d1.chd is a real entry");
+    }
+}

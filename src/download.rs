@@ -570,3 +570,223 @@ pub async fn fetch(
         verified,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romm-download-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("creating a temp dir");
+        dir
+    }
+
+    fn write(dir: &Path, name: &str, body: &[u8]) -> PathBuf {
+        let p = dir.join(name);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    /// A zip whose members are written in the given order, so a test can prove
+    /// the hash is taken in *name* order rather than storage order.
+    fn zip_of(path: &Path, members: &[(&str, &[u8])]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts: zip::write::SimpleFileOptions = Default::default();
+        for (name, body) in members {
+            zip.start_file(*name, opts).unwrap();
+            std::io::Write::write_all(&mut zip, body).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    fn md5_of(bytes: &[u8]) -> String {
+        hex::encode(md5::Md5::digest(bytes))
+    }
+
+    /// The exclusion rule decides which bytes feed the archive hash, so getting
+    /// it wrong does not error — it silently computes a hash that will never
+    /// match the server's, for every archive containing such a file.
+    #[test]
+    fn exclusions_match_on_the_basename_and_are_case_insensitive_on_extension() {
+        // Nothing about an ordinary ROM is excluded.
+        assert!(!excluded("Sonic.md"));
+        assert!(!excluded("roms/Sonic.md"));
+
+        // Names match exactly, anywhere in the tree.
+        assert!(excluded(".DS_Store"));
+        assert!(excluded("some/nested/dir/.DS_Store"));
+        assert!(excluded("gamelist.xml"));
+
+        // ...but only exactly. A name that merely ends with an excluded one is
+        // a real file and its bytes belong in the hash.
+        assert!(!excluded("mygamelist.xml"));
+
+        // Extensions are compared lowercased, since archives carry both forms.
+        assert!(excluded("Thumbs.DB"));
+        assert!(excluded("notes.log"));
+        assert!(excluded("NOTES.LOG"));
+        assert!(!excluded("save.srm"));
+    }
+
+    /// Setting the exclusions to nothing must not wipe the fallbacks — an empty
+    /// `/api/config` response would otherwise change how every archive hashes.
+    #[test]
+    fn empty_server_exclusions_are_ignored() {
+        set_exclusions(Vec::new(), Vec::new());
+        assert!(excluded(".DS_Store"), "the fallback list must survive");
+    }
+
+    /// RomM streams every eligible member through ONE digest, in ASCII order of
+    /// the internal path. With a single member the concatenation is that member,
+    /// which is why a one-file zip looks like it matches "the file inside".
+    #[test]
+    fn a_single_member_archive_hashes_as_its_contents() {
+        let dir = scratch("composite-one");
+        let zip_path = dir.join("one.zip");
+        zip_of(&zip_path, &[("game.md", b"abcdef")]);
+
+        let (md5, _) = hash_archive_composite(&zip_path).expect("a zip we just wrote");
+        assert_eq!(md5, md5_of(b"abcdef"));
+    }
+
+    /// The ordering rule, which is the part that cannot be guessed: members are
+    /// concatenated by sorted name, not by the order they sit in the archive.
+    #[test]
+    fn members_hash_in_name_order_not_storage_order() {
+        let dir = scratch("composite-order");
+        let zip_path = dir.join("set.zip");
+        // Deliberately stored z-then-a.
+        zip_of(&zip_path, &[("z.bin", b"ZZZ"), ("a.bin", b"AAA")]);
+
+        let (md5, _) = hash_archive_composite(&zip_path).unwrap();
+        assert_eq!(md5, md5_of(b"AAAZZZ"), "sorted by name: a.bin then z.bin");
+        assert_ne!(md5, md5_of(b"ZZZAAA"), "not the order they were written in");
+    }
+
+    /// An excluded member contributes nothing, so an archive with junk in it
+    /// hashes identically to the same archive without.
+    #[test]
+    fn excluded_members_do_not_reach_the_digest() {
+        let dir = scratch("composite-excluded");
+        let clean = dir.join("clean.zip");
+        let dirty = dir.join("dirty.zip");
+        zip_of(&clean, &[("game.md", b"payload")]);
+        zip_of(&dirty, &[("game.md", b"payload"), (".DS_Store", b"junk")]);
+
+        assert_eq!(
+            hash_archive_composite(&clean).unwrap().0,
+            hash_archive_composite(&dirty).unwrap().0
+        );
+    }
+
+    /// Per-member verification is what makes a folder ROM checkable at all, and
+    /// it must name the file that is wrong rather than just failing.
+    #[test]
+    fn member_verification_names_the_file_that_does_not_match() {
+        let dir = scratch("members-bad");
+        write(&dir, "disc1.chd", b"one");
+        write(&dir, "disc2.chd", b"two");
+
+        let members = vec![
+            ("disc1.chd".to_owned(), md5_of(b"one")),
+            ("disc2.chd".to_owned(), md5_of(b"WRONG")),
+        ];
+        let err = verify_members(&dir, &members).expect_err("disc2 does not match").to_string();
+        assert!(err.contains("disc2.chd"), "must say which file: {err}");
+        assert!(!err.contains("disc1.chd"), "and not blame the good one: {err}");
+    }
+
+    /// The server names members by leaf, but a zip may nest them a level deep.
+    /// Falling back to a search is what stops that being reported as missing.
+    #[test]
+    fn a_nested_member_is_found_rather_than_called_missing() {
+        let dir = scratch("members-nested");
+        write(&dir, "Shenmue/disc1.chd", b"one");
+
+        let members = vec![("disc1.chd".to_owned(), md5_of(b"one"))];
+        let (checked, _) = verify_members(&dir, &members).expect("found one level down");
+        assert_eq!(checked, 1);
+    }
+
+    /// A member the server listed no hash for is skipped, not treated as a
+    /// failure — `checked` and `total` differing is what reports that honestly.
+    #[test]
+    fn members_without_a_published_hash_are_skipped_not_failed() {
+        let dir = scratch("members-nohash");
+        write(&dir, "a.bin", b"a");
+        write(&dir, "b.bin", b"b");
+
+        let members = vec![
+            ("a.bin".to_owned(), md5_of(b"a")),
+            ("b.bin".to_owned(), String::new()),
+        ];
+        let (checked, total) = verify_members(&dir, &members).unwrap();
+        assert_eq!((checked, total), (1, 2));
+        assert!(
+            Verified::Members { checked, total }.describe().contains("no hash for the rest"),
+            "the shortfall has to be visible, not rounded up to a clean bill of health"
+        );
+    }
+
+    /// RomM synthesises an .m3u into the zip for multi-disc launching that has
+    /// no counterpart on the server. Counting it would report a shortfall that
+    /// does not exist, and make every folder ROM look partly unverified.
+    #[test]
+    fn a_generated_playlist_is_not_counted_as_an_unverified_member() {
+        let dir = scratch("members-m3u");
+        write(&dir, "disc1.chd", b"one");
+        write(&dir, "Game.m3u", b"disc1.chd\n");
+
+        let members = vec![("disc1.chd".to_owned(), md5_of(b"one"))];
+        let (checked, total) = verify_members(&dir, &members).unwrap();
+        assert_eq!(
+            (checked, total),
+            (1, 1),
+            "the .m3u the server never listed is generated, not missing"
+        );
+        assert_eq!(
+            Verified::Members { checked, total }.describe(),
+            "all 1 files md5-checked"
+        );
+
+        // An .m3u the server DID list is a real file and does count.
+        let listed = std::collections::HashSet::from(["Game.m3u"]);
+        assert_eq!(count_members(&dir, &listed), 2);
+    }
+
+    /// Filenames reach the server as a URL path segment. A raw space or `#`
+    /// truncates or misroutes the request, and this library is full of both.
+    #[test]
+    fn filenames_are_percent_encoded_for_the_content_url() {
+        assert_eq!(
+            urlencode_path("Final Fantasy VII (USA) (Disc 1).chd"),
+            "Final%20Fantasy%20VII%20%28USA%29%20%28Disc%201%29.chd"
+        );
+        assert_eq!(urlencode_path("Blow'em Out!.zip"), "Blow%27em%20Out%21.zip");
+        // Unreserved characters must pass through untouched.
+        assert_eq!(urlencode_path("a-b_c.d~e"), "a-b_c.d~e");
+    }
+
+    /// The words shown after a download are the user's only evidence of what
+    /// was actually checked, so "verified" must never overstate.
+    #[test]
+    fn describe_does_not_overstate_what_was_checked() {
+        assert_eq!(Verified::Md5.describe(), "md5 verified");
+        assert_eq!(
+            Verified::SizeOnly.describe(),
+            "size only — server published no hash"
+        );
+        assert_eq!(
+            Verified::Members { checked: 3, total: 3 }.describe(),
+            "all 3 files md5-checked"
+        );
+        assert!(Verified::Members { checked: 2, total: 3 }
+            .describe()
+            .contains("2 of 3"));
+    }
+}

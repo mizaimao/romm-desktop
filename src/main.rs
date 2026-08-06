@@ -1574,3 +1574,41 @@ async fn main() -> Result<()> {
         Command::SyncSaves { dry_run } => cmd_sync_saves(dry_run).await,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Depth is the whole point: a ROM can sit directly under its platform, or
+    /// two levels down inside a folder ROM. Taking the parent directory would
+    /// report `Shenmue (USA)` as the platform.
+    #[test]
+    fn the_platform_is_the_directory_directly_under_roms() {
+        let cases = [
+            ("/lib/roms/snes/Chrono Trigger.sfc", Some("snes")),
+            ("/lib/roms/dc/Shenmue (USA)/Shenmue (USA).m3u", Some("dc")),
+            ("/lib/roms/psx/MultiDisk/FF7/disc1.chd", Some("psx")),
+            // `roms` at the filesystem root still works.
+            ("/roms/nes/Metroid.nes", Some("nes")),
+        ];
+        for (path, want) in cases {
+            assert_eq!(platform_from_path(Path::new(path)).as_deref(), want, "for {path}");
+        }
+    }
+
+    /// Outside a library tree there is nothing to infer, and guessing would
+    /// launch the wrong core. The caller falls back to asking the index.
+    #[test]
+    fn a_path_outside_a_library_infers_nothing() {
+        for path in ["/Users/frank/Downloads/Game.sfc", "Game.sfc", "/roms"] {
+            assert_eq!(platform_from_path(Path::new(path)), None, "for {path}");
+        }
+    }
+
+    /// Only a directory literally named `roms` anchors the search, so a game
+    /// under `my-roms/` is not silently mistaken for a library.
+    #[test]
+    fn the_anchor_directory_must_be_named_exactly_roms() {
+        assert_eq!(platform_from_path(Path::new("/lib/my-roms/snes/Game.sfc")), None);
+    }
+}
