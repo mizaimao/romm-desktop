@@ -17,17 +17,19 @@ export async function showSystems() {
   el.list.innerHTML = `<div class="empty">Loading…</div>`;
 
   let rows;
+  let motion = { current: null, options: [] };
   try {
-    rows = await invoke("systems");
+    [rows, motion] = await Promise.all([invoke("systems"), invoke("motion_options")]);
   } catch (e) {
     el.list.innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
     return;
   }
-  render(rows);
+  render(rows, motion);
 }
 
-function render(rows) {
+function render(rows, motion) {
   el.list.innerHTML = `
+    ${motionMarkup(motion)}
     <table class="systbl">
       <thead>
         <tr><th>System</th><th>Games</th><th>Display</th><th>Emulator</th><th>Shader</th></tr>
@@ -41,12 +43,43 @@ function render(rows) {
     sel.addEventListener("change", async () => {
       const { slug, field } = sel.dataset;
       try {
-        toast(await invoke("set_system_choice", { slug, field, value: sel.value }));
+        // The motion layer is global, so it has its own command rather than a
+        // per-system one. Everything else is keyed by platform slug.
+        const msg = field === "motion"
+          ? await invoke("set_motion_shader", { value: sel.value })
+          : await invoke("set_system_choice", { slug, field, value: sel.value });
+        toast(msg);
       } catch (e) {
         toast(String(e), 8000);
       }
     })
   );
+}
+
+/// The strobe/BFI layer. Deliberately above the table and separate from it: it
+/// chains onto whatever shader each system already uses rather than replacing
+/// one, so it is not a per-system choice and should not look like a column.
+function motionMarkup(motion) {
+  if (!motion?.options?.length) return "";
+  const options = motion.options
+    .map(
+      (o) =>
+        `<option value="${o.path}" ${o.path === motion.current ? "selected" : ""} title="${escapeHtml(
+          o.note
+        )}">${escapeHtml(o.label)} — ${escapeHtml(o.note)}</option>`
+    )
+    .join("");
+  return `
+    <div class="sysmotion">
+      <label for="motion-sel"><strong>Motion layer</strong></label>
+      <select id="motion-sel" data-field="motion">
+        <option value="none" ${!motion.current ? "selected" : ""}>Off</option>
+        ${options}
+      </select>
+      <p>Reduces the smearing an LCD gives 60fps content, by strobing across
+         sub-frames. Chained on top of each system's own shader — it does not
+         replace it. Best on a 120Hz+ display; CRT systems only.</p>
+    </div>`;
 }
 
 function rowMarkup(s) {
