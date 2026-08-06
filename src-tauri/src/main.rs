@@ -907,6 +907,39 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
     })
 }
 
+/// Point the app at a RetroArch install by hand.
+///
+/// The automatic search only knows conventional locations — `/Applications`,
+/// `C:/Program Files/RetroArch` and so on — which is no help when the install
+/// lives somewhere like `E:/Emulators/RetroArch`. The path is verified before
+/// it is written, so a typo fails here rather than at the next launch.
+///
+/// `state.retroarch` is resolved once at startup and is not behind a lock — it
+/// is read inside an async command, where holding one across an await would be
+/// a hazard — so the new path applies on the next launch of the app rather than
+/// immediately. The returned string says so.
+#[tauri::command]
+fn set_retroarch_root(path: String) -> CmdResult<String> {
+    let path = path.trim().to_owned();
+
+    if path.is_empty() {
+        // Empty means "go back to probing the usual places".
+        romm_desktop::config::clear_table_entry("config.toml", "retroarch", "root").map_err(err)?;
+        return Ok("Cleared. The usual locations will be searched again after a restart.".into());
+    }
+
+    // Verify before writing, so a typo fails here rather than at the next launch.
+    let found = RetroArch::locate(Some(&path)).map_err(|e| e.to_string())?;
+    romm_desktop::config::set_table_entry("config.toml", "retroarch", "root", &path)
+        .map_err(err)?;
+
+    Ok(format!(
+        "Found {} with {} cores. Restart to use it.",
+        found.binary.display(),
+        found.installed_cores().len()
+    ))
+}
+
 fn current_style(state: &State<'_, AppState>) -> theme::IconStyle {
     let i = state.icon_style.load(Ordering::Relaxed) as usize;
     theme::IconStyle::ALL[i.min(theme::IconStyle::ALL.len() - 1)]
@@ -1133,6 +1166,7 @@ fn main() {
             theme_remove,
             icon_styles,
             set_icon_style,
+            set_retroarch_root,
             systems,
             set_system_choice,
             game_cores,

@@ -1,7 +1,9 @@
-// Settings pane. Currently just keyboard bindings.
+// Settings pane: emulator location and keyboard bindings.
 
 import { ACTIONS, keyFor, setKey, resetAll, keyLabel } from "./bindings.js";
 import { toast } from "./util.js";
+
+const invoke = window.__TAURI__?.core?.invoke;
 
 /// Set while waiting for a keypress to assign, so the global handler can get
 /// out of the way.
@@ -28,9 +30,21 @@ export function toggleSettings() {
   box.innerHTML = `
     <div class="set-panel" role="dialog" aria-label="Settings">
       <header>
-        <h3>Keyboard</h3>
+        <h3>Settings</h3>
         <button class="set-close" title="Close">×</button>
       </header>
+
+      <h4>RetroArch</h4>
+      <p class="hint">Leave empty to search the usual locations. Set it when the
+        install lives elsewhere, such as <code>E:\\Emulators\\RetroArch</code>.</p>
+      <div class="set-row set-path">
+        <input class="set-ra" type="text" spellcheck="false"
+               placeholder="path to the RetroArch folder" />
+        <button class="set-ra-save">Save</button>
+      </div>
+      <p class="hint set-ra-status"></p>
+
+      <h4>Keyboard</h4>
       <p class="hint">Click a key to rebind it. Press Esc while rebinding to leave it unset.</p>
       <div class="set-rows">${ACTIONS.map(
         (a) => `
@@ -49,6 +63,29 @@ export function toggleSettings() {
     if (ev.target === box) closeSettings();
   });
   box.querySelector(".set-close").addEventListener("click", closeSettings);
+
+  // RetroArch location. The backend verifies the path before writing it to
+  // config.toml, so an invalid one is reported here rather than failing later
+  // at launch time.
+  const raInput = box.querySelector(".set-ra");
+  const raStatus = box.querySelector(".set-ra-status");
+  invoke?.("status")
+    .then((s) => {
+      if (s?.retroarch) raInput.placeholder = s.retroarch;
+      raStatus.textContent = s?.retroarch
+        ? `Currently using ${s.retroarch} (${s.cores_installed} cores)`
+        : "Not found. Set a path, or install RetroArch.";
+    })
+    .catch(() => {});
+  box.querySelector(".set-ra-save").addEventListener("click", async () => {
+    raStatus.textContent = "Checking…";
+    try {
+      raStatus.textContent = await invoke("set_retroarch_root", { path: raInput.value });
+      toast("RetroArch path saved");
+    } catch (e) {
+      raStatus.textContent = String(e);
+    }
+  });
   box.querySelector(".set-reset").addEventListener("click", () => {
     resetAll();
     closeSettings();
