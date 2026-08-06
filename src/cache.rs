@@ -582,6 +582,17 @@ impl Cache {
         {
             let tx = self.conn.transaction()?;
             for p in &platforms {
+                // A slug can come back under a different id: deleting a platform
+                // on the server and letting a scan recreate it renumbers it, and
+                // the upsert below only resolves a conflict on `id`, leaving the
+                // UNIQUE on `fs_slug` to fail. Drop the stale row first.
+                //
+                // Safe because `roms` keys off `platform_slug`, not this id, so
+                // nothing downstream is orphaned by the renumbering.
+                tx.execute(
+                    "DELETE FROM platforms WHERE fs_slug = ?1 AND id <> ?2",
+                    params![p.fs_slug, p.id],
+                )?;
                 tx.execute(
                     "INSERT INTO platforms(id, fs_slug, display_name, rom_count)
                      VALUES(?1, ?2, ?3, ?4)
