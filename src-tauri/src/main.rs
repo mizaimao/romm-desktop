@@ -1188,42 +1188,55 @@ fn anchor_to_data_root() {
         return;
     }
 
-    // The core map ships inside the bundle; copy it out once so the app has a
-    // writable, inspectable copy alongside everything else. Resolved from the
-    // executable rather than Tauri's path API, so this can run before the app
-    // is built and no AppHandle is needed.
+    // Seed the core map from the copy compiled into the binary, so the user
+    // has an inspectable, editable file alongside everything else.
+    //
+    // Previously this hunted for the file inside the running bundle, using
+    // paths that only described the macOS `.app` layout. A Windows build found
+    // nothing, so the map never arrived and startup failed — see
+    // `CoreMap::load_or_embedded`. Nothing here can fail the launch any more.
     let dest = data_root.join(MARKER);
     if !dest.is_file()
-        && let Ok(exe) = std::env::current_exe()
-        && let Some(contents) = exe.parent().and_then(|p| p.parent())
+        && let Err(e) = std::fs::write(&dest, romm_desktop::coremap::EMBEDDED)
     {
-        // Tauri rewrites a `../data/x` resource path to `_up_/data/x` inside
-        // the bundle, so check that first and fall back to the flat location.
-        let candidates = [
-            contents.join("Resources/_up_/data/esde-core-map.json"),
-            contents.join("Resources/esde-core-map.json"),
-        ];
-        match candidates.iter().find(|p| p.is_file()) {
-            Some(res) => {
-                if let Err(e) = std::fs::copy(res, &dest) {
-                    eprintln!("warning: could not seed {}: {e}", dest.display());
-                }
-            }
-            None => eprintln!("warning: no bundled core map found; platform icons and core mapping will be unavailable"),
-        }
+        eprintln!("warning: could not seed {}: {e}", dest.display());
     }
 
     let _ = std::env::set_current_dir(&data_root);
 }
 
+/// Write panics somewhere findable before the process dies.
+///
+/// With no console attached, a panic in a release build produces no output at
+/// all. This is the difference between "it does nothing when I double-click"
+/// and a file naming the line that failed.
+fn install_panic_log() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+        if let Some(home) = home {
+            let path = PathBuf::from(home).join("RomM").join("crash.log");
+            let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
+            let _ = std::fs::write(&path, format!("{info}\n"));
+            eprintln!("panic written to {}", path.display());
+        }
+        previous(info);
+    }));
+}
+
 fn main() {
+    install_panic_log();
     anchor_to_data_root();
     let cfg = Config::load().unwrap_or_default();
     let store = cache::Cache::open(Path::new(CACHE_DB)).expect("opening metadata cache");
     // Archive verification depends on the server's exclusion lists; load the
     // cached copy before anything can download.
     romm_desktop::apply_cached_server_config(&store);
-    let map = CoreMap::load(Path::new(CORE_MAP)).expect("loading core map");
+    // Never `expect` here. A release build has no console (see
+    // `windows_subsystem` at the top of this file), so a panic at startup is
+    // completely silent: the icon bounces and nothing happens, with no way to
+    // tell whether the app crashed or never ran.
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
         .ok()
         .map(Arc::new);

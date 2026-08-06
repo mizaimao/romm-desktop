@@ -76,7 +76,31 @@ pub fn resolve_core_for(
         .map(str::to_owned)
 }
 
+/// The shipped core map, compiled into the binary.
+///
+/// A file next to the executable is not something a downloaded build can rely
+/// on: the resource-copying code only ever knew the macOS `.app` layout, so a
+/// loose Windows exe found nothing, failed to load the map, and — with no
+/// console attached in a release build — exited without a word. 110 KB in the
+/// binary buys a program that always starts.
+pub const EMBEDDED: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/esde-core-map.json"));
+
 impl CoreMap {
+    /// The compiled-in map. Infallible by construction: it is validated at
+    /// build time by the test below, so a malformed file fails CI, not a user.
+    pub fn embedded() -> Self {
+        serde_json::from_str(EMBEDDED).expect("the embedded core map is valid JSON")
+    }
+
+    /// Load from disk, falling back to the embedded copy.
+    ///
+    /// Disk wins so a user can edit the mapping without a rebuild; the
+    /// fallback means a fresh install works before anything has been written.
+    pub fn load_or_embedded(path: &Path) -> Self {
+        Self::load(path).unwrap_or_else(|_| Self::embedded())
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading core map at {}", path.display()))?;
@@ -193,6 +217,19 @@ mod tests {
     /// A per-game pin beats the platform override, which beats the ES-DE
     /// default. This ordering is why arcade works at all: one platform, many
     /// romsets, no single core that runs them.
+    /// The compiled-in map has to parse, since `embedded()` unwraps it. This
+    /// is what makes that unwrap safe: a bad `data/esde-core-map.json` fails
+    /// here rather than at a user's first launch.
+    #[test]
+    fn the_embedded_core_map_parses() {
+        let m = CoreMap::embedded();
+        assert!(!m.systems.is_empty(), "the embedded map has systems");
+        assert!(
+            m.default_core("snes").is_some(),
+            "and a default for a platform that certainly has one"
+        );
+    }
+
     #[test]
     fn per_game_beats_override_beats_default() {
         let m = map();

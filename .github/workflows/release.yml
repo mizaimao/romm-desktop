@@ -60,11 +60,6 @@ jobs:
 
       - run: npm ci
 
-      # The CLI/TUI. No system libraries needed: rustls uses *ring* and rusqlite
-      # is bundled, so this is a plain cargo build on every platform.
-      - name: Build CLI
-        run: cargo build --release --locked --target ${{ matrix.target }} --bin romm-desktop
-
       # The desktop app. `bundle.targets` in tauri.conf.json picks the right
       # format per platform: NSIS installer on Windows, .deb and AppImage on
       # Linux. macOS is built locally instead — see scripts/build-macos.sh.
@@ -75,15 +70,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          BIN=target/${{ matrix.target }}/release/romm-desktop
-          [ -f "$BIN.exe" ] && cp "$BIN.exe" "dist/romm-desktop-${{ matrix.target }}.exe" || true
-          [ -f "$BIN" ] && cp "$BIN" "dist/romm-desktop-${{ matrix.target }}" || true
-          # The GUI executable itself, alongside the installer. The whole UI is
-          # embedded in the binary, so this runs as-is with nothing to install —
-          # which is what you want for testing a build on another machine.
+          # The app, published as `romm-desktop`. Cargo still calls it
+          # romm-gui: the CLI crate already owns the romm-desktop bin name, and
+          # two targets of the same name collide in one target directory.
+          # Renaming on the way out avoids that without a confusing download.
           GUI=target/${{ matrix.target }}/release/romm-gui
-          [ -f "$GUI.exe" ] && cp "$GUI.exe" "dist/romm-gui-${{ matrix.target }}.exe" || true
-          [ -f "$GUI" ] && cp "$GUI" "dist/romm-gui-${{ matrix.target }}" || true
+          [ -f "$GUI.exe" ] && cp "$GUI.exe" "dist/romm-desktop-${{ matrix.target }}.exe" || true
+          [ -f "$GUI" ] && cp "$GUI" "dist/romm-desktop-${{ matrix.target }}" || true
           B=target/${{ matrix.target }}/release/bundle
           find "$B" -maxdepth 3 \
             \( -name '*.deb' -o -name '*.AppImage' \
@@ -122,14 +115,13 @@ jobs:
           body: |
             Download below. Nothing here needs installing unless you want it to.
 
-            **Windows** — `romm-gui-x86_64-pc-windows-msvc.exe` is the app,
-            portable: the whole UI is embedded in the binary, so just run it.
-            `*-setup.exe` is the installer if you would rather have a Start
-            menu entry. `romm-desktop-*.exe` is the CLI/TUI.
+            **Windows** — `romm-desktop-x86_64-pc-windows-msvc.exe` is the
+            app, portable: the UI and the core map are both compiled into it,
+            so just run it. `*-setup.exe` is the installer if you would rather
+            have a Start menu entry.
 
-            **Linux** — `romm-gui-x86_64-unknown-linux-gnu` is the app,
-            `*.AppImage` and `*.deb` are the packaged forms, and
-            `romm-desktop-*` is the CLI/TUI.
+            **Linux** — `romm-desktop-x86_64-unknown-linux-gnu` is the app;
+            `*.AppImage` and `*.deb` are the packaged forms.
 
             **macOS** is not built here on purpose: an unsigned bundle arrives
             quarantined and needs an `xattr` call before it will open. Build it
