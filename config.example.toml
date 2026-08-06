@@ -91,6 +91,10 @@ mame = "mame2003_plus"
 
 # ---- RetroAchievements ----
 #
+# RetroAchievements. RetroArch calls the feature "cheevos" and names every one
+# of its config keys that way; [achievements] is the readable spelling, and
+# [cheevos] is still accepted so an older config keeps working.
+#
 # RetroArch implements achievements; this owns the configuration for them.
 # Deliberately self-contained: the credentials live here, not in your
 # retroarch.cfg, so the same config.toml behaves identically against any
@@ -103,7 +107,7 @@ mame = "mame2003_plus"
 # The token is what RetroArch stores after a successful login; if you have one
 # already it is `cheevos_token` in its config. Otherwise give `password` and
 # RetroArch will exchange it for a token on first use.
-[cheevos]
+[achievements]
 enabled = false
 username = ""
 token = ""

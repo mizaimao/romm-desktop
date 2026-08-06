@@ -64,7 +64,7 @@ pub struct App {
     core_per_game: std::collections::BTreeMap<String, String>,
     user_ra_cfg: PathBuf,
     shaders_enabled: bool,
-    cheevos: crate::cheevos::Settings,
+    achievements: crate::achievements::Settings,
     shader_overrides: std::collections::BTreeMap<String, String>,
     quit: bool,
     /// Set while a download is in flight; cleared once the UI reports it.
@@ -122,8 +122,8 @@ impl App {
             shader_overrides: crate::config::Config::load()
                 .map(|c| c.shaders.by_platform)
                 .unwrap_or_default(),
-            cheevos: crate::config::Config::load()
-                .map(|c| c.cheevos.settings())
+            achievements: crate::config::Config::load()
+                .map(|c| c.achievements.settings())
                 .unwrap_or_default(),
             quit: false,
             progress: None,
@@ -263,7 +263,7 @@ impl App {
             // The TUI has no gamepad detection, so hotkeys fall back to the
             // best profile for this OS's input driver.
             pad: None,
-            cheevos: Some(&self.cheevos),
+            achievements: Some(&self.achievements),
         };
         let plan = match crate::launch::plan(ra, &self.map, &req) {
             Ok(p) => p,

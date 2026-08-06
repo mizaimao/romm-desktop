@@ -46,7 +46,7 @@ pub struct Request<'a> {
     /// "whatever this OS's input driver would use".
     pub pad: Option<&'a str>,
     /// RetroAchievements. `None` leaves the user's own settings alone.
-    pub cheevos: Option<&'a crate::cheevos::Settings>,
+    pub achievements: Option<&'a crate::achievements::Settings>,
 }
 
 /// A resolved, ready-to-spawn launch.
@@ -188,7 +188,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     if let Some(note) = tweaks::describe(req.platform, &core) {
         notes.push(note);
     }
-    if let Some(note) = req.cheevos.and_then(crate::cheevos::describe) {
+    if let Some(note) = req.achievements.and_then(crate::achievements::describe) {
         notes.push(note);
     }
 
@@ -213,7 +213,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         },
         ra.system_dir_line(),
         ra.prepare_tweaks(req.library_root, req.platform, &core),
-        req.cheevos.map(crate::cheevos::config_lines).unwrap_or_default()
+        req.achievements.map(crate::achievements::config_lines).unwrap_or_default()
     );
     let overrides = ra
         .write_overrides_full(req.library_root, Some(req.user_cfg), &extra, req.pad)

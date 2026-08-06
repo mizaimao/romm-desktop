@@ -30,7 +30,7 @@
 //! config — which is RetroArch's default once you enable achievements — would
 //! otherwise take those hotkeys away with no indication why.
 
-/// What the user configured under `[cheevos]`.
+/// What the user configured under `[achievements]`.
 #[derive(Debug, Default, Clone)]
 pub struct Settings {
     pub enabled: bool,
@@ -94,7 +94,7 @@ pub fn config_lines(s: &Settings) -> String {
         // half-configured login that fails on every launch.
         return format!(
             "\n# ---- RetroAchievements ----\n\
-             # [cheevos] enabled = true, but there is {}. Left untouched rather\n\
+             # [achievements] enabled = true, but there is {}. Left untouched rather\n\
              # than written half-configured, which fails a login every launch.\n",
             s.missing()
         );
@@ -135,7 +135,7 @@ pub fn describe(s: &Settings) -> Option<String> {
         return None;
     }
     if !s.usable() {
-        return Some(format!("achievements: enabled but {} — see [cheevos]", s.missing()));
+        return Some(format!("achievements: enabled but {} — see [achievements]", s.missing()));
     }
     let who = present(&s.username).unwrap_or("");
     Some(if s.hardcore {

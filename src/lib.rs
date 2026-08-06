@@ -2,10 +2,10 @@
 //! (`src-tauri/`). Everything the GUI needs already lives here — the GUI adds
 //! a window, not a second implementation.
 
+pub mod achievements;
 pub mod api;
 pub mod arcade;
 pub mod cache;
-pub mod cheevos;
 pub mod config;
 pub mod coremap;
 pub mod cores;

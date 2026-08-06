@@ -33,12 +33,18 @@ CHUNK = 8 * 1024 * 1024
 class Api:
     def __init__(self, cfg):
         self.url = cfg["url"].rstrip("/")
-        self.auth = base64.b64encode(
-            f"{cfg['username']}:{cfg['password']}".encode()
-        ).decode()
+        # A client token if one is configured, Basic otherwise. Matches the Rust
+        # client, so config.toml does not have to keep a password around purely
+        # for this script.
+        token = (cfg.get("token") or "").strip()
+        if token:
+            self.header = f"Bearer {token}"
+        else:
+            creds = f"{cfg.get('username', '')}:{cfg.get('password', '')}"
+            self.header = "Basic " + base64.b64encode(creds.encode()).decode()
 
     def _req(self, method, path, *, data=None, headers=None, timeout=300):
-        h = {"Authorization": f"Basic {self.auth}"}
+        h = {"Authorization": self.header}
         h.update(headers or {})
         req = urllib.request.Request(self.url + path, data=data, method=method, headers=h)
         with urllib.request.urlopen(req, timeout=timeout) as r:

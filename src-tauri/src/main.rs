@@ -50,8 +50,8 @@ struct AppState {
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
     /// RetroAchievements, read once at startup from this project's config.toml
-    /// — see `romm_desktop::cheevos`.
-    cheevos: romm_desktop::cheevos::Settings,
+    /// — see `romm_desktop::achievements`.
+    achievements: romm_desktop::achievements::Settings,
 }
 
 #[derive(Serialize)]
@@ -557,7 +557,7 @@ async fn launch_rom(
         core_per_game: &per_game,
         core_override: None,
         pad: pad.as_deref(),
-        cheevos: Some(&state.cheevos),
+        achievements: Some(&state.achievements),
     };
     // Fetch what is missing before planning. `plan` only ever picks among cores
     // already on disk, so without this a fresh install — which has none — fails
@@ -1328,7 +1328,7 @@ fn main() {
                     .and_then(|s| theme::IconStyle::ALL.iter().position(|x| *x == s))
                     .unwrap_or(3) as u8,
             ),
-            cheevos: cfg.cheevos.settings(),
+            achievements: cfg.achievements.settings(),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,

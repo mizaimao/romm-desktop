@@ -26,14 +26,19 @@ pub struct Config {
     pub icons: IconsCfg,
     #[serde(default)]
     pub esde: EsdeCfg,
-    #[serde(default)]
-    pub cheevos: CheevosCfg,
+    /// `[achievements]`, with `[cheevos]` still accepted: that is RetroArch's
+    /// own name for the feature and what every key it writes is called, so an
+    /// existing config keeps working.
+    #[serde(default, alias = "cheevos")]
+    pub achievements: AchievementsCfg,
 }
 
-/// RetroAchievements. See [`crate::cheevos`] for why the username is required
-/// and why hardcore mode is never inherited.
+/// RetroAchievements — the `[achievements]` section of config.toml.
+///
+/// See [`crate::achievements`] for why a username is required alongside the
+/// credential, and why hardcore mode is written explicitly every launch.
 #[derive(Debug, Default, Deserialize)]
-pub struct CheevosCfg {
+pub struct AchievementsCfg {
     #[serde(default)]
     pub enabled: bool,
     /// RetroAchievements account name. The token alone authenticates nothing.
@@ -54,9 +59,9 @@ pub struct CheevosCfg {
     pub test_unofficial: bool,
 }
 
-impl CheevosCfg {
-    pub fn settings(&self) -> crate::cheevos::Settings {
-        crate::cheevos::Settings {
+impl AchievementsCfg {
+    pub fn settings(&self) -> crate::achievements::Settings {
+        crate::achievements::Settings {
             enabled: self.enabled,
             username: self.username.clone(),
             token: self.token.clone(),
