@@ -785,6 +785,31 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
         .collect())
 }
 
+/// Sync saves and save states with the server.
+///
+/// An explicit action rather than something that happens on launch: a save is
+/// the only thing here that cannot be fetched again if it goes wrong, so
+/// overwriting one should be a decision, not a side effect.
+#[tauri::command]
+async fn sync_saves(state: State<'_, AppState>) -> CmdResult<String> {
+    let client = state.client.clone().ok_or("not connected to a server")?;
+    let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
+    let root = ra.root.clone();
+
+    // The cache is not Sync, so the scan takes the lock and releases it before
+    // any awaiting starts. A future holding the connection across an await
+    // cannot be spawned at all.
+    let candidates = {
+        let cache = state.cache.lock().map_err(err)?;
+        romm_desktop::savesync::scan(&cache, &state.map, &root).map_err(err)?
+    };
+
+    let summary = romm_desktop::savesync::run(&client, &candidates, &root, Path::new("."))
+        .await
+        .map_err(err)?;
+    Ok(format!("{}\n{}", summary.headline(), summary.notes.join("\n")))
+}
+
 /// The motion (strobe/BFI) layer: what is installed, and what is selected.
 ///
 /// Global rather than per-system: it depends on the display, not the console.
@@ -1293,6 +1318,7 @@ fn main() {
             set_icon_style,
             set_retroarch_root,
             systems,
+            sync_saves,
             motion_options,
             set_motion_shader,
             set_system_choice,

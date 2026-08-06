@@ -813,6 +813,10 @@ footer#toast {
 .badge.crt { color: #d8a657; border-color: #6b5626; }
 .badge.hh { color: #7fbf7f; border-color: #3c5c3c; }
 
+/* The sync status can be several lines of per-file notes, so let it wrap
+   rather than stretching the panel. */
+.set-savesync-status { white-space: pre-wrap; }
+
 .sysmotion {
   display: grid;
   grid-template-columns: auto auto 1fr;

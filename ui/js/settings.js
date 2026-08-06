@@ -52,6 +52,16 @@ export function toggleSettings() {
       </div>
       <p class="hint set-ra-status"></p>
 
+      <h4>Saves</h4>
+      <p class="hint">Compares your RetroArch saves and save states with the
+        server and transfers whatever differs. Never runs on its own: a save is
+        the one thing here that cannot be downloaded again if it goes wrong.
+        Anything changed on both sides is reported, not overwritten.</p>
+      <div class="set-path">
+        <button class="set-savesync">Sync saves now</button>
+      </div>
+      <p class="hint set-savesync-status"></p>
+
       <h4>Controller</h4>
       <p class="hint">Click a button to rebind it. Press the new button on the
         pad, or Esc to leave it unset.</p>
@@ -84,6 +94,23 @@ export function toggleSettings() {
     if (ev.target === box) closeSettings();
   });
   box.querySelector(".set-close").addEventListener("click", closeSettings);
+
+  // Saves. The button disables itself while running: the scan plus a round
+  // trip per file takes a few seconds, and a second click would start a
+  // concurrent sync over the same files.
+  const syncBtn = box.querySelector(".set-savesync");
+  const syncStatus = box.querySelector(".set-savesync-status");
+  syncBtn?.addEventListener("click", async () => {
+    syncBtn.disabled = true;
+    syncStatus.textContent = "Scanning saves…";
+    try {
+      syncStatus.textContent = await invoke("sync_saves");
+    } catch (e) {
+      syncStatus.textContent = `Sync failed — ${e}`;
+    } finally {
+      syncBtn.disabled = false;
+    }
+  });
 
   // RetroArch location. The backend verifies the path before writing it to
   // config.toml, so an invalid one is reported here rather than failing later

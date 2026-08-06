@@ -101,6 +101,16 @@ fn is_ignorable(rel: &Path, file_name: &str) -> bool {
     )
 }
 
+/// Does this filename belong in the `states` tree rather than `saves`?
+///
+/// Shares its rule with [`split_slot`] below, which is the authority on the
+/// naming: anything carrying `.state` is a save state, everything else
+/// (`.srm`, `.sav`) is a battery save. A download filed under the wrong one is
+/// invisible to the next scan.
+pub fn is_state_name(file_name: &str) -> bool {
+    file_name.to_ascii_lowercase().contains(".state")
+}
+
 /// Split a save filename into (rom basename, slot).
 ///
 /// RetroArch conventions, plus what this collection actually contains:

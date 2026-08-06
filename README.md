@@ -111,11 +111,24 @@ data/           generated reference data (core map, arcade names, catver)
 The GUI, TUI and CLI share one launch planner. Adding an emulator quirk in one
 place fixes it in all three — which is the point, because it did not used to.
 
+## Saves
+
+`Settings -> Sync saves now`, or `romm-desktop sync-saves`. It compares the
+RetroArch save tree with the server and transfers whatever differs.
+
+Never automatic. A save is the only thing here that cannot be fetched again if
+it goes wrong, so it is an action you take rather than a side effect of
+launching a game. Anything changed on both sides since the last sync is
+reported and left alone -- picking a winner silently is how an evening's
+progress disappears.
+
+`sync-saves --dry-run` prints what would be offered without writing anything,
+which is the way to check the ROM matching first.
+
 ## Status
 
-Browsing, downloading and launching all work. **Save sync does not**: the API
-layer exists and the scanner runs, but nothing calls it yet. That is the largest
-outstanding piece.
+Browsing, downloading, launching and save sync all work. Windows has had far
+less use than macOS.
 
 `data/` also carries the arcade work: every romset launch-tested against FBNeo
 and two MAME versions, with the results in `arcade-core-test.json`.

@@ -1467,6 +1467,50 @@ enum Command {
     Hashcheck {
         file: PathBuf,
     },
+    /// Sync save files and save states with the server
+    SyncSaves {
+        /// Report what would happen without writing or uploading anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// Sync saves with the server.
+///
+/// `--dry-run` stops after the scan and prints what would be offered, which is
+/// the safe way to see whether the ROM matching is right before anything
+/// overwrites a save file.
+async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
+    let ra = RetroArch::locate_in(&cfg.retroarch.ordered_paths())?;
+
+    if dry_run {
+        let candidates = romm_desktop::savesync::scan(&store, &map, &ra.root)?;
+        let (states, skipped) = romm_desktop::savesync::client_states(&candidates);
+        println!("{} save(s) would be offered, {skipped} skipped", states.len());
+        for s in &states {
+            println!(
+                "  rom {:>6}  {:<40} {:<10} {}",
+                s.rom_id,
+                s.file_name,
+                s.slot.as_deref().unwrap_or("-"),
+                s.emulator.as_deref().unwrap_or("-")
+            );
+        }
+        return Ok(());
+    }
+
+    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+    let candidates = romm_desktop::savesync::scan(&store, &map, &ra.root)?;
+    let summary =
+        romm_desktop::savesync::run(&client, &candidates, &ra.root, Path::new(".")).await?;
+    for note in &summary.notes {
+        println!("{note}");
+    }
+    println!("{}", summary.headline());
+    Ok(())
 }
 
 #[tokio::main]
@@ -1527,5 +1571,6 @@ async fn main() -> Result<()> {
         } => cmd_launch(&rom, go, core.as_deref(), fullscreen),
         Command::Art { term } => cmd_art(&term).await,
         Command::Hashcheck { file } => cmd_hashcheck(&file),
+        Command::SyncSaves { dry_run } => cmd_sync_saves(dry_run).await,
     }
 }
