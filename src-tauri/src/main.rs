@@ -49,8 +49,8 @@ struct AppState {
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
-    /// RetroAchievements, read once at startup. The login token itself stays in
-    /// the user's own retroarch.cfg — see `romm_desktop::cheevos`.
+    /// RetroAchievements, read once at startup from this project's config.toml
+    /// — see `romm_desktop::cheevos`.
     cheevos: romm_desktop::cheevos::Settings,
 }
 
@@ -1204,10 +1204,8 @@ fn anchor_to_data_root() {
     // Checked before the marker search because it is the more specific signal:
     // a config.toml is something the user deliberately put somewhere, whereas
     // the marker only says "a checkout is somewhere above us".
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(Path::to_path_buf));
-    for dir in [std::env::current_dir().ok(), exe_dir].into_iter().flatten() {
+    let exe_dir = std::env::current_exe().ok().and_then(|e| app_dir(&e));
+    for dir in [std::env::current_dir().ok(), exe_dir.clone()].into_iter().flatten() {
         if dir.join(CONFIG).is_file() {
             let _ = std::env::set_current_dir(&dir);
             return;
@@ -1229,38 +1227,35 @@ fn anchor_to_data_root() {
         }
     }
 
-    // 2. Bundled: use a plainly-named folder in the user's home.
+    // 2. The executable's own directory, and nowhere else.
     //
-    // Windows does not set HOME, so checking only that left an installed
-    // Windows build with no data directory at all — it fell back to whatever
-    // the shortcut's working directory happened to be.
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    let Some(data_root) = home.map(|h| h.join("RomM")) else {
-        eprintln!("warning: no HOME or USERPROFILE; leaving the working directory alone");
-        return;
-    };
-    if let Err(e) = std::fs::create_dir_all(data_root.join("data")) {
-        eprintln!("warning: could not create {}: {e}", data_root.display());
+    // The app lives where it was put. It does not create a folder in the home
+    // directory, and it does not write anything at all from this function —
+    // the core map is compiled into the binary (`CoreMap::load_or_embedded`),
+    // so there is nothing that has to exist on disk before startup.
+    if let Some(dir) = exe_dir {
+        let _ = std::env::set_current_dir(&dir);
         return;
     }
+    eprintln!("warning: could not locate the executable; leaving the working directory alone");
+}
 
-    // Seed the core map from the copy compiled into the binary, so the user
-    // has an inspectable, editable file alongside everything else.
-    //
-    // Previously this hunted for the file inside the running bundle, using
-    // paths that only described the macOS `.app` layout. A Windows build found
-    // nothing, so the map never arrived and startup failed — see
-    // `CoreMap::load_or_embedded`. Nothing here can fail the launch any more.
-    let dest = data_root.join(MARKER);
-    if !dest.is_file()
-        && let Err(e) = std::fs::write(&dest, romm_desktop::coremap::EMBEDDED)
-    {
-        eprintln!("warning: could not seed {}: {e}", dest.display());
+/// The directory a user would say the app is "in".
+///
+/// On macOS the executable is buried at `RomM-Desktop.app/Contents/MacOS/`,
+/// which is inside the signed bundle: writing there breaks the signature and is
+/// wiped on update. The directory holding the `.app` is the equivalent of the
+/// folder a loose `.exe` sits in, so that is what gets used.
+fn app_dir(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?;
+    let mut cur = dir;
+    while let Some(parent) = cur.parent() {
+        if cur.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")) {
+            return Some(parent.to_path_buf());
+        }
+        cur = parent;
     }
-
-    let _ = std::env::set_current_dir(&data_root);
+    Some(dir.to_path_buf())
 }
 
 /// Write panics somewhere findable before the process dies.
@@ -1271,12 +1266,14 @@ fn anchor_to_data_root() {
 fn install_panic_log() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-        if let Some(home) = home {
-            let path = PathBuf::from(home).join("RomM").join("crash.log");
-            let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
-            let _ = std::fs::write(&path, format!("{info}\n"));
-            eprintln!("panic written to {}", path.display());
+        // Beside the app, in the data directory `anchor_to_data_root` chose —
+        // not in the home directory. Nothing is created: if that location is
+        // not writable the panic still reaches stderr, which is no worse than
+        // before and does not leave a folder behind.
+        let path = PathBuf::from("crash.log");
+        if std::fs::write(&path, format!("{info}\n")).is_ok() {
+            let shown = path.canonicalize().unwrap_or(path);
+            eprintln!("panic written to {}", shown.display());
         }
         previous(info);
     }));
@@ -1362,4 +1359,56 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// On macOS the executable is buried inside the signed bundle. Writing
+    /// there breaks the signature and is wiped on update, so the directory
+    /// holding the `.app` is the app's location as far as data goes — the
+    /// equivalent of the folder a loose .exe sits in.
+    #[test]
+    fn a_macos_bundle_resolves_to_the_directory_holding_it() {
+        assert_eq!(
+            app_dir(Path::new("/Applications/RomM-Desktop.app/Contents/MacOS/romm-gui")),
+            Some(PathBuf::from("/Applications"))
+        );
+        assert_eq!(
+            app_dir(Path::new(
+                "/Users/frank/Projects/romm-desktop/RomM-Desktop.app/Contents/MacOS/romm-gui"
+            )),
+            Some(PathBuf::from("/Users/frank/Projects/romm-desktop"))
+        );
+    }
+
+    /// A loose executable — the Windows and Linux shape — anchors to its own
+    /// directory. Unzip it anywhere, drop a config.toml beside it, run it.
+    #[test]
+    fn a_loose_executable_anchors_beside_itself() {
+        assert_eq!(
+            app_dir(Path::new("D:/Emulators/RomM/romm-desktop.exe")),
+            Some(PathBuf::from("D:/Emulators/RomM"))
+        );
+        assert_eq!(
+            app_dir(Path::new("/opt/romm/romm-desktop")),
+            Some(PathBuf::from("/opt/romm"))
+        );
+    }
+
+    /// A directory merely *containing* the string "app" is not a bundle; only a
+    /// `.app` extension counts, or an install under /home/apps/ would anchor a
+    /// level too high.
+    #[test]
+    fn only_a_dot_app_extension_counts_as_a_bundle() {
+        assert_eq!(
+            app_dir(Path::new("/home/frank/apps/romm-desktop")),
+            Some(PathBuf::from("/home/frank/apps"))
+        );
+        assert_eq!(
+            app_dir(Path::new("/srv/appdata/romm/romm-desktop")),
+            Some(PathBuf::from("/srv/appdata/romm"))
+        );
+    }
 }
