@@ -2,6 +2,10 @@ name: Release
 
 # Tag a commit to publish:  git tag v0.1.0 && git push origin v0.1.0
 # Or run manually from the Actions tab to get artifacts without a release.
+#
+# Linux and Windows only. A CI-built macOS bundle would be unsigned, so it
+# arrives quarantined and needs mounting, dragging and an xattr call before it
+# opens. Build it on the Mac instead: scripts/build-macos.sh
 on:
   push:
     tags: ["v*"]
@@ -18,12 +22,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            label: macOS (Apple silicon)
-            target: aarch64-apple-darwin
-          - os: macos-13
-            label: macOS (Intel)
-            target: x86_64-apple-darwin
           - os: ubuntu-22.04
             label: Linux
             target: x86_64-unknown-linux-gnu
@@ -65,8 +63,8 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }} --bin romm-desktop
 
       # The desktop app. `bundle.targets` in tauri.conf.json picks the right
-      # format per platform: .app on macOS, NSIS installer on Windows,
-      # .deb and AppImage on Linux.
+      # format per platform: NSIS installer on Windows, .deb and AppImage on
+      # Linux. macOS is built locally instead — see scripts/build-macos.sh.
       - name: Build desktop app
         run: npx tauri build --target ${{ matrix.target }}
 
@@ -79,13 +77,9 @@ jobs:
           [ -f "$BIN" ] && cp "$BIN" "dist/romm-desktop-${{ matrix.target }}" || true
           B=target/${{ matrix.target }}/release/bundle
           find "$B" -maxdepth 3 \
-            \( -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \
+            \( -name '*.deb' -o -name '*.AppImage' \
                -o -name '*-setup.exe' -o -name '*.msi' \) \
             -exec cp {} dist/ \; 2>/dev/null || true
-          # macOS .app is a directory — ship it as a tarball
-          if [ -d "$B/macos" ]; then
-            tar -czf "dist/RomM-Desktop-${{ matrix.target }}.app.tar.gz" -C "$B/macos" .
-          fi
           ls -la dist
 
       - uses: actions/upload-artifact@v4
