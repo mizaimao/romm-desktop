@@ -414,11 +414,9 @@ impl App {
                 View::Platforms => self.enter_platform(cache)?,
                 View::Roms => self.play(term)?,
             },
-            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
-                if self.view == View::Roms {
-                    self.view = View::Platforms;
-                    self.filter.clear();
-                }
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') if self.view == View::Roms => {
+                self.view = View::Platforms;
+                self.filter.clear();
             }
             _ => {}
         }

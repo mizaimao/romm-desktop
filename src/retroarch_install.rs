@@ -16,6 +16,9 @@
 //! mode so it never touches an existing RetroArch's config.
 
 use std::path::{Path, PathBuf};
+// Every use of Command here is macOS-only (hdiutil, cp -R, xattr); importing it
+// unconditionally is an unused import on Linux and Windows.
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -65,6 +68,9 @@ pub async fn latest_available(http: &reqwest::Client) -> Result<String> {
     bail!("no known RetroArch release is downloadable right now")
 }
 
+/// Only `install_dmg` shells out, and that is macOS-only, so this would be dead
+/// code elsewhere.
+#[cfg(target_os = "macos")]
 fn run(cmd: &mut Command, what: &str) -> Result<String> {
     let out = cmd.output().with_context(|| format!("running {what}"))?;
     if !out.status.success() {
