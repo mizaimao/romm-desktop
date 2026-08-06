@@ -512,8 +512,16 @@ async fn download_rom(
 }
 
 /// Launch a ROM in RetroArch. Blocks until the emulator exits.
+///
+/// `pad` is the name the frontend's Gamepad API reports for the connected
+/// controller, used to pick the RetroArch autoconfig profile the gamepad
+/// hotkeys are derived from. Absent when nothing is connected.
 #[tauri::command]
-async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
+async fn launch_rom(
+    state: State<'_, AppState>,
+    id: i64,
+    pad: Option<String>,
+) -> CmdResult<String> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
         cache.rom_by_id(id).map_err(err)?
@@ -539,6 +547,7 @@ async fn launch_rom(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
         core_overrides: &overrides,
         core_per_game: &per_game,
         core_override: None,
+        pad: pad.as_deref(),
     };
     // Fetch what is missing before planning. `plan` only ever picks among cores
     // already on disk, so without this a fresh install — which has none — fails

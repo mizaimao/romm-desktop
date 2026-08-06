@@ -115,6 +115,14 @@ function edge(last) {
   focusNode(last ? nodes[nodes.length - 1] : nodes[0]);
 }
 
+/// Index of the selected card, or -1. Lost when linear navigation was replaced
+/// with the grid-aware version below, while `activate` kept calling it — so
+/// every press of Enter or A threw a ReferenceError, inside a rAF callback
+/// where nothing surfaces it.
+function focusedIndex(nodes) {
+  return nodes.findIndex((n) => n.classList.contains("sel"));
+}
+
 function activate() {
   const nodes = items();
   if (!nodes.length) return;

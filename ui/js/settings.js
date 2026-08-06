@@ -55,6 +55,7 @@ export function toggleSettings() {
       <h4>Controller</h4>
       <p class="hint">Click a button to rebind it. Press the new button on the
         pad, or Esc to leave it unset.</p>
+      <p class="hint pad-live">No controller detected.</p>
       <div class="set-rows">${ACTIONS.map(
         (a) => `
         <div class="set-row pad-row" data-id="${a.id}">
@@ -147,6 +148,28 @@ export function toggleSettings() {
     toggleSettings();
     toast("Controller bindings reset");
   });
+
+  // Live readout of what the pad actually reports. The defaults assume the
+  // W3C "standard" layout, but a pad that reports a different mapping puts the
+  // face buttons at other indices — in which case the bindings look right and
+  // nothing responds. This makes that visible instead of a guessing game.
+  const live = box.querySelector(".pad-live");
+  const tick = () => {
+    if (!document.getElementById("settings")) return;
+    const pad = (navigator.getGamepads?.() ?? []).find(Boolean);
+    if (!pad) {
+      live.textContent = "No controller detected — press a button to wake it.";
+    } else {
+      const down = pad.buttons
+        .map((b, i) => (b.pressed ? i : null))
+        .filter((i) => i !== null);
+      live.textContent =
+        `${pad.id} · mapping: ${pad.mapping || "(none reported)"} · ` +
+        `${pad.buttons.length} buttons · pressed: ${down.length ? down.join(", ") : "none"}`;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 
   box.querySelectorAll(".pad-row").forEach((row) => {
     const btn = row.querySelector(".set-pad");

@@ -140,6 +140,7 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         core_overrides: &cfg.cores.overrides,
         core_per_game: &cfg.cores.per_game,
         core_override,
+        pad: None,
     };
     let plan = launch::plan(&ra, &map, &req)?;
 

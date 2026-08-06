@@ -41,9 +41,60 @@ function fire(action, now) {
   runAction(action);
 }
 
+/// Translate raw pad state into the set of actions held this frame.
+///
+/// Split out of `poll` so it can be tested without a browser: this is where
+/// "the A button does nothing" would live, and a bug here is otherwise
+/// invisible, since poll runs inside requestAnimationFrame where a throw is
+/// swallowed and the next frame is already queued.
+export function pressedActions(pads, map) {
+  const pressed = new Set();
+
+  for (const pad of pads) {
+    if (!pad) continue;
+
+    for (const [index, action] of Object.entries(map)) {
+      // A rebind clears the old slot by writing null, so skip those rather
+      // than dispatching an action of null.
+      if (action && pad.buttons[index]?.pressed) pressed.add(action);
+    }
+    // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
+    // diagonally it would otherwise report left+up in the same frame and move
+    // twice, which reads as the cursor jumping around on its own.
+    const [x = 0, y = 0] = pad.axes;
+    if (Math.abs(x) > Math.abs(y)) {
+      if (x < -STICK_DEADZONE) pressed.add("left");
+      if (x > STICK_DEADZONE) pressed.add("right");
+    } else {
+      if (y < -STICK_DEADZONE) pressed.add("up");
+      if (y > STICK_DEADZONE) pressed.add("down");
+    }
+  }
+
+  return pressed;
+}
+
+/// Reported at most once. A throw inside a rAF callback does not stop the loop
+/// — the next frame was already scheduled — so without this the controller just
+/// silently stops responding, which is precisely how a broken poll survived
+/// several rounds of being reported and "fixed".
+let complained = false;
+
 function poll() {
   if (!running) return;
   requestAnimationFrame(poll);
+  try {
+    step();
+  } catch (e) {
+    console.error("gamepad poll failed", e);
+    if (!complained) {
+      complained = true;
+      toast(`Controller input error: ${e.message}`);
+    }
+  }
+}
+
+function step() {
 
   // The lightbox owns input entirely while open, as with the keyboard.
   if (!el.lb.hidden) return;
@@ -69,30 +120,8 @@ function poll() {
     return;
   }
 
-  const pads = navigator.getGamepads?.() ?? [];
   const now = performance.now();
-  const pressed = new Set();
-
-  for (const pad of pads) {
-    if (!pad) continue;
-
-    for (const [index, action] of Object.entries(map)) {
-      // A rebind clears the old slot by writing null, so skip those rather
-      // than dispatching an action of null.
-      if (action && pad.buttons[index]?.pressed) pressed.add(action);
-    }
-    // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
-    // diagonally it would otherwise report left+up in the same frame and move
-    // twice, which reads as the cursor jumping around on its own.
-    const [x = 0, y = 0] = pad.axes;
-    if (Math.abs(x) > Math.abs(y)) {
-      if (x < -STICK_DEADZONE) pressed.add("left");
-      if (x > STICK_DEADZONE) pressed.add("right");
-    } else {
-      if (y < -STICK_DEADZONE) pressed.add("up");
-      if (y > STICK_DEADZONE) pressed.add("down");
-    }
-  }
+  const pressed = pressedActions(navigator.getGamepads?.() ?? [], map);
 
   for (const action of pressed) fire(action, now);
   // Release anything no longer held so the next press fires immediately.

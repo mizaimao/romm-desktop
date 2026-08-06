@@ -9,6 +9,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use crate::padprofile;
 use crate::util::expand_tilde;
 
 /// Seed for the user's own RetroArch settings.
@@ -318,42 +319,11 @@ video_aspect_ratio_auto = \"true\"
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
 
-# ---- Controller hotkeys ----
-# RetroArch ships keyboard hotkeys (F1 menu, Escape exit) but binds none for a
-# gamepad, so a handheld user has no way out of a game without a keyboard.
-# These give every install launched from here the same combinations.
-#
-# Back/Select/Minus is the modifier: nothing here fires unless it is held, so
-# the buttons keep their normal in-game meaning. Indices are standard-mapping,
-# which RetroArch reports identically for Xbox, DualSense, Switch Pro and
-# 8BitDo pads — the names below are the Xbox ones.
-input_enable_hotkey_btn = \"8\"          # Back / Select / Minus — hold for all of these
-
-input_exit_emulator_btn = \"0\"          # + A  -> quit
-input_shader_toggle_btn = \"1\"          # + B  -> shaders on/off
-input_fps_toggle_btn = \"2\"             # + X  -> FPS counter
-input_menu_toggle_btn = \"3\"            # + Y  -> RetroArch menu
-input_load_state_btn = \"4\"             # + LB -> load state
-input_save_state_btn = \"5\"             # + RB -> save state
-input_hold_fast_forward_btn = \"7\"      # + RT -> fast-forward while held
-
-input_shader_prev_btn = \"12\"           # + D-pad up    -> previous shader
-input_shader_next_btn = \"13\"           # + D-pad down  -> next shader
-input_state_slot_decrease_btn = \"14\"   # + D-pad left  -> previous save slot
-input_state_slot_increase_btn = \"15\"   # + D-pad right -> next save slot
-
-# Quit asks once rather than dropping the game instantly — A is easy to hit by
-# accident, and losing unsaved progress to a stray press is not recoverable.
-quit_press_twice = \"true\"
-
-# Opening the menu should pause, not leave the game running underneath it.
-menu_pause_libretro = \"true\"
 ";
 
     /// Windows-only additions, appended to `OVERRIDES` there.
     #[cfg(target_os = "windows")]
-    const OVERRIDES_OS: &str = "\
-
+    const OVERRIDES_OS: &str = "
 # ---- Windows ----
 # The GL driver flickers while a window is being resized, badly enough to look
 # broken. D3D11 does not, and is the driver the Windows build is tuned for.
@@ -377,7 +347,7 @@ video_vsync = \"true\"
         dir: &Path,
         user_config: Option<&Path>,
     ) -> Result<PathBuf> {
-        self.write_overrides_full(dir, user_config, "")
+        self.write_overrides_full(dir, user_config, "", None)
     }
 
     /// As above, with `extra` (per-platform shader settings) inserted before
@@ -387,11 +357,13 @@ video_vsync = \"true\"
         dir: &Path,
         user_config: Option<&Path>,
         extra: &str,
+        pad: Option<&str>,
     ) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
         body.push_str(Self::OVERRIDES_OS);
+        body.push_str(&self.hotkeys(pad));
         body.push_str(extra);
 
         if let Some(user) = user_config {
@@ -414,6 +386,22 @@ video_vsync = \"true\"
         std::fs::write(&path, &body)
             .with_context(|| format!("writing {}", path.display()))?;
         Ok(path)
+    }
+
+    /// The controller hotkey block for `device` (the connected pad's reported
+    /// name, if the frontend knows it).
+    ///
+    /// Generated per launch rather than shipped as fixed numbers: RetroArch
+    /// hotkeys take raw driver indices, which differ per controller *and* per
+    /// operating system. See [`crate::padprofile`].
+    pub fn hotkeys(&self, device: Option<&str>) -> String {
+        let profile = padprofile::find(&self.root, device).unwrap_or_else(|| {
+            // No autoconfig directory, or nothing in it for this pad. The
+            // built-in table is right for an Xbox-style controller, which is
+            // the overwhelming majority, and the user's own config still wins.
+            padprofile::fallback()
+        });
+        padprofile::hotkey_block(&profile)
     }
 
     /// Write a starter user-settings file if none exists yet.
@@ -653,4 +641,171 @@ pub fn render(cmd: &Command) -> String {
     let mut parts = vec![quote(&cmd.get_program().to_string_lossy())];
     parts.extend(cmd.get_args().map(|a| quote(&a.to_string_lossy())));
     parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake(root: &Path) -> RetroArch {
+        RetroArch {
+            root: root.to_path_buf(),
+            binary: root.join("retroarch"),
+            portable: false,
+            system_override: None,
+        }
+    }
+
+    /// Each test gets its own directory under the OS temp dir, named for the
+    /// test, so a failure leaves inspectable output and runs cannot collide.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romm-desktop-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("creating a temp dir");
+        dir
+    }
+
+    /// The user's own file is appended last, because `--appendconfig` gives the
+    /// final assignment of a key. This is the promise the README makes: we never
+    /// modify their retroarch.cfg and never win an argument with it.
+    #[test]
+    fn the_users_own_settings_come_last() {
+        let dir = scratch("user-last");
+        let user = dir.join("mine.cfg");
+        std::fs::write(&user, "video_driver = \"vulkan\"\n").unwrap();
+
+        let path = fake(&dir)
+            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", None)
+            .unwrap();
+        let body = std::fs::read_to_string(path).unwrap();
+
+        let ours = body.find("input_enable_hotkey_btn").expect("our hotkeys");
+        let extra = body.find("video_smooth").expect("the per-platform extra");
+        let theirs = body.find("vulkan").expect("the user's line");
+        assert!(ours < extra, "per-platform settings layer over ours");
+        assert!(extra < theirs, "the user's file layers over everything");
+    }
+
+    /// A missing user config is a warning, not a failed launch — the file is
+    /// optional and someone deleting it should not be unable to play.
+    #[test]
+    fn a_missing_user_config_does_not_fail_the_launch() {
+        let dir = scratch("missing-user");
+        let path = fake(&dir)
+            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None)
+            .unwrap();
+        assert!(std::fs::read_to_string(path).unwrap().contains("input_enable_hotkey_btn"));
+    }
+
+    /// The hotkeys are generated from the pad profile, not hardcoded.
+    ///
+    /// The layout is asserted symbolically: which *button* does what, with the
+    /// index looked up the same way the generator looks it up. Pinning literal
+    /// numbers here is what let the wrong ones ship — they looked right next to
+    /// a matching comment, and were the browser's indices rather than
+    /// RetroArch's.
+    #[test]
+    fn the_hotkeys_come_from_the_pad_profile() {
+        use crate::padprofile;
+
+        let dir = scratch("hotkeys");
+        let body = std::fs::read_to_string(
+            fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
+        )
+        .unwrap();
+
+        // No autoconfig under a scratch dir, so this is the built-in fallback.
+        let profile = padprofile::fallback();
+        assert!(
+            body.contains(&profile.get(padprofile::MODIFIER).unwrap().line("enable_hotkey")),
+            "Select must be bound as the modifier"
+        );
+        for (action, button, _) in padprofile::HOTKEYS {
+            let bind = profile.get(*button).expect("fallback covers every hotkey");
+            assert!(
+                body.contains(&bind.line(action)),
+                "{action} should be on {button:?}, as {}",
+                bind.line(action)
+            );
+        }
+
+        // The two settings that make quit survivable.
+        assert!(body.contains("quit_press_twice = \"true\""), "quit must confirm");
+        assert!(
+            body.contains("config_save_on_exit = \"false\""),
+            "RetroArch must not write our layered settings back into the user\'s config"
+        );
+    }
+
+    /// Quit must never sit on the same button as the modifier, and must never
+    /// be reachable without it. Holding B and tapping A is an ordinary thing to
+    /// do in a game; it should not end one.
+    #[test]
+    fn quit_is_not_reachable_during_normal_play() {
+        use crate::padprofile::{self, Physical};
+
+        let dir = scratch("quit-safety");
+        let body = std::fs::read_to_string(
+            fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
+        )
+        .unwrap();
+
+        let profile = padprofile::fallback();
+        let modifier = profile.get(padprofile::MODIFIER).unwrap();
+        let quit = profile.get(Physical::A).unwrap();
+        assert_ne!(modifier.value, quit.value);
+        assert!(body.contains(&modifier.line("enable_hotkey")));
+        // The face buttons must not be the modifier under any profile.
+        for face in [Physical::A, Physical::B, Physical::X, Physical::Y] {
+            let bind = profile.get(face).unwrap();
+            assert_ne!(
+                bind.value, modifier.value,
+                "{face:?} is used constantly in play and cannot be the hotkey modifier"
+            );
+        }
+    }
+
+    /// Every emitted line must be a `key = value` assignment, a comment, or
+    /// blank. A stray escaped newline once joined the platform block onto the
+    /// preceding line, which RetroArch parses as one malformed setting.
+    #[test]
+    fn every_emitted_line_parses_as_a_setting() {
+        let dir = scratch("well-formed");
+        let path = fake(&dir).write_overrides_full(&dir, None, "", None).unwrap();
+        for line in std::fs::read_to_string(path).unwrap().lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (key, _) = line.split_once(" = ").unwrap_or_else(|| panic!("malformed: {line}"));
+            assert!(
+                key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                "key {key:?} has characters RetroArch will not accept"
+            );
+        }
+    }
+
+    /// Locating reports what it tried rather than a bare "not found", because
+    /// the usual cause is an install somewhere unusual (a second drive) and the
+    /// list is what tells the user to go set the path in Settings.
+    #[test]
+    fn a_failed_locate_names_the_paths_it_tried() {
+        let missing = scratch("no-retroarch").join("nowhere");
+        let err = RetroArch::locate_in(&[missing.display().to_string()])
+            .expect_err("there is no RetroArch there")
+            .to_string();
+        assert!(err.contains(&missing.display().to_string()), "got: {err}");
+        assert!(err.contains("config.toml"), "should say how to fix it: {err}");
+    }
+
+    /// The starter user config is written once and never overwritten — it holds
+    /// the user's own settings after the first run.
+    #[test]
+    fn the_starter_user_config_is_never_overwritten() {
+        let path = scratch("starter").join("user.cfg");
+        assert!(RetroArch::ensure_user_config(&path).unwrap(), "written the first time");
+        std::fs::write(&path, "input_driver = \"mine\"\n").unwrap();
+        assert!(!RetroArch::ensure_user_config(&path).unwrap(), "left alone the second time");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "input_driver = \"mine\"\n");
+    }
 }

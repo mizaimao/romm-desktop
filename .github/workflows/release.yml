@@ -78,6 +78,12 @@ jobs:
           BIN=target/${{ matrix.target }}/release/romm-desktop
           [ -f "$BIN.exe" ] && cp "$BIN.exe" "dist/romm-desktop-${{ matrix.target }}.exe" || true
           [ -f "$BIN" ] && cp "$BIN" "dist/romm-desktop-${{ matrix.target }}" || true
+          # The GUI executable itself, alongside the installer. The whole UI is
+          # embedded in the binary, so this runs as-is with nothing to install —
+          # which is what you want for testing a build on another machine.
+          GUI=target/${{ matrix.target }}/release/romm-gui
+          [ -f "$GUI.exe" ] && cp "$GUI.exe" "dist/romm-gui-${{ matrix.target }}.exe" || true
+          [ -f "$GUI" ] && cp "$GUI" "dist/romm-gui-${{ matrix.target }}" || true
           B=target/${{ matrix.target }}/release/bundle
           find "$B" -maxdepth 3 \
             \( -name '*.deb' -o -name '*.AppImage' \

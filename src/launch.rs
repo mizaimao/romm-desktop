@@ -35,6 +35,10 @@ pub struct Request<'a> {
     pub core_per_game: &'a BTreeMap<String, String>,
     /// Explicit `--core`, bypassing resolution entirely.
     pub core_override: Option<&'a str>,
+    /// Name the connected controller reports, used to pick the RetroArch
+    /// autoconfig profile the gamepad hotkeys are derived from. None means
+    /// "whatever this OS's input driver would use".
+    pub pad: Option<&'a str>,
 }
 
 /// A resolved, ready-to-spawn launch.
@@ -162,7 +166,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         ra.prepare_tweaks(req.library_root, req.platform, &core)
     );
     let overrides = ra
-        .write_overrides_full(req.library_root, Some(req.user_cfg), &extra)
+        .write_overrides_full(req.library_root, Some(req.user_cfg), &extra, req.pad)
         .ok();
 
     Ok(Plan {

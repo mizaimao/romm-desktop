@@ -49,8 +49,8 @@ pub const CATALOGUE: &[ShaderOption] = &[
     ShaderOption { path: "handheld/sameboy-lcd", label: "SameBoy LCD", note: "Accurate DMG panel", display: Display::Handheld },
     ShaderOption { path: "handheld/gameboy-pocket", label: "Game Boy Pocket", note: "Grey panel", display: Display::Handheld },
     ShaderOption { path: "handheld/gameboy-color-dot-matrix", label: "GBC dot matrix", note: "Colour dot matrix", display: Display::Handheld },
-    ShaderOption { path: "handheld/agb001", label: "GBA (AGB-001)", note: "Original non-backlit", display: Display::Handheld },
-    ShaderOption { path: "handheld/ags001", label: "GBA SP (AGS-001)", note: "Front-lit SP", display: Display::Handheld },
+    ShaderOption { path: "handheld/agb001", label: "GBA (AGB-001)", note: "Original, unlit — very dark", display: Display::Handheld },
+    ShaderOption { path: "handheld/ags001", label: "GBA SP (AGS-001)", note: "Front-lit SP — the default", display: Display::Handheld },
     ShaderOption { path: "handheld/gameboy-advance-dot-matrix", label: "GBA dot matrix", note: "Visible pixel grid", display: Display::Handheld },
     ShaderOption { path: "handheld/lcd1x_nds", label: "DS LCD", note: "Tuned for DS", display: Display::Handheld },
     ShaderOption { path: "handheld/lcd1x_psp", label: "PSP LCD", note: "Tuned for PSP", display: Display::Handheld },
@@ -80,7 +80,12 @@ pub fn default_for(platform: &str) -> Option<&'static str> {
     Some(match platform {
         "gb" => "handheld/gameboy",
         "gbc" => "handheld/gameboy-color-dot-matrix",
-        "gba" => "handheld/agb001",
+        // ags001, not agb001: the AGB-001 is the *original* Game Boy Advance,
+        // whose screen had no lighting at all, so an accurate recreation of it
+        // is genuinely very dark — that is the panel, not a bug in the shader.
+        // The AGS-001 is the front-lit SP, and its preset adds a second
+        // lighting pass. Same family, same look, actually visible indoors.
+        "gba" => "handheld/ags001",
         "nds" => "handheld/lcd1x_nds",
         "psp" => "handheld/lcd1x_psp",
         "gamegear" | "wonderswan" | "wonderswancolor" | "neo-geo-pocket" => "handheld/lcd1x",
@@ -186,4 +191,81 @@ pub async fn ensure_pack(client: &reqwest::Client, ra: &RetroArch) -> anyhow::Re
         .context("opening the shader pack")?;
     zip.extract(&dest).context("extracting the shader pack")?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The GBA default must be the *lit* panel. AGB-001 is the original Game
+    /// Boy Advance, which had no screen lighting at all, so a faithful shader
+    /// for it is close to unreadable on a desktop monitor. AGS-001 is the
+    /// front-lit SP and its preset carries a second lighting pass.
+    #[test]
+    fn the_gba_default_is_a_lit_panel() {
+        assert_eq!(default_for("gba"), Some("handheld/ags001"));
+    }
+
+    /// Every shipped default has to exist in the catalogue, or the Settings
+    /// list shows a shader the app itself chose but cannot name.
+    #[test]
+    fn every_default_is_in_the_catalogue() {
+        for platform in [
+            "gb", "gbc", "gba", "nds", "psp", "gamegear", "wonderswan",
+            "wonderswancolor", "neo-geo-pocket", "snes", "genesis", "arcade",
+        ] {
+            let preset = default_for(platform).expect("every platform has a default");
+            assert!(
+                CATALOGUE.iter().any(|o| o.path == preset),
+                "{platform} defaults to {preset}, which is not in the catalogue"
+            );
+        }
+    }
+
+    /// A default must match the display it is for: a CRT mask on a handheld
+    /// looks wrong, and an LCD grid on a TV console looks broken.
+    #[test]
+    fn defaults_match_the_display_they_are_for() {
+        for platform in ["gb", "gbc", "gba", "nds", "psp", "snes", "genesis", "n64"] {
+            let preset = default_for(platform).unwrap();
+            let entry = CATALOGUE.iter().find(|o| o.path == preset).unwrap();
+            assert_eq!(
+                entry.display,
+                display_of(platform),
+                "{platform} defaults to {preset}, which is for the other display kind"
+            );
+        }
+    }
+
+    /// An explicit choice wins over the shipped default, and "none" means none
+    /// rather than falling back.
+    #[test]
+    fn an_override_beats_the_default() {
+        let mut over = std::collections::BTreeMap::new();
+        over.insert("gba".to_owned(), "handheld/lcd1x".to_owned());
+        assert_eq!(preset_for(&over, "gba").as_deref(), Some("handheld/lcd1x"));
+
+        over.insert("gba".to_owned(), "none".to_owned());
+        assert_eq!(preset_for(&over, "gba"), None, "\"none\" must not fall back");
+    }
+
+    /// Selecting nothing has to emit an explicit disable: without it a shader
+    /// set for the previous game persists into one that should have none.
+    #[test]
+    fn no_shader_disables_rather_than_omitting() {
+        let dir = std::env::temp_dir().join("romm-desktop-test-shaders");
+        let ra = RetroArch {
+            root: dir.clone(),
+            binary: dir.join("retroarch"),
+            portable: false,
+            system_override: None,
+        };
+        assert!(config_lines(&ra, None).contains("video_shader_enable = \"false\""));
+        // A preset this install does not have is the same as none, not a
+        // reference to a missing file that RetroArch would fail to load.
+        assert!(
+            config_lines(&ra, Some("crt/crt-guest-advanced"))
+                .contains("video_shader_enable = \"false\"")
+        );
+    }
 }

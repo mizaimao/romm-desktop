@@ -12,6 +12,7 @@ pub mod download;
 pub mod esde;
 pub mod launch;
 pub mod media;
+pub mod padprofile;
 pub mod parity;
 pub mod probe;
 pub mod retroarch;

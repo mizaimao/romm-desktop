@@ -169,3 +169,112 @@ impl CoreMap {
             .map(|e| e.label.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn map() -> CoreMap {
+        serde_json::from_str(
+            r#"{
+              "default_core_by_romm_platform": {"snes": "snes9x"},
+              "systems": {"snes": {
+                "romm_platforms": ["snes"],
+                "emulators": [
+                  {"label": "Snes9x", "kind": "libretro", "core": "snes9x"},
+                  {"label": "bsnes",  "kind": "libretro", "core": "bsnes"},
+                  {"label": "Standalone", "kind": "standalone"}
+                ]}}
+            }"#,
+        )
+        .expect("test fixture matches the CoreMap schema")
+    }
+
+    /// A per-game pin beats the platform override, which beats the ES-DE
+    /// default. This ordering is why arcade works at all: one platform, many
+    /// romsets, no single core that runs them.
+    #[test]
+    fn per_game_beats_override_beats_default() {
+        let m = map();
+        let none = BTreeMap::new();
+        let over = BTreeMap::from([("snes".to_owned(), "bsnes".to_owned())]);
+        let pinned = BTreeMap::from([(
+            crate::config::game_key("snes", "Game.sfc"),
+            "mesen".to_owned(),
+        )]);
+
+        assert_eq!(
+            resolve_core_for(&m, &over, &pinned, "snes", Some("Game.sfc"), |_| true).as_deref(),
+            Some("mesen"),
+            "a per-game pin must win over everything"
+        );
+        assert_eq!(
+            resolve_core_for(&m, &over, &none, "snes", Some("Game.sfc"), |_| true).as_deref(),
+            Some("bsnes"),
+            "with no pin, the platform override wins"
+        );
+        assert_eq!(
+            resolve_core_for(&m, &none, &none, "snes", None, |_| true).as_deref(),
+            Some("snes9x"),
+            "with neither, the ES-DE default is used"
+        );
+    }
+
+    /// A pin only applies to the game it names — a sibling on the same platform
+    /// still resolves normally.
+    #[test]
+    fn a_pin_does_not_leak_to_other_games() {
+        let m = map();
+        let pinned = BTreeMap::from([(
+            crate::config::game_key("snes", "Game.sfc"),
+            "mesen".to_owned(),
+        )]);
+        assert_eq!(
+            resolve_core_for(&m, &BTreeMap::new(), &pinned, "snes", Some("Other.sfc"), |_| true)
+                .as_deref(),
+            Some("snes9x")
+        );
+    }
+
+    /// An override is honoured even when that core is absent, so the resulting
+    /// error names the core the user asked for instead of quietly substituting.
+    #[test]
+    fn override_survives_a_missing_core() {
+        let m = map();
+        let over = BTreeMap::from([("snes".to_owned(), "bsnes".to_owned())]);
+        assert_eq!(
+            resolve_core_for(&m, &over, &BTreeMap::new(), "snes", None, |_| false).as_deref(),
+            Some("bsnes")
+        );
+    }
+
+    /// An uninstalled default falls through to an installed alternative rather
+    /// than failing the launch.
+    #[test]
+    fn uninstalled_default_falls_back_to_an_alternative() {
+        let m = map();
+        let none = BTreeMap::new();
+        assert_eq!(
+            resolve_core_for(&m, &none, &none, "snes", None, |c| c == "bsnes").as_deref(),
+            Some("bsnes")
+        );
+        assert_eq!(
+            resolve_core_for(&m, &none, &none, "snes", None, |_| false),
+            None,
+            "with nothing installed there is nothing to resolve to"
+        );
+    }
+
+    #[test]
+    fn unknown_platform_resolves_to_nothing() {
+        let m = map();
+        let none = BTreeMap::new();
+        assert_eq!(resolve_core_for(&m, &none, &none, "dreamcast", None, |_| true), None);
+    }
+
+    /// Standalone emulators are not cores and must never be handed to RetroArch.
+    #[test]
+    fn standalone_emulators_are_not_offered_as_cores() {
+        assert_eq!(map().alternatives("snes"), vec!["snes9x", "bsnes"]);
+    }
+}

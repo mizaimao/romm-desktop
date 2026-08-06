@@ -7,7 +7,10 @@ import { toast } from "./util.js";
 export async function launch(id) {
   try {
     toast("Launching…");
-    toast(await invoke("launch_rom", { id }));
+    // The connected pad's name picks which RetroArch autoconfig profile the
+    // gamepad hotkeys are built from. Raw button indices differ per controller
+    // and per OS, so guessing them is how "hold Select" ended up as "hold B".
+    toast(await invoke("launch_rom", { id, pad: state.gamepad }));
   } catch (e) {
     toast(`Launch failed — ${e}`, 8000);
   }

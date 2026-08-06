@@ -51,3 +51,18 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace
+
+  ui:
+    name: ui
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Runs the real ui/js modules against index.html in jsdom. Cheap, and it
+      # catches the class of break that is invisible in the app itself: a throw
+      # inside requestAnimationFrame leaves the loop running and says nothing.
+      - run: npm test

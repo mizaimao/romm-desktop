@@ -25,6 +25,16 @@ cargo build --release       # CLI and TUI
 ./scripts/build-macos.sh    # macOS app bundle, into the repo root
 ```
 
+```sh
+cargo test --workspace     # core resolution, RetroArch config layering
+npm test                   # ui/js, run against index.html in jsdom
+```
+
+The UI tests are worth the jsdom dependency: an exception thrown inside a
+`requestAnimationFrame` callback does not stop the loop — the next frame is
+already scheduled — so a broken controller path fails silently in the app and
+only shows up here.
+
 On Linux the GUI additionally needs `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `librsvg2-dev`, `libayatana-appindicator3-dev` and `patchelf`.
 
@@ -70,6 +80,21 @@ otherwise leaves a handheld user unable to quit a game. Hold **Back/Select**:
 | D-pad ← → | previous / next save slot |
 
 Anything in your own settings file is applied last and wins.
+
+Those hotkeys are **generated per launch, not shipped as fixed numbers**.
+RetroArch hotkeys take raw driver button indices, and the same Xbox controller
+reports Select as button 2 on macOS, 6 on Linux and 6 on Windows — with the
+d-pad as four buttons in one case and a hat in the others, and the triggers as
+axes rather than buttons. So the indices are read out of RetroArch's own
+`autoconfig/` profile for the connected pad, which is the only source that is
+right for every controller on every OS. To see what your machine produces:
+
+```sh
+cargo run --example padprofile_dump -- "Xbox Wireless Controller"
+```
+
+If no profile matches, a built-in Xbox-style table for the current OS is used
+and the block says so.
 
 ## Layout
 

@@ -252,6 +252,9 @@ impl App {
             core_overrides: &cfg_core_overrides,
             core_per_game: &self.core_per_game,
             core_override: None,
+            // The TUI has no gamepad detection, so hotkeys fall back to the
+            // best profile for this OS's input driver.
+            pad: None,
         };
         let plan = match crate::launch::plan(ra, &self.map, &req) {
             Ok(p) => p,
