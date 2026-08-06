@@ -1499,7 +1499,14 @@ async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
     let client = cfg.server.client()?;
     let candidates = romm_desktop::savesync::scan(&store, &map, &ra.root)?;
     let summary =
-        romm_desktop::savesync::run(&client, &candidates, &ra.root, Path::new(".")).await?;
+        romm_desktop::savesync::run(
+            &client,
+            &candidates,
+            &ra.root,
+            Path::new("."),
+            Path::new(&cfg.library.local_root),
+        )
+        .await?;
     for note in &summary.notes {
         println!("{note}");
     }

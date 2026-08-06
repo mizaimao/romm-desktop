@@ -179,6 +179,7 @@ pub async fn run(
     candidates: &[Candidate],
     ra_root: &Path,
     data_dir: &Path,
+    library_root: &Path,
 ) -> Result<Summary> {
     let identity = DeviceIdentity::ensure(client, data_dir).await?;
     let mut summary = Summary::default();
@@ -204,8 +205,18 @@ pub async fn run(
                     continue;
                 };
                 let name = op.file_name.clone().unwrap_or_else(|| format!("save-{save_id}"));
-                match download_one(client, ra_root, save_id, &name, op.emulator.as_deref(), &identity)
-                    .await
+                match download_one(
+                    client,
+                    ra_root,
+                    save_id,
+                    &name,
+                    op.emulator.as_deref(),
+                    &identity,
+                    library_root,
+                    op.rom_id,
+                    op.slot.as_deref(),
+                )
+                .await
                 {
                     Ok(path) => {
                         summary.downloaded += 1;
@@ -257,6 +268,7 @@ pub async fn run(
     Ok(summary)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_one(
     client: &Client,
     root: &Path,
@@ -264,12 +276,23 @@ async fn download_one(
     file_name: &str,
     emulator: Option<&str>,
     identity: &DeviceIdentity,
+    library_root: &Path,
+    rom_id: i64,
+    slot: Option<&str>,
 ) -> Result<PathBuf> {
     let bytes = client.save_content(save_id, &identity.device_id).await?;
     let path = download_path(root, file_name, emulator);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
+    }
+    // Whatever is being replaced goes into the rotating backup first. This is
+    // the only irreversible step in a sync, and it stops being something the
+    // user consciously chose the moment syncing runs on its own.
+    let slot = slot.unwrap_or("unslotted");
+    if let Err(e) = crate::savebackup::keep(library_root, rom_id, slot, &path) {
+        // A failed backup must not cost the download, but it must be said.
+        eprintln!("warning: could not back up {} before overwriting: {e}", path.display());
     }
     std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
     // Only after the bytes are safely on disk: telling the server first would

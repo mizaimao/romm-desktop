@@ -24,6 +24,7 @@ pub mod slangp;
 pub mod theme;
 pub mod tweaks;
 pub mod theme_remote;
+pub mod savebackup;
 pub mod saves;
 pub mod savesync;
 pub mod tui;

@@ -808,7 +808,13 @@ async fn sync_saves(state: State<'_, AppState>) -> CmdResult<String> {
         romm_desktop::savesync::scan(&cache, &state.map, &root).map_err(err)?
     };
 
-    let summary = romm_desktop::savesync::run(&client, &candidates, &root, Path::new("."))
+    let summary = romm_desktop::savesync::run(
+        &client,
+        &candidates,
+        &root,
+        Path::new("."),
+        state.roms_dir.parent().unwrap_or(Path::new(".")),
+    )
         .await
         .map_err(err)?;
     Ok(format!("{}\n{}", summary.headline(), summary.notes.join("\n")))
