@@ -311,3 +311,262 @@ fn collect(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Battery saves. The slot is a constant because a `.srm` has no slot of
+    /// its own, and it must still never be empty — see the module docs on what
+    /// a null slot does to the server's pairing.
+    #[test]
+    fn battery_saves_split_into_a_basename_and_a_stable_slot() {
+        assert_eq!(
+            split_slot("Chrono Trigger.srm"),
+            Some(("Chrono Trigger".to_owned(), "autosave".to_owned()))
+        );
+        assert_eq!(
+            split_slot("Zelda.sav"),
+            Some(("Zelda".to_owned(), "autosave".to_owned()))
+        );
+        // The extension match is case-insensitive, but the basename keeps the
+        // case it had — it is matched against the ROM filename later.
+        assert_eq!(
+            split_slot("ZELDA.SRM"),
+            Some(("ZELDA".to_owned(), "autosave".to_owned()))
+        );
+    }
+
+    /// `.state` is slot 0, `.stateN` is slot N, `.state.auto` is the autosave.
+    /// Getting the numbering wrong pairs a save against the wrong server slot.
+    #[test]
+    fn save_states_carry_their_slot_number() {
+        assert_eq!(
+            split_slot("Metroid.state"),
+            Some(("Metroid".to_owned(), "slot0".to_owned()))
+        );
+        assert_eq!(
+            split_slot("Metroid.state3"),
+            Some(("Metroid".to_owned(), "slot3".to_owned()))
+        );
+        // Two digits must not be truncated to one.
+        assert_eq!(
+            split_slot("Metroid.state10"),
+            Some(("Metroid".to_owned(), "slot10".to_owned()))
+        );
+        assert_eq!(
+            split_slot("Metroid.state.auto"),
+            Some(("Metroid".to_owned(), "auto".to_owned()))
+        );
+    }
+
+    /// Opera writes `<name>.0.srm`. That trailing index is a disc number, not
+    /// part of the game's name, and leaving it on means the save never matches
+    /// the ROM it belongs to.
+    #[test]
+    fn an_opera_disc_index_is_not_part_of_the_basename() {
+        assert_eq!(
+            split_slot("Lemmings.0.srm"),
+            Some(("Lemmings".to_owned(), "autosave".to_owned()))
+        );
+        // A dotted segment that is not numeric is part of the name and stays.
+        assert_eq!(
+            split_slot("Sonic.CD.srm"),
+            Some(("Sonic.CD".to_owned(), "autosave".to_owned()))
+        );
+    }
+
+    /// A game whose title contains dots or brackets must survive intact, since
+    /// the basename is what gets matched against the ROM filename.
+    #[test]
+    fn punctuation_in_a_title_survives_the_split() {
+        assert_eq!(
+            split_slot("Final Fantasy VII (USA) (Disc 1).state2"),
+            Some(("Final Fantasy VII (USA) (Disc 1)".to_owned(), "slot2".to_owned()))
+        );
+    }
+
+    /// Anything unrecognised is skipped rather than guessed at. A wrong slot is
+    /// worse than no candidate: it pairs against something on the server.
+    #[test]
+    fn unrecognised_names_produce_no_candidate() {
+        for name in ["notes.txt", "Game.stateX", "Game.state-1", "Game", "retroarch.cfg"] {
+            assert_eq!(split_slot(name), None, "{name} should not parse as a save");
+        }
+    }
+
+    /// Whatever `split_slot` accepts, the slot it returns must be non-empty and
+    /// deterministic. Unstable slots accumulate duplicates on the server
+    /// without bound, which is the failure this guards.
+    #[test]
+    fn every_recognised_save_gets_a_non_empty_stable_slot() {
+        let names = [
+            "A.srm", "A.sav", "A.state", "A.state0", "A.state9", "A.state.auto", "A.0.srm",
+        ];
+        for name in names {
+            let (_, slot) = split_slot(name).unwrap_or_else(|| panic!("{name} should parse"));
+            assert!(!slot.is_empty(), "{name} produced an empty slot");
+            assert_eq!(split_slot(name).unwrap().1, slot, "{name} must be deterministic");
+        }
+    }
+
+    /// The states/saves split has to agree with `split_slot`, or a downloaded
+    /// file lands in the tree the next scan does not look in and is lost.
+    #[test]
+    fn the_state_test_agrees_with_the_slot_parser() {
+        for name in ["Game.state", "Game.state5", "Game.state.auto", "GAME.STATE"] {
+            assert!(is_state_name(name), "{name} belongs in states/");
+        }
+        for name in ["Game.srm", "Game.sav", "Game.0.srm"] {
+            assert!(!is_state_name(name), "{name} belongs in saves/");
+        }
+    }
+
+    /// The save tree also holds files that are not saves. Uploading a MAME
+    /// config or a PCSX2 memory-card internal as if it were one is noise at
+    /// best and a wrong restore at worst.
+    #[test]
+    fn non_save_files_in_the_tree_are_ignored() {
+        assert!(is_ignorable(Path::new("MAME/mame/cfg/default.cfg"), "default.cfg"));
+        assert!(is_ignorable(Path::new("PCSX2/_pcsx2_lastsave"), "_pcsx2_lastsave"));
+        assert!(is_ignorable(Path::new("x/.DS_Store"), ".DS_Store"));
+        assert!(is_ignorable(Path::new("x/settings.ini"), "settings.ini"));
+        assert!(is_ignorable(Path::new("x/readme.TXT"), "readme.TXT"));
+
+        assert!(!is_ignorable(Path::new("Snes9x/Zelda.srm"), "Zelda.srm"));
+        assert!(!is_ignorable(Path::new("Snes9x/Zelda.state1"), "Zelda.state1"));
+    }
+
+    /// RetroArch's save directories are named after the core's *display* name,
+    /// which never matches the libretro stem exactly. Comparison happens on a
+    /// reduced form of both.
+    #[test]
+    fn core_directory_names_reduce_to_a_comparable_form() {
+        assert_eq!(normalise("MAME - Current"), "mamecurrent");
+        assert_eq!(normalise("melonDS DS"), "melondsds");
+        assert_eq!(normalise("Snes9x"), "snes9x");
+        assert_eq!(normalise("Beetle PSX HW"), "beetlepsxhw");
+    }
+
+    fn map() -> CoreMap {
+        serde_json::from_str(
+            r#"{
+              "default_core_by_romm_platform": {"nds": "melondsds"},
+              "systems": {"nds": {
+                "romm_platforms": ["nds"],
+                "emulators": [
+                  {"label": "melonDS DS", "kind": "libretro", "core": "melondsds"},
+                  {"label": "melonDS",    "kind": "libretro", "core": "melonds"}
+                ]}}
+            }"#,
+        )
+        .unwrap()
+    }
+
+    fn candidate(core: &str, slot: &str, kind: Kind, rom_id: i64) -> Candidate {
+        Candidate {
+            path: PathBuf::from(format!("/ra/saves/{core}/Game.srm")),
+            kind,
+            core_dir: core.to_owned(),
+            core: Some(core.to_owned()),
+            rom_base: "Game".to_owned(),
+            slot: slot.to_owned(),
+            size: 1,
+            content_hash: "h".to_owned(),
+            resolution: Resolution::Resolved {
+                rom_id,
+                platform: "nds".to_owned(),
+                fs_name: "Game.nds".to_owned(),
+            },
+            canonical: true,
+            superseded_by: None,
+        }
+    }
+
+    /// The real collision in this library: the same game saved under both
+    /// `melonDS` and `melonDS DS`. They map to one server-side pairing, so
+    /// syncing both would have them overwrite each other on every single run.
+    /// The platform's default core wins, because that is what future saves will
+    /// come from.
+    #[test]
+    fn the_default_core_wins_a_slot_collision() {
+        let mut c = vec![
+            candidate("melonds", "autosave", Kind::Save, 1),
+            candidate("melondsds", "autosave", Kind::Save, 1),
+        ];
+        mark_canonical(&mut c, &map());
+
+        assert!(!c[0].canonical, "the non-default core loses");
+        assert_eq!(c[0].superseded_by.as_deref(), Some("melondsds"));
+        assert!(c[1].canonical, "the platform default wins");
+        assert!(c[1].superseded_by.is_none());
+    }
+
+    /// Order must not decide the winner. Listing the default first previously
+    /// left it beaten by whatever came after it.
+    #[test]
+    fn the_default_still_wins_when_it_is_seen_first() {
+        let mut c = vec![
+            candidate("melondsds", "autosave", Kind::Save, 1),
+            candidate("melonds", "autosave", Kind::Save, 1),
+        ];
+        mark_canonical(&mut c, &map());
+
+        assert!(c[0].canonical, "the default must not be displaced by a later entry");
+        assert!(!c[1].canonical);
+        assert_eq!(c[1].superseded_by.as_deref(), Some("melondsds"));
+    }
+
+    /// The loser is flagged, never dropped. `romm-desktop scan` reports it so
+    /// the user can see why a save is not being synced.
+    #[test]
+    fn a_superseded_save_is_kept_and_explained() {
+        let mut c = vec![
+            candidate("melonds", "autosave", Kind::Save, 1),
+            candidate("melondsds", "autosave", Kind::Save, 1),
+        ];
+        mark_canonical(&mut c, &map());
+        assert_eq!(c.len(), 2, "nothing is silently discarded");
+        assert!(c.iter().any(|x| !x.canonical && x.superseded_by.is_some()));
+    }
+
+    /// Different slots, different games and the save/state split are all
+    /// separate pairings — collapsing any of them would discard a real save.
+    #[test]
+    fn only_a_genuine_collision_is_treated_as_one() {
+        let mut c = vec![
+            candidate("melonds", "slot1", Kind::State, 1),
+            candidate("melondsds", "slot2", Kind::State, 1),
+            candidate("melondsds", "slot1", Kind::State, 2),
+            // Same rom, same slot name, but a battery save rather than a state.
+            candidate("melonds", "slot1", Kind::Save, 1),
+        ];
+        mark_canonical(&mut c, &map());
+        assert!(
+            c.iter().all(|x| x.canonical),
+            "none of these share a (rom, slot, kind) pairing"
+        );
+    }
+
+    /// An unresolved save has no rom_id to pair on, so it cannot collide with
+    /// anything and must be left alone rather than compared.
+    #[test]
+    fn unresolved_saves_are_not_drawn_into_collision_handling() {
+        let mut unmatched = candidate("melonds", "autosave", Kind::Save, 1);
+        unmatched.resolution = Resolution::Unmatched;
+        let mut c = vec![unmatched, candidate("melondsds", "autosave", Kind::Save, 1)];
+        mark_canonical(&mut c, &map());
+        assert!(c.iter().all(|x| x.canonical));
+    }
+
+    /// A core's platforms come from the map, and the default mapping is
+    /// consulted as well as the alternatives list — a core that is only ever a
+    /// default would otherwise resolve to no platforms and match nothing.
+    #[test]
+    fn a_cores_platforms_include_both_defaults_and_alternatives() {
+        let m = map();
+        assert_eq!(platforms_for_core(&m, "melondsds"), ["nds"]);
+        assert_eq!(platforms_for_core(&m, "melonds"), ["nds"], "an alternative counts too");
+        assert!(platforms_for_core(&m, "nothing").is_empty());
+    }
+}

@@ -95,3 +95,88 @@ pub fn describe(platform: &str, core: &str) -> Option<String> {
     }
     Some(format!("{} core options applied", core_options(platform, core).len()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every platform this project treats as NES has to get the same treatment,
+    /// or rapid fire works on one of them and silently not the other.
+    #[test]
+    fn both_nes_platforms_get_the_turbo_options() {
+        for platform in ["nes", "famicom"] {
+            let opts = core_options(platform, "fceumm");
+            assert_eq!(opts.len(), 2, "{platform}");
+            assert!(opts.contains(&("fceumm_turbo_enable", "Both")), "{platform}");
+            assert_eq!(remap(platform, "fceumm").len(), 4, "two buttons, two players");
+            assert!(describe(platform, "fceumm").is_some());
+        }
+    }
+
+    /// The redirect is global once enabled, so it must stay off for everything
+    /// that does not need it — otherwise every other core starts reading our
+    /// options file instead of the user's own.
+    #[test]
+    fn nothing_is_applied_to_a_platform_that_does_not_need_it() {
+        for (platform, core) in [("snes", "snes9x"), ("nes", "mesen"), ("arcade", "fbneo")] {
+            assert!(core_options(platform, core).is_empty(), "{platform}/{core}");
+            assert!(remap(platform, core).is_empty(), "{platform}/{core}");
+            assert!(describe(platform, core).is_none(), "{platform}/{core}");
+        }
+    }
+
+    /// The trap this guards: `prepare_tweaks` gives up silently when a core has
+    /// no directory name, so options defined without one are written nowhere
+    /// and the feature just does not happen. Adding a core to `core_options`
+    /// and forgetting `core_dir_name` must fail here rather than in play.
+    #[test]
+    fn every_core_with_options_also_has_a_directory_name() {
+        // The platforms this module knows about, paired with the core each
+        // entry is keyed on.
+        for (platform, core) in [("nes", "fceumm"), ("famicom", "fceumm")] {
+            if !core_options(platform, core).is_empty() || !remap(platform, core).is_empty() {
+                assert!(
+                    core_dir_name(core).is_some(),
+                    "{core} has settings to write but no config directory name, \
+                     so prepare_tweaks would discard them"
+                );
+            }
+        }
+        assert_eq!(core_dir_name("fceumm"), Some("FCEUmm"), "display name, not the stem");
+        assert_eq!(core_dir_name("snes9x"), None);
+    }
+
+    /// The remap is a swap, and that is what makes it correct under either
+    /// reading of a .rmp file. If both keys ever pointed at the same button it
+    /// would stop being symmetric and the direction would start to matter.
+    #[test]
+    fn the_turbo_remap_exchanges_the_two_buttons() {
+        let lines = remap("nes", "fceumm");
+        for player in 1..=2 {
+            assert!(
+                lines.contains(&format!("input_player{player}_btn_x = \"{PAD_Y}\"")),
+                "player {player} X takes Y's id"
+            );
+            assert!(
+                lines.contains(&format!("input_player{player}_btn_y = \"{PAD_X}\"")),
+                "player {player} Y takes X's id"
+            );
+        }
+        assert_ne!(PAD_X, PAD_Y, "a swap between equal ids would be a no-op");
+    }
+
+    /// Every emitted remap line has to parse as a RetroArch assignment; a
+    /// malformed one is ignored silently and the buttons stay swapped.
+    #[test]
+    fn remap_lines_are_well_formed_assignments() {
+        for line in remap("nes", "fceumm") {
+            let (key, value) = line.split_once(" = ").expect("key = value");
+            assert!(key.starts_with("input_player"), "unexpected key: {key}");
+            assert!(value.starts_with('"') && value.ends_with('"'), "unquoted: {line}");
+            assert!(
+                value.trim_matches('"').chars().all(|c| c.is_ascii_digit()),
+                "a RetroPad id must be numeric: {line}"
+            );
+        }
+    }
+}

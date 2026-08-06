@@ -331,3 +331,201 @@ pub fn cover_aspect(media_root: &Path, platform: &str) -> Option<f32> {
     ratios.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     Some(ratios[ratios.len() / 2])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romm-media-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A PNG header only: signature, then the IHDR chunk whose first two fields
+    /// are the dimensions. Enough for `image_size`, which never decodes pixels.
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        v.extend_from_slice(&13u32.to_be_bytes());
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&w.to_be_bytes());
+        v.extend_from_slice(&h.to_be_bytes());
+        v
+    }
+
+    /// A JPEG reduced to SOI followed by an SOF0 frame header, which is where
+    /// the dimensions live — height first, then width.
+    fn jpeg(w: u16, h: u16) -> Vec<u8> {
+        let mut v = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08];
+        v.extend_from_slice(&h.to_be_bytes());
+        v.extend_from_slice(&w.to_be_bytes());
+        v
+    }
+
+    /// RomM emits cover URLs carrying a timestamp with a raw space in it, which
+    /// makes the HTTP request line invalid. `/` and `?` have to survive, or the
+    /// path stops addressing anything.
+    #[test]
+    fn a_server_path_is_encoded_without_destroying_its_structure() {
+        let raw = "/assets/romm/resources/roms/2/42/cover/big.png?ts=2026-07-30 00:45:10";
+        let got = encode_path(raw);
+        assert!(!got.contains(' '), "the raw space must be gone: {got}");
+        assert!(got.contains("%20"));
+        assert!(got.starts_with("/assets/romm/"), "slashes are preserved: {got}");
+        assert!(got.contains("?ts="), "the query still addresses the same asset: {got}");
+        assert!(got.contains("00%3A45%3A10") || got.contains("00:45:10"));
+    }
+
+    /// The stored file's extension comes from the server path, and the query
+    /// string is not part of it — `big.png?ts=…` must not become `png?ts=…`.
+    #[test]
+    fn the_extension_ignores_the_query_string() {
+        assert_eq!(extension_of("/x/big.png?ts=2026-07-30 00:45:10"), "png");
+        assert_eq!(extension_of("/x/cover.jpg"), "jpg");
+        assert_eq!(extension_of("/x/clip.webm"), "webm");
+    }
+
+    /// Anything that does not look like an extension falls back to png rather
+    /// than producing a file named after half a URL.
+    #[test]
+    fn an_unusable_extension_falls_back_to_png() {
+        assert_eq!(extension_of("/x/no-extension-here"), "png");
+        // Too long to be an extension — this is a path segment with a dot.
+        assert_eq!(extension_of("/x/file.somethinglong"), "png");
+        // Not alphanumeric.
+        assert_eq!(extension_of("/x/file.p n g"), "png");
+    }
+
+    /// Imported ES-DE art and art fetched from the server share one tree, so
+    /// the lookup must match on stem regardless of which extension landed.
+    #[test]
+    fn local_media_is_found_by_stem_whatever_the_extension() {
+        let root = scratch("find-local");
+        let dir = root.join("snes").join(COVERS);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Zelda.webp"), b"img").unwrap();
+
+        assert!(find_local(&root, "snes", "Zelda", COVERS).is_some());
+        // A different game, a different platform and a different media type
+        // must all miss rather than returning the wrong file.
+        assert!(find_local(&root, "snes", "Zeld", COVERS).is_none());
+        assert!(find_local(&root, "nes", "Zelda", COVERS).is_none());
+        assert!(find_local(&root, "snes", "Zelda", VIDEOS).is_none());
+    }
+
+    /// Dimensions are read from the header alone. Getting the PNG field order
+    /// wrong transposes every cover; in JPEG the two are stored height-first,
+    /// which is the easy mistake.
+    #[test]
+    fn image_dimensions_are_read_from_the_header_of_both_formats() {
+        let dir = scratch("image-size");
+        let p = dir.join("a.png");
+        std::fs::write(&p, png(600, 800)).unwrap();
+        assert_eq!(image_size(&p), Some((600, 800)));
+
+        let j = dir.join("b.jpg");
+        std::fs::write(&j, jpeg(320, 240)).unwrap();
+        assert_eq!(image_size(&j), Some((320, 240)), "JPEG stores height before width");
+    }
+
+    /// Anything that is not a readable image must decline rather than return a
+    /// nonsense ratio that reshapes the whole grid.
+    #[test]
+    fn a_file_that_is_not_an_image_has_no_size() {
+        let dir = scratch("image-size-bad");
+        let txt = dir.join("notes.txt");
+        std::fs::write(&txt, b"not an image at all").unwrap();
+        assert_eq!(image_size(&txt), None);
+        assert_eq!(image_size(&dir.join("missing.png")), None);
+
+        // A PNG claiming zero height would divide by zero downstream.
+        let zero = dir.join("zero.png");
+        std::fs::write(&zero, png(100, 0)).unwrap();
+        assert_eq!(image_size(&zero), None);
+    }
+
+    /// Box art varies enormously by system, so the grid measures rather than
+    /// assumes. The median is used so one odd wide promo shot cannot reshape
+    /// every card on the page.
+    #[test]
+    fn the_cover_aspect_is_the_median_and_ignores_an_outlier() {
+        let root = scratch("aspect");
+        let dir = root.join("snes").join(COVERS);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Four portrait covers at 0.5, and one very wide outlier.
+        for i in 0..4 {
+            std::fs::write(dir.join(format!("box{i}.png")), png(500, 1000)).unwrap();
+        }
+        std::fs::write(dir.join("promo.png"), png(4000, 1000)).unwrap();
+
+        let aspect = cover_aspect(&root, "snes").expect("five covers is enough");
+        assert!(
+            (aspect - 0.5).abs() < 0.01,
+            "the median must ignore the 4.0 outlier, got {aspect}"
+        );
+    }
+
+    /// Too few covers means no confident answer, and the grid keeps its default
+    /// rather than shaping itself around one or two files.
+    #[test]
+    fn too_few_covers_yields_no_aspect_at_all() {
+        let root = scratch("aspect-few");
+        let dir = root.join("snes").join(COVERS);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(cover_aspect(&root, "snes"), None, "nothing cached yet");
+
+        std::fs::write(dir.join("a.png"), png(500, 1000)).unwrap();
+        std::fs::write(dir.join("b.png"), png(500, 1000)).unwrap();
+        assert_eq!(cover_aspect(&root, "snes"), None, "two is not enough to be confident");
+
+        std::fs::write(dir.join("c.png"), png(500, 1000)).unwrap();
+        assert!(cover_aspect(&root, "snes").is_some(), "three is");
+    }
+
+    /// Every declared media type needs at least one extension to probe, or
+    /// `ensure_esde` silently never fetches it.
+    #[test]
+    fn every_media_type_has_extensions_to_try() {
+        for (kind, exts) in ESDE_TYPES {
+            assert!(!exts.is_empty(), "{kind} has no extensions and could never be fetched");
+        }
+        // The named constants must all be types that actually exist in the
+        // table, or a lookup by that name finds nothing.
+        for kind in [COVERS, SCREENSHOTS, VIDEOS, MANUALS] {
+            assert!(
+                ESDE_TYPES.iter().any(|(k, _)| *k == kind),
+                "{kind} is referenced by name but not declared"
+            );
+        }
+    }
+
+    /// With no client there is nothing to fetch from, so these must resolve
+    /// from disk alone rather than erroring — this is the offline path.
+    #[tokio::test]
+    async fn artwork_resolves_offline_from_local_files_only() {
+        let root = scratch("offline");
+        let dir = root.join("snes").join(COVERS);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Zelda.png"), b"img").unwrap();
+
+        assert!(ensure(None, &root, "snes", "Zelda", COVERS, None).await.is_some());
+        assert!(ensure(None, &root, "snes", "Missing", COVERS, None).await.is_none());
+        // A local full cover is preferred over spending a request on a thumb.
+        assert!(ensure_thumb(None, &root, "snes", "Zelda", None, None).await.is_some());
+        assert!(ensure_esde(None, &root, "snes", "Zelda", COVERS).await.is_some());
+    }
+
+    /// Extra screenshots are stored as `<stem>-2`, `<stem>-3` so a fetched set
+    /// cannot overwrite an imported ES-DE screenshot sharing the plain stem.
+    #[tokio::test]
+    async fn a_screenshot_set_falls_back_to_the_plain_stem_when_offline() {
+        let root = scratch("shot-set");
+        let dir = root.join("snes").join(SCREENSHOTS);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Zelda.png"), b"img").unwrap();
+
+        let got = ensure_set(None, &root, "snes", "Zelda", &[]).await;
+        assert_eq!(got.len(), 1, "the local screenshot is still found with no server list");
+    }
+}

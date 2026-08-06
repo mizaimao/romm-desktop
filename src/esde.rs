@@ -276,3 +276,268 @@ pub fn media_path(layout: &Layout, system: &str, stem: &str, kind: &str) -> Opti
         .map(|e| dir.join(format!("{stem}.{e}")))
         .find(|p| p.is_file())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romm-esde-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn touch(path: &Path, body: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    fn map() -> CoreMap {
+        serde_json::from_str(
+            r#"{
+              "default_core_by_romm_platform": {"snes": "snes9x", "megadrive": "genesisgx"},
+              "systems": {
+                "snes":      {"romm_platforms": ["snes"],      "emulators": []},
+                "megadrive": {"romm_platforms": ["megadrive"], "emulators": []}
+              }
+            }"#,
+        )
+        .unwrap()
+    }
+
+    /// ES-DE keeps its ROMs directory separate and configurable, so it is not
+    /// safe to assume `<root>/ROMs`.
+    #[test]
+    fn an_explicit_roms_directory_overrides_the_default() {
+        let default = Layout::new(Path::new("/esde"), None);
+        assert_eq!(default.roms, Path::new("/esde/ROMs"));
+        assert_eq!(default.gamelists, Path::new("/esde/gamelists"));
+        assert_eq!(default.media, Path::new("/esde/downloaded_media"));
+
+        let custom = Layout::new(Path::new("/esde"), Some(Path::new("/Volumes/SD/games")));
+        assert_eq!(custom.roms, Path::new("/Volumes/SD/games"));
+        assert_eq!(
+            custom.gamelists,
+            Path::new("/esde/gamelists"),
+            "only the ROMs location moves"
+        );
+    }
+
+    /// The gamelist is the only source of real titles. Rating is rescaled from
+    /// ES-DE's 0.0–1.0 to RomM's 0–100, and the year is the first four
+    /// characters of a timestamp — both silent if wrong.
+    #[test]
+    fn a_gamelist_entry_is_parsed_into_metadata() {
+        let dir = scratch("gamelist");
+        let path = dir.join("gamelist.xml");
+        touch(
+            &path,
+            br#"<?xml version="1.0"?>
+            <gameList>
+              <game>
+                <path>./Chrono Trigger (USA).sfc</path>
+                <name>Chrono Trigger</name>
+                <desc>A tale of time travel &amp; friendship</desc>
+                <genre>Role-Playing</genre>
+                <players>1</players>
+                <rating>0.95</rating>
+                <releasedate>19950811T000000</releasedate>
+              </game>
+            </gameList>"#,
+        );
+
+        let meta = parse_gamelist(&path);
+        let e = meta.get("Chrono Trigger (USA)").expect("keyed by file stem");
+        assert_eq!(e.name.as_deref(), Some("Chrono Trigger"));
+        assert_eq!(
+            e.desc.as_deref(),
+            Some("A tale of time travel & friendship"),
+            "entities must be unescaped"
+        );
+        assert_eq!(e.rating, Some(95.0), "0.95 becomes 95, not 0.95");
+        assert_eq!(e.year, Some(1995));
+        assert_eq!(e.players.as_deref(), Some("1"));
+    }
+
+    /// `<path>` is relative and prefixed in a couple of ways; all of them have
+    /// to reduce to the same key or the metadata never joins to the file.
+    #[test]
+    fn game_paths_reduce_to_a_file_stem_however_they_are_written() {
+        let dir = scratch("gamelist-paths");
+        let path = dir.join("gamelist.xml");
+        touch(
+            &path,
+            br#"<gameList>
+              <game><path>./Sonic.md</path><name>Dotted</name></game>
+              <game><path>Sub/Dir/Streets of Rage.md</path><name>Nested</name></game>
+              <game><path>.\Windows\Golden Axe.md</path><name>Backslashes</name></game>
+            </gameList>"#,
+        );
+        let meta = parse_gamelist(&path);
+        assert_eq!(meta.get("Sonic").and_then(|e| e.name.clone()).as_deref(), Some("Dotted"));
+        assert_eq!(
+            meta.get("Streets of Rage").and_then(|e| e.name.clone()).as_deref(),
+            Some("Nested")
+        );
+        assert_eq!(
+            meta.get("Golden Axe").and_then(|e| e.name.clone()).as_deref(),
+            Some("Backslashes")
+        );
+    }
+
+    /// A game with almost no metadata must not poison the whole gamelist, and
+    /// empty tags count as absent rather than as an empty title.
+    #[test]
+    fn sparse_and_empty_fields_are_treated_as_missing() {
+        let dir = scratch("gamelist-sparse");
+        let path = dir.join("gamelist.xml");
+        touch(
+            &path,
+            br#"<gameList>
+              <game><path>./A.sfc</path><name></name><rating></rating></game>
+              <game><path>./B.sfc</path><name>Has a name</name></game>
+            </gameList>"#,
+        );
+        let meta = parse_gamelist(&path);
+        assert!(meta.get("A").unwrap().name.is_none(), "an empty tag is not a title");
+        assert!(meta.get("A").unwrap().rating.is_none());
+        assert_eq!(meta.get("B").unwrap().name.as_deref(), Some("Has a name"));
+    }
+
+    /// A missing gamelist is ordinary — plenty of systems have none — and must
+    /// yield no metadata rather than failing the scan.
+    #[test]
+    fn a_missing_gamelist_is_not_an_error() {
+        assert!(parse_gamelist(Path::new("/nonexistent/gamelist.xml")).is_empty());
+    }
+
+    /// Saves, configs and dotfiles sit beside games in an ES-DE tree. Indexing
+    /// them invents games that cannot launch.
+    #[test]
+    fn non_game_files_beside_the_roms_are_not_indexed() {
+        for name in ["gamelist.xml", "notes.txt", "Zelda.srm", "Zelda.state", "es.cfg", ".DS_Store"] {
+            assert!(!is_game_file(Path::new(name)), "{name} is not a game");
+        }
+        for name in ["Zelda.sfc", "Sonic.md", "Game.chd", "Game.zip"] {
+            assert!(is_game_file(Path::new(name)), "{name} is a game");
+        }
+    }
+
+    /// The alias that matters most: a real install calls it `genesis` where the
+    /// map says `megadrive`. Without the alias this drops the single largest
+    /// system on the card.
+    #[test]
+    fn a_real_installs_system_names_are_aliased_to_the_map() {
+        let dir = scratch("scan-alias");
+        touch(&dir.join("ROMs/genesis/Sonic.md"), b"rom");
+        let layout = Layout::new(&dir, None);
+
+        let (games, skipped) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].platform_slug, "megadrive", "genesis is megadrive");
+        assert_eq!(games[0].system, "genesis", "but its media still lives under genesis");
+        assert!(skipped.is_empty());
+    }
+
+    /// A BIOS folder scanned as a system invents phantom games and hands them
+    /// to a core that cannot run them.
+    #[test]
+    fn bios_and_ports_directories_are_not_systems() {
+        let dir = scratch("scan-bios");
+        touch(&dir.join("ROMs/snes/Zelda.sfc"), b"rom");
+        touch(&dir.join("ROMs/0_BIOS/scph1001.bin"), b"bios");
+        touch(&dir.join("ROMs/bios/neogeo.zip"), b"bios");
+        touch(&dir.join("ROMs/ports/doom.sh"), b"port");
+        touch(&dir.join("ROMs/.hidden/x.bin"), b"junk");
+        let layout = Layout::new(&dir, None);
+
+        let (games, skipped) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1, "only the real system");
+        assert_eq!(games[0].name, "Zelda");
+        assert!(
+            !skipped.iter().any(|s| s == "0_BIOS" || s == "bios" || s == "ports"),
+            "these are excluded outright, not reported as unmapped systems"
+        );
+    }
+
+    /// An unknown system is reported rather than guessed at: a wrong slug puts
+    /// games under a platform whose core cannot run them.
+    #[test]
+    fn an_unmapped_system_is_skipped_and_named() {
+        let dir = scratch("scan-unknown");
+        touch(&dir.join("ROMs/snes/Zelda.sfc"), b"rom");
+        touch(&dir.join("ROMs/vectrex/Minestorm.bin"), b"rom");
+        let layout = Layout::new(&dir, None);
+
+        let (games, skipped) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(skipped, ["vectrex"], "reported so the user can add a mapping");
+    }
+
+    /// A directory inside a system is a multi-disc game, which ES-DE treats as
+    /// one entry — the same shape as RomM's folder ROMs.
+    #[test]
+    fn a_multi_disc_directory_counts_as_one_game_and_is_sized_whole() {
+        let dir = scratch("scan-folder");
+        touch(&dir.join("ROMs/snes/Solo.sfc"), b"12345");
+        touch(&dir.join("ROMs/snes/Shenmue (USA)/disc1.chd"), b"aaa");
+        touch(&dir.join("ROMs/snes/Shenmue (USA)/disc2.chd"), b"bb");
+        let layout = Layout::new(&dir, None);
+
+        let (games, _) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 2, "the folder is one game, not two files");
+        let folder = games.iter().find(|g| g.fs_name == "Shenmue (USA)").expect("folder game");
+        assert_eq!(folder.size_bytes, 5, "summed across the folder's contents");
+        let solo = games.iter().find(|g| g.fs_name == "Solo.sfc").unwrap();
+        assert_eq!(solo.size_bytes, 5);
+    }
+
+    /// The gamelist supplies the title; without one the file stem stands in, so
+    /// a game is never nameless.
+    #[test]
+    fn scanned_games_take_their_title_from_the_gamelist_or_the_filename() {
+        let dir = scratch("scan-names");
+        touch(&dir.join("ROMs/snes/ct.sfc"), b"rom");
+        touch(&dir.join("ROMs/snes/unnamed.sfc"), b"rom");
+        touch(
+            &dir.join("gamelists/snes/gamelist.xml"),
+            br#"<gameList><game><path>./ct.sfc</path><name>Chrono Trigger</name>
+                <genre>RPG, Adventure</genre></game></gameList>"#,
+        );
+        let layout = Layout::new(&dir, None);
+
+        let (games, _) = scan(&layout, &map()).unwrap();
+        let named = games.iter().find(|g| g.fs_name == "ct.sfc").unwrap();
+        assert_eq!(named.name, "Chrono Trigger");
+        assert_eq!(named.genres, ["RPG", "Adventure"], "split and trimmed");
+        let plain = games.iter().find(|g| g.fs_name == "unnamed.sfc").unwrap();
+        assert_eq!(plain.name, "unnamed", "falls back to the stem");
+    }
+
+    /// A missing ROMs directory is worth saying plainly — it is the single most
+    /// likely thing to be misconfigured.
+    #[test]
+    fn scanning_without_a_roms_directory_says_so() {
+        let dir = scratch("scan-noroms");
+        let layout = Layout::new(&dir, None);
+        let err = scan(&layout, &map()).expect_err("no ROMs dir").to_string();
+        assert!(err.contains("ROMs"), "got: {err}");
+    }
+
+    /// Media is keyed by ES-DE system name and found by probing extensions,
+    /// because ES-DE stores whatever the scraper produced.
+    #[test]
+    fn media_is_located_by_probing_the_extensions_esde_uses() {
+        let dir = scratch("media");
+        let layout = Layout::new(&dir, None);
+        touch(&dir.join("downloaded_media/snes/covers/Zelda.jpg"), b"img");
+
+        assert_eq!(
+            media_path(&layout, "snes", "Zelda", "covers"),
+            Some(dir.join("downloaded_media/snes/covers/Zelda.jpg"))
+        );
+        assert_eq!(media_path(&layout, "snes", "Zelda", "videos"), None);
+        assert_eq!(media_path(&layout, "snes", "Missing", "covers"), None);
+    }
+}
