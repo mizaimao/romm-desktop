@@ -5,6 +5,7 @@
 pub mod api;
 pub mod arcade;
 pub mod cache;
+pub mod cheevos;
 pub mod config;
 pub mod coremap;
 pub mod cores;

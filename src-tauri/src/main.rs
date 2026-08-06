@@ -49,6 +49,9 @@ struct AppState {
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
+    /// RetroAchievements, read once at startup. The login token itself stays in
+    /// the user's own retroarch.cfg — see `romm_desktop::cheevos`.
+    cheevos: romm_desktop::cheevos::Settings,
 }
 
 #[derive(Serialize)]
@@ -554,6 +557,7 @@ async fn launch_rom(
         core_per_game: &per_game,
         core_override: None,
         pad: pad.as_deref(),
+        cheevos: Some(&state.cheevos),
     };
     // Fetch what is missing before planning. `plan` only ever picks among cores
     // already on disk, so without this a fresh install — which has none — fails
@@ -1298,6 +1302,7 @@ fn main() {
                     .and_then(|s| theme::IconStyle::ALL.iter().position(|x| *x == s))
                     .unwrap_or(3) as u8,
             ),
+            cheevos: cfg.cheevos.settings(),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,

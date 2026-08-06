@@ -80,3 +80,29 @@ mame = "mame2003_plus"
 # [esde]
 # root = "~/ES-DE"
 # roms = "/Volumes/Games/ROMs"
+
+# ---- RetroAchievements ----
+#
+# RetroArch implements achievements itself; this only switches them on and
+# supplies the account name. Log in once through RetroArch's own menu
+# (Settings -> Achievements) and it stores the login token in its config —
+# this app reads that rather than keeping a second copy of your credentials.
+#
+# `username` is required. The token authenticates nothing without it, and a
+# blank username is why achievements can look configured but never activate.
+[cheevos]
+enabled = false
+username = ""
+
+# Disables save states, fast-forward and rewind, which are four of the gamepad
+# hotkeys this app binds (Select + LB/RB/RT and the save-slot d-pad). Written
+# on every launch either way, so an install with it switched on cannot take
+# those away without you asking for it.
+hardcore = false
+
+# Unofficial / in-development achievement sets.
+# test_unofficial = false
+
+# Only if you are not logging in through RetroArch and want to supply the token
+# directly. Normally leave this unset.
+# token = ""

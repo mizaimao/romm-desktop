@@ -45,6 +45,8 @@ pub struct Request<'a> {
     /// autoconfig profile the gamepad hotkeys are derived from. None means
     /// "whatever this OS's input driver would use".
     pub pad: Option<&'a str>,
+    /// RetroAchievements. `None` leaves the user's own settings alone.
+    pub cheevos: Option<&'a crate::cheevos::Settings>,
 }
 
 /// A resolved, ready-to-spawn launch.
@@ -186,12 +188,15 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     if let Some(note) = tweaks::describe(req.platform, &core) {
         notes.push(note);
     }
+    if let Some(note) = req.cheevos.and_then(crate::cheevos::describe) {
+        notes.push(note);
+    }
 
     // Point RetroArch at the generated chain when there is one. Passing the
     // absolute path rather than a catalogue name keeps config_lines honest:
     // it only ever emits a shader it has verified exists.
     let extra = format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         match &chained {
             Some(p) => format!(
                 "\n# Base shader with a motion pass chained on.\n\
@@ -207,7 +212,8 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
             None => shaders::config_lines(ra, preset.as_deref()),
         },
         ra.system_dir_line(),
-        ra.prepare_tweaks(req.library_root, req.platform, &core)
+        ra.prepare_tweaks(req.library_root, req.platform, &core),
+        req.cheevos.map(crate::cheevos::config_lines).unwrap_or_default()
     );
     let overrides = ra
         .write_overrides_full(req.library_root, Some(req.user_cfg), &extra, req.pad)

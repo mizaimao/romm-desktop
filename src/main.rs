@@ -129,6 +129,7 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         .or_else(|| platform_from_path(rom))
         .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
     let user_cfg = cfg.user_retroarch_config();
+    let cheevos = cfg.cheevos.settings();
     let req = launch::Request {
         rom,
         platform: &platform,
@@ -142,7 +143,8 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
         core_override,
 motion_shader: cfg.shaders.motion.as_deref(),
         refresh_hz: None,
-                pad: None,
+        pad: None,
+        cheevos: Some(&cheevos),
     };
     let plan = launch::plan(&ra, &map, &req)?;
 

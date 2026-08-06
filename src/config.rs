@@ -26,6 +26,41 @@ pub struct Config {
     pub icons: IconsCfg,
     #[serde(default)]
     pub esde: EsdeCfg,
+    #[serde(default)]
+    pub cheevos: CheevosCfg,
+}
+
+/// RetroAchievements. See [`crate::cheevos`] for why the username is required
+/// and why hardcore mode is never inherited.
+#[derive(Debug, Default, Deserialize)]
+pub struct CheevosCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    /// RetroAchievements account name. The token alone authenticates nothing.
+    #[serde(default)]
+    pub username: Option<String>,
+    /// Normally left unset: RetroArch stores the login token in its own config
+    /// and this app inherits it rather than keeping a second copy.
+    #[serde(default)]
+    pub token: Option<String>,
+    /// Disables save states, fast-forward and rewind — four of the gamepad
+    /// hotkeys this app binds.
+    #[serde(default)]
+    pub hardcore: bool,
+    #[serde(default)]
+    pub test_unofficial: bool,
+}
+
+impl CheevosCfg {
+    pub fn settings(&self) -> crate::cheevos::Settings {
+        crate::cheevos::Settings {
+            enabled: self.enabled,
+            username: self.username.clone(),
+            token: self.token.clone(),
+            hardcore: self.hardcore,
+            test_unofficial: self.test_unofficial,
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
