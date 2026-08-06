@@ -161,11 +161,17 @@ pub struct ShadersCfg {
     /// `"none"` to force no shader for that platform.
     #[serde(default)]
     pub by_platform: BTreeMap<String, String>,
+    /// Strobe/BFI pass chained on top of the platform shader for CRT
+    /// consoles, e.g. `"subframe-bfi/adaptive_strobe-koko"`. Off by default:
+    /// how well it works depends on the display, so it is a deliberate choice
+    /// rather than something that should surprise anyone.
+    #[serde(default)]
+    pub motion: Option<String>,
 }
 
 impl Default for ShadersCfg {
     fn default() -> Self {
-        Self { enabled: true, by_platform: BTreeMap::new() }
+        Self { enabled: true, by_platform: BTreeMap::new(), motion: None }
     }
 }
 

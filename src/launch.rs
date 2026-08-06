@@ -35,6 +35,12 @@ pub struct Request<'a> {
     pub core_per_game: &'a BTreeMap<String, String>,
     /// Explicit `--core`, bypassing resolution entirely.
     pub core_override: Option<&'a str>,
+    /// Strobe/BFI pass chained on top of the platform's shader, if the user
+    /// turned one on. Empty or "none" means no motion pass.
+    pub motion_shader: Option<&'a str>,
+    /// Display refresh in Hz, as measured by the frontend. Sets how many
+    /// subframes the motion pass gets; None falls back to a safe 2.
+    pub refresh_hz: Option<f32>,
     /// Name the connected controller reports, used to pick the RetroArch
     /// autoconfig profile the gamepad hotkeys are derived from. None means
     /// "whatever this OS's input driver would use".
@@ -152,16 +158,54 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         .shaders_enabled
         .then(|| shaders::preset_for(req.shader_overrides, req.platform))
         .flatten();
-    let shader = preset.as_deref().and_then(|p| shaders::resolve(ra, p));
-    let shader_label = preset.as_deref().map(|p| shaders::label_of(p).to_owned());
+    // A motion pass has to be chained onto the platform's shader, since
+    // RetroArch loads exactly one preset. The generated file replaces the base
+    // preset as the thing we point RetroArch at.
+    let motion = req
+        .motion_shader
+        .filter(|m| !m.is_empty() && *m != "none")
+        .filter(|_| shaders::display_of(req.platform) == shaders::Display::Crt);
+    let chained = motion
+        .and_then(|m| shaders::write_chained(ra, req.library_root, preset.as_deref(), m));
+
+    let shader = match &chained {
+        Some(p) => Some(p.clone()),
+        None => preset.as_deref().and_then(|p| shaders::resolve(ra, p)),
+    };
+    let shader_label = match (motion, preset.as_deref()) {
+        (Some(m), Some(p)) if chained.is_some() => {
+            Some(format!("{} + {}", shaders::label_of(p), shaders::label_of(m)))
+        }
+        (Some(m), None) if chained.is_some() => Some(shaders::label_of(m).to_owned()),
+        _ => preset.as_deref().map(|p| shaders::label_of(p).to_owned()),
+    };
+    if motion.is_some() && chained.is_none() {
+        notes.push("motion shader not installed — using the base shader alone".to_owned());
+    }
 
     if let Some(note) = tweaks::describe(req.platform, &core) {
         notes.push(note);
     }
 
+    // Point RetroArch at the generated chain when there is one. Passing the
+    // absolute path rather than a catalogue name keeps config_lines honest:
+    // it only ever emits a shader it has verified exists.
     let extra = format!(
-        "{}{}{}",
-        shaders::config_lines(ra, preset.as_deref()),
+        "{}{}{}{}",
+        match &chained {
+            Some(p) => format!(
+                "\n# Base shader with a motion pass chained on.\n\
+                 video_shader_enable = \"true\"\nvideo_shader = \"{}\"\n\
+                 video_shader_subframes = \"{}\"\n",
+                p.display(),
+                shaders::subframes_for(req.refresh_hz)
+            ),
+            None => String::new(),
+        },
+        match &chained {
+            Some(_) => String::new(),
+            None => shaders::config_lines(ra, preset.as_deref()),
+        },
         ra.system_dir_line(),
         ra.prepare_tweaks(req.library_root, req.platform, &core)
     );

@@ -173,8 +173,11 @@ describe("activate — the A button", () => {
       { cmd: "rom_detail", args: { id: 42 } },
       "A on a game asks the backend for its detail first"
     );
+    // Not yet on disk, so it downloads first; a downloaded game launches
+    // straight away. Either is "A did something", which is what is being
+    // asserted -- the bug this guards against is A doing nothing at all.
     assert.ok(
-      invoked.slice(1).some((c) => c.cmd === "launch_rom" || c.cmd === "download"),
+      invoked.slice(1).some((c) => c.cmd === "download_rom" || c.cmd === "launch_rom"),
       `and then acts on it; got ${invoked.map((c) => c.cmd).join(" -> ")}`
     );
   });

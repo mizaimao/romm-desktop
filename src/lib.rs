@@ -19,6 +19,7 @@ pub mod retroarch;
 pub mod retroarch_install;
 pub mod savehash;
 pub mod shaders;
+pub mod slangp;
 pub mod theme;
 pub mod tweaks;
 pub mod theme_remote;

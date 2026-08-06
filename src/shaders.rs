@@ -9,9 +9,10 @@
 //! offering it, so a missing format degrades to "no shader" rather than a
 //! black screen.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::retroarch::RetroArch;
+use crate::slangp;
 
 /// What kind of display the system had — decides which presets make sense.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +52,7 @@ pub const CATALOGUE: &[ShaderOption] = &[
     ShaderOption { path: "handheld/gameboy-color-dot-matrix", label: "GBC dot matrix", note: "Colour dot matrix", display: Display::Handheld },
     ShaderOption { path: "handheld/agb001", label: "GBA (AGB-001)", note: "Original, unlit — very dark", display: Display::Handheld },
     ShaderOption { path: "handheld/ags001", label: "GBA SP (AGS-001)", note: "Front-lit SP — the default", display: Display::Handheld },
+    ShaderOption { path: "presets/handheld-plus-color-mod/lcd-grid-v2-sp101-color", label: "GBA SP backlit (AGS-101)", note: "Brightest — the backlit SP revision", display: Display::Handheld },
     ShaderOption { path: "handheld/gameboy-advance-dot-matrix", label: "GBA dot matrix", note: "Visible pixel grid", display: Display::Handheld },
     ShaderOption { path: "handheld/lcd1x_nds", label: "DS LCD", note: "Tuned for DS", display: Display::Handheld },
     ShaderOption { path: "handheld/lcd1x_psp", label: "PSP LCD", note: "Tuned for PSP", display: Display::Handheld },
@@ -93,6 +95,43 @@ pub fn default_for(platform: &str) -> Option<&'static str> {
     })
 }
 
+/// Strobe/BFI passes, which chain on top of whatever base shader is selected.
+///
+/// These are *shader* BFI: they use RetroArch's `video_shader_subframes` and
+/// modulate brightness across subframes, rather than the frontend's
+/// `video_black_frame_insertion`, which hard-requires the display refresh to be
+/// an exact integer multiple of the content frame rate. That constraint is what
+/// rules BFI out on a 144Hz monitor showing 60fps content (144/60 = 2.4).
+///
+/// Ordered best-first. The adaptive one compensates its own gain, so it costs
+/// far less brightness than plain black-frame insertion — which matters on a
+/// CRT preset that is already dark.
+pub const MOTION: &[ShaderOption] = &[
+    ShaderOption { path: "subframe-bfi/adaptive_strobe-koko", label: "Adaptive strobe", note: "Gain-compensated, keeps brightness", display: Display::Crt },
+    ShaderOption { path: "subframe-bfi/120hz-smart-BFI", label: "Smart BFI (120Hz)", note: "Per-area cadence, needs 120Hz", display: Display::Crt },
+    ShaderOption { path: "subframe-bfi/120hz-safe-BFI", label: "Safe BFI (120Hz)", note: "Flips cadence to spare the panel", display: Display::Crt },
+    ShaderOption { path: "subframe-bfi/bfi-simple", label: "Simple BFI", note: "Plain black subframe, halves brightness", display: Display::Crt },
+    ShaderOption { path: "subframe-bfi/crt-beam-simulator", label: "CRT beam simulator", note: "Rolling scan, wants 240Hz+", display: Display::Crt },
+];
+
+/// Subframes to render per content frame, from the display's refresh rate.
+///
+/// `video_shader_subframes` divides one content frame into N draws, so the
+/// display has to be able to show them: at 120Hz a 60fps game gets 2, at 240Hz
+/// it gets 4. Unlike frontend BFI a non-integer ratio is not fatal here — the
+/// strobe cadence just beats slightly against the refresh — so 144Hz rounds
+/// down to 2 rather than being refused.
+pub fn subframes_for(refresh_hz: Option<f32>) -> u32 {
+    const CONTENT_FPS: f32 = 60.0;
+    match refresh_hz {
+        Some(hz) if hz >= CONTENT_FPS * 2.0 => ((hz / CONTENT_FPS).floor() as u32).min(8),
+        // Unknown refresh: 2 is right for every 120Hz+ panel and harmless on a
+        // 60Hz one, where RetroArch simply has no spare subframe to draw.
+        None => 2,
+        Some(_) => 1,
+    }
+}
+
 fn shader_root(ra: &RetroArch) -> PathBuf {
     ra.shaders_dir().join("shaders_slang")
 }
@@ -130,6 +169,35 @@ pub fn config_lines(ra: &RetroArch, preset: Option<&str>) -> String {
         // would persist into one that should have none.
         None => "\nvideo_shader_enable = \"false\"\n".to_owned(),
     }
+}
+
+/// Write a preset combining `base` with a motion pass, and return its path.
+///
+/// RetroArch loads one preset at a time, so a strobe layer on top of a CRT
+/// shader has to be a generated file. It lands in `dir` (our own config
+/// directory) rather than inside the RetroArch install, which is only possible
+/// because [`crate::slangp`] rewrites every shader path to an absolute one.
+pub fn write_chained(
+    ra: &RetroArch,
+    dir: &Path,
+    base: Option<&str>,
+    motion: &str,
+) -> Option<PathBuf> {
+    let motion_path = resolve(ra, motion)?;
+    let extra = slangp::Preset::load(&motion_path).ok()?;
+
+    let body = match base.and_then(|b| resolve(ra, b)) {
+        Some(base_path) => {
+            let base = slangp::Preset::load(&base_path).ok()?;
+            slangp::chain(&base, &extra)
+        }
+        // No base shader: the motion pass is the whole chain.
+        None => slangp::chain(&slangp::Preset::parse("shaders = 0", dir), &extra),
+    };
+
+    let out = dir.join("romm-motion.slangp");
+    std::fs::write(&out, body).ok()?;
+    Some(out)
 }
 
 /// Preset for a platform: the user's choice if set, else the shipped default.

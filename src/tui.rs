@@ -252,6 +252,10 @@ impl App {
             core_overrides: &cfg_core_overrides,
             core_per_game: &self.core_per_game,
             core_override: None,
+            // No display detection here either; motion shaders are a GUI
+            // setting and the TUI leaves them off.
+            motion_shader: None,
+            refresh_hz: None,
             // The TUI has no gamepad detection, so hotkeys fall back to the
             // best profile for this OS's input driver.
             pad: None,

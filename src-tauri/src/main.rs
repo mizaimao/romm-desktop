@@ -44,6 +44,8 @@ struct AppState {
     user_retroarch_cfg: PathBuf,
     shaders_enabled: bool,
     shader_overrides: Mutex<std::collections::BTreeMap<String, String>>,
+    /// Strobe/BFI pass chained onto CRT shaders, if the user enabled one.
+    motion_shader: Mutex<Option<String>>,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
     /// taking any lock the render path also needs.
     icon_style: AtomicU8,
@@ -521,6 +523,7 @@ async fn launch_rom(
     state: State<'_, AppState>,
     id: i64,
     pad: Option<String>,
+    refresh: Option<f32>,
 ) -> CmdResult<String> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
@@ -535,6 +538,7 @@ async fn launch_rom(
     let overrides = state.core_overrides.lock().map_err(err)?.clone();
     let per_game = state.core_per_game.lock().map_err(err)?.clone();
     let shader_overrides = state.shader_overrides.lock().map_err(err)?.clone();
+    let motion = state.motion_shader.lock().map_err(err)?.clone();
     let lib = state.roms_dir.parent().unwrap_or(Path::new("."));
     let req = romm_desktop::launch::Request {
         rom: &path,
@@ -544,6 +548,8 @@ async fn launch_rom(
         user_cfg: &state.user_retroarch_cfg,
         shaders_enabled: state.shaders_enabled,
         shader_overrides: &shader_overrides,
+        motion_shader: motion.as_deref(),
+        refresh_hz: refresh,
         core_overrides: &overrides,
         core_per_game: &per_game,
         core_override: None,
@@ -777,6 +783,53 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
             }
         })
         .collect())
+}
+
+/// The motion (strobe/BFI) layer: what is installed, and what is selected.
+///
+/// Global rather than per-system: it depends on the display, not the console.
+/// It chains *onto* whichever shader a system already uses rather than
+/// replacing it, so picking one here leaves every per-system choice intact.
+#[derive(Serialize)]
+struct MotionView {
+    current: Option<String>,
+    options: Vec<ShaderOptionView>,
+}
+
+#[tauri::command]
+fn motion_options(state: State<'_, AppState>) -> CmdResult<MotionView> {
+    let installed: Vec<ShaderOptionView> = state
+        .retroarch
+        .as_ref()
+        .map(|ra| {
+            shaders::MOTION
+                .iter()
+                .filter(|o| shaders::resolve(ra, o.path).is_some())
+                .map(|o| ShaderOptionView {
+                    path: o.path.to_owned(),
+                    label: o.label.to_owned(),
+                    note: o.note.to_owned(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(MotionView {
+        current: state.motion_shader.lock().map_err(err)?.clone(),
+        options: installed,
+    })
+}
+
+#[tauri::command]
+fn set_motion_shader(state: State<'_, AppState>, value: String) -> CmdResult<String> {
+    romm_desktop::config::set_table_entry("config.toml", "shaders", "motion", &value)
+        .map_err(err)?;
+    let chosen = (value != "none" && !value.is_empty()).then_some(value);
+    *state.motion_shader.lock().map_err(err)? = chosen.clone();
+    Ok(match chosen {
+        Some(v) => format!("motion layer: {v}"),
+        None => "motion layer off".to_owned(),
+    })
 }
 
 /// Persist a per-system core or shader choice to config.toml.
@@ -1198,6 +1251,7 @@ fn main() {
             user_retroarch_cfg: cfg.user_retroarch_config(),
             shaders_enabled: cfg.shaders.enabled,
             shader_overrides: Mutex::new(cfg.shaders.by_platform.clone()),
+            motion_shader: Mutex::new(cfg.shaders.motion.clone()),
             // From config, not hardcoded: index 0 is `logo`, which is ES-DE's
             // wordmark art — a picture of the system's name. The grid wants
             // hardware, and the user's choice has to survive a restart.
@@ -1226,6 +1280,8 @@ fn main() {
             set_icon_style,
             set_retroarch_root,
             systems,
+            motion_options,
+            set_motion_shader,
             set_system_choice,
             game_cores,
             set_game_core,

@@ -4,13 +4,42 @@
 import { state, invoke } from "./state.js";
 import { toast } from "./util.js";
 
+/// Display refresh in Hz, measured rather than asked for: no web API reports
+/// it, and Tauri's Monitor exposes size, position and scale factor but not
+/// refresh rate. The median gap between animation frames is a good proxy —
+/// median rather than mean so one hitched frame does not drag the estimate.
+///
+/// Cached after the first read: this costs ~24 frames, and a launch should not
+/// wait on it twice.
+let refreshHz = null;
+
+function measureRefresh(frames = 24) {
+  if (refreshHz !== null) return Promise.resolve(refreshHz);
+  return new Promise((resolve) => {
+    const times = [];
+    let last = performance.now();
+    const tick = (now) => {
+      times.push(now - last);
+      last = now;
+      if (times.length < frames) return requestAnimationFrame(tick);
+      times.sort((a, b) => a - b);
+      const median = times[times.length >> 1];
+      // Guard against a throttled or backgrounded window, which reports
+      // frame gaps far outside any real refresh rate.
+      refreshHz = median > 0.5 && median < 40 ? Math.round(1000 / median) : null;
+      resolve(refreshHz);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
 export async function launch(id) {
   try {
     toast("Launching…");
     // The connected pad's name picks which RetroArch autoconfig profile the
     // gamepad hotkeys are built from. Raw button indices differ per controller
     // and per OS, so guessing them is how "hold Select" ended up as "hold B".
-    toast(await invoke("launch_rom", { id, pad: state.gamepad }));
+    toast(await invoke("launch_rom", { id, pad: state.gamepad, refresh: await measureRefresh() }));
   } catch (e) {
     toast(`Launch failed — ${e}`, 8000);
   }
