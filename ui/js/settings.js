@@ -2,8 +2,7 @@
 
 import { ACTIONS, keyFor, setKey, resetAll, keyLabel } from "./bindings.js";
 import { toast } from "./util.js";
-
-const invoke = window.__TAURI__?.core?.invoke;
+import { invoke } from "./state.js";
 
 /// Set while waiting for a keypress to assign, so the global handler can get
 /// out of the way.
@@ -37,7 +36,7 @@ export function toggleSettings() {
       <h4>RetroArch</h4>
       <p class="hint">Leave empty to search the usual locations. Set it when the
         install lives elsewhere, such as <code>E:\\Emulators\\RetroArch</code>.</p>
-      <div class="set-row set-path">
+      <div class="set-path">
         <input class="set-ra" type="text" spellcheck="false"
                placeholder="path to the RetroArch folder" />
         <button class="set-ra-save">Save</button>
@@ -69,7 +68,7 @@ export function toggleSettings() {
   // at launch time.
   const raInput = box.querySelector(".set-ra");
   const raStatus = box.querySelector(".set-ra-status");
-  invoke?.("status")
+  invoke("status")
     .then((s) => {
       if (s?.retroarch) raInput.placeholder = s.retroarch;
       raStatus.textContent = s?.retroarch
