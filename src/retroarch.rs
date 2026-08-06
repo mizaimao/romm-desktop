@@ -323,19 +323,36 @@ config_save_on_exit = \"false\"
 # gamepad, so a handheld user has no way out of a game without a keyboard.
 # These give every install launched from here the same combinations.
 #
-# Select acts as the modifier, so none of these fire during normal play: a
-# hotkey needs Select held as well. Buttons are given by standard-mapping
-# index, which is what RetroArch reports for Xbox, DualSense, Switch Pro and
-# 8BitDo pads alike.
-input_enable_hotkey_btn = \"8\"          # Select / Share — modifier
-input_menu_toggle_btn = \"9\"            # + Start  -> RetroArch menu
-input_exit_emulator_btn = \"1\"          # + B/Circle -> quit
-input_save_state_btn = \"3\"             # + Y/Triangle
-input_load_state_btn = \"0\"             # + A/Cross
-input_screenshot_btn = \"2\"             # + X/Square
-input_pause_toggle_btn = \"10\"          # + L3
-input_hold_fast_forward_btn = \"5\"      # + R1
-input_rewind_btn = \"4\"                 # + L1
+# Back/Select/Minus is the modifier: nothing here fires unless it is held, so
+# the buttons keep their normal in-game meaning. Indices are standard-mapping,
+# which RetroArch reports identically for Xbox, DualSense, Switch Pro and
+# 8BitDo pads — the names below are the Xbox ones.
+input_enable_hotkey_btn = \"8\"          # Back / Select / Minus — hold for all of these
+
+input_exit_emulator_btn = \"0\"          # + A  -> quit
+input_shader_toggle_btn = \"1\"          # + B  -> shaders on/off
+input_fps_toggle_btn = \"2\"             # + X  -> FPS counter
+input_menu_toggle_btn = \"3\"            # + Y  -> RetroArch menu
+input_load_state_btn = \"4\"             # + LB -> load state
+input_save_state_btn = \"5\"             # + RB -> save state
+input_hold_fast_forward_btn = \"7\"      # + RT -> fast-forward while held
+
+input_shader_prev_btn = \"12\"           # + D-pad up   -> previous shader
+input_shader_next_btn = \"13\"           # + D-pad down -> next shader
+
+# Right stick, not the d-pad, so slot changes cannot be fumbled while aiming
+# for a shader. Axis 2 is the right stick's X under xinput and the usual SDL
+# mapping, but the index is driver-dependent — if these land on the wrong stick,
+# rebind them in RetroArch once and copy the values into your settings file.
+input_state_slot_decrease_axis = \"-2\"  # + right stick left  -> previous slot
+input_state_slot_increase_axis = \"+2\"  # + right stick right -> next slot
+
+# Quit asks once rather than dropping the game instantly — A is easy to hit by
+# accident, and losing unsaved progress to a stray press is not recoverable.
+quit_press_twice = \"true\"
+
+# Opening the menu should pause, not leave the game running underneath it.
+menu_pause_libretro = \"true\"
 ";
 
     /// Windows-only additions, appended to `OVERRIDES` there.
