@@ -1183,61 +1183,77 @@ fn resolve_core_for(
 /// Config, cache, core map and library are all addressed relative to one
 /// directory, but where that is depends on how the app was started:
 ///
+/// * a config.toml the user put beside the executable, or in the cwd
 /// * a dev checkout — the repo itself, found by walking up for the core map
-/// * a bundled `.app` — `~/RomM`, created on first launch
+/// * otherwise the executable's own directory
 ///
-/// `~/RomM` rather than `~/Library/Application Support`: a visible folder can
-/// be found, backed up and deleted, and nothing in it is unrecoverable. Inside
-/// the bundle is not an option — it breaks code signing and is wiped on update.
+/// Nothing is created and nothing is written to the home directory. See
+/// [`choose_data_root`], which holds the ordering and is where the tests are.
 fn anchor_to_data_root() {
-    const MARKER: &str = "data/esde-core-map.json";
-    const CONFIG: &str = "config.toml";
+    let cwd = std::env::current_dir().ok();
+    let exe = std::env::current_exe().ok();
+    match choose_data_root(cwd.as_deref(), exe.as_deref(), &|p| p.is_file()) {
+        Some(root) => {
+            let _ = std::env::set_current_dir(&root);
+        }
+        None => eprintln!(
+            "warning: could not locate the executable; leaving the working directory alone"
+        ),
+    }
+}
 
-    // 0. A config.toml beside the executable, or in the working directory.
+const MARKER: &str = "data/esde-core-map.json";
+const CONFIG: &str = "config.toml";
+
+/// Decide the data root. Split out from [`anchor_to_data_root`] because the
+/// *order* is the part that was wrong, and a function that calls
+/// `set_current_dir` cannot be tested — the working directory is per-process,
+/// so tests would fight each other.
+///
+/// `is_file` is injected for the same reason: the interesting cases are layouts
+/// nobody has on disk (a Windows portable install, a `.app` in /Applications).
+fn choose_data_root(
+    cwd: Option<&Path>,
+    exe: Option<&Path>,
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let exe_dir = exe.and_then(app_dir);
+
+    // 1. A config.toml beside the executable, or in the working directory.
     //
     // This is what a portable install looks like and what everyone expects of
     // one: unzip the exe, drop config.toml next to it, run it. Without this the
     // Windows build ignored that file completely — it anchored to %USERPROFILE%
     // \RomM and looked for the config there, so a config sitting right beside
-    // the exe did nothing and the app reported itself unconfigured.
+    // the exe was never on any path it consulted.
     //
     // Checked before the marker search because it is the more specific signal:
-    // a config.toml is something the user deliberately put somewhere, whereas
-    // the marker only says "a checkout is somewhere above us".
-    let exe_dir = std::env::current_exe().ok().and_then(|e| app_dir(&e));
-    for dir in [std::env::current_dir().ok(), exe_dir.clone()].into_iter().flatten() {
-        if dir.join(CONFIG).is_file() {
-            let _ = std::env::set_current_dir(&dir);
-            return;
+    // a config.toml is somewhere a user deliberately put a file, whereas the
+    // marker only says "a checkout is somewhere above us".
+    for dir in [cwd, exe_dir.as_deref()].into_iter().flatten() {
+        if is_file(&dir.join(CONFIG)) {
+            return Some(dir.to_path_buf());
         }
     }
 
-    // 1. A source checkout, if we are running from one.
-    let mut roots: Vec<PathBuf> = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.extend(cwd.ancestors().map(Path::to_path_buf));
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        roots.extend(exe.ancestors().map(Path::to_path_buf));
-    }
-    for root in roots {
-        if root.join(MARKER).is_file() {
-            let _ = std::env::set_current_dir(&root);
-            return;
+    // 2. A source checkout, if we are running from one.
+    let ancestors = cwd
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .chain(exe.into_iter().flat_map(Path::ancestors));
+    for root in ancestors {
+        if is_file(&root.join(MARKER)) {
+            return Some(root.to_path_buf());
         }
     }
 
-    // 2. The executable's own directory, and nowhere else.
+    // 3. The executable's own directory, and nowhere else.
     //
     // The app lives where it was put. It does not create a folder in the home
-    // directory, and it does not write anything at all from this function —
-    // the core map is compiled into the binary (`CoreMap::load_or_embedded`),
-    // so there is nothing that has to exist on disk before startup.
-    if let Some(dir) = exe_dir {
-        let _ = std::env::set_current_dir(&dir);
-        return;
-    }
-    eprintln!("warning: could not locate the executable; leaving the working directory alone");
+    // directory, and nothing is written from here at all — the core map is
+    // compiled into the binary (`CoreMap::load_or_embedded`), so no file has to
+    // exist on disk before startup.
+    exe_dir
 }
 
 /// The directory a user would say the app is "in".
@@ -1410,5 +1426,108 @@ mod tests {
             app_dir(Path::new("/srv/appdata/romm/romm-desktop")),
             Some(PathBuf::from("/srv/appdata/romm"))
         );
+    }
+
+    /// A set of paths that "exist", for driving `choose_data_root` over layouts
+    /// nobody has on this disk.
+    fn exists(paths: &[&str]) -> impl Fn(&Path) -> bool + use<> {
+        let owned: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+        move |p: &Path| owned.iter().any(|o| Path::new(o) == p)
+    }
+
+    /// The reported bug, as a test: a portable Windows install with its config
+    /// beside the exe, launched from a working directory that has nothing to do
+    /// with it. This used to land on %USERPROFILE%\RomM, where the config was
+    /// never on any path the app consulted.
+    ///
+    /// The checkout marker above the working directory is what gives this test
+    /// teeth. Without it the answer is right either way — step 3 also returns
+    /// the executable's directory — so the ordering would not actually be under
+    /// test. A mutation run (delete the config check, watch this still pass)
+    /// is what surfaced that.
+    #[test]
+    fn a_config_beside_the_executable_wins() {
+        let root = choose_data_root(
+            Some(Path::new("C:/Users/frank/checkout/sub")),
+            Some(Path::new("D:/Emulators/RomM/romm-desktop.exe")),
+            &exists(&[
+                "D:/Emulators/RomM/config.toml",
+                // A checkout above the cwd, which wins if the config is
+                // consulted second instead of first.
+                "C:/Users/frank/checkout/data/esde-core-map.json",
+            ]),
+        );
+        assert_eq!(root, Some(PathBuf::from("D:/Emulators/RomM")));
+    }
+
+    /// The working directory is checked before the executable, so running from
+    /// a configured folder uses that config rather than the app's own.
+    #[test]
+    fn the_working_directory_is_preferred_over_the_executables() {
+        let root = choose_data_root(
+            Some(Path::new("/srv/romm-live")),
+            Some(Path::new("/opt/romm/romm-desktop")),
+            &exists(&["/srv/romm-live/config.toml", "/opt/romm/config.toml"]),
+        );
+        assert_eq!(root, Some(PathBuf::from("/srv/romm-live")));
+    }
+
+    /// A config.toml is a deliberate act; the core map only says a checkout is
+    /// somewhere above us. The specific signal has to win, or a developer with
+    /// a checkout above their portable install gets the wrong data directory.
+    #[test]
+    fn a_config_beats_a_checkout_found_further_up() {
+        let root = choose_data_root(
+            Some(Path::new("/home/frank/Projects/romm-desktop/portable")),
+            Some(Path::new("/home/frank/Projects/romm-desktop/portable/romm-desktop")),
+            &exists(&[
+                "/home/frank/Projects/romm-desktop/portable/config.toml",
+                "/home/frank/Projects/romm-desktop/data/esde-core-map.json",
+            ]),
+        );
+        assert_eq!(
+            root,
+            Some(PathBuf::from("/home/frank/Projects/romm-desktop/portable"))
+        );
+    }
+
+    /// With no config anywhere, a checkout above the working directory is used
+    /// — this is what makes `cargo run` from a subdirectory work.
+    #[test]
+    fn a_checkout_is_found_by_walking_up() {
+        let root = choose_data_root(
+            Some(Path::new("/home/frank/Projects/romm-desktop/src-tauri")),
+            Some(Path::new("/home/frank/Projects/romm-desktop/target/debug/romm-gui")),
+            &exists(&["/home/frank/Projects/romm-desktop/data/esde-core-map.json"]),
+        );
+        assert_eq!(root, Some(PathBuf::from("/home/frank/Projects/romm-desktop")));
+    }
+
+    /// Nothing configured and no checkout: the app lives where it was put. The
+    /// previous behaviour — inventing ~/RomM and writing a core map into it —
+    /// is what this asserts is gone.
+    #[test]
+    fn with_nothing_to_go_on_it_anchors_beside_the_app_not_in_home() {
+        let root = choose_data_root(
+            Some(Path::new("/")),
+            Some(Path::new("/Applications/RomM-Desktop.app/Contents/MacOS/romm-gui")),
+            &exists(&[]),
+        );
+        assert_eq!(
+            root,
+            Some(PathBuf::from("/Applications")),
+            "the bundle resolves to the folder holding it, and never to $HOME"
+        );
+        assert!(
+            !format!("{root:?}").contains("RomM/"),
+            "no invented data folder"
+        );
+    }
+
+    /// Without an executable path there is nothing to anchor to, and leaving the
+    /// working directory alone beats guessing.
+    #[test]
+    fn no_executable_and_no_markers_changes_nothing() {
+        assert_eq!(choose_data_root(Some(Path::new("/tmp")), None, &exists(&[])), None);
     }
 }

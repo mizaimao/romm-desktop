@@ -547,6 +547,96 @@ mod tests {
         }
     }
 
+    /// The section was renamed, and the old name has to keep working — a config
+    /// that silently stops applying does not error, it just turns achievements
+    /// off, which is indistinguishable from never having set them up.
+    #[test]
+    fn the_old_cheevos_section_name_is_still_accepted() {
+        let renamed: Config = toml::from_str(
+            "[achievements]\nenabled = true\nusername = \"frank\"\ntoken = \"t\"\n",
+        )
+        .unwrap();
+        let legacy: Config = toml::from_str(
+            "[cheevos]\nenabled = true\nusername = \"frank\"\ntoken = \"t\"\n",
+        )
+        .unwrap();
+
+        for (label, cfg) in [("achievements", renamed), ("cheevos", legacy)] {
+            let s = cfg.achievements.settings();
+            assert!(s.enabled, "[{label}] should be read");
+            assert!(s.usable(), "[{label}] should authenticate");
+            assert_eq!(s.username.as_deref(), Some("frank"), "[{label}]");
+            assert_eq!(
+                s.credential(),
+                Some(("cheevos_token", "t")),
+                "[{label}] credential"
+            );
+        }
+    }
+
+    /// Absent means off, and off means the user's own RetroArch settings are
+    /// left alone rather than overwritten with a disabled login.
+    #[test]
+    fn no_achievements_section_means_untouched() {
+        let cfg: Config = toml::from_str("[server]\nurl = \"http://x\"\n").unwrap();
+        let s = cfg.achievements.settings();
+        assert!(!s.enabled);
+        assert!(!s.usable());
+        assert!(crate::achievements::config_lines(&s).is_empty());
+    }
+
+    /// Every field of the section has to survive the trip, including the two
+    /// that change what the emulator does.
+    #[test]
+    fn the_achievements_section_maps_every_field() {
+        let cfg: Config = toml::from_str(
+            "[achievements]\nenabled = true\nusername = \"frank\"\n\
+             password = \"pw\"\nhardcore = true\ntest_unofficial = true\n",
+        )
+        .unwrap();
+        let s = cfg.achievements.settings();
+        assert_eq!(s.credential(), Some(("cheevos_password", "pw")));
+        assert!(s.hardcore);
+        assert!(s.test_unofficial);
+        let out = crate::achievements::config_lines(&s);
+        assert!(out.contains("cheevos_hardcore_mode_enable = \"true\""));
+        assert!(out.contains("cheevos_test_unofficial = \"true\""));
+    }
+
+    /// A configured token has to actually reach the client, or the app keeps
+    /// sending Basic and the token silently does nothing.
+    #[test]
+    fn a_configured_token_reaches_the_client_as_a_bearer() {
+        let cfg: Config = toml::from_str(
+            "[server]\nurl = \"http://dev.lan\"\ntoken = \"rmm_abc\"\nusername = \"frank\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.server.client().unwrap().auth(), "Bearer rmm_abc");
+    }
+
+    /// Without a token it falls back to Basic, so an existing config that never
+    /// had one keeps working untouched.
+    #[test]
+    fn without_a_token_the_client_falls_back_to_basic() {
+        let cfg: Config = toml::from_str(
+            "[server]\nurl = \"http://dev.lan\"\nusername = \"user\"\npassword = \"pass\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.server.client().unwrap().auth(), "Basic dXNlcjpwYXNz");
+    }
+
+    /// A token alone is enough — the password was deliberately removed from the
+    /// real config, so building a client must not require one.
+    #[test]
+    fn a_token_alone_is_enough_to_build_a_client() {
+        let cfg: Config =
+            toml::from_str("[server]\nurl = \"http://dev.lan\"\ntoken = \"rmm_abc\"\n").unwrap();
+        assert!(
+            cfg.server.client().is_ok(),
+            "a config with no username or password must still connect"
+        );
+    }
+
     /// Per-game keys are file paths, which TOML cannot express as bare keys.
     /// Round-tripping through a real parser is the only check that matters.
     #[test]
