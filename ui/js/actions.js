@@ -3,6 +3,7 @@
 
 import { state, invoke } from "./state.js";
 import { toast } from "./util.js";
+import { askConflicts, conflictsFrom } from "./conflicts.js";
 
 /// Display refresh in Hz, measured rather than asked for: no web API reports
 /// it, and Tauri's Monitor exposes size, position and scale factor but not
@@ -33,7 +34,7 @@ function measureRefresh(frames = 24) {
   });
 }
 
-export async function launch(id) {
+export async function launch(id, { resolving = false } = {}) {
   try {
     toast("Launching…");
     // The connected pad's name picks which RetroArch autoconfig profile the
@@ -41,6 +42,17 @@ export async function launch(id) {
     // and per OS, so guessing them is how "hold Select" ended up as "hold B".
     toast(await invoke("launch_rom", { id, pad: state.gamepad, refresh: await measureRefresh() }));
   } catch (e) {
+    // A save that changed in two places stops the launch rather than picking a
+    // winner. Ask, then start again — the second attempt syncs cleanly because
+    // the conflict is gone by then.
+    const conflicts = conflictsFrom(e);
+    if (conflicts && !resolving) {
+      const answered = await askConflicts(conflicts);
+      if (!answered) return toast("Launch cancelled — saves left as they were");
+      // `resolving` guards the retry: if it somehow conflicts again we report
+      // it rather than reopening the dialog forever.
+      return launch(id, { resolving: true });
+    }
     toast(`Launch failed — ${e}`, 8000);
   }
 }

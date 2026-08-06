@@ -54,6 +54,9 @@ struct AppState {
     achievements: romm_desktop::achievements::Settings,
     /// Pull before a launch and push after it exits.
     auto_sync: bool,
+    /// Conflicts awaiting the user's answer, so the resolve command can act on
+    /// one by name rather than the UI having to hand the whole record back.
+    pending_conflicts: Mutex<Vec<romm_desktop::savesync::SaveConflict>>,
 }
 
 #[derive(Serialize)]
@@ -600,14 +603,30 @@ async fn launch_rom(
     // those two moments are a real boundary rather than a guess about when
     // someone stopped playing.
     let mut notes = fetched;
-    if let Some(note) = auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await {
+    let pre = auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await;
+    if let Some(note) = pre.note {
         notes.push(note);
+    }
+    // A conflict stops the launch, as Steam does. Playing on top of a save
+    // whose ownership is unresolved is how the loser gets overwritten for good
+    // on the way back out — the one moment where continuing quietly is worse
+    // than refusing.
+    if !pre.conflicts.is_empty() {
+        *state.pending_conflicts.lock().map_err(err)? = pre.conflicts.clone();
+        return Err(format!(
+            "SAVE_CONFLICT:{}",
+            serde_json::to_string(&pre.conflicts).unwrap_or_default()
+        ));
     }
 
     let status = plan.run(ra, &path, false).map_err(err)?;
 
-    if let Some(note) = auto_sync(&state, ra, &row, savesync::When::AfterExit).await {
+    let post = auto_sync(&state, ra, &row, savesync::When::AfterExit).await;
+    if let Some(note) = post.note {
         notes.push(note);
+    }
+    if !post.conflicts.is_empty() {
+        *state.pending_conflicts.lock().map_err(err)? = post.conflicts;
     }
 
     let prefix = if notes.is_empty() {
@@ -622,38 +641,104 @@ async fn launch_rom(
     })
 }
 
+/// What one half of the automatic sync produced.
+#[derive(Default)]
+struct AutoSync {
+    /// A line for the launch notes, when anything happened.
+    note: Option<String>,
+    /// Saves changed on both sides. Non-empty means the user has to choose.
+    conflicts: Vec<romm_desktop::savesync::SaveConflict>,
+}
+
 /// One half of the automatic sync for a single game.
 ///
-/// Returns a note when something happened, `None` when nothing did. Never an
-/// error: a sync failure must not stop a game starting, and must not be the
-/// last thing that happens after one ends — so problems are reported in the
-/// launch notes and the launch itself carries on.
+/// A sync *failure* never stops anything: an unreachable server must not lock
+/// the library, so the problem goes into the launch notes and play continues
+/// offline. A *conflict* is different — that is a question only the user can
+/// answer, and the caller refuses to launch until they have.
 async fn auto_sync(
     state: &State<'_, AppState>,
     ra: &RetroArch,
     row: &cache::RomRow,
     when: savesync::When,
-) -> Option<String> {
+) -> AutoSync {
     if !state.auto_sync {
-        return None;
+        return AutoSync::default();
     }
-    let client = state.client.clone()?;
+    let Some(client) = state.client.clone() else {
+        return AutoSync::default();
+    };
     let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
 
     // The SQLite connection is not Sync, so the scan takes the lock and drops
     // it before any awaiting starts.
     let candidates = {
-        let cache = state.cache.lock().ok()?;
+        let Ok(cache) = state.cache.lock() else {
+            return AutoSync::default();
+        };
         match savesync::scan_for_rom(&cache, &state.map, &ra.root, &row.fs_name) {
             Ok(c) => c,
-            Err(e) => return Some(format!("saves: could not scan ({e})")),
+            Err(e) => {
+                return AutoSync {
+                    note: Some(format!("saves: could not scan ({e})")),
+                    ..Default::default()
+                };
+            }
         }
     };
 
     match savesync::run(&client, &candidates, &ra.root, Path::new("."), &library_root).await {
-        Ok(summary) => savesync::describe(when, &summary),
-        Err(e) => Some(format!("saves: {} failed ({e})", when.label())),
+        Ok(summary) => AutoSync {
+            note: savesync::describe(when, &summary),
+            conflicts: summary.conflicts,
+        },
+        Err(e) => AutoSync {
+            note: Some(format!("saves: {} failed ({e})", when.label())),
+            ..Default::default()
+        },
     }
+}
+
+/// Carry out the user's answer to a conflict, then report what happened.
+///
+/// Separate from `launch_rom` so the UI can present the choice and then launch
+/// again: a Tauri command cannot block waiting for a webview dialog.
+#[tauri::command]
+async fn resolve_save_conflict(
+    state: State<'_, AppState>,
+    file_name: String,
+    keep: romm_desktop::savesync::Keep,
+) -> CmdResult<String> {
+    let client = state.client.clone().ok_or("not connected to a server")?;
+    let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
+    let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+    let conflict = {
+        let pending = state.pending_conflicts.lock().map_err(err)?;
+        pending
+            .iter()
+            .find(|c| c.file_name == file_name)
+            .cloned()
+            .ok_or_else(|| format!("no pending conflict for {file_name}"))?
+    };
+
+    let outcome = savesync::resolve(
+        &client,
+        &conflict,
+        keep,
+        &ra.root,
+        &library_root,
+        Path::new("."),
+    )
+    .await
+    .map_err(err)?;
+
+    state
+        .pending_conflicts
+        .lock()
+        .map_err(err)?
+        .retain(|c| c.file_name != file_name);
+    Ok(outcome)
 }
 
 #[derive(Serialize)]
@@ -1403,6 +1488,7 @@ fn main() {
             ),
             achievements: cfg.achievements.settings(),
             auto_sync: cfg.saves.auto_sync,
+            pending_conflicts: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
             platforms,
@@ -1424,6 +1510,7 @@ fn main() {
             set_retroarch_root,
             systems,
             sync_saves,
+            resolve_save_conflict,
             motion_options,
             set_motion_shader,
             set_system_choice,

@@ -676,8 +676,15 @@ impl Client {
         emulator: Option<&str>,
         device_id: &str,
         session_id: Option<i64>,
+        overwrite: bool,
     ) -> Result<std::result::Result<Save, Conflict>> {
         let mut url = format!("/api/saves?rom_id={rom_id}&device_id={device_id}");
+        // Overwrite is off for ordinary uploads: refusing is what makes the
+        // server detect a conflict at all. It goes on only to carry out a
+        // decision the user has already been shown and made.
+        if overwrite {
+            url.push_str("&overwrite=true");
+        }
         if let Some(s) = slot {
             url.push_str(&format!("&slot={}", urlencode(s)));
         }
@@ -687,8 +694,6 @@ impl Client {
         if let Some(s) = session_id {
             url.push_str(&format!("&session_id={s}"));
         }
-        // overwrite stays off: that is what makes the server detect conflicts.
-
         let part = reqwest::multipart::Part::bytes(bytes).file_name(file_name.to_owned());
         let form = reqwest::multipart::Form::new().part("saveFile", part);
 

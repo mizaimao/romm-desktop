@@ -127,9 +127,17 @@ That backup is what makes the automation defensible. A save is the only thing
 here that cannot be fetched again, and syncing it unattended without a way back
 would be the one action in the app capable of destroying something for good.
 
-Anything changed on both sides since the last sync is a conflict: both copies
-are left exactly as they are and it says so. Picking a winner silently is how
-an evening's progress disappears.
+Anything changed on both sides since the last sync is a conflict, and **the
+launch stops there and asks** — the two copies side by side with their dates,
+keep mine or keep the server's. Nothing is written until you answer, and the
+copy you do not keep is backed up anyway.
+
+Refusing to start is the point. Playing on top of a save whose ownership is
+unsettled means the loser gets overwritten for good when you quit, which is the
+one moment where carrying on quietly is worse than stopping.
+
+A server that is simply unreachable is not a conflict: it says so and the game
+starts, because being unable to play offline would be worse than a missed sync.
 
 Turn it off with `[saves] auto_sync = false` and sync when you ask instead:
 

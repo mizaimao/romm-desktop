@@ -34,6 +34,14 @@ export function starBar(rating) {
 
 let toastTimer;
 export function toast(msg, ms = 4000) {
+  // Missing element is not worth throwing over. This is called from async
+  // click handlers, where a throw is swallowed by the promise and the handler
+  // simply stops half-done — the failure mode that hid the A-button bug for
+  // five rounds. Losing a status line is the smaller problem.
+  if (!el.toast) {
+    console.warn("toast:", msg);
+    return;
+  }
   el.toast.textContent = msg;
   el.toast.hidden = false;
   clearTimeout(toastTimer);

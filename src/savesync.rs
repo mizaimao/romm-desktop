@@ -14,9 +14,10 @@
 //! overwrite now copies the previous file into a rotating backup first (see
 //! [`crate::savebackup`]), so a bad outcome is recoverable rather than final.
 //!
-//! Conflicts are still never resolved locally. When both sides changed since
-//! the last sync the server says so and this reports it untouched — picking a
-//! winner silently is how people lose an evening's progress.
+//! A conflict is never resolved silently. When both sides changed since the
+//! last sync, nothing is written and the launch is refused until the user says
+//! which copy to keep — playing on top of a save whose ownership is unsettled
+//! is how the loser gets overwritten for good on the way back out.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -95,7 +96,9 @@ fn hostname() -> String {
 pub struct Summary {
     pub uploaded: usize,
     pub downloaded: usize,
-    pub conflicts: usize,
+    /// Saves changed on both sides since the last sync. Nothing is written for
+    /// these; they carry enough detail for the user to choose.
+    pub conflicts: Vec<SaveConflict>,
     pub unchanged: usize,
     /// Local files the server was not told about, and why.
     pub skipped: usize,
@@ -103,9 +106,37 @@ pub struct Summary {
     pub notes: Vec<String>,
 }
 
+/// A save that changed on both sides, described well enough to choose between.
+#[derive(Debug, Clone, Serialize)]
+pub struct SaveConflict {
+    pub rom_id: i64,
+    pub save_id: Option<i64>,
+    pub file_name: String,
+    pub slot: Option<String>,
+    pub emulator: Option<String>,
+    /// The server's own words for why it refused to pick.
+    pub reason: Option<String>,
+    /// Absolute path of the local copy, when one was found.
+    pub local_path: Option<PathBuf>,
+    pub local_updated: Option<String>,
+    pub local_bytes: i64,
+    pub server_updated: Option<String>,
+}
+
+/// Which copy to keep. There is no third option that keeps both: they are the
+/// same `(rom, slot)` as far as the server is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Keep {
+    /// Upload this machine's copy over the server's.
+    Local,
+    /// Download the server's copy over this machine's.
+    Server,
+}
+
 impl Summary {
     pub fn headline(&self) -> String {
-        if self.uploaded + self.downloaded + self.conflicts == 0 {
+        if self.uploaded + self.downloaded + self.conflicts.len() == 0 {
             return format!("Saves already in sync ({} checked)", self.unchanged);
         }
         let mut parts = Vec::new();
@@ -115,8 +146,8 @@ impl Summary {
         if self.downloaded > 0 {
             parts.push(format!("{} downloaded", self.downloaded));
         }
-        if self.conflicts > 0 {
-            parts.push(format!("{} in conflict", self.conflicts));
+        if !self.conflicts.is_empty() {
+            parts.push(format!("{} in conflict", self.conflicts.len()));
         }
         parts.join(", ")
     }
@@ -231,14 +262,14 @@ pub fn describe(when: When, summary: &Summary) -> Option<String> {
         When::BeforeLaunch => summary.downloaded,
         When::AfterExit => summary.uploaded,
     };
-    if moved == 0 && summary.conflicts == 0 {
+    if moved == 0 && summary.conflicts.is_empty() {
         return None;
     }
     let mut line = format!("saves: {moved} {}", when.label());
-    if summary.conflicts > 0 {
+    if !summary.conflicts.is_empty() {
         line.push_str(&format!(
             ", {} in conflict and left alone — run `sync-saves` to look",
-            summary.conflicts
+            summary.conflicts.len()
         ));
     }
     Some(line)
@@ -304,24 +335,50 @@ pub async fn run(
                     summary.notes.push(format!("server asked to upload {name}, which is not here"));
                     continue;
                 };
-                match upload_one(client, c, op.rom_id, &identity, plan.session_id).await {
+                match upload_one(client, c, op.rom_id, &identity, plan.session_id, false).await {
                     Ok(true) => {
                         summary.uploaded += 1;
                         summary.notes.push(format!("uploaded {name}"));
                     }
-                    // A conflict is the server declining, not an error.
+                    // A 409 is the server declining because its copy moved on
+                    // since we last synced — the same situation `negotiate`
+                    // calls a conflict, discovered a step later. Described the
+                    // same way so it is resolvable rather than just reported.
                     Ok(false) => {
-                        summary.conflicts += 1;
+                        summary.conflicts.push(SaveConflict {
+                            rom_id: op.rom_id,
+                            save_id: op.save_id,
+                            slot: op.slot.clone().or_else(|| Some(c.slot.clone())),
+                            emulator: op.emulator.clone().or_else(|| c.core.clone()),
+                            reason: Some("the server's copy changed since this device last synced".to_owned()),
+                            local_updated: Some(modified_rfc3339(&c.path)),
+                            local_bytes: c.size as i64,
+                            local_path: Some(c.path.clone()),
+                            server_updated: op.server_updated_at.clone(),
+                            file_name: name.clone(),
+                        });
                         summary.notes.push(format!("{name}: server copy moved on, left alone"));
                     }
                     Err(e) => summary.notes.push(format!("could not upload {name}: {e}")),
                 }
             }
             "conflict" => {
-                summary.conflicts += 1;
                 let name = op.file_name.clone().unwrap_or_default();
-                let why = op.reason.clone().unwrap_or_else(|| "both sides changed".to_owned());
-                summary.notes.push(format!("{name}: {why} — nothing written"));
+                let local = candidates
+                    .iter()
+                    .find(|c| c.path.file_name().is_some_and(|n| n.to_string_lossy() == name));
+                summary.conflicts.push(SaveConflict {
+                    rom_id: op.rom_id,
+                    save_id: op.save_id,
+                    slot: op.slot.clone().or_else(|| local.map(|c| c.slot.clone())),
+                    emulator: op.emulator.clone().or_else(|| local.and_then(|c| c.core.clone())),
+                    reason: op.reason.clone(),
+                    local_updated: local.map(|c| modified_rfc3339(&c.path)),
+                    local_bytes: local.map(|c| c.size as i64).unwrap_or(0),
+                    local_path: local.map(|c| c.path.clone()),
+                    server_updated: op.server_updated_at.clone(),
+                    file_name: name,
+                });
             }
             "no_op" => summary.unchanged += 1,
             other => summary.notes.push(format!("unknown action {other:?} from the server")),
@@ -337,6 +394,77 @@ pub async fn run(
     }
 
     Ok(summary)
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Carry out a decision about one conflict.
+///
+/// The only place `overwrite=true` is ever sent, and only for a conflict the
+/// user has been shown and answered. Both directions back up the file they
+/// replace first, so choosing wrong is recoverable by copying a file back
+/// rather than being the end of that save.
+pub async fn resolve(
+    client: &Client,
+    conflict: &SaveConflict,
+    keep: Keep,
+    ra_root: &Path,
+    library_root: &Path,
+    data_dir: &Path,
+) -> Result<String> {
+    let identity = DeviceIdentity::ensure(client, data_dir).await?;
+    let slot = conflict.slot.as_deref().unwrap_or("unslotted");
+
+    match keep {
+        Keep::Local => {
+            let path = conflict
+                .local_path
+                .clone()
+                .context("no local copy to keep — nothing to upload")?;
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let result = client
+                .upload_save(
+                    conflict.rom_id,
+                    &conflict.file_name,
+                    bytes,
+                    conflict.slot.as_deref(),
+                    conflict.emulator.as_deref(),
+                    &identity.device_id,
+                    None,
+                    true,
+                )
+                .await?;
+            match result {
+                Ok(_) => Ok(format!("{}: kept this machine's copy", conflict.file_name)),
+                // Refused even with overwrite on: the server moved again
+                // between being asked and being answered. Saying so beats
+                // reporting a success that did not happen.
+                Err(c) => anyhow::bail!(
+                    "{}: the server refused the upload ({})",
+                    conflict.file_name,
+                    c.detail.chars().take(200).collect::<String>()
+                ),
+            }
+        }
+        Keep::Server => {
+            let save_id = conflict
+                .save_id
+                .context("the server did not name a save to download")?;
+            let path = download_one(
+                client,
+                ra_root,
+                save_id,
+                &conflict.file_name,
+                conflict.emulator.as_deref(),
+                &identity,
+                library_root,
+                conflict.rom_id,
+                Some(slot),
+            )
+            .await?;
+            Ok(format!("{}: kept the server's copy", path.display()))
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -379,6 +507,7 @@ async fn upload_one(
     rom_id: i64,
     identity: &DeviceIdentity,
     session_id: Option<i64>,
+    overwrite: bool,
 ) -> Result<bool> {
     let bytes = std::fs::read(&candidate.path)
         .with_context(|| format!("reading {}", candidate.path.display()))?;
@@ -397,6 +526,7 @@ async fn upload_one(
             candidate.core.as_deref().or(Some(&candidate.core_dir)),
             &identity.device_id,
             session_id,
+            overwrite,
         )
         .await?;
     Ok(result.is_ok())
@@ -490,6 +620,22 @@ mod tests {
         );
     }
 
+    /// A conflict with just enough shape to count as one.
+    fn conflict(file_name: &str) -> SaveConflict {
+        SaveConflict {
+            rom_id: 7,
+            save_id: Some(1),
+            file_name: file_name.to_owned(),
+            slot: Some("autosave".to_owned()),
+            emulator: Some("snes9x".to_owned()),
+            reason: Some("both sides changed".to_owned()),
+            local_path: Some(PathBuf::from("/ra/saves/snes9x/Zelda.srm")),
+            local_updated: Some("2026-08-06T10:00:00Z".to_owned()),
+            local_bytes: 8192,
+            server_updated: Some("2026-08-06T12:00:00Z".to_owned()),
+        }
+    }
+
     fn candidate(name: &str, resolution: Resolution, canonical: bool) -> Candidate {
         Candidate {
             path: PathBuf::from(format!("/ra/saves/snes9x/{name}")),
@@ -579,7 +725,7 @@ mod tests {
     /// declined to act looks exactly like one that had nothing to do.
     #[test]
     fn a_conflict_is_always_surfaced() {
-        let stuck = Summary { conflicts: 1, ..Default::default() };
+        let stuck = Summary { conflicts: vec![conflict("Zelda.srm")], ..Default::default() };
         let note = describe(When::AfterExit, &stuck).expect("a conflict must be reported");
         assert!(note.contains("1 in conflict"), "{note}");
         assert!(note.contains("left alone"), "and that nothing was written: {note}");
@@ -590,7 +736,11 @@ mod tests {
     fn the_headline_says_nothing_happened_when_nothing_did() {
         let s = Summary { unchanged: 12, ..Default::default() };
         assert_eq!(s.headline(), "Saves already in sync (12 checked)");
-        let s = Summary { uploaded: 2, conflicts: 1, ..Default::default() };
+        let s = Summary {
+            uploaded: 2,
+            conflicts: vec![conflict("Zelda.srm")],
+            ..Default::default()
+        };
         assert_eq!(s.headline(), "2 uploaded, 1 in conflict");
     }
 }
