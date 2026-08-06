@@ -3,7 +3,7 @@
 
 import { state, invoke } from "./state.js";
 import { toast } from "./util.js";
-import { askConflicts, conflictsFrom } from "./conflicts.js";
+import { askConflicts, conflictsFrom, askOffline, offlineFrom } from "./conflicts.js";
 
 /// Display refresh in Hz, measured rather than asked for: no web API reports
 /// it, and Tauri's Monitor exposes size, position and scale factor but not
@@ -34,13 +34,20 @@ function measureRefresh(frames = 24) {
   });
 }
 
-export async function launch(id, { resolving = false } = {}) {
+export async function launch(id, { resolving = false, skipSync = false } = {}) {
   try {
     toast("Launching…");
     // The connected pad's name picks which RetroArch autoconfig profile the
     // gamepad hotkeys are built from. Raw button indices differ per controller
     // and per OS, so guessing them is how "hold Select" ended up as "hold B".
-    toast(await invoke("launch_rom", { id, pad: state.gamepad, refresh: await measureRefresh() }));
+    toast(
+      await invoke("launch_rom", {
+        id,
+        pad: state.gamepad,
+        refresh: await measureRefresh(),
+        skipSync,
+      })
+    );
   } catch (e) {
     // A save that changed in two places stops the launch rather than picking a
     // winner. Ask, then start again — the second attempt syncs cleanly because
@@ -53,6 +60,16 @@ export async function launch(id, { resolving = false } = {}) {
       // it rather than reopening the dialog forever.
       return launch(id, { resolving: true });
     }
+    // Saves could not be checked at all. Ask rather than deciding: starting
+    // silently risks an hour on top of a stale save, and refusing would mean a
+    // server being off stops you playing.
+    const offline = offlineFrom(e);
+    if (offline && !skipSync) {
+      const go = await askOffline(offline);
+      if (!go) return toast("Launch cancelled");
+      return launch(id, { skipSync: true });
+    }
+
     toast(`Launch failed — ${e}`, 8000);
   }
 }

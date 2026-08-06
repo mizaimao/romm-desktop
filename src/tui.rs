@@ -40,6 +40,14 @@ struct Progress {
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 
+/// What an automatic sync decided about a launch.
+enum SyncOutcome {
+    /// Carry on; the string is a note worth showing.
+    Ok(Option<String>),
+    /// Do not launch — a conflict needs answering first.
+    Blocked(String),
+}
+
 #[derive(PartialEq)]
 enum View {
     Platforms,
@@ -65,6 +73,13 @@ pub struct App {
     user_ra_cfg: PathBuf,
     shaders_enabled: bool,
     achievements: crate::achievements::Settings,
+    auto_sync: bool,
+    /// Own connection to the metadata cache, for resolving saves to ROMs.
+    ///
+    /// A second connection rather than borrowing the caller's: `App` outlives
+    /// the borrow, and SQLite is happy with two readers of the same file.
+    /// `None` when it could not be opened, which only costs the sync.
+    save_cache: Option<Cache>,
     shader_overrides: std::collections::BTreeMap<String, String>,
     quit: bool,
     /// Set while a download is in flight; cleared once the UI reports it.
@@ -125,6 +140,10 @@ impl App {
             achievements: crate::config::Config::load()
                 .map(|c| c.achievements.settings())
                 .unwrap_or_default(),
+            auto_sync: crate::config::Config::load()
+                .map(|c| c.saves.auto_sync)
+                .unwrap_or(true),
+            save_cache: Cache::open(Path::new("cache.sqlite3")).ok(),
             quit: false,
             progress: None,
             launch_when_done: None,
@@ -273,16 +292,82 @@ impl App {
             }
         };
 
+        // Pull before, push after — the same automatic sync the GUI does. A
+        // conflict refuses the launch here too, but the TUI has no dialog to
+        // resolve it in, so it says where to.
+        match self.sync_saves(&rom, crate::savesync::When::BeforeLaunch) {
+            SyncOutcome::Blocked(msg) => {
+                self.status = msg;
+                return Ok(());
+            }
+            SyncOutcome::Ok(Some(note)) => self.status = note,
+            SyncOutcome::Ok(None) => {}
+        }
+
         restore_terminal(term)?;
         let result = plan.run(ra, &path, false);
         setup_terminal(term)?;
 
-        self.status = match result {
+        let played = match result {
             Ok(s) if s.success() => format!("{} exited cleanly", rom.name),
             Ok(s) => format!("{} exited with {}", rom.name, s),
             Err(e) => format!("launch failed: {e}"),
         };
+        // After the fact there is nothing to ask — the game has been played, so
+        // anything that went wrong is reported rather than blocking.
+        self.status = match self.sync_saves(&rom, crate::savesync::When::AfterExit) {
+            SyncOutcome::Ok(Some(note)) => format!("{played} — {note}"),
+            SyncOutcome::Blocked(msg) => format!("{played} — {msg}"),
+            SyncOutcome::Ok(None) => played,
+        };
         Ok(())
+    }
+
+    /// One half of the automatic save sync, run on the tokio runtime.
+    ///
+    /// Blocking is fine here: the TUI is idle at this point either way, and a
+    /// launch is about to take over the terminal.
+    fn sync_saves(&self, rom: &RomRow, when: crate::savesync::When) -> SyncOutcome {
+        if !self.auto_sync {
+            return SyncOutcome::Ok(None);
+        }
+        let (Some(client), Some(ra)) = (self.client.clone(), self.ra.as_ref()) else {
+            return SyncOutcome::Ok(None);
+        };
+        let library_root = self.local_roms.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+        let Some(cache) = self.save_cache.as_ref() else {
+            return SyncOutcome::Ok(None);
+        };
+        let candidates = match crate::savesync::scan_for_rom(
+            cache,
+            &self.map,
+            &ra.root,
+            &rom.fs_name,
+        ) {
+            Ok(c) => c,
+            Err(e) => return SyncOutcome::Ok(Some(format!("saves: could not scan ({e})"))),
+        };
+
+        let root = ra.root.clone();
+        let result = self.rt.block_on(async move {
+            crate::savesync::run(&client, &candidates, &root, Path::new("."), &library_root).await
+        });
+
+        match result {
+            Ok(summary) if !summary.conflicts.is_empty() && when == crate::savesync::When::BeforeLaunch => {
+                SyncOutcome::Blocked(format!(
+                    "save conflict on {} — resolve it in the app, or run `romm-desktop sync-saves`",
+                    summary.conflicts[0].file_name
+                ))
+            }
+            Ok(summary) => SyncOutcome::Ok(crate::savesync::describe(when, &summary)),
+            // Not fatal: a server that is off must not stop you playing.
+            Err(e) => SyncOutcome::Ok(Some(format!(
+                "saves NOT synced ({}) — progress stays on this machine",
+                e.to_string().lines().next().unwrap_or("server unreachable")
+            ))),
+        }
     }
 
     /// Kick off a download on the tokio runtime. The UI keeps redrawing while

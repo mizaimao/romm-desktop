@@ -532,6 +532,8 @@ async fn launch_rom(
     id: i64,
     pad: Option<String>,
     refresh: Option<f32>,
+    // Set by the retry after the user answered an offline warning.
+    skip_sync: Option<bool>,
 ) -> CmdResult<String> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
@@ -603,9 +605,23 @@ async fn launch_rom(
     // those two moments are a real boundary rather than a guess about when
     // someone stopped playing.
     let mut notes = fetched;
-    let pre = auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await;
+    let pre = if skip_sync.unwrap_or(false) {
+        // The user already said "play anyway" to an offline warning; asking
+        // again on the retry would be a loop they cannot get out of.
+        notes.push("saves: not synced — you chose to play anyway".to_owned());
+        AutoSync::default()
+    } else {
+        auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await
+    };
     if let Some(note) = pre.note {
         notes.push(note);
+    }
+    // Could not sync at all. Steam asks rather than either blocking or starting
+    // silently, and it is the right call: the save may be stale, which is worth
+    // knowing before you put an hour into it, but being unable to play because
+    // a server is off would be worse.
+    if let Some(why) = pre.failed {
+        return Err(format!("SAVE_OFFLINE:{why}"));
     }
     // A conflict stops the launch, as Steam does. Playing on top of a save
     // whose ownership is unresolved is how the loser gets overwritten for good
@@ -621,9 +637,18 @@ async fn launch_rom(
 
     let status = plan.run(ra, &path, false).map_err(err)?;
 
-    let post = auto_sync(&state, ra, &row, savesync::When::AfterExit).await;
+    let post = if skip_sync.unwrap_or(false) {
+        AutoSync::default()
+    } else {
+        auto_sync(&state, ra, &row, savesync::When::AfterExit).await
+    };
     if let Some(note) = post.note {
         notes.push(note);
+    }
+    // After the fact there is nothing to ask: the game has already been played.
+    // Say so in the notes so progress that has not left the machine is visible.
+    if let Some(why) = post.failed {
+        notes.push(format!("saves: NOT uploaded — {why}"));
     }
     if !post.conflicts.is_empty() {
         *state.pending_conflicts.lock().map_err(err)? = post.conflicts;
@@ -648,6 +673,10 @@ struct AutoSync {
     note: Option<String>,
     /// Saves changed on both sides. Non-empty means the user has to choose.
     conflicts: Vec<romm_desktop::savesync::SaveConflict>,
+    /// Set when the sync could not run at all — server down, DNS gone, timeout.
+    /// Distinct from a conflict: nothing is wrong with the save, we simply do
+    /// not know whether it is current.
+    failed: Option<String>,
 }
 
 /// One half of the automatic sync for a single game.
@@ -680,7 +709,7 @@ async fn auto_sync(
             Ok(c) => c,
             Err(e) => {
                 return AutoSync {
-                    note: Some(format!("saves: could not scan ({e})")),
+                    failed: Some(format!("could not read the save folder: {e}")),
                     ..Default::default()
                 };
             }
@@ -691,9 +720,12 @@ async fn auto_sync(
         Ok(summary) => AutoSync {
             note: savesync::describe(when, &summary),
             conflicts: summary.conflicts,
+            failed: None,
         },
         Err(e) => AutoSync {
-            note: Some(format!("saves: {} failed ({e})", when.label())),
+            failed: Some(
+                e.to_string().lines().next().unwrap_or("the server did not answer").to_owned(),
+            ),
             ..Default::default()
         },
     }

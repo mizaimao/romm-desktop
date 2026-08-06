@@ -157,3 +157,69 @@ export function conflictsFrom(err) {
     return null;
   }
 }
+
+/// Pull the reason out of a launch refused because saves could not sync.
+export function offlineFrom(err) {
+  const text = typeof err === "string" ? err : String(err?.message ?? err ?? "");
+  const at = text.indexOf("SAVE_OFFLINE:");
+  return at === -1 ? null : text.slice(at + "SAVE_OFFLINE:".length).trim() || "unknown reason";
+}
+
+/// "Saves can't sync — play anyway?"
+///
+/// Asked rather than decided either way. Starting silently risks an hour on top
+/// of a stale save; refusing would mean a server being off stops you playing at
+/// all. Steam asks, and it is the right call.
+export function askOffline(reason) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "conflict-overlay";
+    overlay.innerHTML = `<div class="conflict-box">
+        <header><span class="icon icon-info-on"></span><h2>Saves are not syncing</h2></header>
+        <p class="lead">Your saves could not be checked against the server.</p>
+        <p class="why">${escape(reason)}</p>
+        <p class="note">You can play, but progress will not be uploaded when you
+          quit, and this device may not have the newest save.</p>
+        <div class="sides">
+          <button class="side" data-go="yes"><span class="who">Play anyway</span>
+            <span class="when">saves stay on this machine</span></button>
+          <button class="side" data-go="no"><span class="who">Cancel</span>
+            <span class="when">do not launch</span></button>
+        </div>
+      </div>`;
+
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      resolve(ok);
+    };
+
+    const sides = () => [...overlay.querySelectorAll("[data-go]")];
+    const onKey = (e) => {
+      const list = sides();
+      const at = list.indexOf(document.activeElement);
+      if (e.key === "Escape") finish(false);
+      else if (e.key === "ArrowRight" || e.key === "ArrowDown")
+        list[Math.min(at + 1, list.length - 1)].focus();
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+        list[Math.max(at - 1, 0)].focus();
+      else if (e.key === "Enter" && at >= 0) list[at].click();
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    overlay.addEventListener("click", (e) => {
+      const go = e.target.closest("[data-go]");
+      if (go) finish(go.dataset.go === "yes");
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    // Cancel is focused first: the safe answer should be the one a stray Enter
+    // lands on.
+    sides()[1].focus();
+  });
+}

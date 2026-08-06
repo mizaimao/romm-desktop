@@ -136,8 +136,14 @@ Refusing to start is the point. Playing on top of a save whose ownership is
 unsettled means the loser gets overwritten for good when you quit, which is the
 one moment where carrying on quietly is worse than stopping.
 
-A server that is simply unreachable is not a conflict: it says so and the game
-starts, because being unable to play offline would be worse than a missed sync.
+A server it cannot reach is a different question, and it asks that one too:
+**"saves are not syncing — play anyway?"** Starting silently risks an hour on
+top of a stale save; refusing outright would mean a server being off stops you
+playing at all. Cancel is the focused button, so a stray Enter is the safe
+answer.
+
+The TUI does the same sync. It has no dialog to resolve a conflict in, so it
+refuses the launch and points at `sync-saves`.
 
 Turn it off with `[saves] auto_sync = false` and sync when you ask instead:
 

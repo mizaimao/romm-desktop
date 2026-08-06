@@ -188,3 +188,41 @@ describe("the conflict dialog", () => {
     );
   });
 });
+
+describe("the offline warning", () => {
+  test("finds the reason a launch was refused for", () => {
+    assert.equal(mod.offlineFrom("SAVE_OFFLINE:dns error"), "dns error");
+    assert.equal(mod.offlineFrom("RetroArch not found"), null);
+    // A conflict is a different question and must not be mistaken for this.
+    assert.equal(mod.offlineFrom("SAVE_CONFLICT:[{}]"), null);
+  });
+
+  test("offers play-anyway and cancel, with cancel focused", () => {
+    mod.askOffline("connection refused");
+    const box = document.querySelector("#conflict-overlay");
+    assert.ok(box);
+    assert.match(box.textContent, /connection refused/);
+    assert.match(box.textContent, /Play anyway/);
+    // The safe answer is where a stray Enter lands.
+    assert.equal(document.activeElement.dataset.go, "no");
+  });
+
+  test("play anyway resolves true, cancel resolves false", async () => {
+    let done = mod.askOffline("server down");
+    document.querySelector('[data-go="yes"]').click();
+    assert.equal(await done, true);
+
+    done = mod.askOffline("server down");
+    document.querySelector('[data-go="no"]').click();
+    assert.equal(await done, false);
+  });
+
+  test("Escape means cancel — never an accidental unsynced launch", async () => {
+    const done = mod.askOffline("server down");
+    document.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+    );
+    assert.equal(await done, false);
+    assert.equal(document.querySelector("#conflict-overlay"), null);
+  });
+});
