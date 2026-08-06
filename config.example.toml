@@ -91,7 +91,7 @@ mame = "mame2003_plus"
 
 # ---- RetroAchievements ----
 #
-# RetroAchievements. RetroArch calls the feature "cheevos" and names every one
+# RetroArch calls the feature "cheevos" and names every one
 # of its config keys that way; [achievements] is the readable spelling, and
 # [cheevos] is still accepted so an older config keeps working.
 #
@@ -122,6 +122,39 @@ hardcore = false
 # Unofficial / in-development achievement sets.
 # test_unofficial = false
 
-# Only if you are not logging in through RetroArch and want to supply the token
-# directly. Normally leave this unset.
-# token = ""
+[icons]
+# Which per-system artwork the platform grid shows:
+#   systemart         hardware renders (default)
+#   systemart_legacy  the older hardware set
+#   consolegame       console with a game
+#   controller        controllers only
+#   logo              ES-DE wordmarks — a picture of the system's NAME, not the
+#                     system itself
+# Changing it in the Themes pane writes here, so it survives a restart.
+style = "systemart"
+
+# ---------------------------------------------------------------------------
+# ScreenScraper (optional)
+#
+# NOT READ BY THE APP YET — kept here so the credentials and the explanation
+# live with the rest of the configuration rather than in someone's notes.
+#
+# Four fields are needed, not two. `ssid`/`sspassword` are your ordinary
+# screenscraper.fr login; `devid`/`devpassword` are separate credentials the
+# ScreenScraper team issues to a registered application after you present it on
+# their forum. A normal user account cannot call the API on its own — every
+# request is rejected without a devid.
+#
+# Without devid/devpassword, scrape through ES-DE instead: it ships with its
+# own approved devid and only asks for the ssid/sspassword pair.
+#
+# ScreenScraper throttles by account tier. Exceeding the allowance returns HTTP
+# 429 rather than data, so a bulk run has to rate-limit itself.
+# ---------------------------------------------------------------------------
+[scraper]
+ssid = ""
+sspassword = ""
+devid = ""
+devpassword = ""
+softname = "romm-desktop"
+max_threads = 1
