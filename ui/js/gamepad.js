@@ -12,19 +12,11 @@
 
 import { el, state } from "./state.js";
 import { runAction } from "./keys.js";
+import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
 
-const BUTTONS = {
-  0: "activate",   // bottom face — A / Cross
-  1: "back",       // right face  — B / Circle
-  4: "pageUp",     // L1 / LB
-  5: "pageDown",   // R1 / RB
-  9: "help",       // Start / Options
-  12: "up",
-  13: "down",
-  14: "left",
-  15: "right",
-};
+// Rebindable in Settings; padMap() layers the user's choices over the
+// position-based defaults in bindings.js.
 
 // Held directions repeat; one-shot buttons do not.
 const REPEATABLE = new Set(["up", "down", "left", "right", "pageUp", "pageDown"]);

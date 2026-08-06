@@ -173,6 +173,7 @@ export const HANDLERS = {
   back2: goBack,
   search: () => el.search.focus(),
   help: toggleHelp,
+  settings: toggleSettings,
   download: () => {
     if (state.selected) import("./actions.js").then((m) => m.download(state.selected, false));
   },

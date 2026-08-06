@@ -1,15 +1,23 @@
 // Settings pane: emulator location and keyboard bindings.
 
-import { ACTIONS, keyFor, setKey, resetAll, keyLabel } from "./bindings.js";
+import {
+  ACTIONS, keyFor, setKey, resetAll, keyLabel,
+  padFor, setPad, resetPad, padLabel,
+} from "./bindings.js";
 import { toast } from "./util.js";
 import { invoke } from "./state.js";
+import { open as openDialog } from "../../node_modules/@tauri-apps/plugin-dialog/dist-js/index.js";
 
 /// Set while waiting for a keypress to assign, so the global handler can get
 /// out of the way.
 let capturing = null;
 
+/// Set while waiting for a controller button. The Gamepad API has no
+/// button-down event, so binding one means polling until something is pressed.
+let padCapture = null;
+
 export function isCapturing() {
-  return capturing !== null;
+  return capturing !== null || padCapture !== null;
 }
 
 export function settingsOpen() {
@@ -17,6 +25,7 @@ export function settingsOpen() {
 }
 
 export function closeSettings() {
+  stopPadCapture();
   document.getElementById("settings")?.remove();
   capturing = null;
 }
@@ -39,9 +48,22 @@ export function toggleSettings() {
       <div class="set-path">
         <input class="set-ra" type="text" spellcheck="false"
                placeholder="path to the RetroArch folder" />
+        <button class="set-ra-pick" title="Choose a folder">Browse…</button>
         <button class="set-ra-save">Save</button>
       </div>
       <p class="hint set-ra-status"></p>
+
+      <h4>Controller</h4>
+      <p class="hint">Click a button to rebind it. Press the new button on the
+        pad, or Esc to leave it unset.</p>
+      <div class="set-rows">${ACTIONS.map(
+        (a) => `
+        <div class="set-row pad-row" data-id="${a.id}">
+          <span class="set-label">${a.label}</span>
+          <button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabel(padFor(a.id))}</button>
+        </div>`
+      ).join("")}</div>
+      <footer><button class="set-pad-reset">Reset controller</button></footer>
 
       <h4>Keyboard</h4>
       <p class="hint">Click a key to rebind it. Press Esc while rebinding to leave it unset.</p>
@@ -76,6 +98,15 @@ export function toggleSettings() {
         : "Not found. Set a path, or install RetroArch.";
     })
     .catch(() => {});
+  box.querySelector(".set-ra-pick").addEventListener("click", async () => {
+    try {
+      const dir = await openDialog({ directory: true, multiple: false,
+                                     title: "Select the RetroArch folder" });
+      if (dir) raInput.value = dir;
+    } catch (e) {
+      raStatus.textContent = String(e);
+    }
+  });
   box.querySelector(".set-ra-save").addEventListener("click", async () => {
     raStatus.textContent = "Checking…";
     try {
@@ -92,7 +123,10 @@ export function toggleSettings() {
     toast("Keyboard bindings reset");
   });
 
-  box.querySelectorAll(".set-row").forEach((row) => {
+  // Keyboard rows only — the controller rows below carry .pad-row and hold no
+  // .set-key, so an unscoped selector would find a null button and throw,
+  // taking the whole panel with it.
+  box.querySelectorAll(".set-row:not(.pad-row)").forEach((row) => {
     const btn = row.querySelector(".set-key");
     btn.addEventListener("click", () => {
       if (capturing) capturing.btn.textContent = keyLabel(keyFor(capturing.id));
@@ -102,11 +136,83 @@ export function toggleSettings() {
     });
   });
 
+  box.querySelector(".set-pad-reset").addEventListener("click", () => {
+    resetPad();
+    closeSettings();
+    toggleSettings();
+    toast("Controller bindings reset");
+  });
+
+  box.querySelectorAll(".pad-row").forEach((row) => {
+    const btn = row.querySelector(".set-pad");
+    btn.addEventListener("click", () => {
+      stopPadCapture();
+      btn.textContent = "press a button…";
+      btn.classList.add("capturing");
+      startPadCapture(row.dataset.id, btn);
+    });
+  });
+
   document.body.appendChild(box);
+}
+
+function stopPadCapture() {
+  if (!padCapture) return;
+  cancelAnimationFrame(padCapture.raf);
+  padCapture.btn.classList.remove("capturing");
+  padCapture.btn.textContent = padLabel(padFor(padCapture.id));
+  padCapture = null;
+}
+
+function startPadCapture(id, btn) {
+  // Ignore whatever is already held from the click that got us here, so the
+  // action is not instantly bound to the button still under the user's thumb.
+  const settled = new Set();
+  const step = () => {
+    const pads = navigator.getGamepads?.() ?? [];
+    for (const pad of pads) {
+      if (!pad) continue;
+      for (let i = 0; i < pad.buttons.length; i++) {
+        const down = pad.buttons[i]?.pressed;
+        if (!down) {
+          settled.add(i);
+          continue;
+        }
+        if (!settled.has(i)) continue; // held since before we started
+        setPad(id, i);
+        padCapture = null;
+        btn.classList.remove("capturing");
+        redrawPadRows();
+        return;
+      }
+    }
+    if (padCapture) padCapture.raf = requestAnimationFrame(step);
+  };
+  padCapture = { id, btn, raf: requestAnimationFrame(step) };
+}
+
+function redrawPadRows() {
+  document.querySelectorAll("#settings .pad-row").forEach((row) => {
+    const b = row.querySelector(".set-pad");
+    if (b.classList.contains("capturing")) return;
+    const i = padFor(row.dataset.id);
+    b.textContent = padLabel(i);
+    b.classList.toggle("unset", i === null);
+  });
 }
 
 /// Consume a keypress as a new binding. Returns true when handled.
 export function captureKey(ev) {
+  if (padCapture) {
+    if (ev.key !== "Escape") return true;   // swallow keys while binding a pad
+    ev.preventDefault();
+    setPad(padCapture.id, null);
+    const { btn } = padCapture;
+    padCapture = null;
+    btn.classList.remove("capturing");
+    redrawPadRows();
+    return true;
+  }
   if (!capturing) return false;
   ev.preventDefault();
 
@@ -123,7 +229,7 @@ export function captureKey(ev) {
   capturing = null;
 
   // Another row may have lost its key to this one; redraw them all.
-  document.querySelectorAll("#settings .set-row").forEach((row) => {
+  document.querySelectorAll("#settings .set-row:not(.pad-row)").forEach((row) => {
     const b = row.querySelector(".set-key");
     if (b.classList.contains("capturing")) return;
     const k = keyFor(row.dataset.id);

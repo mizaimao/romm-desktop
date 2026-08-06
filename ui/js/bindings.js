@@ -25,7 +25,88 @@ export const ACTIONS = [
   { id: "layout",  label: "Toggle grid / list",   fallback: null },
   { id: "sidebar", label: "Toggle info pane",     fallback: null },
   { id: "themes",  label: "Open themes",          fallback: null },
+  { id: "settings",label: "Open settings",        fallback: null },
 ];
+
+/// Controller buttons, by W3C "standard mapping" index.
+///
+/// Separate from the keyboard map because the two are rebound independently —
+/// and because an index means nothing without a name: 0 is the bottom face
+/// button, which is A on Xbox, Cross on PlayStation and B on a Nintendo pad.
+export const PAD_BUTTONS = [
+  { index: 0,  name: "A / Cross (bottom face)" },
+  { index: 1,  name: "B / Circle (right face)" },
+  { index: 2,  name: "X / Square (left face)" },
+  { index: 3,  name: "Y / Triangle (top face)" },
+  { index: 4,  name: "L1 / LB" },
+  { index: 5,  name: "R1 / RB" },
+  { index: 6,  name: "L2 / LT" },
+  { index: 7,  name: "R2 / RT" },
+  { index: 8,  name: "Select / Share" },
+  { index: 9,  name: "Start / Options" },
+  { index: 10, name: "L3 (left stick)" },
+  { index: 11, name: "R3 (right stick)" },
+  { index: 12, name: "D-pad up" },
+  { index: 13, name: "D-pad down" },
+  { index: 14, name: "D-pad left" },
+  { index: 15, name: "D-pad right" },
+];
+
+const PAD_KEY = "romm.pad";
+
+/// Defaults, chosen by position rather than label so they read correctly on
+/// every controller family.
+const PAD_FALLBACK = {
+  0: "activate",
+  1: "back",
+  4: "pageUp",
+  5: "pageDown",
+  8: "settings",
+  9: "help",
+  12: "up",
+  13: "down",
+  14: "left",
+  15: "right",
+};
+
+function loadPad() {
+  try {
+    return JSON.parse(localStorage.getItem(PAD_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+/// index -> action, user overrides layered over the defaults.
+export function padMap() {
+  return { ...PAD_FALLBACK, ...loadPad() };
+}
+
+/// Which button currently triggers `action`, or null.
+export function padFor(action) {
+  const entry = Object.entries(padMap()).find(([, a]) => a === action);
+  return entry ? Number(entry[0]) : null;
+}
+
+/// Bind `action` to `index`, clearing whatever else held that button. A null
+/// index unbinds.
+export function setPad(action, index) {
+  const custom = loadPad();
+  for (const [i, a] of Object.entries(padMap())) {
+    if (a === action) custom[i] = null;
+  }
+  if (index !== null) custom[index] = action;
+  localStorage.setItem(PAD_KEY, JSON.stringify(custom));
+}
+
+export function resetPad() {
+  localStorage.removeItem(PAD_KEY);
+}
+
+export function padLabel(index) {
+  if (index === null || index === undefined) return "unset";
+  return PAD_BUTTONS.find((b) => b.index === index)?.name ?? `button ${index}`;
+}
 
 function load() {
   try {

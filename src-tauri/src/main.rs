@@ -1125,6 +1125,8 @@ fn main() {
     let media_dir = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
 
     tauri::Builder::default()
+        // Native folder picker for the RetroArch location setting.
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             cache: Mutex::new(store),
             map,

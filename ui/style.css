@@ -847,3 +847,10 @@ footer#toast {
   min-height: 1.2em;
   word-break: break-all;
 }
+
+/* Controller binding buttons. Wider than the key ones: a button name is
+   "A / Cross (bottom face)", not a single glyph. */
+.set-panel .set-pad {
+  min-width: 13em;
+  text-align: right;
+}
