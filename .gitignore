@@ -66,3 +66,6 @@ src-tauri/icons/icon.iconset/
 /*.zip
 /*.7z
 /*.chd
+
+# local safety copies of gamelists/settings before edits
+backups/

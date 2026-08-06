@@ -116,6 +116,11 @@ pub struct EsdeCfg {
 }
 
 impl EsdeCfg {
+    /// Artwork root of the ES-DE library, if one is configured.
+    pub fn media_dir(&self) -> Option<PathBuf> {
+        self.layout().map(|l| l.media).filter(|p| p.is_dir())
+    }
+
     pub fn layout(&self) -> Option<crate::esde::Layout> {
         let root = crate::util::expand_tilde(self.root.as_deref()?);
         let roms = self.roms.as_deref().map(crate::util::expand_tilde);

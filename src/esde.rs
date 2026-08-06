@@ -25,6 +25,36 @@ use anyhow::{Context, Result, bail};
 
 use crate::coremap::CoreMap;
 
+/// ES-DE system directories the core map does not cover.
+///
+/// The map is built from ES-DE's Android system list, and a real install does
+/// not match it exactly: `genesis` is the same console the map calls
+/// `megadrive` — 942 games on this card, and the single biggest thing a
+/// missing alias would drop. The rest are systems RomM has platforms for but
+/// the Android export never listed.
+const SYSTEM_ALIASES: &[(&str, &str)] = &[
+    ("genesis", "megadrive"),
+    ("megadrive", "megadrive"),
+    ("gameandwatch", "g-and-w"),
+    ("n3ds", "new-nintendo-3ds"),
+    ("pico-8", "pico8"),
+    ("easyrpg", "easyrpg"),
+    ("ps2", "ps2"),
+    ("ps3", "ps3"),
+    ("switch", "switch"),
+    ("wii", "wii"),
+    ("wiiu", "wiiu"),
+    ("saturn", "saturn"),
+    ("xbox360", "xbox360"),
+    ("naomi", "naomi"),
+];
+
+/// Directories inside the ROMs folder that are not systems.
+///
+/// A BIOS folder scanned as a system would invent 176 phantom "games" and,
+/// worse, hand them to a core that cannot run them.
+const NOT_SYSTEMS: &[&str] = &["0_BIOS", "bios", "ports", "SourcePorts", "Ports"];
+
 /// One game found on disk.
 #[derive(Debug, Clone)]
 pub struct Game {
@@ -144,7 +174,7 @@ fn is_game_file(p: &Path) -> bool {
 ///
 /// Systems the core map does not know are skipped rather than guessed at — a
 /// wrong slug would put games under a platform whose core cannot run them.
-pub fn scan(layout: &Layout, map: &CoreMap) -> Result<Vec<Game>> {
+pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> {
     if !layout.roms.is_dir() {
         bail!("no ROMs directory at {}", layout.roms.display());
     }
@@ -156,8 +186,13 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<Vec<Game>> {
             sys_to_slug.insert(system.as_str(), slug.as_str());
         }
     }
+    // Aliases win: they describe the directory names a real install uses.
+    for (system, slug) in SYSTEM_ALIASES {
+        sys_to_slug.insert(system, slug);
+    }
 
     let mut out = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     for entry in std::fs::read_dir(&layout.roms)
         .with_context(|| format!("reading {}", layout.roms.display()))?
         .flatten()
@@ -169,7 +204,11 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<Vec<Game>> {
         let Some(system) = dir.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
+        if NOT_SYSTEMS.contains(&system) || system.starts_with('.') {
+            continue;
+        }
         let Some(slug) = sys_to_slug.get(system) else {
+            skipped.push(system.to_owned());
             continue;
         };
 
@@ -212,7 +251,8 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<Vec<Game>> {
         }
     }
     out.sort_by(|a, b| (&a.platform_slug, &a.name).cmp(&(&b.platform_slug, &b.name)));
-    Ok(out)
+    skipped.sort();
+    Ok((out, skipped))
 }
 
 fn dir_size(p: &Path) -> i64 {

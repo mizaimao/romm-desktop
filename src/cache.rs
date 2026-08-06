@@ -110,6 +110,12 @@ pub struct RomRow {
     pub manual_path: Option<String>,
     pub youtube_id: Option<String>,
     pub multi_file: bool,
+    /// ES-DE system directory this came from, when the library was scanned
+    /// from a local ES-DE tree. Artwork there is keyed by ES-DE system name,
+    /// not by RomM slug, so the two cannot be used interchangeably.
+    pub esde_system: Option<String>,
+    /// Absolute path for a locally scanned game.
+    pub local_path: Option<String>,
 }
 
 /// Columns every `RomRow` query selects, in order.
@@ -118,7 +124,7 @@ const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name
                            cover_path, screenshot_path, screenshots_json, \
                            cover_small_path, summary, meta_json, alt_names_json, \
                            regions_json, manual_path, youtube_id, \
-                           COALESCE(multi_file, 0)";
+                           COALESCE(multi_file, 0), esde_system, local_path";
 
 fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
     Ok(RomRow {
@@ -149,6 +155,8 @@ fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
             }
             _ => false,
         },
+        esde_system: r.get(18)?,
+        local_path: r.get(19)?,
     })
 }
 

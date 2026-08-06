@@ -30,6 +30,10 @@ struct AppState {
     retroarch: Option<RetroArch>,
     roms_dir: PathBuf,
     media_dir: PathBuf,
+    /// Artwork of a locally scanned ES-DE library. Keyed by ES-DE *system*
+    /// name rather than RomM slug, so it needs its own lookup rather than
+    /// being folded into `media_dir`.
+    esde_media: Option<PathBuf>,
     theme_root: Option<String>,
     themes_dir: PathBuf,
     /// Behind mutexes so a choice made in the UI takes effect on the next
@@ -147,7 +151,7 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
 fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomView> {
     rows.into_iter()
         .map(|r| RomView {
-            downloaded: local_path(state, &r.platform_slug, &r.fs_name).is_some(),
+            downloaded: row_path(state, &r).is_some(),
             id: r.id,
             name: r.name,
             fs_name: r.fs_name,
@@ -280,26 +284,38 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     // Local ES-DE media covers only ~2% of this library, so fall back to the
     // server's artwork and cache it into the same tree.
     let client = state.client.clone();
-    let media_root = state.media_dir.clone();
+    // A locally scanned ES-DE library keeps its artwork on the same disk as
+    // the games, keyed by ES-DE system name. Nothing needs fetching there, so
+    // the server client is dropped for those rows — otherwise every miss would
+    // become a pointless request against a server this library did not come
+    // from.
+    let (scope_dir, scope_key) = media_scope(&state, &row);
+    let media_root = scope_dir.to_path_buf();
+    let media_key = scope_key.to_owned();
+    let client = if state.esde_media.is_some() && row.esde_system.is_some() {
+        None
+    } else {
+        client
+    };
     let as_url = |p: Option<std::path::PathBuf>| p.map(|p| p.display().to_string());
 
     let cover = media::ensure(
-        client.as_deref(), &media_root, &row.platform_slug, &stem,
+        client.as_deref(), &media_root, &media_key, &stem,
         media::COVERS, row.cover_path.as_deref(),
     ).await;
     let screenshots = media::ensure_set(
-        client.as_deref(), &media_root, &row.platform_slug, &stem,
+        client.as_deref(), &media_root, &media_key, &stem,
         &row.screenshots(),
     ).await;
     // No server-side video exists on this deployment; local only.
     let video = media::ensure_esde(
-        client.as_deref(), &media_root, &row.platform_slug, &stem, media::VIDEOS,
+        client.as_deref(), &media_root, &media_key, &stem, media::VIDEOS,
     )
     .await;
 
     // Manuals are PDFs, which the webview renders natively.
     let manual = media::ensure(
-        client.as_deref(), &media_root, &row.platform_slug, &stem,
+        client.as_deref(), &media_root, &media_key, &stem,
         media::MANUALS, row.manual_path.as_deref(),
     ).await;
 
@@ -310,7 +326,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
             continue; // handled above, from RomM's own copies
         }
         if let Some(p) = media::ensure_esde(
-            client.as_deref(), &media_root, &row.platform_slug, &stem, kind,
+            client.as_deref(), &media_root, &media_key, &stem, kind,
         )
         .await
         {
@@ -947,6 +963,31 @@ fn local_path(state: &State<'_, AppState>, platform: &str, fs_name: &str) -> Opt
     p.is_file().then_some(p)
 }
 
+/// Where a row's file actually is.
+///
+/// A locally scanned ES-DE game records its own absolute path — it lives on
+/// whatever disk the library is on, which `<roms_dir>/<slug>/<file>` cannot
+/// express.
+fn row_path(state: &State<'_, AppState>, row: &cache::RomRow) -> Option<PathBuf> {
+    if let Some(p) = row.local_path.as_deref().map(PathBuf::from)
+        && (p.is_file() || p.is_dir())
+    {
+        return Some(p);
+    }
+    local_path(state, &row.platform_slug, &row.fs_name)
+}
+
+/// Artwork directory and key to look under.
+///
+/// ES-DE keys media by its own system name (`genesis`, `neogeo`), while the
+/// downloaded RomM tree keys by slug — so the pair must travel together.
+fn media_scope<'a>(state: &'a State<'_, AppState>, row: &'a cache::RomRow) -> (&'a Path, &'a str) {
+    match (state.esde_media.as_deref(), row.esde_system.as_deref()) {
+        (Some(dir), Some(system)) => (dir, system),
+        _ => (state.media_dir.as_path(), row.platform_slug.as_str()),
+    }
+}
+
 fn resolve_core(state: &State<'_, AppState>, platform: &str) -> Option<String> {
     resolve_core_for(state, platform, None)
 }
@@ -1058,6 +1099,7 @@ fn main() {
             retroarch,
             roms_dir,
             media_dir,
+            esde_media: cfg.esde.media_dir(),
             theme_root: cfg.theme.root.clone(),
             themes_dir: cfg.themes_dir(),
             core_overrides: Mutex::new(cfg.cores.overrides.clone()),

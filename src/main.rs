@@ -833,7 +833,7 @@ fn cmd_scan_esde(root: Option<&str>, roms: Option<&str>) -> Result<()> {
 
     let map = CoreMap::load(Path::new(CORE_MAP))?;
     let started = std::time::Instant::now();
-    let games = romm_desktop::esde::scan(&layout, &map)?;
+    let (games, skipped) = romm_desktop::esde::scan(&layout, &map)?;
     if games.is_empty() {
         bail!("found no games under {}", layout.roms.display());
     }
@@ -854,6 +854,9 @@ fn cmd_scan_esde(root: Option<&str>, roms: Option<&str>) -> Result<()> {
     println!("{:<16}{:>7}", "platform", "games");
     for (slug, count) in &by_platform {
         println!("{slug:<16}{count:>7}");
+    }
+    if !skipped.is_empty() {
+        println!("\nskipped (no platform mapping): {}", skipped.join(", "));
     }
     Ok(())
 }
