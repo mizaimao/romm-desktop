@@ -123,6 +123,63 @@ struct RomDetail {
     youtube_id: Option<String>,
 }
 
+/// Pull the library from the server into the local cache.
+///
+/// The GUI had no way to do this. The Windows release ships only the GUI, so a
+/// fresh install there had an empty cache, nothing on screen, and no command to
+/// fill it — which reads as "it cannot connect to the server" even though the
+/// server is perfectly reachable. On macOS the cache was always populated by
+/// the CLI beforehand, which is why it never showed up there.
+///
+/// Opens its own cache connection rather than using the shared one: `sync`
+/// needs `&mut Cache` and awaits, and a `MutexGuard` cannot be held across an
+/// await. Two SQLite connections to one file is fine, and the shared one sees
+/// the committed rows immediately afterwards.
+#[tauri::command]
+async fn sync_library(app: tauri::AppHandle, state: State<'_, AppState>, full: bool) -> CmdResult<String> {
+    let client = state
+        .client
+        .clone()
+        .ok_or("no server configured — set [server] in config.toml")?;
+    let mut store = cache::Cache::open(Path::new(CACHE_DB)).map_err(err)?;
+
+    let _ = app.emit("sync-progress", "checking the server…");
+    // Refresh the settings that govern hashing before anything downloads.
+    if let Ok(cfg) = client.config().await {
+        store.save_server_config(&cfg).ok();
+    }
+
+    let _ = app.emit("sync-progress", "fetching the library…");
+    let (platforms, upserted, incremental) = store.sync(&client, full).await.map_err(err)?;
+
+    // Removals never appear in an incremental pull.
+    let mut pruned = 0;
+    if let Ok(ids) = client.rom_identifiers().await {
+        pruned = store.prune_missing(&ids).unwrap_or(0);
+    }
+
+    let _ = app.emit("sync-progress", "collections…");
+    let collections = match client.all_collections().await {
+        Ok(items) => store.replace_collections(&items).unwrap_or(0),
+        Err(_) => 0,
+    };
+
+    // A sync rewrites names from the server, so the real arcade titles go back
+    // afterwards rather than before.
+    let names = romm_desktop::arcade::names(Path::new("data/arcade-names.json"));
+    let renamed = store.apply_arcade_names(&names).unwrap_or(0);
+
+    let total = store.rom_count().unwrap_or(0);
+    let _ = app.emit("sync-progress", "done");
+    Ok(format!(
+        "{} sync: {total} games across {platforms} platforms ({upserted} updated{}{}{})",
+        if incremental { "Incremental" } else { "Full" },
+        if pruned > 0 { format!(", {pruned} removed") } else { String::new() },
+        if collections > 0 { format!(", {collections} collections") } else { String::new() },
+        if renamed > 0 { format!(", {renamed} arcade titles") } else { String::new() },
+    ))
+}
+
 /// Pull the useful bits out of RomM's merged `metadatum` blob.
 fn meta_strings(meta: &Option<serde_json::Value>, key: &str) -> Vec<String> {
     meta.as_ref()
@@ -1542,6 +1599,7 @@ fn main() {
             set_retroarch_root,
             systems,
             sync_saves,
+            sync_library,
             resolve_save_conflict,
             motion_options,
             set_motion_shader,

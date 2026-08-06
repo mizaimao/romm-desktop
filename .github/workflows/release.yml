@@ -76,6 +76,10 @@ jobs:
       - name: Build desktop app
         run: npx tauri build --target ${{ matrix.target }}
 
+      # The CLI is a separate binary in the same workspace.
+      - name: Build CLI
+        run: cargo build --release --bin romm-desktop --target ${{ matrix.target }}
+
       - name: Collect artifacts
         shell: bash
         run: |
@@ -87,6 +91,12 @@ jobs:
           GUI=target/${{ matrix.target }}/release/romm-gui
           [ -f "$GUI.exe" ] && cp "$GUI.exe" "dist/romm-desktop-${{ matrix.target }}.exe" || true
           [ -f "$GUI" ] && cp "$GUI" "dist/romm-desktop-${{ matrix.target }}" || true
+          # The CLI as well. It was never shipped, so a Windows user had no
+          # `sync`, `doctor` or `sync-saves` at all -- and until the GUI grew a
+          # library sync there was no way to fill the cache on that platform.
+          CLI=target/${{ matrix.target }}/release/romm-desktop
+          [ -f "$CLI.exe" ] && cp "$CLI.exe" "dist/romm-cli-${{ matrix.target }}.exe" || true
+          [ -f "$CLI" ] && cp "$CLI" "dist/romm-cli-${{ matrix.target }}" || true
           B=target/${{ matrix.target }}/release/bundle
           find "$B" -maxdepth 3 \
             \( -name '*.deb' -o -name '*.AppImage' \
@@ -128,7 +138,8 @@ jobs:
             **Windows** — `romm-desktop-x86_64-pc-windows-msvc.exe` is the
             app, portable: the UI and the core map are both compiled into it,
             so just run it. `*-setup.exe` is the installer if you would rather
-            have a Start menu entry.
+            have a Start menu entry. `romm-cli-*.exe` is the command line —
+            `doctor`, `sync`, `sync-saves` and the rest.
 
             **Linux** — `romm-desktop-x86_64-unknown-linux-gnu` is the app;
             `*.AppImage` and `*.deb` are the packaged forms.

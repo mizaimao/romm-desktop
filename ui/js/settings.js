@@ -5,7 +5,7 @@ import {
   padFor, setPad, resetPad, padLabel,
 } from "./bindings.js";
 import { toast } from "./util.js";
-import { invoke } from "./state.js";
+import { invoke, listen } from "./state.js";
 
 /// Set while waiting for a keypress to assign, so the global handler can get
 /// out of the way.
@@ -62,6 +62,16 @@ export function toggleSettings() {
       </div>
       <p class="hint set-savesync-status"></p>
 
+      <h4>Library</h4>
+      <p class="hint">Fetch the list of games from the server. Nothing is
+        downloaded — this is the index the grid is built from, so a fresh
+        install shows nothing until it has run once.</p>
+      <div class="set-path">
+        <button class="set-libsync">Sync library</button>
+        <button class="set-libsync-full">Full resync</button>
+      </div>
+      <p class="hint set-libsync-status"></p>
+
       <h4>Controller</h4>
       <p class="hint">Click a button to rebind it. Press the new button on the
         pad, or Esc to leave it unset.</p>
@@ -111,6 +121,42 @@ export function toggleSettings() {
       syncBtn.disabled = false;
     }
   });
+
+  // Library. This is the one the Windows build had no way to run: the release
+  // ships only the GUI, so a fresh install had an empty cache, an empty grid,
+  // and nothing anywhere to fill it.
+  const libStatus = box.querySelector(".set-libsync-status");
+  const runLibSync = async (btn, full) => {
+    const buttons = [
+      box.querySelector(".set-libsync"),
+      box.querySelector(".set-libsync-full"),
+    ];
+    buttons.forEach((b) => b && (b.disabled = true));
+    libStatus.textContent = full ? "Re-fetching everything…" : "Syncing…";
+    // A full pull of ~9,000 games takes several seconds, so the backend says
+    // which stage it is on rather than leaving the panel looking hung.
+    const stop = await listen("sync-progress", ({ payload }) => {
+      libStatus.textContent = String(payload);
+    });
+    try {
+      libStatus.textContent = await invoke("sync_library", { full });
+      // The grid is built from the cache, so it has to be rebuilt to show what
+      // just arrived.
+      const { showPlatforms } = await import("./library.js");
+      await showPlatforms();
+    } catch (e) {
+      libStatus.textContent = `Sync failed — ${e}`;
+    } finally {
+      stop?.();
+      buttons.forEach((b) => b && (b.disabled = false));
+    }
+  };
+  box.querySelector(".set-libsync")?.addEventListener("click", (e) =>
+    runLibSync(e.currentTarget, false)
+  );
+  box.querySelector(".set-libsync-full")?.addEventListener("click", (e) =>
+    runLibSync(e.currentTarget, true)
+  );
 
   // RetroArch location. The backend verifies the path before writing it to
   // config.toml, so an invalid one is reported here rather than failing later
