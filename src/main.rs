@@ -1466,6 +1466,10 @@ enum Command {
         /// Report what would happen without writing or uploading anything
         #[arg(long)]
         dry_run: bool,
+        /// Answer every conflict the same way instead of leaving them alone.
+        /// The copy not kept is backed up to library/saves-backup/ first.
+        #[arg(long, value_name = "local|server")]
+        keep: Option<String>,
     },
 }
 
@@ -1474,7 +1478,7 @@ enum Command {
 /// `--dry-run` stops after the scan and prints what would be offered, which is
 /// the safe way to see whether the ROM matching is right before anything
 /// overwrites a save file.
-async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
+async fn cmd_sync_saves(dry_run: bool, keep: Option<&str>) -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
     let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
@@ -1530,6 +1534,52 @@ async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
         println!("{note}");
     }
     println!("{}", summary.headline());
+
+    if summary.conflicts.is_empty() {
+        return Ok(());
+    }
+
+    // Without --keep there is nothing more this command can do: a conflict is a
+    // question, and the CLI has no way to ask it mid-run. Print it and say how
+    // to answer, rather than repeating the same stalemate on every run.
+    let Some(keep) = keep else {
+        println!("\n{} conflict(s) — nothing was written:", summary.conflicts.len());
+        for c in &summary.conflicts {
+            println!(
+                "  {:<44} this machine {}   server {}",
+                c.file_name,
+                c.local_updated.as_deref().unwrap_or("?"),
+                c.server_updated.as_deref().unwrap_or("?")
+            );
+        }
+        println!(
+            "\nAnswer them with `sync-saves --keep local` or `--keep server`.\n\
+             The copy you do not keep is backed up to library/saves-backup/ first."
+        );
+        return Ok(());
+    };
+
+    let choice = match keep {
+        "local" | "mine" => romm_desktop::savesync::Keep::Local,
+        "server" | "remote" => romm_desktop::savesync::Keep::Server,
+        other => bail!("--keep takes `local` or `server`, not {other:?}"),
+    };
+    println!("\nresolving {} conflict(s), keeping {keep}:", summary.conflicts.len());
+    for c in &summary.conflicts {
+        match romm_desktop::savesync::resolve(
+            &client,
+            c,
+            choice,
+            &ra.root,
+            Path::new(&cfg.library.local_root),
+            Path::new("."),
+        )
+        .await
+        {
+            Ok(msg) => println!("  {msg}"),
+            Err(e) => println!("  {}: FAILED — {e}", c.file_name),
+        }
+    }
     Ok(())
 }
 
@@ -1591,7 +1641,7 @@ async fn main() -> Result<()> {
         } => cmd_launch(&rom, go, core.as_deref(), fullscreen),
         Command::Art { term } => cmd_art(&term).await,
         Command::Hashcheck { file } => cmd_hashcheck(&file),
-        Command::SyncSaves { dry_run } => cmd_sync_saves(dry_run).await,
+        Command::SyncSaves { dry_run, keep } => cmd_sync_saves(dry_run, keep.as_deref()).await,
     }
 }
 

@@ -418,6 +418,16 @@ pub async fn resolve(
     library_root: &Path,
     data_dir: &Path,
 ) -> Result<String> {
+    // A save state goes through the states endpoints. Resolving one here would
+    // post a freeze-frame to /api/saves, which is exactly the bug statesync
+    // exists to fix.
+    if saves::is_state_name(&conflict.file_name) {
+        return crate::statesync::resolve_one(
+            client, conflict, keep, ra_root, library_root, data_dir,
+        )
+        .await;
+    }
+
     let identity = DeviceIdentity::ensure(client, data_dir).await?;
     let slot = conflict.slot.as_deref().unwrap_or("unslotted");
 

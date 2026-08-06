@@ -206,7 +206,20 @@ pub async fn run(
                     Ok(saved) => {
                         summary.uploaded += 1;
                         summary.notes.push(format!("uploaded state {file_name}"));
-                        ledger.record(*rom_id, &file_name, &c.content_hash, Some(&fingerprint(&saved)));
+                        // The fingerprint has to come from the same endpoint the
+                        // next run will compare against. POST and GET report
+                        // updated_at differently, so recording the upload
+                        // response made the following sync believe the server
+                        // had moved and download what it had just sent.
+                        let print = match client.states(*rom_id).await {
+                            Ok(list) => list
+                                .iter()
+                                .find(|s| s.file_name == file_name)
+                                .map(fingerprint)
+                                .unwrap_or_else(|| fingerprint(&saved)),
+                            Err(_) => fingerprint(&saved),
+                        };
+                        ledger.record(*rom_id, &file_name, &c.content_hash, Some(&print));
                     }
                     Err(e) => summary.notes.push(format!("could not upload {file_name}: {e}")),
                 }
@@ -278,6 +291,89 @@ fn mtime_secs(path: &Path) -> i64 {
         .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Carry out a decision about one save-state conflict.
+///
+/// States need their own path: the saves endpoints would file a freeze-frame as
+/// an in-game save, which is the bug this module exists to fix — and doing it
+/// while *resolving* a state conflict is an easy way to reintroduce it.
+///
+/// The ledger is updated either way, or the same conflict is reported again on
+/// the next run and the answer never sticks.
+pub async fn resolve_one(
+    client: &Client,
+    conflict: &SaveConflict,
+    keep: crate::savesync::Keep,
+    ra_root: &Path,
+    library_root: &Path,
+    data_dir: &Path,
+) -> Result<String> {
+    let mut ledger = Ledger::load(data_dir);
+
+    let message = match keep {
+        crate::savesync::Keep::Local => {
+            let path = conflict
+                .local_path
+                .clone()
+                .context("no local copy to keep — nothing to upload")?;
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            client
+                .upload_state(
+                    conflict.rom_id,
+                    &conflict.file_name,
+                    bytes,
+                    conflict.emulator.as_deref(),
+                )
+                .await?;
+            let hash = crate::savehash::compute(&path).unwrap_or_default();
+            let print = server_print(client, conflict.rom_id, &conflict.file_name).await;
+            ledger.record(conflict.rom_id, &conflict.file_name, &hash, print.as_deref());
+            format!("{}: kept this machine's copy", conflict.file_name)
+        }
+        crate::savesync::Keep::Server => {
+            let state_id = conflict
+                .save_id
+                .context("the server did not name a state to download")?;
+            let bytes = client.state_content(state_id).await?;
+            let dest = crate::savesync::download_path(
+                ra_root,
+                &conflict.file_name,
+                conflict.emulator.as_deref(),
+            );
+            if let Some(dir) = dest.parent() {
+                std::fs::create_dir_all(dir).ok();
+            }
+            let slot = conflict.slot.as_deref().unwrap_or("unslotted");
+            crate::savebackup::keep(library_root, conflict.rom_id, slot, &dest).ok();
+            std::fs::write(&dest, &bytes)
+                .with_context(|| format!("writing {}", dest.display()))?;
+
+            let hash = crate::savehash::compute(&dest).unwrap_or_default();
+            let print = server_print(client, conflict.rom_id, &conflict.file_name).await;
+            ledger.record(conflict.rom_id, &conflict.file_name, &hash, print.as_deref());
+            format!("{}: kept the server's copy", dest.display())
+        }
+    };
+
+    ledger.save(data_dir)?;
+    Ok(message)
+}
+
+/// The server's fingerprint for one state, read from the listing.
+///
+/// Always the listing, never an upload response: the two report `updated_at`
+/// differently, and recording the upload's version made the next sync believe
+/// the server had moved and download what it had just sent.
+async fn server_print(client: &Client, rom_id: i64, file_name: &str) -> Option<String> {
+    client
+        .states(rom_id)
+        .await
+        .ok()?
+        .iter()
+        .find(|s| s.file_name == file_name)
+        .map(fingerprint)
 }
 
 /// Where the ledger lives, for callers that want to report it.
