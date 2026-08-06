@@ -337,15 +337,10 @@ input_load_state_btn = \"4\"             # + LB -> load state
 input_save_state_btn = \"5\"             # + RB -> save state
 input_hold_fast_forward_btn = \"7\"      # + RT -> fast-forward while held
 
-input_shader_prev_btn = \"12\"           # + D-pad up   -> previous shader
-input_shader_next_btn = \"13\"           # + D-pad down -> next shader
-
-# Right stick, not the d-pad, so slot changes cannot be fumbled while aiming
-# for a shader. Axis 2 is the right stick's X under xinput and the usual SDL
-# mapping, but the index is driver-dependent — if these land on the wrong stick,
-# rebind them in RetroArch once and copy the values into your settings file.
-input_state_slot_decrease_axis = \"-2\"  # + right stick left  -> previous slot
-input_state_slot_increase_axis = \"+2\"  # + right stick right -> next slot
+input_shader_prev_btn = \"12\"           # + D-pad up    -> previous shader
+input_shader_next_btn = \"13\"           # + D-pad down  -> next shader
+input_state_slot_decrease_btn = \"14\"   # + D-pad left  -> previous save slot
+input_state_slot_increase_btn = \"15\"   # + D-pad right -> next save slot
 
 # Quit asks once rather than dropping the game instantly — A is easy to hit by
 # accident, and losing unsaved progress to a stray press is not recoverable.

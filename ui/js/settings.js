@@ -6,7 +6,6 @@ import {
 } from "./bindings.js";
 import { toast } from "./util.js";
 import { invoke } from "./state.js";
-import { open as openDialog } from "../../node_modules/@tauri-apps/plugin-dialog/dist-js/index.js";
 
 /// Set while waiting for a keypress to assign, so the global handler can get
 /// out of the way.
@@ -100,8 +99,14 @@ export function toggleSettings() {
     .catch(() => {});
   box.querySelector(".set-ra-pick").addEventListener("click", async () => {
     try {
-      const dir = await openDialog({ directory: true, multiple: false,
-                                     title: "Select the RetroArch folder" });
+      // Invoked directly rather than imported from @tauri-apps/plugin-dialog:
+      // frontendDist is ui/, so node_modules is not in the bundle and the
+      // import fails there — taking the whole module graph, and the page, with
+      // it.
+      const dir = await invoke("plugin:dialog|open", {
+        options: { directory: true, multiple: false,
+                   title: "Select the RetroArch folder" },
+      });
       if (dir) raInput.value = dir;
     } catch (e) {
       raStatus.textContent = String(e);
