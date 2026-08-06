@@ -105,7 +105,7 @@ fn is_ignorable(rel: &Path, file_name: &str) -> bool {
 ///
 /// Shares its rule with [`split_slot`] below, which is the authority on the
 /// naming: anything carrying `.state` is a save state, everything else
-/// (`.srm`, `.sav`) is a battery save. A download filed under the wrong one is
+/// (`.srm`, `.sav`) is a game save. A download filed under the wrong one is
 /// invisible to the next scan.
 pub fn is_state_name(file_name: &str) -> bool {
     file_name.to_ascii_lowercase().contains(".state")
@@ -114,7 +114,7 @@ pub fn is_state_name(file_name: &str) -> bool {
 /// Split a save filename into (rom basename, slot).
 ///
 /// RetroArch conventions, plus what this collection actually contains:
-/// `.srm`/`.sav` are battery saves; `.state` is manual slot 0; `.stateN` is
+/// `.srm`/`.sav` are game saves; `.state` is manual slot 0; `.stateN` is
 /// slot N; `.state.auto` is the autosave slot. Opera writes `<name>.0.srm`
 /// under `per_game/`.
 fn split_slot(file_name: &str) -> Option<(String, String)> {
@@ -352,11 +352,11 @@ fn collect(
 mod tests {
     use super::*;
 
-    /// Battery saves. The slot is a constant because a `.srm` has no slot of
+    /// Game saves. The slot is a constant because a `.srm` has no slot of
     /// its own, and it must still never be empty — see the module docs on what
     /// a null slot does to the server's pairing.
     #[test]
-    fn battery_saves_split_into_a_basename_and_a_stable_slot() {
+    fn game_saves_split_into_a_basename_and_a_stable_slot() {
         assert_eq!(
             split_slot("Chrono Trigger.srm"),
             Some(("Chrono Trigger".to_owned(), "autosave".to_owned()))
@@ -574,7 +574,7 @@ mod tests {
             candidate("melonds", "slot1", Kind::State, 1),
             candidate("melondsds", "slot2", Kind::State, 1),
             candidate("melondsds", "slot1", Kind::State, 2),
-            // Same rom, same slot name, but a battery save rather than a state.
+            // Same rom, same slot name, but a game save rather than a state.
             candidate("melonds", "slot1", Kind::Save, 1),
         ];
         mark_canonical(&mut c, &map());

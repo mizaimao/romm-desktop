@@ -199,7 +199,7 @@ pub fn client_states(candidates: &[Candidate]) -> (Vec<ClientSaveState>, usize) 
 ///
 /// Mirrors RetroArch's own layout, which is what the scanner reads back:
 /// `<root>/states/<core>/…` for save states, `<root>/saves/<core>/…` for
-/// battery saves. Without the core directory a download would land somewhere
+/// game saves. Without the core directory a download would land somewhere
 /// the next scan cannot see.
 pub fn download_path(root: &Path, file_name: &str, emulator: Option<&str>) -> PathBuf {
     let kind = if saves::is_state_name(file_name) { "states" } else { "saves" };
@@ -602,7 +602,7 @@ pub async fn run_all(
     let mut summary = run(client, candidates, ra_root, data_dir, library_root).await?;
 
     // States are best effort against the saves half: failing to sync a
-    // freeze-frame should not discard a successful battery-save sync.
+    // freeze-frame should not discard a successful game-save sync.
     match crate::statesync::run(client, candidates, ra_root, library_root, data_dir).await {
         Ok(states) => {
             summary.uploaded += states.uploaded;
@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
     }
 
-    /// Save states and battery saves live in different trees. Putting one in
+    /// Save states and game saves live in different trees. Putting one in
     /// the other's directory means the next scan never finds it again.
     #[test]
     fn downloads_land_where_the_scanner_will_find_them() {
