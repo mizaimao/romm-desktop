@@ -190,17 +190,47 @@ fn resolve(cache: &Cache, platforms: &[String], rom_base: &str) -> Result<Resolu
 
 /// Walk `<root>/saves` and `<root>/states`.
 pub fn scan(root: &Path, cache: &Cache, map: &CoreMap) -> Result<Vec<Candidate>> {
+    scan_matching(root, cache, map, &|_| true)
+}
+
+/// As [`scan`], considering only saves whose ROM basename passes `keep`.
+///
+/// Automatic sync runs either side of every launch, and a full scan hashes the
+/// contents of every save in the tree — which is the expensive part and grows
+/// with the library. Filtering before hashing makes a per-game sync proportional
+/// to that game rather than to everything ever played.
+///
+/// The filter is on the ROM basename rather than the file, so every core's copy
+/// of the same game is still seen together and [`mark_canonical`] can resolve a
+/// collision between them.
+pub fn scan_matching(
+    root: &Path,
+    cache: &Cache,
+    map: &CoreMap,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<Vec<Candidate>> {
     let mut out = Vec::new();
     for (sub, kind) in [("saves", Kind::Save), ("states", Kind::State)] {
         let base = root.join(sub);
         if !base.is_dir() {
             continue;
         }
-        collect(&base, &base, kind, cache, map, &mut out)?;
+        collect(&base, &base, kind, cache, map, keep, &mut out)?;
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     mark_canonical(&mut out, map);
     Ok(out)
+}
+
+/// Saves belonging to one ROM, matched on its file stem the way an emulator
+/// derives a save name from the content it loaded.
+pub fn scan_for_stem(
+    root: &Path,
+    cache: &Cache,
+    map: &CoreMap,
+    stem: &str,
+) -> Result<Vec<Candidate>> {
+    scan_matching(root, cache, map, &|base| base.eq_ignore_ascii_case(stem))
 }
 
 /// Resolve `(rom_id, slot)` collisions between cores.
@@ -252,18 +282,20 @@ fn mark_canonical(candidates: &mut [Candidate], map: &CoreMap) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect(
     base: &Path,
     dir: &Path,
     kind: Kind,
     cache: &Cache,
     map: &CoreMap,
+    keep: &dyn Fn(&str) -> bool,
     out: &mut Vec<Candidate>,
 ) -> Result<()> {
     for entry in std::fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect(base, &path, kind, cache, map, out)?;
+            collect(base, &path, kind, cache, map, keep, out)?;
             continue;
         }
         let file_name = entry.file_name().to_string_lossy().to_string();
@@ -274,6 +306,10 @@ fn collect(
         let Some((rom_base, slot)) = split_slot(&file_name) else {
             continue;
         };
+        // Before hashing: the digest is the expensive part of a scan.
+        if !keep(&rom_base) {
+            continue;
+        }
 
         // First path component under saves/ or states/ is the core directory.
         let core_dir = rel

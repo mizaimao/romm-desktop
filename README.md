@@ -113,17 +113,32 @@ place fixes it in all three — which is the point, because it did not used to.
 
 ## Saves
 
-`Settings -> Sync saves now`, or `romm-desktop sync-saves`. It compares the
-RetroArch save tree with the server and transfers whatever differs.
+Automatic, in the shape you expect from Steam: the server's copy is pulled
+before a game starts and whatever changed is pushed after it exits. `plan.run`
+blocks until the emulator quits, so those two moments are a real boundary
+rather than a guess about when you stopped playing.
 
-Never automatic. A save is the only thing here that cannot be fetched again if
-it goes wrong, so it is an action you take rather than a side effect of
-launching a game. Anything changed on both sides since the last sync is
-reported and left alone -- picking a winner silently is how an evening's
-progress disappears.
+**Every overwrite is backed up first.** Ten copies per game and save slot, in
+`library/saves-backup/<rom id>/<slot>/`, oldest dropped. Plain files, so
+recovery is copying one back — no tooling, nothing to learn at the moment
+something has already gone wrong.
 
-`sync-saves --dry-run` prints what would be offered without writing anything,
-which is the way to check the ROM matching first.
+That backup is what makes the automation defensible. A save is the only thing
+here that cannot be fetched again, and syncing it unattended without a way back
+would be the one action in the app capable of destroying something for good.
+
+Anything changed on both sides since the last sync is a conflict: both copies
+are left exactly as they are and it says so. Picking a winner silently is how
+an evening's progress disappears.
+
+Turn it off with `[saves] auto_sync = false` and sync when you ask instead:
+
+```sh
+romm-desktop sync-saves            # or Settings -> Sync saves now
+romm-desktop sync-saves --dry-run  # what would be offered, writing nothing
+```
+
+`--dry-run` is the way to check the ROM matching before anything moves.
 
 ## Status
 

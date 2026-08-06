@@ -15,7 +15,7 @@ use tauri::{Emitter, State};
 
 use romm_desktop::{
     api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
-    shaders, theme, theme_remote, util,
+    savesync, shaders, theme, theme_remote, util,
 };
 
 const CACHE_DB: &str = "cache.sqlite3";
@@ -52,6 +52,8 @@ struct AppState {
     /// RetroAchievements, read once at startup from this project's config.toml
     /// — see `romm_desktop::achievements`.
     achievements: romm_desktop::achievements::Settings,
+    /// Pull before a launch and push after it exits.
+    auto_sync: bool,
 }
 
 #[derive(Serialize)]
@@ -592,17 +594,66 @@ async fn launch_rom(
     }
 
     let plan = romm_desktop::launch::plan(ra, &state.map, &req).map_err(err)?;
+
+    // Steam-cloud shape: pull what the server has that is newer, play, then
+    // push whatever changed. `plan.run` blocks until the emulator exits, so
+    // those two moments are a real boundary rather than a guess about when
+    // someone stopped playing.
+    let mut notes = fetched;
+    if let Some(note) = auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await {
+        notes.push(note);
+    }
+
     let status = plan.run(ra, &path, false).map_err(err)?;
-    let prefix = if fetched.is_empty() {
+
+    if let Some(note) = auto_sync(&state, ra, &row, savesync::When::AfterExit).await {
+        notes.push(note);
+    }
+
+    let prefix = if notes.is_empty() {
         String::new()
     } else {
-        format!("{}; ", fetched.join("; "))
+        format!("{}; ", notes.join("; "))
     };
     Ok(if status.success() {
         format!("{prefix}{} exited cleanly", row.name)
     } else {
         format!("{prefix}{} exited with {status}", row.name)
     })
+}
+
+/// One half of the automatic sync for a single game.
+///
+/// Returns a note when something happened, `None` when nothing did. Never an
+/// error: a sync failure must not stop a game starting, and must not be the
+/// last thing that happens after one ends — so problems are reported in the
+/// launch notes and the launch itself carries on.
+async fn auto_sync(
+    state: &State<'_, AppState>,
+    ra: &RetroArch,
+    row: &cache::RomRow,
+    when: savesync::When,
+) -> Option<String> {
+    if !state.auto_sync {
+        return None;
+    }
+    let client = state.client.clone()?;
+    let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+    // The SQLite connection is not Sync, so the scan takes the lock and drops
+    // it before any awaiting starts.
+    let candidates = {
+        let cache = state.cache.lock().ok()?;
+        match savesync::scan_for_rom(&cache, &state.map, &ra.root, &row.fs_name) {
+            Ok(c) => c,
+            Err(e) => return Some(format!("saves: could not scan ({e})")),
+        }
+    };
+
+    match savesync::run(&client, &candidates, &ra.root, Path::new("."), &library_root).await {
+        Ok(summary) => savesync::describe(when, &summary),
+        Err(e) => Some(format!("saves: {} failed ({e})", when.label())),
+    }
 }
 
 #[derive(Serialize)]
@@ -1351,6 +1402,7 @@ fn main() {
                     .unwrap_or(3) as u8,
             ),
             achievements: cfg.achievements.settings(),
+            auto_sync: cfg.saves.auto_sync,
         })
         .invoke_handler(tauri::generate_handler![
             platforms,

@@ -158,3 +158,19 @@ devid = ""
 devpassword = ""
 softname = "romm-desktop"
 max_threads = 1
+
+[saves]
+# Where RetroArch keeps saves/ and states/. In a portable install this is the
+# portable root itself.
+root = "./Saves"
+
+# Pull before a game starts and push after it exits, Steam-cloud style.
+#
+# Every overwrite copies the previous file into library/saves-backup/ first --
+# ten per game and slot, oldest dropped -- so a wrong result is recoverable by
+# copying a file back rather than being final. Turn this off to sync only when
+# you ask, with `romm-desktop sync-saves`.
+#
+# A conflict is never resolved automatically either way: if both sides changed
+# since the last sync, both are left alone and it says so.
+auto_sync = true

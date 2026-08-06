@@ -4,13 +4,19 @@
 //! never run. This module is the missing middle: scan the RetroArch save tree,
 //! tell the server what we have, and carry out whatever it asks for.
 //!
-//! Deliberately explicit rather than automatic on launch. A save file is the
-//! one thing here that cannot be re-downloaded if it goes wrong, so overwriting
-//! one is a decision the user makes, not a side effect of pressing A.
+//! Runs automatically either side of a launch — pull before, push after — and
+//! on demand through `sync-saves`. `[saves] auto_sync` turns the automatic half
+//! off.
 //!
-//! Conflicts are never resolved locally. When both sides changed since the last
-//! sync the server says so and this reports it untouched — picking a winner
-//! silently is how people lose an evening's progress.
+//! This was deliberately manual for a long time, on the grounds that a save is
+//! the one thing here that cannot be re-downloaded if it goes wrong. That was
+//! really an argument against automatic sync *without a way back*: every
+//! overwrite now copies the previous file into a rotating backup first (see
+//! [`crate::savebackup`]), so a bad outcome is recoverable rather than final.
+//!
+//! Conflicts are still never resolved locally. When both sides changed since
+//! the last sync the server says so and this reports it untouched — picking a
+//! winner silently is how people lose an evening's progress.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -171,6 +177,71 @@ pub fn download_path(root: &Path, file_name: &str, emulator: Option<&str>) -> Pa
 /// `Sync`, so a future holding one across an await cannot be spawned.
 pub fn scan(cache: &Cache, map: &CoreMap, ra_root: &Path) -> Result<Vec<Candidate>> {
     saves::scan(ra_root, cache, map).context("scanning the save tree")
+}
+
+/// As [`scan`], for one game only — what the automatic sync either side of a
+/// launch uses.
+///
+/// `fs_name` is the ROM's filename; emulators derive a save name from its stem,
+/// which is what the scanner matches on.
+pub fn scan_for_rom(
+    cache: &Cache,
+    map: &CoreMap,
+    ra_root: &Path,
+    fs_name: &str,
+) -> Result<Vec<Candidate>> {
+    let stem = Path::new(fs_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fs_name);
+    saves::scan_for_stem(ra_root, cache, map, stem)
+        .with_context(|| format!("scanning saves for {stem}"))
+}
+
+/// When the automatic sync runs.
+///
+/// Both halves are separate because they fail differently. A pull that cannot
+/// reach the server should not stop you playing offline; a push that fails has
+/// progress sitting on the machine that still needs to leave it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum When {
+    /// Before the emulator starts: take whatever the server has that is newer.
+    BeforeLaunch,
+    /// After it exits: send whatever changed while playing.
+    AfterExit,
+}
+
+impl When {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BeforeLaunch => "pulled before launch",
+            Self::AfterExit => "pushed after exit",
+        }
+    }
+}
+
+/// Report of one automatic half-sync, for the launch notes.
+///
+/// Never an error to the caller: a sync problem must not stop a game starting
+/// or be the last thing that happens after one ends. Anything that went wrong
+/// is in `notes` and shown, which is the difference between "sync is broken"
+/// and "nothing happened and nobody said why".
+pub fn describe(when: When, summary: &Summary) -> Option<String> {
+    let moved = match when {
+        When::BeforeLaunch => summary.downloaded,
+        When::AfterExit => summary.uploaded,
+    };
+    if moved == 0 && summary.conflicts == 0 {
+        return None;
+    }
+    let mut line = format!("saves: {moved} {}", when.label());
+    if summary.conflicts > 0 {
+        line.push_str(&format!(
+            ", {} in conflict and left alone — run `sync-saves` to look",
+            summary.conflicts
+        ));
+    }
+    Some(line)
 }
 
 /// Negotiate and carry out the plan for an already-scanned tree.
@@ -478,6 +549,41 @@ mod tests {
         c.core = None;
         let (states, _) = client_states(&[c]);
         assert_eq!(states[0].emulator.as_deref(), Some("Snes9x"));
+    }
+
+
+    /// The launch note is the only place an automatic sync is visible, so it
+    /// must say nothing when nothing happened and must never hide a conflict.
+    #[test]
+    fn an_automatic_sync_reports_only_what_it_did() {
+        let quiet = Summary { unchanged: 4, ..Default::default() };
+        assert_eq!(describe(When::BeforeLaunch, &quiet), None, "silent when idle");
+
+        let pulled = Summary { downloaded: 2, ..Default::default() };
+        assert_eq!(
+            describe(When::BeforeLaunch, &pulled).unwrap(),
+            "saves: 2 pulled before launch"
+        );
+
+        // An upload is not a pull: reporting the wrong direction would tell
+        // someone their progress left the machine when it did not.
+        assert_eq!(describe(When::BeforeLaunch, &Summary { uploaded: 3, ..Default::default() }), None);
+        assert_eq!(
+            describe(When::AfterExit, &Summary { uploaded: 3, ..Default::default() }).unwrap(),
+            "saves: 3 pushed after exit"
+        );
+    }
+
+    /// A conflict is the one outcome that needs the user, so it is surfaced
+    /// even when nothing moved -- otherwise an automatic sync that quietly
+    /// declined to act looks exactly like one that had nothing to do.
+    #[test]
+    fn a_conflict_is_always_surfaced() {
+        let stuck = Summary { conflicts: 1, ..Default::default() };
+        let note = describe(When::AfterExit, &stuck).expect("a conflict must be reported");
+        assert!(note.contains("1 in conflict"), "{note}");
+        assert!(note.contains("left alone"), "and that nothing was written: {note}");
+        assert!(note.contains("sync-saves"), "and how to look: {note}");
     }
 
     #[test]

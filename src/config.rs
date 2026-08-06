@@ -125,11 +125,23 @@ pub struct SavesCfg {
     /// portable RetroArch install this is the portable root itself.
     #[serde(default = "default_saves_root")]
     pub root: String,
+
+    /// Pull before a game starts and push after it exits, Steam-cloud style.
+    ///
+    /// On by default now that every overwrite is backed up first — see
+    /// [`crate::savebackup`]. Without those backups this would be the one
+    /// setting in the app that can destroy something unrecoverable, which is
+    /// why it did not exist until they did.
+    ///
+    /// A conflict is still never resolved automatically: both sides are left
+    /// as they are and reported.
+    #[serde(default = "yes")]
+    pub auto_sync: bool,
 }
 
 impl Default for SavesCfg {
     fn default() -> Self {
-        Self { root: default_saves_root() }
+        Self { root: default_saves_root(), auto_sync: true }
     }
 }
 
