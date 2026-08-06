@@ -15,7 +15,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Nothing ships without the tests that guard it passing on the tagged commit.
+  #
+  # This workflow used to build and publish without running a single test, so a
+  # tag on a red commit produced a real release with real download links. It is
+  # the CI workflow itself rather than a copy of it: a duplicated matrix drifts,
+  # and the copy that drifts is always the one nobody is watching.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: verify
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:

@@ -1,6 +1,6 @@
 [package]
 name = "romm-desktop"
-version = "0.1.1"
+version.workspace = true
 edition = "2024"
 
 # The core is a library so the Tauri GUI (src-tauri/) and the CLI/TUI share one
@@ -15,6 +15,20 @@ path = "src/main.rs"
 
 [workspace]
 members = ["src-tauri"]
+
+# The single source of the version number.
+#
+# Both crates inherit it with `version.workspace = true`, and
+# src-tauri/tauri.conf.json has no `version` key at all — Tauri falls back to
+# the version in its own Cargo.toml, which is this one. So the number lives in
+# exactly one place and the bundle, the binary, the user-agent and the
+# `client_version` sent at device registration cannot disagree.
+#
+# To cut a release: change this line, commit, tag `v<version>`, push the tag.
+# Do not reintroduce a literal version in either member manifest or in
+# tauri.conf.json — that is the drift this replaced.
+[workspace.package]
+version = "0.1.1"
 
 [dependencies]
 anyhow = "1.0.104"
