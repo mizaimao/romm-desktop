@@ -7,8 +7,16 @@
 [server]
 url = "http://dev.lan"
 
-# Basic auth is enough to get started. Swap for a token or the device-code
-# flow later, once there is something to swap.
+# A client token is preferred and takes precedence over username/password.
+# Create one in RomM under API tokens with only the scopes this client uses:
+#   me.read  roms.read  platforms.read  collections.read
+#   assets.read  assets.write  devices.read  devices.write
+# Nothing here writes to your library, so leave every *.write on roms,
+# platforms, users and tasks unchecked. A token can also be revoked from the
+# server without changing your account password.
+#
+# Basic auth still works and is used when no token is set.
+# token = "romm_..."
 username = ""
 password = ""
 

@@ -1295,7 +1295,7 @@ fn main() {
     // completely silent: the icon bounces and nothing happens, with no way to
     // tell whether the app crashed or never ran.
     let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
+    let client = cfg.server.client()
         .ok()
         .map(Arc::new);
     let retroarch = RetroArch::locate_in(&cfg.retroarch.ordered_paths())

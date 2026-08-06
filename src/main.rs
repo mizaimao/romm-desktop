@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use romm_desktop::{
-    api, cache, cores, download, media, parity, saves, theme, theme_remote, tui,
+    cache, cores, download, media, parity, saves, theme, theme_remote, tui,
 };
 use romm_desktop::config::Config;
 use romm_desktop::coremap::{self, CoreMap};
@@ -228,11 +228,7 @@ fn cmd_suggest() -> Result<()> {
 /// Stage 1 — prove auth works and the library is reachable.
 async fn cmd_check() -> Result<()> {
     let cfg = Config::load()?;
-    let client = api::Client::new(
-        &cfg.server.url,
-        &cfg.server.username,
-        &cfg.server.password,
-    )?;
+    let client = cfg.server.client()?;
 
     let me = client.me().await?;
     println!("server    {}", cfg.server.url);
@@ -428,7 +424,7 @@ const CACHE_DB: &str = "cache.sqlite3";
 /// Stage 2 — pull metadata into the local cache.
 async fn cmd_sync(full: bool) -> Result<()> {
     let cfg = Config::load()?;
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+    let client = cfg.server.client()?;
     let mut store = cache::Cache::open(Path::new(CACHE_DB))?;
 
     // Refresh the settings that govern how we hash and verify, so a server
@@ -525,11 +521,7 @@ async fn cmd_get_platform(slug: &str, jobs: usize) -> Result<()> {
     }
 
     let roms_dir = cfg.local_roms_dir();
-    let client = std::sync::Arc::new(api::Client::new(
-        &cfg.server.url,
-        &cfg.server.username,
-        &cfg.server.password,
-    )?);
+    let client = std::sync::Arc::new(cfg.server.client()?);
 
     let total: i64 = rows.iter().map(|r| r.fs_size_bytes.max(0)).sum();
     println!("{} games, {} — {jobs} at a time", rows.len(), human(total as u64));
@@ -664,7 +656,7 @@ async fn cmd_probe(
         candidates.join(", ")
     );
 
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password).ok();
+    let client = cfg.server.client().ok();
     let roms_dir = cfg.local_roms_dir();
     let mut tally: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
 
@@ -938,7 +930,7 @@ async fn cmd_get(needle: &str) -> Result<()> {
 
 /// Fetch one resolved ROM, reporting progress and how it was verified.
 async fn download_one(rom: cache::RomRow, cfg: &Config) -> Result<()> {
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+    let client = cfg.server.client()?;
     let roms_dir = cfg.local_roms_dir();
 
     println!(
@@ -1092,7 +1084,7 @@ fn cmd_scan() -> Result<()> {
 async fn cmd_art(needle: &str) -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password).ok();
+    let client = cfg.server.client().ok();
     let media_root = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
 
     let matches = store.search(needle, 5)?;
@@ -1314,7 +1306,7 @@ fn cmd_browse() -> Result<()> {
     // Missing RetroArch is not fatal; browsing still works, launching doesn't.
     let ra = locate_retroarch(&cfg).ok();
     // Likewise a missing server only disables downloading.
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)
+    let client = cfg.server.client()
         .ok()
         .map(std::sync::Arc::new);
     tui::run(
@@ -1504,7 +1496,7 @@ async fn cmd_sync_saves(dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    let client = api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+    let client = cfg.server.client()?;
     let candidates = romm_desktop::savesync::scan(&store, &map, &ra.root)?;
     let summary =
         romm_desktop::savesync::run(&client, &candidates, &ra.root, Path::new(".")).await?;
@@ -1541,7 +1533,7 @@ async fn main() -> Result<()> {
         Command::HashParity => {
             let cfg = Config::load()?;
             let client =
-                api::Client::new(&cfg.server.url, &cfg.server.username, &cfg.server.password)?;
+                cfg.server.client()?;
             parity::run(&client).await
         }
         Command::Scan => cmd_scan(),

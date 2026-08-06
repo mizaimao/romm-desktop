@@ -105,7 +105,7 @@ pub async fn fetch(
     let resp = client
         .http()
         .get(&url)
-        .header("Authorization", format!("Basic {}", client.auth()))
+        .header("Authorization", client.auth())
         .send()
         .await
         .with_context(|| format!("GET {url}"))?;

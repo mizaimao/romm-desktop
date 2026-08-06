@@ -75,6 +75,25 @@ pub struct Server {
     pub username: String,
     #[serde(default)]
     pub password: String,
+    /// A RomM client token, used in preference to username/password.
+    ///
+    /// Better than Basic for a device that keeps credentials on disk: it
+    /// carries only the scopes this client needs, and can be revoked from the
+    /// server without touching the account password.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+impl Server {
+    /// Build a client from whichever credential is configured.
+    pub fn client(&self) -> anyhow::Result<crate::api::Client> {
+        crate::api::Client::with_auth(
+            &self.url,
+            &self.username,
+            &self.password,
+            self.token.as_deref(),
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]

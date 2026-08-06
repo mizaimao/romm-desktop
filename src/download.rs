@@ -421,6 +421,9 @@ fn unpack_folder_rom(zip_path: &Path, dest: &Path) -> Result<()> {
 
 /// Download `target` into `<library_roms>/<platform>/<fs_name>`.
 ///
+/// `auth` is a complete `Authorization` header value, so this works with a
+/// bearer token or Basic without knowing which.
+///
 /// `progress` is called with `(downloaded_so_far, total_or_0)`.
 pub async fn fetch(
     http: &reqwest::Client,
@@ -476,7 +479,7 @@ pub async fn fetch(
 
     let mut req = http
         .get(&url)
-        .header("Authorization", format!("Basic {auth}"));
+        .header("Authorization", auth);
     if resume_from > 0 {
         req = req.header("Range", format!("bytes={resume_from}-"));
     }

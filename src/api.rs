@@ -159,12 +159,42 @@ pub struct Client {
 
 impl Client {
     pub fn new(base_url: &str, username: &str, password: &str) -> Result<Self> {
+        Self::with_auth(base_url, username, password, None)
+    }
+
+    /// As [`Self::new`], preferring a bearer token when one is configured.
+    ///
+    /// A RomM client token carries explicit scopes and can be revoked from the
+    /// server without changing the account password, so it is strictly better
+    /// than Basic for a device that keeps its credentials on disk. Basic stays
+    /// supported because existing configs use it.
+    pub fn with_auth(
+        base_url: &str,
+        username: &str,
+        password: &str,
+        token: Option<&str>,
+    ) -> Result<Self> {
         if base_url.is_empty() {
             bail!("server.url is empty — copy config.example.toml to config.toml");
         }
+        let token = token.map(str::trim).filter(|t| !t.is_empty());
+        if token.is_none() && username.is_empty() && password.is_empty() {
+            bail!(
+                "no credentials — set [server] token (preferred) or username and \
+                 password in config.toml"
+            );
+        }
         let http = crate::util::http_client(None).context("building HTTP client")?;
-        let auth = base64::engine::general_purpose::STANDARD
-            .encode(format!("{username}:{password}"));
+        // The complete header value, so no call site has to know which scheme
+        // is in use. Getting that wrong is silent: the server just 401s.
+        let auth = match token {
+            Some(t) => format!("Bearer {t}"),
+            None => format!(
+                "Basic {}",
+                base64::engine::general_purpose::STANDARD
+                    .encode(format!("{username}:{password}"))
+            ),
+        };
         Ok(Self {
             http,
             base: base_url.trim_end_matches('/').to_owned(),
@@ -181,8 +211,10 @@ impl Client {
         &self.base
     }
 
-    /// Pre-encoded HTTP Basic credential, for callers issuing their own
-    /// requests (streaming downloads).
+    /// The complete `Authorization` header value — `Bearer …` or `Basic …`
+    /// depending on what was configured. Callers issuing their own requests
+    /// (streaming downloads, artwork) send this verbatim rather than
+    /// reconstructing a scheme they would have to keep in sync.
     pub fn auth(&self) -> &str {
         &self.auth
     }
@@ -192,7 +224,7 @@ impl Client {
         let resp = self
             .http
             .get(&url)
-            .header("Authorization", format!("Basic {}", self.auth))
+            .header("Authorization", &self.auth)
             .send()
             .await
             .with_context(|| format!("GET {url}"))?;
@@ -544,7 +576,7 @@ impl Client {
         let resp = self
             .http
             .post(&url)
-            .header("Authorization", format!("Basic {}", self.auth))
+            .header("Authorization", &self.auth)
             .json(body)
             .send()
             .await
@@ -609,7 +641,7 @@ impl Client {
         let resp = self
             .http
             .get(&url)
-            .header("Authorization", format!("Basic {}", self.auth))
+            .header("Authorization", &self.auth)
             .send()
             .await
             .with_context(|| format!("GET {url}"))?;
@@ -625,7 +657,7 @@ impl Client {
         let url = format!("{}/api/saves/{save_id}/downloaded", self.base);
         self.http
             .post(&url)
-            .header("Authorization", format!("Basic {}", self.auth))
+            .header("Authorization", &self.auth)
             .send()
             .await
             .with_context(|| format!("POST {url}"))?;
@@ -664,7 +696,7 @@ impl Client {
         let resp = self
             .http
             .post(&full)
-            .header("Authorization", format!("Basic {}", self.auth))
+            .header("Authorization", &self.auth)
             .multipart(form)
             .send()
             .await
@@ -687,7 +719,7 @@ impl Client {
         let url = format!("{}/api/sync/sessions/{session_id}/complete", self.base);
         self.http
             .post(&url)
-            .header("Authorization", format!("Basic {}", self.auth))
+            .header("Authorization", &self.auth)
             .send()
             .await
             .with_context(|| format!("POST {url}"))?;
@@ -743,13 +775,41 @@ mod tests {
         assert_eq!(c.base(), "http://dev.lan");
     }
 
-    /// Credentials are pre-encoded once and reused, since streaming downloads
-    /// issue their own requests and need the same header.
+    /// `auth()` is the complete header value, not a bare credential. Streaming
+    /// downloads and artwork fetches send it verbatim, so if it were just the
+    /// base64 every one of those call sites would have to hardcode `Basic` —
+    /// which is exactly how a bearer token silently keeps sending Basic.
     #[test]
     fn basic_credentials_are_encoded_once_for_reuse() {
         let c = Client::new("http://dev.lan", "user", "pass").unwrap();
-        // "user:pass" in base64.
-        assert_eq!(c.auth(), "dXNlcjpwYXNz");
+        // "user:pass" in base64, as a ready-to-send header value.
+        assert_eq!(c.auth(), "Basic dXNlcjpwYXNz");
+    }
+
+    /// A configured token wins over username/password, and produces a bearer
+    /// header rather than Basic.
+    #[test]
+    fn a_token_is_preferred_and_sent_as_a_bearer() {
+        let c = Client::with_auth("http://dev.lan", "user", "pass", Some("tok_abc")).unwrap();
+        assert_eq!(c.auth(), "Bearer tok_abc");
+
+        // Blank or whitespace-only is not a token; fall back to Basic rather
+        // than sending "Bearer " and getting a 401 with no explanation.
+        for empty in [Some(""), Some("   "), None] {
+            let c = Client::with_auth("http://dev.lan", "user", "pass", empty).unwrap();
+            assert_eq!(c.auth(), "Basic dXNlcjpwYXNz", "for {empty:?}");
+        }
+    }
+
+    /// No credential of any kind is a configuration mistake worth naming, not
+    /// an empty Basic header that 401s on every request.
+    #[test]
+    fn no_credentials_at_all_is_refused_with_advice() {
+        let err = match Client::with_auth("http://dev.lan", "", "", None) {
+            Ok(_) => panic!("must not build a client with no credentials"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("token"), "should mention the token option: {err}");
     }
 
     /// The three collection families share one struct because the server

@@ -127,7 +127,7 @@ async fn upload(
     let resp = client
         .http()
         .post(&url)
-        .header("Authorization", format!("Basic {}", client.auth()))
+        .header("Authorization", client.auth())
         .multipart(form)
         .send()
         .await
@@ -150,7 +150,7 @@ async fn delete_saves(client: &api::Client, ids: &[i64]) -> Result<()> {
     let resp = client
         .http()
         .post(&url)
-        .header("Authorization", format!("Basic {}", client.auth()))
+        .header("Authorization", client.auth())
         .json(&serde_json::json!({ "saves": ids }))
         .send()
         .await?;
