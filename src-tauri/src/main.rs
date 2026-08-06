@@ -1010,6 +1010,11 @@ struct Status {
     roms_dir: String,
     media_dir: String,
     disk_bytes: u64,
+    /// Directory every relative path is resolved against, and therefore where
+    /// `config.toml` is read from. Reported because "it cannot find my config"
+    /// is otherwise unanswerable from inside the app.
+    data_dir: String,
+    config_path: String,
 }
 
 #[tauri::command]
@@ -1036,6 +1041,8 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
         roms_dir: abs(&state.roms_dir),
         media_dir: abs(&state.media_dir),
         disk_bytes: util::dir_size(&state.roms_dir) + util::dir_size(&state.media_dir),
+        data_dir: abs(Path::new(".")),
+        config_path: abs(Path::new("config.toml")),
     })
 }
 
@@ -1184,6 +1191,28 @@ fn resolve_core_for(
 /// the bundle is not an option — it breaks code signing and is wiped on update.
 fn anchor_to_data_root() {
     const MARKER: &str = "data/esde-core-map.json";
+    const CONFIG: &str = "config.toml";
+
+    // 0. A config.toml beside the executable, or in the working directory.
+    //
+    // This is what a portable install looks like and what everyone expects of
+    // one: unzip the exe, drop config.toml next to it, run it. Without this the
+    // Windows build ignored that file completely — it anchored to %USERPROFILE%
+    // \RomM and looked for the config there, so a config sitting right beside
+    // the exe did nothing and the app reported itself unconfigured.
+    //
+    // Checked before the marker search because it is the more specific signal:
+    // a config.toml is something the user deliberately put somewhere, whereas
+    // the marker only says "a checkout is somewhere above us".
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf));
+    for dir in [std::env::current_dir().ok(), exe_dir].into_iter().flatten() {
+        if dir.join(CONFIG).is_file() {
+            let _ = std::env::set_current_dir(&dir);
+            return;
+        }
+    }
 
     // 1. A source checkout, if we are running from one.
     let mut roots: Vec<PathBuf> = Vec::new();

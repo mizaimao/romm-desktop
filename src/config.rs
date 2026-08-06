@@ -39,10 +39,13 @@ pub struct CheevosCfg {
     /// RetroAchievements account name. The token alone authenticates nothing.
     #[serde(default)]
     pub username: Option<String>,
-    /// Normally left unset: RetroArch stores the login token in its own config
-    /// and this app inherits it rather than keeping a second copy.
+    /// Login token — what RetroArch stores after a successful login, and what
+    /// it prefers thereafter. Either this or `password`.
     #[serde(default)]
     pub token: Option<String>,
+    /// Account password, exchanged for a token by RetroArch on first use.
+    #[serde(default)]
+    pub password: Option<String>,
     /// Disables save states, fast-forward and rewind — four of the gamepad
     /// hotkeys this app binds.
     #[serde(default)]
@@ -57,6 +60,7 @@ impl CheevosCfg {
             enabled: self.enabled,
             username: self.username.clone(),
             token: self.token.clone(),
+            password: self.password.clone(),
             hardcore: self.hardcore,
             test_unofficial: self.test_unofficial,
         }

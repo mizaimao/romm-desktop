@@ -83,16 +83,23 @@ mame = "mame2003_plus"
 
 # ---- RetroAchievements ----
 #
-# RetroArch implements achievements itself; this only switches them on and
-# supplies the account name. Log in once through RetroArch's own menu
-# (Settings -> Achievements) and it stores the login token in its config —
-# this app reads that rather than keeping a second copy of your credentials.
+# RetroArch implements achievements; this owns the configuration for them.
+# Deliberately self-contained: the credentials live here, not in your
+# retroarch.cfg, so the same config.toml behaves identically against any
+# RetroArch install — including a fresh one that has never been logged in.
 #
-# `username` is required. The token authenticates nothing without it, and a
-# blank username is why achievements can look configured but never activate.
+# Both a username and a credential are required. A token with no username
+# authenticates nothing, which is how achievements can look configured and
+# never activate.
+#
+# The token is what RetroArch stores after a successful login; if you have one
+# already it is `cheevos_token` in its config. Otherwise give `password` and
+# RetroArch will exchange it for a token on first use.
 [cheevos]
 enabled = false
 username = ""
+token = ""
+# password = ""
 
 # Disables save states, fast-forward and rewind, which are four of the gamepad
 # hotkeys this app binds (Select + LB/RB/RT and the save-slot d-pad). Written

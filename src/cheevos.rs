@@ -1,15 +1,21 @@
 //! RetroAchievements, delivered through the launch config layer.
 //!
-//! Nothing here talks to retroachievements.org. RetroArch already implements
-//! the whole protocol; it just needs three keys set, and the login token it
-//! already stores is reusable — logging in through RetroArch once puts
-//! `cheevos_token` in its own config, and that token is what these settings
-//! ride on.
+//! Nothing here talks to retroachievements.org — RetroArch implements the whole
+//! protocol. What this does is own the *configuration*, in this project's
+//! `config.toml`, and write it into the per-launch layer.
 //!
-//! The trap is `cheevos_username`. RetroArch writes the token and password on
-//! login but can be left with an empty username, and with no username the token
-//! authenticates nothing — achievements stay silently off even though the
-//! credentials are right there. That is the state this machine was in.
+//! Self-contained on purpose. The credentials are not read from the user's own
+//! `retroarch.cfg` and nothing here depends on how RetroArch is set up: the
+//! same `config.toml` produces the same achievement behaviour against any
+//! RetroArch install, including a fresh one that has never been logged in. That
+//! is the same principle as the rest of the launch layer — this app's settings
+//! live in this app's config, and the user's emulator settings are left alone.
+//!
+//! `cheevos_username` is required alongside the credential. RetroArch can hold
+//! a token with an empty username, in which case the token authenticates
+//! nothing and achievements stay silently off — which is exactly the state this
+//! machine's `retroarch.cfg` was in, and precisely why inheriting from it is
+//! not something to rely on.
 //!
 //! ## Hardcore mode
 //!
@@ -28,25 +34,49 @@
 #[derive(Debug, Default, Clone)]
 pub struct Settings {
     pub enabled: bool,
-    /// RetroAchievements account name. Required: the token alone does nothing.
+    /// RetroAchievements account name. Required alongside a credential.
     pub username: Option<String>,
-    /// Login token. Normally absent here and inherited from the user's own
-    /// `retroarch.cfg`, which is where RetroArch put it at login.
+    /// Login token, which is what RetroArch stores after a successful login and
+    /// what it prefers on subsequent runs. Either this or `password`.
     pub token: Option<String>,
+    /// Account password. RetroArch exchanges it for a token on first use, so a
+    /// token is the better thing to keep here once you have one.
+    pub password: Option<String>,
     /// Disables save states, fast-forward and rewind. Off unless asked for.
     pub hardcore: bool,
     /// Unofficial/test achievement sets.
     pub test_unofficial: bool,
 }
 
+fn present(v: &Option<String>) -> Option<&str> {
+    v.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
 impl Settings {
+    /// The credential to send, preferring a token over a password.
+    pub fn credential(&self) -> Option<(&'static str, &str)> {
+        present(&self.token)
+            .map(|t| ("cheevos_token", t))
+            .or_else(|| present(&self.password).map(|p| ("cheevos_password", p)))
+    }
+
     /// True when there is enough to actually authenticate.
     ///
-    /// A username is required even though the token does the authenticating,
-    /// because RetroArch sends the pair. Enabling without one produces a login
-    /// failure on every launch and no achievements.
+    /// Both halves are required. A username with no credential cannot log in,
+    /// and a credential with no username authenticates nothing — RetroArch
+    /// sends the pair.
     pub fn usable(&self) -> bool {
-        self.enabled && self.username.as_deref().is_some_and(|u| !u.trim().is_empty())
+        self.enabled && present(&self.username).is_some() && self.credential().is_some()
+    }
+
+    /// Why it is not usable, for the launch note.
+    fn missing(&self) -> &'static str {
+        match (present(&self.username).is_some(), self.credential().is_some()) {
+            (false, false) => "no username or token",
+            (false, true) => "no username",
+            (true, false) => "no token or password",
+            (true, true) => "",
+        }
     }
 }
 
@@ -62,23 +92,26 @@ pub fn config_lines(s: &Settings) -> String {
     if !s.usable() {
         // Enabled but unusable. Say so in the file rather than writing a
         // half-configured login that fails on every launch.
-        return "\n# ---- RetroAchievements ----\n\
-                # [cheevos] enabled = true, but no username is set, and the token\n\
-                # authenticates nothing without one. Left untouched.\n"
-            .to_owned();
+        return format!(
+            "\n# ---- RetroAchievements ----\n\
+             # [cheevos] enabled = true, but there is {}. Left untouched rather\n\
+             # than written half-configured, which fails a login every launch.\n",
+            s.missing()
+        );
     }
 
     let mut out = String::from(
         "\n# ---- RetroAchievements ----\n\
-         # The token comes from your own retroarch.cfg, written when you logged\n\
-         # in through RetroArch. It is not stored by this app.\n\
+         # Configured entirely from this project's config.toml, so achievements\n\
+         # behave the same against any RetroArch install and nothing depends on\n\
+         # how the emulator itself was set up.\n\
          cheevos_enable = \"true\"\n",
     );
-    if let Some(u) = s.username.as_deref().map(str::trim) {
+    if let Some(u) = present(&s.username) {
         out.push_str(&format!("cheevos_username = \"{}\"\n", escape(u)));
     }
-    if let Some(t) = s.token.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        out.push_str(&format!("cheevos_token = \"{}\"\n", escape(t)));
+    if let Some((key, value)) = s.credential() {
+        out.push_str(&format!("{key} = \"{}\"\n", escape(value)));
     }
 
     // Always explicit — see the module docs on why inheriting this is a trap.
@@ -102,11 +135,9 @@ pub fn describe(s: &Settings) -> Option<String> {
         return None;
     }
     if !s.usable() {
-        return Some(
-            "achievements: enabled but no username set — add [cheevos] username".to_owned(),
-        );
+        return Some(format!("achievements: enabled but {} — see [cheevos]", s.missing()));
     }
-    let who = s.username.as_deref().unwrap_or("").trim();
+    let who = present(&s.username).unwrap_or("");
     Some(if s.hardcore {
         format!("achievements: {who} (HARDCORE — save states and fast-forward are disabled)")
     } else {
@@ -128,6 +159,7 @@ mod tests {
         Settings {
             enabled: true,
             username: username.map(str::to_owned),
+            token: Some("tok".to_owned()),
             ..Default::default()
         }
     }
@@ -140,9 +172,9 @@ mod tests {
         assert!(describe(&Settings::default()).is_none());
     }
 
-    /// The exact state this machine was in: a valid token, no username. The
-    /// token authenticates nothing without one, so writing a half-configured
-    /// login would fail on every launch with no explanation.
+    /// The exact state this machine's retroarch.cfg was in: a valid token, no
+    /// username. The token authenticates nothing without one, so writing a
+    /// half-configured login would fail on every launch with no explanation.
     #[test]
     fn a_token_without_a_username_is_refused_and_explained() {
         let mut s = on(None);
@@ -159,16 +191,44 @@ mod tests {
         assert!(!s.usable());
     }
 
-    /// The normal case: username here, token inherited from the user's own
-    /// retroarch.cfg. This app never stores the token.
+    /// A username with no credential cannot log in, and must be refused just as
+    /// clearly as the other way round.
     #[test]
-    fn a_username_alone_is_enough_because_the_token_is_inherited() {
-        let s = on(Some("frank"));
-        assert!(s.usable());
-        let out = config_lines(&s);
+    fn a_username_without_a_credential_is_refused() {
+        let mut s = on(Some("frank"));
+        s.token = None;
+        assert!(!s.usable());
+        assert!(describe(&s).unwrap().contains("no token or password"));
+        assert!(!config_lines(&s).contains("cheevos_enable = \"true\""));
+    }
+
+    /// The whole point of the redesign: everything needed is written by us, so
+    /// the same config.toml behaves identically against any RetroArch install,
+    /// including one that has never been logged in.
+    #[test]
+    fn the_login_is_written_in_full_and_inherits_nothing() {
+        let out = config_lines(&on(Some("franknickzhang")));
         assert!(out.contains("cheevos_enable = \"true\""));
-        assert!(out.contains("cheevos_username = \"frank\""));
-        assert!(!out.contains("cheevos_token"), "not ours to write: {out}");
+        assert!(out.contains("cheevos_username = \"franknickzhang\""));
+        assert!(out.contains("cheevos_token = \"tok\""), "the credential is ours: {out}");
+    }
+
+    /// A password works when there is no token yet — RetroArch exchanges it for
+    /// one. A token is preferred when both are present, since that is what
+    /// RetroArch itself would rather use.
+    #[test]
+    fn a_token_is_preferred_over_a_password() {
+        let mut s = on(Some("frank"));
+        s.token = None;
+        s.password = Some("hunter2".to_owned());
+        assert_eq!(s.credential(), Some(("cheevos_password", "hunter2")));
+        assert!(config_lines(&s).contains("cheevos_password = \"hunter2\""));
+
+        s.token = Some("tok".to_owned());
+        assert_eq!(s.credential(), Some(("cheevos_token", "tok")));
+        let out = config_lines(&s);
+        assert!(out.contains("cheevos_token = \"tok\""));
+        assert!(!out.contains("hunter2"), "the password is not also written: {out}");
     }
 
     /// Hardcore is written on every launch whether on or off, because

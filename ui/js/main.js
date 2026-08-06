@@ -75,11 +75,15 @@ listen("download-progress", ({ payload }) => {
     // Both of these are only otherwise discovered by pressing play and having
     // it fail, which is a poor way to learn the app was never configured.
     if (!s.configured) {
-      toast("No config.toml — copy config.example.toml and add your server");
+      // Naming the exact path it looked at: "it cannot find my config" is
+      // otherwise unanswerable, and the answer is rarely the directory the
+      // user expected.
+      toast(`No config.toml at ${s.config_path} — copy config.example.toml there`);
     } else if (!s.retroarch) {
       toast("RetroArch not found — set its location in Settings");
     }
     el.status.title =
+      `Config:     ${s.config_path}\nData dir:   ${s.data_dir}\n` +
       `Downloads:  ${s.roms_dir}\nArtwork:    ${s.media_dir}\n\n` +
       `Everything this app downloads lives there. Delete that folder to reclaim the space.`;
   } catch (e) {
