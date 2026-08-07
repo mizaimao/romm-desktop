@@ -884,3 +884,30 @@ data and works. Note the differing ids: `/files` takes a `RomFile.id`, the other
 
 A write-up ready to post is in [`docs/upstream-romfile-500.md`](docs/upstream-romfile-500.md).
 Not filed: `gh` is not authenticated here, and posting is Frank's call.
+
+## 17. Settings — what is done and what is not
+
+The Settings panel is now its own resizable window with a tab rail on the left:
+General, Appearance, Control. It replaced a single scrolling column that put
+emulator paths, sync buttons and both binding tables in one list, so the two
+longest things in the app sat between the user and everything else.
+
+### Stretch goal: a controller picture
+
+Bindings are still a table of rows. The intended version is a drawing of a
+controller with each binding attached to the button it belongs to — click the
+button on the picture, press the button on the pad. That is how every emulator
+frontend worth using does it, and it removes the translation step where someone
+has to work out which physical button "Confirm" currently is.
+
+Not done. It needs artwork per controller family (Xbox, DualSense, Switch Pro,
+8BitDo) and a hit-mapped overlay, and `padprofile.rs` already knows which pad is
+connected, so the picture could follow the hardware. Logged rather than started.
+
+### Still to do
+
+* One field per `config.toml` key. Several settings — shaders, per-game cores,
+  the ES-DE paths, achievements — are still config-file only, and the tabs exist
+  precisely so they have somewhere to go.
+* The Control tab is the two old binding tables moved across unchanged. They now
+  sit in a two-column grid, which is an improvement in density and nothing else.

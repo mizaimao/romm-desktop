@@ -158,6 +158,9 @@ export function startBackdrop({ strength = 1 } = {}) {
   };
 
   document.body.prepend(canvas);
+  // Without this the page's own opaque background sits on top of the canvas and
+  // the shader renders perfectly where nobody can see it.
+  document.documentElement.classList.add("backdrop-on");
   frame = requestAnimationFrame(draw);
 
   running = () => {
@@ -165,6 +168,7 @@ export function startBackdrop({ strength = 1 } = {}) {
     cancelAnimationFrame(frame);
     window.removeEventListener("resize", resize);
     canvas.remove();
+    document.documentElement.classList.remove("backdrop-on");
     running = null;
   };
   return running;

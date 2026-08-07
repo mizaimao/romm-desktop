@@ -39,6 +39,13 @@ export function toast(msg, ms = 4000) {
   // simply stops half-done — the failure mode that hid the A-button bug for
   // five rounds. Losing a status line is the smaller problem.
   if (!el.toast) {
+    // The Settings window has its own document and no #toast footer, so a
+    // status message there is dispatched for that window to place rather than
+    // being dropped.
+    if (typeof window !== "undefined" && document.getElementById("settings-toast")) {
+      window.dispatchEvent(new CustomEvent("settings-toast", { detail: msg }));
+      return;
+    }
     console.warn("toast:", msg);
     return;
   }

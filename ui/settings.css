@@ -1,0 +1,98 @@
+/* The Settings window.
+ *
+ * Loaded on top of style.css so the colours, fonts and control styling match
+ * the main window exactly — this is the same app, in a second window, not a
+ * separate thing that happens to look similar.
+ */
+
+body.settings-window {
+  display: grid;
+  /* A fixed rail and a pane that takes the rest. The rail does not move when
+     the window is resized, which is the point of putting it on the left. */
+  grid-template-columns: 168px 1fr;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ---- Tab rail ---------------------------------------------------------- */
+
+#tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+
+#tabs .tab {
+  appearance: none;
+  text-align: left;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  /* Room for the active marker, so the label does not shift when a tab is
+     selected. */
+  border-left: 3px solid transparent;
+}
+
+#tabs .tab:hover { background: var(--panel-2); }
+
+#tabs .tab.active {
+  background: var(--panel-2);
+  border-left-color: var(--accent, #7c8cff);
+  font-weight: 600;
+}
+
+#tabs .tab:focus-visible {
+  outline: 2px solid var(--accent, #7c8cff);
+  outline-offset: -2px;
+}
+
+/* ---- Pane -------------------------------------------------------------- */
+
+#pane {
+  padding: 18px 22px 32px;
+  overflow-y: auto;
+}
+
+#pane:focus { outline: none; }
+
+/* The first heading in a pane should not push the content down — the tab
+   already says which section this is. */
+#pane h4:first-child { margin-top: 0; }
+
+#pane h4 {
+  margin: 26px 0 6px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+}
+
+/* The binding tables are the longest thing in here. Two columns once there is
+   room, so Control does not become the endless scroll it used to be. */
+#pane .set-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 18px;
+}
+
+#settings-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  max-width: 80vw;
+}

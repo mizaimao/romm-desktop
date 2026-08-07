@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body class="settings-window">
+    <!-- A rail of tabs on the left, one pane on the right. The rail is fixed
+         width and the pane scrolls, so the window resizes without the
+         navigation moving. -->
+    <nav id="tabs" aria-label="Settings sections"></nav>
+    <main id="pane" tabindex="-1"></main>
+    <footer id="settings-toast" hidden></footer>
+    <script type="module" src="js/settings-window.js"></script>
+  </body>
+</html>

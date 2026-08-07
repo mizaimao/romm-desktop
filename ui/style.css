@@ -993,7 +993,22 @@ button:has(> .icon + span) {
 /* ---- Shader backdrop ----------------------------------------------------
    A WebGL2 canvas behind the whole app. Fixed and non-interactive: it must
    never take a click or a focus ring from the grid on top of it. Absent
-   entirely when the machine cannot run it, so nothing here assumes it exists. */
+   entirely when the machine cannot run it, so nothing here assumes it exists.
+
+   `html, body` paint an opaque `--bg`, which sat directly on top of a canvas at
+   z-index -1 — the shader was running perfectly and completely invisible. The
+   page has to be see-through for a backdrop to be a backdrop, so the class goes
+   on <html> while it is on and comes off again when it stops. */
+html.backdrop-on,
+html.backdrop-on body { background: transparent; }
+
+/* The sticky group headings inside the grid paint --bg too, for the same
+   reason: they have to hide the rows scrolling under them. Frosted instead, so
+   the shader shows through without the text losing its background. */
+html.backdrop-on #list h3 {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(10px);
+}
 #backdrop {
   position: fixed;
   inset: 0;

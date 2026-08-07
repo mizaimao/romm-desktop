@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use romm_desktop::{
     api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
@@ -178,6 +178,34 @@ async fn sync_library(app: tauri::AppHandle, state: State<'_, AppState>, full: b
         if collections > 0 { format!(", {collections} collections") } else { String::new() },
         if renamed > 0 { format!(", {renamed} arcade titles") } else { String::new() },
     ))
+}
+
+/// Open the Settings window, or focus it if it is already up.
+///
+/// A real second window rather than an overlay: settings are a place you go and
+/// come back from, and the old panel put both binding tables — the longest
+/// thing in the app — on top of the library you were trying to use. This one is
+/// resizable and remembers nothing about the grid behind it.
+#[tauri::command]
+async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    // Focus rather than open a second copy. Two settings windows would each
+    // hold their own binding state and the last one saved would win.
+    if let Some(existing) = app.get_webview_window("settings") {
+        existing.set_focus().map_err(err)?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
+        .title("Settings")
+        .inner_size(860.0, 640.0)
+        // Below this the tab rail and a binding row stop fitting side by side.
+        .min_inner_size(640.0, 460.0)
+        .resizable(true)
+        .build()
+        .map_err(err)?;
+    Ok(())
 }
 
 /// Pull the useful bits out of RomM's merged `metadatum` blob.
@@ -1606,7 +1634,8 @@ fn main() {
             set_system_choice,
             game_cores,
             set_game_core,
-            status
+            status,
+            open_settings
         ])
         .run(tauri::generate_context!())
         .expect("running tauri application");
