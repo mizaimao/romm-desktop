@@ -856,6 +856,15 @@ async fn launch_rom(
                 Err(e) => fetched.push(format!("could not fetch shaders: {e}")),
             }
         }
+        // BIOS, for the same reason as the core: telling someone to go and
+        // install one is advice delivered at the exact moment they cannot see
+        // why the screen is black. Only what this platform actually needs.
+        let library_root = state.roms_dir.parent().unwrap_or(Path::new("."));
+        match romm_desktop::bios::ensure(api, library_root, core, &row.platform_slug).await {
+            Ok(0) => {}
+            Ok(n) => fetched.push(format!("fetched {n} BIOS file(s)")),
+            Err(e) => fetched.push(format!("could not fetch BIOS: {e}")),
+        }
     }
 
     let plan = romm_desktop::launch::plan(ra, &state.map, &req).map_err(err)?;

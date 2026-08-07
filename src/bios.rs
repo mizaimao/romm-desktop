@@ -18,7 +18,111 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use serde::Deserialize;
+
 use crate::api::{Client, Firmware};
+
+/// The BIOS manifest, compiled in.
+///
+/// Same reasoning as the core map: a Windows install is one loose executable,
+/// and a feature that needs a file nobody shipped is a feature that does not
+/// work there.
+pub const MANIFEST: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/bios-manifest.json"));
+
+/// One BIOS the manifest knows about: which file, and what needs it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Entry {
+    /// File name as RetroArch expects it in the system directory.
+    pub path: String,
+    #[serde(default)]
+    pub desc: String,
+    /// False for BIOS that only unlock optional behaviour.
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub cores: Vec<String>,
+    #[serde(default)]
+    pub systems: Vec<String>,
+}
+
+fn manifest() -> Vec<Entry> {
+    serde_json::from_str(MANIFEST).unwrap_or_default()
+}
+
+/// The BIOS files a launch of `core` on `platform` needs.
+///
+/// Matched on either, because the manifest describes both and neither alone is
+/// enough: `neogeo.zip` is listed against the arcade *systems* while
+/// `geolith`'s own BIOS is listed against the *core*.
+///
+/// Only the required ones. Optional BIOS unlock extra behaviour rather than
+/// making a game run, and pulling the whole set on the way into a game is the
+/// opposite of what an automatic fetch should feel like.
+pub fn required_for(core: &str, platform: &str) -> Vec<String> {
+    manifest()
+        .into_iter()
+        .filter(|e| e.required)
+        .filter(|e| {
+            e.cores.iter().any(|c| c == core) || e.systems.iter().any(|s| s == platform)
+        })
+        .map(|e| e.path)
+        .collect()
+}
+
+/// Fetch any BIOS this launch needs and does not have.
+///
+/// Called on the way into a game rather than offered as a button: a missing
+/// BIOS produces a black screen and a line in a log nobody reads, so "install
+/// it yourself" is advice given at the exact moment the user cannot see why.
+///
+/// Returns how many were fetched. Never fatal — an unreachable server should
+/// not stop a game that might well run without one.
+pub async fn ensure(
+    client: &Client,
+    library_root: &Path,
+    core: &str,
+    platform: &str,
+) -> Result<usize> {
+    let wanted = required_for(core, platform);
+    if wanted.is_empty() {
+        return Ok(0);
+    }
+    let dest = system_dir(library_root);
+    let missing: Vec<String> = wanted
+        .into_iter()
+        .filter(|name| !dest.join(name).is_file())
+        .collect();
+    if missing.is_empty() {
+        return Ok(0);
+    }
+
+    std::fs::create_dir_all(&dest)
+        .with_context(|| format!("creating {}", dest.display()))?;
+    let available = client.firmware().await?;
+    let mut got = 0;
+
+    for name in &missing {
+        // The server's own name for it may carry a path; match on the leaf.
+        let Some(fw) = available.iter().find(|f| {
+            Path::new(&f.file_name)
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy() == name.as_str())
+        }) else {
+            continue;
+        };
+        if let Ok(bytes) = client.firmware_content(fw.id, &fw.file_name).await {
+            let part = dest.join(format!("{name}.part"));
+            if std::fs::write(&part, &bytes).is_ok()
+                && std::fs::rename(&part, dest.join(name)).is_ok()
+            {
+                got += 1;
+            } else {
+                std::fs::remove_file(&part).ok();
+            }
+        }
+    }
+    Ok(got)
+}
 
 /// What a sync did.
 #[derive(Debug, Default)]
@@ -229,5 +333,68 @@ mod tests {
         let s = Summary { downloaded: 3, already_had: 64, bytes: 1024, failed: 1, ..Default::default() };
         assert!(s.headline().contains("3 downloaded"));
         assert!(s.headline().contains("1 failed"));
+    }
+
+    /// The manifest is compiled in, so it must parse. Infallible by
+    /// construction only if something checks — a broken file would otherwise
+    /// silently mean "no BIOS is ever required" and every Neo Geo game would
+    /// fail with a black screen and no fetch attempted.
+    #[test]
+    fn the_embedded_manifest_parses_and_is_populated() {
+        let all = manifest();
+        assert!(all.len() > 100, "got {}", all.len());
+        assert!(all.iter().any(|e| e.path == "neogeo.zip"));
+    }
+
+    /// The case Frank hit: a Neo Geo game will not start without these, and
+    /// they are listed against the arcade systems rather than the core.
+    #[test]
+    fn neo_geo_needs_its_bios_whichever_way_it_is_launched() {
+        for (core, platform) in [("geolith", "neogeoaes"), ("fbneo", "arcade"), ("mame2003_plus", "mame")] {
+            let need = required_for(core, platform);
+            assert!(
+                need.iter().any(|n| n == "neogeo.zip"),
+                "{core}/{platform} should need neogeo.zip, got {need:?}"
+            );
+        }
+    }
+
+    /// Matched on the core as well as the system, because neither alone covers
+    /// the manifest: some entries name only cores.
+    #[test]
+    fn a_core_only_entry_is_found_by_its_core() {
+        let by_core = required_for("geolith", "something-else");
+        assert!(!by_core.is_empty(), "geolith has required BIOS of its own");
+    }
+
+    /// A platform that needs nothing asks for nothing — otherwise every launch
+    /// of every console would hit the network for a list it cannot use.
+    #[test]
+    fn a_platform_with_no_bios_requires_none() {
+        assert!(required_for("snes9x", "snes").is_empty());
+        assert!(required_for("fceumm", "nes").is_empty());
+    }
+
+    /// Only the required ones. Optional BIOS unlock extra behaviour rather than
+    /// making a game run, and fetching the lot on the way into a game is the
+    /// opposite of what an automatic fetch should feel like.
+    #[test]
+    fn optional_bios_are_not_fetched_on_launch() {
+        let all = manifest();
+        let optional: Vec<&Entry> = all.iter().filter(|e| !e.required).collect();
+        assert!(!optional.is_empty(), "the manifest has optional entries to exclude");
+
+        for platform in ["arcade", "mame", "psx", "nes", "snes"] {
+            let need = required_for("any", platform);
+            for e in &optional {
+                if e.systems.iter().any(|s| s == platform) {
+                    assert!(
+                        !need.contains(&e.path),
+                        "{} is optional and must not be fetched on launch",
+                        e.path
+                    );
+                }
+            }
+        }
     }
 }

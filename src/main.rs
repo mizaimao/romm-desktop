@@ -120,7 +120,7 @@ fn cmd_doctor() -> Result<()> {
     Ok(())
 }
 
-fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: bool) -> Result<()> {
+async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: bool) -> Result<()> {
     let cfg = Config::load()?;
     let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?
         .with_system_dir(Some(cfg.system_dir()));
@@ -152,6 +152,38 @@ motion_shader: cfg.shaders.motion.as_deref(),
         pad: None,
         achievements: Some(&achievements),
     };
+    // Cores, shaders and BIOS, fetched on the way in rather than as advice to
+    // go and run something. The GUI has always done this; the CLI told you to
+    // install them yourself, which is the same information delivered at the
+    // moment it is least useful.
+    if let Ok(client) = cfg.server.client() {
+        let core_wanted = core_override.map(str::to_owned).or_else(|| {
+            coremap::resolve_core_for(
+                &map, &cfg.cores.overrides, &cfg.cores.per_game,
+                &platform, Some(req.fs_name), |_| true,
+            )
+        });
+        if let Some(core) = core_wanted.as_deref() {
+            match cores::ensure(client.http(), &ra, core).await {
+                Ok(true) => println!("fetched the {core} core"),
+                Ok(false) => {}
+                Err(e) => eprintln!("warning: could not fetch {core}: {e}"),
+            }
+            match romm_desktop::bios::ensure(
+                &client, Path::new(&cfg.library.local_root), core, &platform,
+            ).await {
+                Ok(0) => {}
+                Ok(n) => println!("fetched {n} BIOS file(s)"),
+                Err(e) => eprintln!("warning: could not fetch BIOS: {e}"),
+            }
+        }
+        if cfg.shaders.enabled
+            && let Err(e) = shaders::ensure_pack(client.http(), &ra).await
+        {
+            eprintln!("warning: could not fetch shaders: {e}");
+        }
+    }
+
     let plan = launch::plan(&ra, &map, &req)?;
 
     for note in &plan.notes {
@@ -1674,7 +1706,7 @@ async fn main() -> Result<()> {
             core,
             fullscreen,
             go,
-        } => cmd_launch(&rom, go, core.as_deref(), fullscreen),
+        } => cmd_launch(&rom, go, core.as_deref(), fullscreen).await,
         Command::Art { term } => cmd_art(&term).await,
         Command::Hashcheck { file } => cmd_hashcheck(&file),
         Command::SyncBios => cmd_sync_bios().await,
