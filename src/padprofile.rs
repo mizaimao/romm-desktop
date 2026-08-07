@@ -477,6 +477,37 @@ pub fn hotkey_block(profile: &PadProfile) -> String {
     out
 }
 
+/// What to write when no profile could be found.
+///
+/// Comments only — deliberately no bindings. RetroArch will still map the pad
+/// for *play* from its own autoconfig; what is missing is only the hotkey
+/// layer, and missing it costs a shortcut. Guessing it costs a game.
+///
+/// The note says which directory was searched, because the usual cause is a
+/// RetroArch that has never been run and therefore has no `autoconfig/` at all.
+pub fn no_profile_note(root: &Path, device: Option<&str>) -> String {
+    format!(
+        "\n# ---- Controller hotkeys ----\n\
+         # None bound. RetroArch takes raw driver button indices for these, and\n\
+         # they differ per controller and per operating system, so they are read\n\
+         # out of RetroArch's own autoconfig profile for the connected pad.\n\
+         #\n\
+         # No profile matched{}.\n\
+         # Searched: {}\n\
+         #\n\
+         # If that directory does not exist, run RetroArch once so it writes its\n\
+         # configuration, then launch again. Guessing the indices instead would\n\
+         # put the modifier on a button or stick used during play, which quits\n\
+         # games mid-session -- so nothing is written rather than something\n\
+         # probably wrong.\n",
+        match device {
+            Some(d) => format!(" for {d:?}"),
+            None => String::new(),
+        },
+        root.join("autoconfig").display()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

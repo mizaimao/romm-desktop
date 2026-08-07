@@ -408,19 +408,19 @@ video_max_swapchain_images = \"2\"
     /// hotkeys take raw driver indices, which differ per controller *and* per
     /// operating system. See [`crate::padprofile`].
     pub fn hotkeys(&self, device: Option<&str>) -> String {
-        let profile = padprofile::find(&self.root, device)
-            // A pad known to number its buttons differently from its platform's
-            // usual layout. Checked before the generic table, which would put
-            // the hotkey modifier on the wrong button for it.
-            .or_else(|| padprofile::known(device))
-            .unwrap_or_else(|| {
-                // No autoconfig directory, or nothing in it for this pad. The
-                // built-in table is right for an Xbox-style controller, which is
-                // the overwhelming majority, and the user's own config still
-                // wins.
-                padprofile::fallback()
-            });
-        padprofile::hotkey_block(&profile)
+        // Only ever a profile RetroArch itself wrote, or one built in for a pad
+        // somebody has actually reported.
+        //
+        // There used to be a generic Xbox table behind these, used whenever
+        // nothing matched. That is worse than nothing. A hotkey index that is
+        // wrong does not fail quietly — it binds the modifier to a button or
+        // stick used constantly in play, so the menu opens or the game quits
+        // while you are moving. A guess is only safe when being wrong is
+        // cheap, and here it is not.
+        match padprofile::find(&self.root, device).or_else(|| padprofile::known(device)) {
+            Some(profile) => padprofile::hotkey_block(&profile),
+            None => padprofile::no_profile_note(&self.root, device),
+        }
     }
 
     /// Write a starter user-settings file if none exists yet.
@@ -675,6 +675,38 @@ mod tests {
         }
     }
 
+    /// Give a scratch RetroArch an autoconfig profile, in every driver
+    /// directory this OS searches, so the test works the same on all three.
+    ///
+    /// Needed now that no profile means no hotkeys: a test that wants hotkeys
+    /// has to supply the thing they are derived from, which is also a more
+    /// honest reflection of how this works in reality.
+    fn with_autoconfig(root: &Path) {
+        const PROFILE: &str = r#"
+input_driver = "test"
+input_device = "Xbox Wireless Controller"
+input_b_btn = "0"
+input_a_btn = "1"
+input_y_btn = "2"
+input_x_btn = "3"
+input_l_btn = "4"
+input_r_btn = "5"
+input_select_btn = "6"
+input_start_btn = "7"
+input_up_btn = "h0up"
+input_down_btn = "h0down"
+input_left_btn = "h0left"
+input_right_btn = "h0right"
+input_l2_axis = "+2"
+input_r2_axis = "+5"
+"#;
+        for driver in ["mfi", "hid", "xinput", "dinput", "sdl2", "udev", "linuxraw"] {
+            let dir = root.join("autoconfig").join(driver);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("xbox.cfg"), PROFILE).unwrap();
+        }
+    }
+
     /// Each test gets its own directory under the OS temp dir, named for the
     /// test, so a failure leaves inspectable output and runs cannot collide.
     fn scratch(name: &str) -> PathBuf {
@@ -690,6 +722,7 @@ mod tests {
     #[test]
     fn the_users_own_settings_come_last() {
         let dir = scratch("user-last");
+        with_autoconfig(&dir);
         let user = dir.join("mine.cfg");
         std::fs::write(&user, "video_driver = \"vulkan\"\n").unwrap();
 
@@ -710,6 +743,7 @@ mod tests {
     #[test]
     fn a_missing_user_config_does_not_fail_the_launch() {
         let dir = scratch("missing-user");
+        with_autoconfig(&dir);
         let path = fake(&dir)
             .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None)
             .unwrap();
@@ -728,13 +762,14 @@ mod tests {
         use crate::padprofile;
 
         let dir = scratch("hotkeys");
+        with_autoconfig(&dir);
         let body = std::fs::read_to_string(
             fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
         )
         .unwrap();
 
-        // No autoconfig under a scratch dir, so this is the built-in fallback.
-        let profile = padprofile::fallback();
+        // The profile written above is what the block must be derived from.
+        let profile = padprofile::find(&dir, None).expect("the autoconfig we just wrote");
         assert!(
             body.contains(&profile.get(padprofile::MODIFIER).unwrap().line("enable_hotkey")),
             "Select must be bound as the modifier"
@@ -764,12 +799,13 @@ mod tests {
         use crate::padprofile::{self, Physical};
 
         let dir = scratch("quit-safety");
+        with_autoconfig(&dir);
         let body = std::fs::read_to_string(
             fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
         )
         .unwrap();
 
-        let profile = padprofile::fallback();
+        let profile = padprofile::find(&dir, None).expect("the autoconfig we just wrote");
         let modifier = profile.get(padprofile::MODIFIER).unwrap();
         let quit = profile.get(Physical::A).unwrap();
         assert_ne!(modifier.value, quit.value);
@@ -826,5 +862,55 @@ mod tests {
         std::fs::write(&path, "input_driver = \"mine\"\n").unwrap();
         assert!(!RetroArch::ensure_user_config(&path).unwrap(), "left alone the second time");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "input_driver = \"mine\"\n");
+    }
+
+    /// The change this file exists to guard: with nothing to derive hotkeys
+    /// from, none are written.
+    ///
+    /// A wrong index does not fail quietly — it puts the modifier on a button or
+    /// stick used constantly in play, so the menu opens or the game quits while
+    /// you are moving. That is exactly what a generic fallback table produced on
+    /// a pad it did not describe.
+    #[test]
+    fn no_profile_means_no_hotkeys_rather_than_a_guess() {
+        let dir = scratch("no-profile");
+        let body = std::fs::read_to_string(
+            fake(&dir).write_overrides_full(&dir, None, "", Some("Some Unusual Pad")).unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            !body.contains("input_enable_hotkey"),
+            "no modifier may be invented: {body}"
+        );
+        assert!(
+            !body.contains("input_exit_emulator"),
+            "and certainly not quit"
+        );
+        // But it must say why, and where it looked.
+        assert!(body.contains("No profile matched"), "{body}");
+        assert!(body.contains("autoconfig"), "names the directory: {body}");
+        assert!(body.contains("run RetroArch once"), "and how to fix it: {body}");
+    }
+
+    /// The note is comments only, so it cannot change any setting by accident.
+    #[test]
+    fn the_no_profile_note_binds_nothing() {
+        let dir = scratch("no-profile-lines");
+        let body = std::fs::read_to_string(
+            fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
+        )
+        .unwrap();
+        // Only the hotkey keys: `input_overlay_enable` and friends are ordinary
+        // base settings and have nothing to do with a pad profile.
+        let mut names: Vec<String> = vec!["enable_hotkey".to_owned()];
+        names.extend(padprofile::HOTKEYS.iter().map(|(a, _, _)| (*a).to_owned()));
+
+        let bound: Vec<&str> = body
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .filter(|l| names.iter().any(|n| l.contains(&format!("input_{n}_"))))
+            .collect();
+        assert!(bound.is_empty(), "no hotkey may be bound: {bound:?}");
     }
 }

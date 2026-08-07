@@ -50,9 +50,16 @@ header {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   /* Translucent rather than solid. `color-mix` keeps this tied to the theme
      colour instead of a second hardcoded value that drifts from it. */
-  background: color-mix(in srgb, var(--panel) 62%, transparent);
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  background: color-mix(in srgb, var(--panel) 52%, transparent);
+  /* Blur alone reads as "slightly smeared", not as glass. What sells it is the
+     rest: pushing saturation and brightness so colour bleeds through from
+     underneath, a hairline highlight along the top edge where light would
+     catch, and a shadow so the bar sits above the page rather than in it. */
+  backdrop-filter: blur(26px) saturate(190%) brightness(115%);
+  -webkit-backdrop-filter: blur(26px) saturate(190%) brightness(115%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 14px rgba(0, 0, 0, 0.35);
   /* Leave room for the macOS traffic lights. */
   padding-left: 88px;
   -webkit-app-region: drag;
@@ -182,10 +189,13 @@ main {
   padding: 0 10px;
   /* Slightly less tint than the header, so the two read as separate sheets of
      glass rather than one thick bar. */
-  background: color-mix(in srgb, var(--panel) 48%, transparent);
-  backdrop-filter: blur(22px) saturate(150%);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: color-mix(in srgb, var(--panel) 38%, transparent);
+  backdrop-filter: blur(26px) saturate(190%) brightness(112%);
+  -webkit-backdrop-filter: blur(26px) saturate(190%) brightness(112%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 12px rgba(0, 0, 0, 0.28);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 }
 #tabbar .stab {
   appearance: none;
@@ -1165,4 +1175,31 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 @media (prefers-reduced-motion: reduce) {
   #list.turn-left,
   #list.turn-right { animation: none; }
+}
+
+/* ---- View transitions ----------------------------------------------------
+   The cover art moves from the card into the detail pane instead of the pane
+   being replaced. Only the pair is animated; everything else cross-fades, which
+   is the browser default and right for text.
+
+   Ignored entirely where the API is missing — the app behaves the same, it just
+   does not animate. Nothing may depend on this having run. */
+::view-transition-old(cover),
+::view-transition-new(cover) {
+  /* No fade on the pair: fading a moving element makes it look like two
+     pictures rather than one travelling. */
+  animation: none;
+  mix-blend-mode: normal;
+  object-fit: cover;
+}
+
+::view-transition-group(cover) { animation-duration: 260ms; }
+
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 160ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
 }

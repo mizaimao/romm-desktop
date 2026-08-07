@@ -24,6 +24,16 @@ export function setSidebar(on) {
 }
 
 export async function selectRom(id) {
+  // The card the cursor is moving to, tagged so the browser can carry it into
+  // the detail pane's cover rather than cross-fading two unrelated images.
+  // Tagged before the class changes, since the old tag has to be cleared in the
+  // same frame or two elements claim the same name and the transition is
+  // skipped entirely.
+  const card = el.list.querySelector(`[data-id="${id}"] .art img`);
+  const previous = document.querySelector('[style*="view-transition-name"]');
+  if (previous) previous.style.viewTransitionName = "";
+  if (card) card.style.viewTransitionName = "cover";
+
   state.selected = id;
   rememberRom(id);
   el.list.querySelectorAll(".row, .gcard").forEach((r) =>
@@ -58,14 +68,21 @@ export async function selectRom(id) {
       ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
       : "";
 
-  const cover = d.cover ? `<img class="cover" src="${convertFileSrc(d.cover)}" alt="" />` : "";
+  // The other half of the morph: same name as the tagged card art, so the
+  // browser treats them as one element moving rather than two fading.
+  const cover = d.cover
+    ? `<img class="cover" style="view-transition-name: cover" src="${convertFileSrc(d.cover)}" alt="" />`
+    : "";
   const video =
     shots.length && d.video
       ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
       : "";
 
   el.detail.hidden = !state.sidebar;
-  el.detail.innerHTML = `
+  // Wrapped so the browser can match the tagged card art to the pane's cover
+  // and move one into the other, instead of replacing the pane wholesale.
+  await withTransition(() => {
+    el.detail.innerHTML = `
     <div class="scroll">
       <h2>${escapeHtml(d.name)}</h2>
       <div class="sub">${escapeHtml(d.fs_name)}</div>
@@ -106,6 +123,7 @@ export async function selectRom(id) {
       </div>
       <progress id="prog" hidden></progress>
     </div>`;
+  });
 
   if (shots.length > 1) startSlideshow(shots.length);
   wireArtwork(d);
@@ -301,6 +319,19 @@ function applyWidth(px) {
 ///
 /// The left stick moves the cursor through the list; the right one reads the
 /// pane next to it, which is otherwise unreachable without a mouse.
+/// Run `fn` inside a view transition when the browser has one.
+///
+/// The API is Chromium-and-newer-WebKit; where it is missing this is a plain
+/// call, so the app behaves identically and simply does not animate. Nothing
+/// downstream may depend on the transition having happened.
+export function withTransition(fn) {
+  const start = document.startViewTransition?.bind(document);
+  if (!start || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return Promise.resolve(fn());
+  }
+  return start(fn).finished.catch(() => {});
+}
+
 export function scrollDetail(amount) {
   const pane = el.detail?.querySelector(".scroll");
   if (!pane || el.detail.hidden) return false;
