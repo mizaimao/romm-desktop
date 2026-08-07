@@ -225,6 +225,18 @@ header h1 {
   --glass: #4d8fd6;
 }
 
+/* `hidden` has to actually hide.
+   The browser's own rule for it is `[hidden] { display: none }` in the *user
+   agent* stylesheet, which loses to any author rule that sets `display` at all
+   — and this file sets one on every button holding an icon beside a word. So
+   Back, Grid and Hide info stayed on screen after being hidden, and the Grid
+   button in particular then redrew the last console you had open, which looks
+   exactly like a button that opens consoles by itself.
+
+   `!important` because the point is to beat every author rule, present and
+   future. This is the one place in the file where that is the correct tool. */
+[hidden] { display: none !important; }
+
 body {
   /* The bars and the content stack. Heights come out of the layout rather than
      being computed from the bars, so changing one moves nothing else. */
@@ -1548,3 +1560,11 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   cursor: pointer;
 }
 .systbl .gun input { accent-color: var(--accent); cursor: pointer; }
+
+/* ---- Consoles as a list -------------------------------------------------
+   The same row as a game list so the two read alike, with the slug in the
+   middle column the platform tag uses in search results. The dot sits where a
+   game's download marker would: both answer "can I play this right now". */
+.prow .have { display: flex; align-items: center; justify-content: center; }
+.prow .pf { opacity: 0.55; }
+.prow .sz { min-width: 12ch; text-align: right; }

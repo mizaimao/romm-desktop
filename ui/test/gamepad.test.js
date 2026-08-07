@@ -70,6 +70,9 @@ before(async () => {
     Object.defineProperty(globalThis, k, { value: dom.window[k], configurable: true });
   }
   globalThis.requestAnimationFrame = (fn) => dom.window.setTimeout(fn, 0);
+  // jsdom has no layout, so it does not implement this at all. The app calls it
+  // whenever it moves the cursor; without a stand-in every such path throws.
+  dom.window.Element.prototype.scrollIntoView = function () {};
 
   const load = (m) => import(join(uiDir, "js", m));
   ui = {
@@ -78,10 +81,11 @@ before(async () => {
     ...(await load("bindings.js")),
     ...(await load("gamepad.js")),
     ...(await load("tabs.js")),
+    ...(await load("library.js")),
   };
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   invoked.length = 0;
   pads = [];
   document.getElementById("list").innerHTML = "";
@@ -89,6 +93,11 @@ beforeEach(() => {
   ui.state.platform = null;
   ui.trail.length = 0;
   ui.resetPad();
+  // The section is module state and survives between tests. A test that ends
+  // in My collections would otherwise change what "back" means for the next
+  // one, which is the kind of coupling that makes a suite lie.
+  await ui.showSection("library");
+  invoked.length = 0;
 });
 
 /// A gamepad with `down` pressed, shaped like the real thing.
@@ -360,5 +369,58 @@ describe("back at the top of a section", () => {
     await settle();
     assert.equal(ui.activeSection(), "mine", "Back must not tip you into the library");
     assert.notEqual(ui.state.view, "platforms");
+  });
+});
+
+describe("grid / list on the consoles screen", () => {
+  /// Pressing it there used to redraw `state.rows`, which still held the last
+  /// console you opened — so the button appeared to open a console by itself.
+  test("switching layout on the consoles screen does not open a console", async () => {
+    cards(`<div class="card" data-slug="snes"></div>`);
+    ui.runAction("activate");
+    await settle();
+    assert.equal(ui.state.view, "roms", "we opened one, so state.rows is populated");
+
+    await ui.resetSection();
+    await settle();
+    assert.equal(ui.state.view, "platforms");
+
+    const before = invoked.length;
+    ui.setLayout("list");
+    await settle();
+    assert.equal(ui.state.view, "platforms", "the layout button must not open anything");
+    assert.equal(
+      invoked.slice(before).filter((c) => c.cmd === "roms").length,
+      0,
+      "no console was asked for"
+    );
+  });
+
+  test("consoles render in both layouts, and stay reachable by keyboard", async () => {
+    ui.state.platforms = [
+      { slug: "snes", name: "Super Nintendo", rom_count: 50, playable: true },
+      { slug: "gb", name: "Game Boy", rom_count: 32, playable: false },
+    ];
+    ui.state.view = "platforms";
+
+    ui.setLayout("list");
+    assert.equal(document.querySelectorAll(".prow").length, 2);
+    // The navigation code selects `.card, .gcard, .row, .tcard`; a console row
+    // that is not one of those cannot be reached without a mouse.
+    assert.equal(document.querySelectorAll(".row").length, 2, "rows must be navigable");
+
+    ui.setLayout("grid");
+    assert.equal(document.querySelectorAll(".card").length, 2);
+    assert.equal(document.querySelectorAll(".prow").length, 0);
+  });
+
+  test("opening a console from a row works, not just from a card", async () => {
+    ui.state.platforms = [{ slug: "gb", name: "Game Boy", rom_count: 32, playable: true }];
+    ui.state.view = "platforms";
+    ui.setLayout("list");
+
+    document.querySelector(".prow").click();
+    await settle();
+    assert.equal(openedPlatform(), "gb");
   });
 });

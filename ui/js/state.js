@@ -18,6 +18,9 @@ export const state = {
   /// Its name, separate from the rendered title. The title carries a count and
   /// re-deriving one from the other appends it twice.
   collectionName: null,
+  /// The consoles as last fetched, so switching layout redraws them without
+  /// another round trip.
+  platforms: [],
   /// List key -> the rom id last selected in it. Coming back to a console or a
   /// collection puts the cursor where you left it rather than at the top, which
   /// otherwise means re-finding your place on every single trip in and out.

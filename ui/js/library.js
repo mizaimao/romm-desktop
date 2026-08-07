@@ -12,9 +12,12 @@ export async function showPlatforms() {
   state.selected = null;
   el.back.hidden = true;
   el.detail.hidden = true;
-  el.layoutBtn.hidden = true;
+  // Grid or list works here too. It was hidden on this screen, which is why
+  // there was no way to see thirty-five consoles without scrolling past
+  // thirty-five pictures of them.
+  el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = true;
-  el.zoomWrap.hidden = false; // the platform grid scales too
+  el.zoomWrap.hidden = state.layout !== "grid";
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");
   coverObserver?.disconnect();
@@ -22,10 +25,34 @@ export async function showPlatforms() {
 
   const items = await invoke("platforms");
   for (const p of items) if (p.cover_aspect) state.aspects[p.slug] = p.cover_aspect;
+  // Kept so switching layout can redraw without asking the backend again.
+  state.platforms = items;
 
-  el.list.innerHTML = `<div class="grid">${items
-    .map(
-      (p) => `
+  renderPlatforms(items);
+
+  restorePlatformCursor();
+}
+
+/// Draw the consoles, in whichever layout is selected.
+///
+/// Both shapes carry the same three facts — name, how many games, whether a
+/// core is installed — so switching layout changes the density and nothing
+/// else. The list is for finding a console you can name; the grid is for
+/// recognising one you cannot.
+function renderPlatforms(items) {
+  el.list.innerHTML =
+    state.layout === "grid"
+      ? `<div class="grid">${items.map(platformCard).join("")}</div>`
+      : `<div class="rows">${items.map(platformRow).join("")}</div>`;
+
+  el.list.querySelectorAll(".card, .prow").forEach((c) =>
+    c.addEventListener("click", () => showRoms(c.dataset.slug))
+  );
+  resetNav();
+}
+
+function platformCard(p) {
+  return `
       <div class="card" data-slug="${p.slug}">
         <div class="logo">${
           p.logo
@@ -37,20 +64,28 @@ export async function showPlatforms() {
           <span class="dot ${p.playable ? "on" : ""}"></span>
           ${p.rom_count} games${p.playable ? "" : " · no core"}
         </div>
-      </div>`
-    )
-    .join("")}</div>`;
+      </div>`;
+}
 
-  el.list.querySelectorAll(".card").forEach((c) =>
-    c.addEventListener("click", () => showRoms(c.dataset.slug))
-  );
-  resetNav();
+function platformRow(p) {
+  // `row` as well as `prow` so keyboard and pad navigation pick it up: the
+  // movement code selects `.card, .gcard, .row, .tcard`, and a row that is not
+  // one of those is unreachable without a mouse.
+  return `
+      <div class="row prow" data-slug="${p.slug}">
+        <span class="have"><span class="dot ${p.playable ? "on" : ""}"></span></span>
+        <span class="nm">${escapeHtml(p.name)}</span>
+        <span class="pf">${escapeHtml(p.slug)}</span>
+        <span class="sz">${p.rom_count} games${p.playable ? "" : " · no core"}</span>
+      </div>`;
+}
 
-  // Put the cursor back on the console you were just in. Coming out of a game
-  // list to find the selection reset to the top-left corner means re-finding
-  // your place every single time.
+/// Put the cursor back on the console you were just in. Coming out of a game
+/// list to find the selection reset to the top-left corner means re-finding
+/// your place every single time.
+function restorePlatformCursor() {
   const back = state.lastPlatform
-    ? el.list.querySelector(`.card[data-slug="${CSS.escape(state.lastPlatform)}"]`)
+    ? el.list.querySelector(`[data-slug="${CSS.escape(state.lastPlatform)}"]`)
     : null;
   if (back) {
     back.classList.add("sel");
@@ -58,7 +93,7 @@ export async function showPlatforms() {
   } else {
     // Always leave something selected, so the controller's A button has a
     // target the moment the grid appears.
-    el.list.querySelector(".card")?.classList.add("sel");
+    el.list.querySelector(".card, .prow")?.classList.add("sel");
   }
 }
 
@@ -216,8 +251,22 @@ export function setLayout(next) {
   el.layoutBtn.querySelector("span:not(.icon)").textContent = next === "grid" ? "List" : "Grid";
   el.layoutBtn.querySelector(".icon").className = `icon icon-${next === "grid" ? "list" : "grid"}`;
   el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
-  el.zoomWrap.hidden = next !== "grid" && state.view !== "platforms";
-  if (state.rows.length) renderRows(state.rows, state.view === "search");
+  // Only a grid has anything to resize, on the consoles screen as much as
+  // anywhere else.
+  el.zoomWrap.hidden = next !== "grid";
+
+  // Redraw whatever is actually on screen.
+  //
+  // This used to redraw `state.rows` regardless of the current view, and
+  // `state.rows` still holds the last console you opened. So pressing the
+  // button on the consoles screen replaced it with that console's games —
+  // which looks exactly like the button opened a console by itself.
+  if (state.view === "platforms") {
+    renderPlatforms(state.platforms);
+    restorePlatformCursor();
+  } else if (state.rows.length) {
+    renderRows(state.rows, state.view === "search");
+  }
 }
 
 // Covers load only for cards near the viewport, batched — opening a

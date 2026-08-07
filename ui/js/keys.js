@@ -231,9 +231,9 @@ export const HANDLERS = {
     if (state.selected) import("./actions.js").then((m) => m.download(state.selected, false));
   },
   layout: () => {
-    if (state.view === "roms" || state.view === "search") {
-      setLayout(state.layout === "grid" ? "list" : "grid");
-    }
+    // Wherever the button is offered, the binding works too.
+    if (el.layoutBtn.hidden) return;
+    setLayout(state.layout === "grid" ? "list" : "grid");
   },
   sidebar: () => {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
