@@ -316,7 +316,13 @@ mod tests {
         let kept = keep(&dir, 7, "autosave", &save).unwrap().unwrap();
 
         assert!(kept.starts_with(dir.join("saves-backup")));
-        assert!(kept.to_string_lossy().contains("/7/"), "keyed by rom id");
+        // By component, not by a literal separator: `contains("/7/")` passes on
+        // macOS and fails on Windows, which is exactly how it failed in CI.
+        assert!(
+            kept.components().any(|c| c.as_os_str() == "7"),
+            "keyed by rom id: {}",
+            kept.display()
+        );
         assert!(kept.file_name().unwrap().to_string_lossy().ends_with("-Zelda.srm"));
     }
 }
