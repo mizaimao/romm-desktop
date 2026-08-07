@@ -50,16 +50,31 @@ header {
   border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   /* Translucent rather than solid. `color-mix` keeps this tied to the theme
      colour instead of a second hardcoded value that drifts from it. */
-  background: color-mix(in srgb, var(--panel) 52%, transparent);
-  /* Blur alone reads as "slightly smeared", not as glass. What sells it is the
-     rest: pushing saturation and brightness so colour bleeds through from
-     underneath, a hairline highlight along the top edge where light would
-     catch, and a shadow so the bar sits above the page rather than in it. */
-  backdrop-filter: blur(26px) saturate(190%) brightness(115%);
-  -webkit-backdrop-filter: blur(26px) saturate(190%) brightness(115%);
+  /* Aero glass.
+     Vista's look was never just blur. Four things did the work, and leaving any
+     one out gives you a grey bar:
+
+       a tint the user picks, sitting over the blur rather than replacing it
+       a vertical gradient, lighter at the top, as if lit from above
+       a bright hairline inside the top edge and a dimmer one inside the bottom
+       a wide soft shadow beneath, so the sheet floats above the page
+
+     The tint is a custom property so Appearance can drive it, the same way
+     Vista's own "Window Color" panel did. */
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--glass) 30%, transparent) 0%,
+      color-mix(in srgb, var(--glass) 16%, transparent) 45%,
+      color-mix(in srgb, var(--glass) 22%, transparent) 100%
+    ),
+    color-mix(in srgb, var(--panel) 46%, transparent);
+  backdrop-filter: blur(30px) saturate(200%) brightness(118%);
+  -webkit-backdrop-filter: blur(30px) saturate(200%) brightness(118%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 1px 14px rgba(0, 0, 0, 0.35);
+    inset 0 1px 0 rgba(255, 255, 255, 0.30),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.07),
+    0 6px 22px rgba(0, 0, 0, 0.42);
   /* Leave room for the macOS traffic lights. */
   padding-left: 88px;
   -webkit-app-region: drag;
@@ -164,7 +179,12 @@ header h1 {
 /* Header plus tab bar. One value, used by every element that has to clear
    them, so moving a bar does not mean hunting for the three places that
    assumed its height. */
-:root { --bars: 85px; }
+:root {
+  --bars: 85px;
+  /* The glass tint. Vista let you choose this and it is half of what made the
+     look yours rather than the operating system's; Appearance sets it. */
+  --glass: #4d8fd6;
+}
 
 main {
   display: flex;
@@ -189,12 +209,20 @@ main {
   padding: 0 10px;
   /* Slightly less tint than the header, so the two read as separate sheets of
      glass rather than one thick bar. */
-  background: color-mix(in srgb, var(--panel) 38%, transparent);
-  backdrop-filter: blur(26px) saturate(190%) brightness(112%);
-  -webkit-backdrop-filter: blur(26px) saturate(190%) brightness(112%);
+  /* The second sheet: less tint and a weaker highlight, so it reads as glass
+     behind glass rather than one thick slab. */
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--glass) 20%, transparent),
+      color-mix(in srgb, var(--glass) 10%, transparent)
+    ),
+    color-mix(in srgb, var(--panel) 32%, transparent);
+  backdrop-filter: blur(30px) saturate(200%) brightness(112%);
+  -webkit-backdrop-filter: blur(30px) saturate(200%) brightness(112%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 1px 12px rgba(0, 0, 0, 0.28);
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 4px 16px rgba(0, 0, 0, 0.30);
   border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
 }
 #tabbar .stab {
@@ -1202,4 +1230,93 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   ::view-transition-group(*),
   ::view-transition-old(*),
   ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ---- Aero controls -------------------------------------------------------
+   Vista's buttons were "gel": rounded, lit from above, with a gloss over the
+   top half and a glow on hover. The gloss is a second background layer rather
+   than a pseudo-element, so it costs nothing and cannot be knocked out of
+   alignment by the button's own content. */
+header button,
+#tabbar .stab {
+  border-radius: 7px;
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.16) 0%,
+      rgba(255, 255, 255, 0.06) 48%,
+      rgba(255, 255, 255, 0) 49%,
+      rgba(0, 0, 0, 0.10) 100%
+    ),
+    color-mix(in srgb, var(--glass) 16%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: background 140ms, box-shadow 140ms, border-color 140ms;
+}
+
+/* The hover glow, which is the part everyone remembers. Vista drew it as light
+   pooling behind the button rather than a border change, so it is a spread
+   shadow in the tint colour. */
+header button:hover,
+#tabbar .stab:hover {
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.24) 0%,
+      rgba(255, 255, 255, 0.10) 48%,
+      rgba(255, 255, 255, 0.02) 49%,
+      rgba(0, 0, 0, 0.08) 100%
+    ),
+    color-mix(in srgb, var(--glass) 30%, transparent);
+  border-color: color-mix(in srgb, var(--glass) 70%, white 10%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 0 12px color-mix(in srgb, var(--glass) 55%, transparent),
+    0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+header button:active,
+#tabbar .stab:active {
+  /* Pressed reverses the lighting: the gloss goes to the bottom, which is what
+     makes it read as pushed in rather than merely darker. */
+  background:
+    linear-gradient(
+      to top,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(0, 0, 0, 0.14) 100%
+    ),
+    color-mix(in srgb, var(--glass) 34%, transparent);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.30);
+}
+
+/* The active tab is lit rather than merely marked. */
+#tabbar .stab.active {
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.26) 0%,
+      rgba(255, 255, 255, 0.08) 48%,
+      rgba(255, 255, 255, 0) 49%,
+      rgba(0, 0, 0, 0.06) 100%
+    ),
+    color-mix(in srgb, var(--glass) 38%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 0 14px color-mix(in srgb, var(--glass) 45%, transparent);
+}
+
+/* Search and the zoom slider are controls too, and a flat box between two gel
+   buttons is the thing that gives a theme away. */
+#search {
+  background: color-mix(in srgb, var(--glass) 12%, rgba(0, 0, 0, 0.25));
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+#search:focus {
+  border-color: color-mix(in srgb, var(--glass) 75%, white 10%);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.35),
+    0 0 10px color-mix(in srgb, var(--glass) 50%, transparent);
 }

@@ -9,7 +9,10 @@ import { showSystems } from "./systems.js";
 import { installTabs, showSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
-import { startBackdrop, stopBackdrop, applyBackdropSettings } from "./backdrop.js";
+import {
+  startBackdrop, stopBackdrop, applyBackdropSettings,
+  applyStoredGlassTint, setGlassTint,
+} from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
@@ -50,6 +53,8 @@ el.search.addEventListener("input", (e) => {
 // The backdrop's controls are in the Settings window and its canvas is here, so
 // the two have to talk. Without this, toggling it there rendered a shader into
 // the settings panel and left the library untouched.
+listen("glass-tint", ({ payload }) => setGlassTint(payload, { announce: false }));
+
 listen("backdrop-toggle", ({ payload }) => {
   if (payload) startBackdrop();
   else stopBackdrop();
@@ -109,6 +114,7 @@ listen("download-progress", ({ payload }) => {
   // Off by default: it is a preference, and starting a GPU loop uninvited on
   // someone's machine is not a decision this app should make for them.
   if (localStorage.getItem("backdrop") === "on") startBackdrop();
+  applyStoredGlassTint();
   setZoom(state.zoom);
   setLayout(state.layout);
   setSidebar(state.sidebar);

@@ -325,3 +325,46 @@ export function backdropSupported() {
     return false;
   }
 }
+
+// ---- Glass tint -----------------------------------------------------------
+//
+// Vista's "Window Color and Appearance" let you pick the colour of the glass,
+// and that choice is most of why two Vista machines looked different from each
+// other. Same idea: one colour drives the bars, the button gel, the hover glow
+// and the focus ring, because in Aero they were all the same light.
+
+export const GLASS_PRESETS = [
+  { id: "aero",     label: "Aero blue",  colour: "#4d8fd6" },
+  { id: "frost",    label: "Frost",      colour: "#8fb8d8" },
+  { id: "graphite", label: "Graphite",   colour: "#6d7681" },
+  { id: "jade",     label: "Jade",       colour: "#3f9e86" },
+  { id: "amber",    label: "Amber",      colour: "#c8873c" },
+  { id: "ruby",     label: "Ruby",       colour: "#b04a55" },
+  { id: "violet",   label: "Violet",     colour: "#7b62c4" },
+];
+
+const GLASS_KEY = "glassTint";
+
+export function glassTint() {
+  return localStorage.getItem(GLASS_KEY) || GLASS_PRESETS[0].colour;
+}
+
+/// Apply the tint to this document, and tell the other window.
+///
+/// Both windows want it: the library has the bars, and Settings has the same
+/// controls in its own document. A tint applied in one and not the other is
+/// worse than no tint, because it looks like a bug.
+export function setGlassTint(colour, { announce = true } = {}) {
+  const value = /^#[0-9a-f]{6}$/i.test(colour) ? colour : GLASS_PRESETS[0].colour;
+  document.documentElement.style.setProperty("--glass", value);
+  if (announce) {
+    localStorage.setItem(GLASS_KEY, value);
+    window.__TAURI__?.event?.emit?.("glass-tint", value);
+  }
+  return value;
+}
+
+/// Called at startup in every window that has chrome to tint.
+export function applyStoredGlassTint() {
+  setGlassTint(glassTint(), { announce: false });
+}

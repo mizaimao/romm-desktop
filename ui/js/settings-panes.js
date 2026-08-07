@@ -18,6 +18,7 @@ import { editServer, editAchievements, editScraper } from "./credentials.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, PRESETS,
+  GLASS_PRESETS, glassTint, setGlassTint,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -133,7 +134,18 @@ export function paneHtml(id) {
         without these. Optional and only when you ask — it is a few hundred MB.
         Needs <code>firmware.read</code> on the token.</p>
       <p class="hint set-bios-status"></p>`;
-  if (id === "appearance") return `      <h4>Shader backdrop</h4>
+  if (id === "appearance") return `      <h4>Glass</h4>
+      <div class="srow">
+        <label>Window colour</label>
+        <div class="ctl">
+          <select class="glass-preset"></select>
+          <input class="glass-custom" type="color" />
+        </div>
+      </div>
+      <p class="hint">Tints the bars, the buttons and the glow behind them —
+        one colour for all of it, the way Aero did.</p>
+
+      <h4>Shader backdrop</h4>
       <div class="srow">
         <label>Enabled</label>
         <div class="ctl"><button class="set-backdrop">Shader backdrop: off</button></div>
@@ -364,6 +376,33 @@ function wireAppearance(box) {
   const strengthVal = box.querySelector(".bd-strength-val");
   const low = box.querySelector(".bd-low");
   const high = box.querySelector(".bd-high");
+
+  // Glass tint. Applied to this window immediately as well as announced, so
+  // the effect is visible on the control that changed it.
+  const glassSel = box.querySelector(".glass-preset");
+  const glassCustom = box.querySelector(".glass-custom");
+  if (glassSel) {
+    glassSel.innerHTML =
+      GLASS_PRESETS.map((g) => `<option value="${g.colour}">${g.label}</option>`).join("") +
+      `<option value="custom">Custom…</option>`;
+    const current = glassTint();
+    const known = GLASS_PRESETS.find((g) => g.colour.toLowerCase() === current.toLowerCase());
+    glassSel.value = known ? known.colour : "custom";
+    glassCustom.value = current;
+    glassCustom.hidden = !!known;
+
+    glassSel.addEventListener("change", () => {
+      if (glassSel.value === "custom") {
+        glassCustom.hidden = false;
+        setGlassTint(glassCustom.value);
+      } else {
+        glassCustom.hidden = true;
+        glassCustom.value = glassSel.value;
+        setGlassTint(glassSel.value);
+      }
+    });
+    glassCustom.addEventListener("input", () => setGlassTint(glassCustom.value));
+  }
 
   // The custom pickers only mean anything on the "custom" scheme; showing them
   // beside a preset invites changing one and watching nothing happen.

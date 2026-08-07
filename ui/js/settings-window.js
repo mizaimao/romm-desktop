@@ -10,6 +10,7 @@
 // into whatever element they are given.
 
 import { TABS, paneHtml, wirePane, isCapturing, captureKey } from "./settings-panes.js";
+import { applyStoredGlassTint } from "./backdrop.js";
 
 const tabsEl = document.getElementById("tabs");
 const paneEl = document.getElementById("pane");
@@ -98,5 +99,6 @@ window.addEventListener("settings-toast", (ev) => {
   toastEl._t = setTimeout(() => (toastEl.hidden = true), 4000);
 });
 
+applyStoredGlassTint();
 buildTabs();
 show(localStorage.getItem(REMEMBERED) || TABS[0].id);
