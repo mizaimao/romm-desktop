@@ -34,12 +34,25 @@ html, body {
 }
 
 header {
+  /* Fixed, with the list padded to match, so content scrolls *underneath*
+     rather than stopping at the bar. Glass with nothing behind it is just a
+     tinted rectangle — the effect only exists if there is something moving
+     under it to blur. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  /* Translucent rather than solid. `color-mix` keeps this tied to the theme
+     colour instead of a second hardcoded value that drifts from it. */
+  background: color-mix(in srgb, var(--panel) 62%, transparent);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   /* Leave room for the macOS traffic lights. */
   padding-left: 88px;
   -webkit-app-region: drag;
@@ -141,10 +154,14 @@ header h1 {
 .tcard button:disabled { opacity: .5; cursor: default; }
 .tbadge { color: var(--ok); font-size: 11px; }
 
+/* Header plus tab bar. One value, used by every element that has to clear
+   them, so moving a bar does not mean hunting for the three places that
+   assumed its height. */
+:root { --bars: 85px; }
+
 main {
   display: flex;
-  /* Header plus tab bar. */
-  height: calc(100% - 47px - 38px);
+  height: 100%;
   overflow: hidden;
 }
 
@@ -153,13 +170,22 @@ main {
    view is showing, and mixing "where am I" with "what can I do here" made both
    harder to find. */
 #tabbar {
+  position: fixed;
+  top: 47px;
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: flex;
   align-items: stretch;
   gap: 2px;
   height: 38px;
   padding: 0 10px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  /* Slightly less tint than the header, so the two read as separate sheets of
+     glass rather than one thick bar. */
+  background: color-mix(in srgb, var(--panel) 48%, transparent);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
 }
 #tabbar .stab {
   appearance: none;
@@ -196,6 +222,9 @@ body.has-pad #tabbar .bumper { display: inline; }
   flex: 1;
   overflow-y: auto;
   padding: 14px;
+  /* Clears the fixed bars. The first row starts below them; everything after
+     scrolls under, which is what gives the glass something to work on. */
+  padding-top: calc(var(--bars) + 14px);
 }
 
 /* Platform grid */
@@ -398,6 +427,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 #detail {
   /* Wider by default — 360px cropped cover art and wrapped every metadata line
      to two. Overridden by --detail-w once the divider has been dragged. */
+  padding-top: calc(var(--bars) + 16px);
   width: var(--detail-w, 460px);
   min-width: 300px;
   max-width: 70vw;
@@ -1054,10 +1084,15 @@ html.backdrop-on body { background: transparent; }
 /* The sticky group headings inside the grid paint --bg too, for the same
    reason: they have to hide the rows scrolling under them. Frosted instead, so
    the shader shows through without the text losing its background. */
-html.backdrop-on #list h3 {
+html.backdrop-on .ghead {
   background: color-mix(in srgb, var(--bg) 72%, transparent);
   backdrop-filter: blur(10px);
 }
+
+/* Grouped-search headings stick below the bars, not behind them. Scroll
+   margin matches, or keyboard navigation lands a card underneath the glass. */
+.ghead { top: var(--bars); }
+.pgroup .gcard, .pgroup .row { scroll-margin-top: calc(var(--bars) + 44px); }
 #backdrop {
   position: fixed;
   inset: 0;
@@ -1075,6 +1110,7 @@ html.backdrop-on #list h3 {
    layout space, so widening the pane does not shift the grid by an extra few
    pixels the first time you touch it. */
 #detail-grip {
+  margin-top: var(--bars);
   width: 7px;
   margin-right: -7px;
   flex: 0 0 7px;
