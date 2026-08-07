@@ -377,6 +377,13 @@ pub fn set_table_entry(path: &str, table: &str, key: &str, value: &str) -> Resul
     write_entry(path, table, key, Some(value))
 }
 
+/// Set a boolean. TOML booleans are bare literals, so they cannot go through
+/// the quoted-string writer — `enabled = "true"` is a string and parses as one,
+/// which then fails to deserialise into a bool.
+pub fn set_table_bool(path: &str, table: &str, key: &str, value: bool) -> Result<()> {
+    write_raw(path, table, key, Some(if value { "true" } else { "false" }))
+}
+
 /// Remove `key` from `[table]` if present.
 pub fn clear_table_entry(path: &str, table: &str, key: &str) -> Result<()> {
     write_entry(path, table, key, None)
@@ -405,16 +412,26 @@ fn defines_key(line: &str, key: &str) -> bool {
 }
 
 fn write_entry(path: &str, table: &str, key: &str, value: Option<&str>) -> Result<()> {
-    let file = Path::new(path);
-    let original = std::fs::read_to_string(file).unwrap_or_default();
-    let header = format!("[{table}]");
-    let entry = value.map(|v| {
+    let quoted = value.map(|v| {
         format!(
             "{} = \"{}\"",
             toml_key(key),
             v.replace('\\', "\\\\").replace('"', "\\\"")
         )
     });
+    write_line(path, table, key, quoted)
+}
+
+/// As [`write_entry`], with the right-hand side written verbatim — for values
+/// that are not TOML strings.
+fn write_raw(path: &str, table: &str, key: &str, value: Option<&str>) -> Result<()> {
+    write_line(path, table, key, value.map(|v| format!("{} = {v}", toml_key(key))))
+}
+
+fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Result<()> {
+    let file = Path::new(path);
+    let original = std::fs::read_to_string(file).unwrap_or_default();
+    let header = format!("[{table}]");
 
     let mut lines: Vec<String> = original.lines().map(str::to_owned).collect();
 
@@ -694,6 +711,63 @@ mod tests {
 
         // The hand-written table above must survive untouched.
         assert_eq!(parsed["cores"]["overrides"]["arcade"].as_str(), Some("mame2003_plus"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod bool_tests {
+    use super::*;
+
+    /// A TOML boolean is a bare literal. Written as a quoted string it parses
+    /// as a string and then fails to deserialise into a bool — so a switch in
+    /// Settings would appear to save and do nothing on the next launch.
+    #[test]
+    fn booleans_are_written_unquoted() {
+        let dir = std::env::temp_dir().join("romm-cfg-bool");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.toml");
+        let p = path.to_str().unwrap();
+        std::fs::write(&path, "[achievements]\nusername = \"frank\"\n").unwrap();
+
+        set_table_bool(p, "achievements", "enabled", true).unwrap();
+        set_table_bool(p, "achievements", "hardcore", false).unwrap();
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("enabled = true"), "unquoted: {raw}");
+        assert!(!raw.contains("\"true\""), "never quoted: {raw}");
+
+        // And it has to survive the real parser into the real struct.
+        let cfg: Config = toml::from_str(&raw).unwrap();
+        assert!(cfg.achievements.enabled);
+        assert!(!cfg.achievements.hardcore);
+        assert_eq!(cfg.achievements.username.as_deref(), Some("frank"));
+
+        // Flipping it back rewrites in place rather than appending a second key.
+        set_table_bool(p, "achievements", "enabled", false).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.matches("enabled").count(), 1, "one key, not two: {raw}");
+        assert!(!toml::from_str::<Config>(&raw).unwrap().achievements.enabled);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Strings and booleans share the writer, so the string path must still
+    /// quote and must not have been broken by adding the raw one.
+    #[test]
+    fn strings_are_still_quoted() {
+        let dir = std::env::temp_dir().join("romm-cfg-str");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.toml");
+        let p = path.to_str().unwrap();
+
+        set_table_entry(p, "library", "local_root", "/data/romm").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("local_root = \"/data/romm\""), "{raw}");
+        let cfg: Config = toml::from_str(&raw).unwrap();
+        assert_eq!(cfg.library.local_root, "/data/romm");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

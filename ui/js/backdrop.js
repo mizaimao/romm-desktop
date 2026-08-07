@@ -106,6 +106,16 @@ export function backdropSettings() {
   }
 }
 
+/// Apply settings to the running shader. Does not store and does not announce.
+///
+/// The receiving end of the event, and separate from `saveBackdropSettings` for
+/// exactly that reason: the listener used to call the saving version, which
+/// emitted again, which the emitting window also received. Every drag of a
+/// colour slider fed itself back round and the backdrop flickered.
+export function applyBackdropSettings(cfg) {
+  if (live) live({ ...backdropSettings(), ...(cfg || {}) });
+}
+
 export function saveBackdropSettings(next) {
   const merged = { ...backdropSettings(), ...next };
   localStorage.setItem("backdropSettings", JSON.stringify(merged));

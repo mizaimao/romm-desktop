@@ -208,6 +208,88 @@ async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
     Ok(())
 }
 
+/// The config.toml values Settings can show and edit.
+///
+/// Deliberately a fixed list rather than "whatever is in the file". Half of
+/// config.toml is not a setting — `cores.per_game` is 155 rows that belong in
+/// the game detail pane, and `[scraper]` is read by nothing. A field here means
+/// somebody decided it belongs on screen.
+#[derive(Serialize)]
+struct ConfigFields {
+    library_root: String,
+    achievements_enabled: bool,
+    achievements_username: String,
+    achievements_token: String,
+    achievements_hardcore: bool,
+    shaders_enabled: bool,
+    /// Present so the UI can say where it is writing, and warn when there is
+    /// nothing to write to.
+    config_path: String,
+    config_exists: bool,
+}
+
+#[tauri::command]
+fn config_fields() -> CmdResult<ConfigFields> {
+    let cfg = Config::load().unwrap_or_default();
+    Ok(ConfigFields {
+        library_root: cfg.library.local_root.clone(),
+        achievements_enabled: cfg.achievements.enabled,
+        achievements_username: cfg.achievements.username.clone().unwrap_or_default(),
+        achievements_token: cfg.achievements.token.clone().unwrap_or_default(),
+        achievements_hardcore: cfg.achievements.hardcore,
+        shaders_enabled: cfg.shaders.enabled,
+        config_path: abs(Path::new("config.toml")),
+        config_exists: Config::exists("config.toml"),
+    })
+}
+
+/// Write one value into config.toml, or remove it when empty.
+///
+/// Goes through the same targeted TOML edit the per-system settings use, so the
+/// hand-written comments explaining non-obvious choices survive — round-tripping
+/// through a serialiser would delete every one of them.
+///
+/// Only the fields `config_fields` exposes are accepted. An allowlist rather
+/// than passing a section and key straight through: this is called from a
+/// webview, and "write any key into any table" is a larger door than this needs.
+#[tauri::command]
+fn set_config_field(field: String, value: String) -> CmdResult<String> {
+    let (table, key) = match field.as_str() {
+        "library_root" => ("library", "local_root"),
+        "achievements_enabled" => ("achievements", "enabled"),
+        "achievements_username" => ("achievements", "username"),
+        "achievements_token" => ("achievements", "token"),
+        "achievements_hardcore" => ("achievements", "hardcore"),
+        "shaders_enabled" => ("shaders", "enabled"),
+        other => return Err(format!("unknown setting {other}")),
+    };
+
+    // Booleans are TOML literals, not strings, so they cannot go through the
+    // quoted-string writer.
+    let boolean = matches!(
+        field.as_str(),
+        "achievements_enabled" | "achievements_hardcore" | "shaders_enabled"
+    );
+
+    if value.trim().is_empty() && !boolean {
+        romm_desktop::config::clear_table_entry("config.toml", table, key).map_err(err)?;
+        return Ok(format!("{key} cleared"));
+    }
+    if boolean {
+        romm_desktop::config::set_table_bool(
+            "config.toml",
+            table,
+            key,
+            value == "true" || value == "1",
+        )
+        .map_err(err)?;
+    } else {
+        romm_desktop::config::set_table_entry("config.toml", table, key, value.trim())
+            .map_err(err)?;
+    }
+    Ok(format!("{key} saved — restart to apply"))
+}
+
 /// Pull the useful bits out of RomM's merged `metadatum` blob.
 fn meta_strings(meta: &Option<serde_json::Value>, key: &str) -> Vec<String> {
     meta.as_ref()
@@ -1680,7 +1762,9 @@ fn main() {
             game_cores,
             set_game_core,
             status,
-            open_settings
+            open_settings,
+            config_fields,
+            set_config_field
         ])
         .run(tauri::generate_context!())
         .expect("running tauri application");

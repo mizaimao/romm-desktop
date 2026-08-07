@@ -9,7 +9,7 @@ import { showSystems } from "./systems.js";
 import { installTabs, showSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
-import { startBackdrop, stopBackdrop, saveBackdropSettings } from "./backdrop.js";
+import { startBackdrop, stopBackdrop, applyBackdropSettings } from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
@@ -55,8 +55,10 @@ listen("backdrop-toggle", ({ payload }) => {
   else stopBackdrop();
 });
 listen("backdrop-settings", ({ payload }) => {
-  // Re-applies live to the running shader; a no-op when it is off.
-  saveBackdropSettings(payload || {});
+  // Apply, never re-save: saving emits, and this window would then answer its
+  // own message. That round trip is what made the backdrop flicker while a
+  // colour was being dragged.
+  applyBackdropSettings(payload);
 });
 
 listen("download-progress", ({ payload }) => {

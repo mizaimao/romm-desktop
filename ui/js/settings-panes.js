@@ -64,7 +64,37 @@ export function paneHtml(id) {
         not overwritten.</p>
       <p class="hint set-savesync-status"></p>
 
+      <h4>Achievements</h4>
+      <div class="srow">
+        <label>RetroAchievements</label>
+        <div class="ctl"><button class="cf-ach-enabled" data-field="achievements_enabled">…</button></div>
+      </div>
+      <div class="srow">
+        <label>Username</label>
+        <div class="ctl"><input class="cf-text" data-field="achievements_username"
+          type="text" spellcheck="false" placeholder="your RA account name" /></div>
+      </div>
+      <div class="srow">
+        <label>Token</label>
+        <div class="ctl"><input class="cf-text" data-field="achievements_token"
+          type="password" spellcheck="false" placeholder="from RetroArch's config" /></div>
+      </div>
+      <div class="srow">
+        <label>Hardcore mode</label>
+        <div class="ctl"><button class="cf-ach-hardcore" data-field="achievements_hardcore">…</button></div>
+      </div>
+      <p class="hint">Hardcore disables save states, fast-forward and rewind —
+        four of the hotkeys this app binds. Both a username and a token are
+        needed; either alone authenticates nothing.</p>
+
       <h4>Library</h4>
+      <div class="srow">
+        <label>Folder</label>
+        <div class="ctl"><input class="cf-text" data-field="library_root"
+          type="text" spellcheck="false" placeholder="./library" /></div>
+      </div>
+      <p class="hint">Everything downloaded lives here — games, artwork, save
+        backups. Deleting this folder reclaims all of it.</p>
       <div class="srow">
         <label>Fetch game list</label>
         <div class="ctl">
@@ -204,6 +234,10 @@ function wireGeneral(box) {
       syncBtn.disabled = false;
     }
   });
+
+  // config.toml fields. Loaded once and written back on change, through a
+  // targeted TOML edit so the hand-written comments in that file survive.
+  wireConfigFields(box);
 
   // Library. This is the one the Windows build had no way to run: the release
   // ships only the GUI, so a fresh install had an empty cache, an empty grid,
@@ -451,4 +485,68 @@ export function captureKey(ev) {
 function cssColour(name, fallback) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback;
+}
+
+/// Bind every `data-field` control in a pane to config.toml.
+///
+/// Text fields save on blur rather than on every keystroke: writing the file on
+/// each character would rewrite it thirty times while someone types a path, and
+/// a half-typed path saved and reloaded is worse than no path.
+async function wireConfigFields(box) {
+  const fields = box.querySelectorAll("[data-field]");
+  if (!fields.length) return;
+
+  let current;
+  try {
+    current = await invoke("config_fields");
+  } catch (e) {
+    box.querySelectorAll(".cf-text").forEach((i) => {
+      i.disabled = true;
+      i.placeholder = `unavailable — ${e}`;
+    });
+    return;
+  }
+
+  if (!current.config_exists) {
+    // Writing settings into a file that does not exist creates one with only
+    // those settings in it, which is a worse starting point than the template.
+    const warn = document.createElement("p");
+    warn.className = "hint";
+    warn.textContent = `No config.toml at ${current.config_path} — copy config.example.toml there first.`;
+    box.prepend(warn);
+  }
+
+  const save = async (field, value) => {
+    try {
+      toast(await invoke("set_config_field", { field, value: String(value) }));
+    } catch (e) {
+      toast(`Could not save — ${e}`, 8000);
+    }
+  };
+
+  for (const node of fields) {
+    const field = node.dataset.field;
+    const value = current[field];
+
+    if (node.tagName === "INPUT") {
+      node.value = value ?? "";
+      // Blur and Enter, not input: see above.
+      node.addEventListener("change", () => save(field, node.value));
+      continue;
+    }
+
+    // Everything else is a toggle rendered as a button, so it works under a
+    // controller the same way every other control here does.
+    let on = !!value;
+    const paint = () => {
+      node.textContent = on ? "On" : "Off";
+      node.classList.toggle("active", on);
+    };
+    paint();
+    node.addEventListener("click", () => {
+      on = !on;
+      paint();
+      save(field, on);
+    });
+  }
 }

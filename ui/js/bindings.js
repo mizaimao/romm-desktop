@@ -85,8 +85,30 @@ function loadPad() {
 }
 
 /// index -> action, user overrides layered over the defaults.
+/// Actions the app is unusable without.
+///
+/// Anything else can be left unbound on purpose — plenty of people never want a
+/// themes button on their pad. These four are different: with a direction
+/// missing you cannot reach half the grid, and with Confirm missing you cannot
+/// open anything at all.
+const ESSENTIAL = ["up", "down", "left", "right", "activate"];
+
 export function padMap() {
-  return { ...PAD_FALLBACK, ...loadPad() };
+  const map = { ...PAD_FALLBACK, ...loadPad() };
+
+  // Rebinding clears whichever button previously held that action by writing
+  // null over it. If that leaves an essential action with no button at all, the
+  // pad is broken rather than customised — a direction that does nothing looks
+  // exactly like an app ignoring the button, and there is nothing on screen to
+  // say otherwise. Put the default back.
+  for (const action of ESSENTIAL) {
+    if (Object.values(map).includes(action)) continue;
+    const home = Object.entries(PAD_FALLBACK).find(([, a]) => a === action)?.[0];
+    // Only if its own default button is free, so healing one binding never
+    // steals a button the user deliberately assigned to something else.
+    if (home !== undefined && !map[home]) map[home] = action;
+  }
+  return map;
 }
 
 /// Which button currently triggers `action`, or null.
