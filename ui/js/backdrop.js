@@ -112,7 +112,34 @@ export function saveBackdropSettings(next) {
   // Applied live rather than on restart: a colour picker you cannot see the
   // result of is a colour picker nobody can use.
   if (live) live(merged);
+  // ...and told to the other window, because the controls live in Settings and
+  // the shader lives in the library. Calling startBackdrop from the settings
+  // window put the canvas in *that* document, so changing the app's background
+  // changed the background of the settings panel and nothing else.
+  window.__TAURI__?.event?.emit?.("backdrop-settings", merged);
   return merged;
+}
+
+/// Whether the library window is showing a backdrop.
+///
+/// Read from storage rather than from `running`, so the settings window — which
+/// never renders one — reports the state of the window that does. localStorage
+/// is shared between them; they are the same origin.
+export function backdropWanted() {
+  return localStorage.getItem("backdrop") === "on";
+}
+
+/// Turn it on or off in whichever window renders the library.
+export function setBackdropWanted(on) {
+  localStorage.setItem("backdrop", on ? "on" : "off");
+  window.__TAURI__?.event?.emit?.("backdrop-toggle", on);
+  // In the library window itself, act immediately rather than waiting for the
+  // event to come back around.
+  if (document.getElementById("list")) {
+    if (on) startBackdrop();
+    else stopBackdrop();
+  }
+  return on;
 }
 
 /// Set while running, so settings changes reach the shader without restarting

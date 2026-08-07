@@ -76,13 +76,35 @@ body.settings-window {
   opacity: 0.75;
 }
 
-/* The binding tables are the longest thing in here. Two columns once there is
-   room, so Control does not become the endless scroll it used to be. */
-#pane .set-rows {
+/* One setting per row: name on the left, control on the right, aligned down
+   the whole pane. Everything used to be a stack of headings, paragraphs and
+   loose buttons at different widths, which is why it read as a pile. */
+#pane .srow {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 4px 18px;
+  grid-template-columns: 220px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 0;
+  min-height: 34px;
 }
+#pane .srow + .srow { border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+#pane .srow > label { opacity: 0.85; }
+#pane .srow .ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+#pane .srow .ctl input[type="text"] { flex: 1; min-width: 0; }
+#pane .srow .ctl input[type="range"] { flex: 1; }
+#pane .srow .ctl button { white-space: nowrap; }
+/* The binding buttons all the same width, so the column of keys reads as a
+   column rather than a ragged edge. */
+#pane .srow .set-key,
+#pane .srow .set-pad { min-width: 150px; }
+
+/* A hint belongs to the row above it, not to the next one. */
+#pane .hint { margin: 4px 0 14px; opacity: 0.6; }
 
 #settings-toast {
   position: fixed;
@@ -97,17 +119,7 @@ body.settings-window {
   max-width: 80vw;
 }
 
-/* The backdrop controls are label / control / readout, which the generic
-   two-column binding grid does not fit. */
-#pane .bd-controls { grid-template-columns: 1fr; gap: 8px; }
-#pane .bd-controls .set-row {
-  display: grid;
-  grid-template-columns: 120px 1fr auto;
-  align-items: center;
-  gap: 12px;
-}
-#pane .bd-controls input[type="range"] { width: 100%; }
-#pane .bd-controls input[type="color"] {
+#pane input[type="color"] {
   width: 46px;
   height: 26px;
   padding: 0;
@@ -118,7 +130,7 @@ body.settings-window {
 }
 #pane .bd-speed-val,
 #pane .bd-strength-val {
-  min-width: 44px;
+  min-width: 48px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;

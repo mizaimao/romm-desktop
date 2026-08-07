@@ -8,6 +8,7 @@ import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play } from "./detail.js";
 import { showPlatforms, showRoms, setLayout } from "./library.js";
 import { showThemes } from "./themes.js";
+import { escapeHtml } from "./util.js";
 import { ACTIONS, actionFor, keyFor, keyLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection } from "./tabs.js";
@@ -160,9 +161,38 @@ function toggleHelp() {
   box.id = "shortcuts";
   box.innerHTML = `<div class="sc-panel"><h3>Keyboard</h3><dl>${bound
     .map((a) => `<dt>${keyLabel(keyFor(a.id))}</dt><dd>${a.label}</dd>`)
-    .join("")}</dl><p>Rebind these in Settings · Esc to close</p></div>`;
+    .join("")}</dl>
+    <h3>Controller</h3>
+    <p class="pad-readout">No controller detected.</p>
+    <p>Rebind these in Settings · Esc to close</p></div>`;
   box.addEventListener("click", () => box.remove());
   document.body.appendChild(box);
+
+  // A live readout of what the pad actually reports, here rather than only in
+  // Settings. "Button X does nothing" is unanswerable without it: the bindings
+  // are by index, and an index that is not the one you think it is looks
+  // exactly like an app that ignores the button.
+  const out = box.querySelector(".pad-readout");
+  const tick = () => {
+    if (!box.isConnected) return;
+    requestAnimationFrame(tick);
+    const pad = (navigator.getGamepads?.() ?? []).find(Boolean);
+    if (!pad) return;
+    const down = pad.buttons
+      .map((b, i) => (b.pressed ? i : null))
+      .filter((i) => i !== null);
+    const axes = pad.axes
+      .map((v, i) => (Math.abs(v) > 0.35 ? `axis${i}:${v.toFixed(2)}` : null))
+      .filter(Boolean);
+    out.innerHTML =
+      `<strong>${escapeHtml(pad.id)}</strong><br>` +
+      `mapping: ${pad.mapping || "(none reported)"} · ${pad.buttons.length} buttons<br>` +
+      `pressed: <strong>${down.length ? down.join(", ") : "nothing"}</strong>` +
+      (axes.length ? `<br>axes: ${axes.join(", ")}` : "") +
+      `<br><span class="hint">Hold a button to see its index. If D-pad left ` +
+      `reports something other than 14, that is the binding to change.</span>`;
+  };
+  requestAnimationFrame(tick);
 }
 
 export const HANDLERS = {

@@ -1089,3 +1089,15 @@ html.backdrop-on #list h3 {
 /* While dragging, stop the pointer selecting text across the whole window —
    otherwise a drag highlights every game name it passes over. */
 body.resizing-detail { user-select: none; cursor: col-resize; }
+
+/* Live controller readout inside the shortcut list. Monospaced numbers so the
+   indices do not jump about while buttons are held. */
+#shortcuts .pad-readout {
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+#shortcuts .pad-readout .hint { opacity: 0.6; font-size: 12px; }

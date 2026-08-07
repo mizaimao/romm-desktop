@@ -9,7 +9,7 @@ import { showSystems } from "./systems.js";
 import { installTabs, showSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
-import { startBackdrop } from "./backdrop.js";
+import { startBackdrop, stopBackdrop, saveBackdropSettings } from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
@@ -45,6 +45,18 @@ el.search.addEventListener("input", (e) => {
   clearTimeout(searchTimer);
   const v = e.target.value;
   searchTimer = setTimeout(() => runSearch(v), 200);
+});
+
+// The backdrop's controls are in the Settings window and its canvas is here, so
+// the two have to talk. Without this, toggling it there rendered a shader into
+// the settings panel and left the library untouched.
+listen("backdrop-toggle", ({ payload }) => {
+  if (payload) startBackdrop();
+  else stopBackdrop();
+});
+listen("backdrop-settings", ({ payload }) => {
+  // Re-applies live to the running shader; a no-op when it is off.
+  saveBackdropSettings(payload || {});
 });
 
 listen("download-progress", ({ payload }) => {

@@ -15,8 +15,8 @@ import {
 } from "./bindings.js";
 import { invoke, listen } from "./state.js";
 import {
-  startBackdrop, stopBackdrop, backdropRunning, backdropSupported,
-  backdropSettings, saveBackdropSettings,
+  backdropSupported, backdropSettings, saveBackdropSettings,
+  backdropWanted, setBackdropWanted,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -41,89 +41,91 @@ export const TABS = [
 /// stale saved tab cannot leave the window blank.
 export function paneHtml(id) {
   if (id === "general") return `      <h4>RetroArch</h4>
-      <p class="hint">Leave empty to search the usual locations. Set it when the
-        install lives elsewhere, such as <code>E:\\Emulators\\RetroArch</code>.</p>
-      <div class="set-path">
-        <input class="set-ra" type="text" spellcheck="false"
-               placeholder="path to the RetroArch folder" />
-        <button class="set-ra-pick" title="Choose a folder">Browse…</button>
-        <button class="set-ra-save">Save</button>
+      <div class="srow">
+        <label>Location</label>
+        <div class="ctl">
+          <input class="set-ra" type="text" spellcheck="false"
+                 placeholder="search the usual places" />
+          <button class="set-ra-pick" title="Choose a folder">Browse…</button>
+          <button class="set-ra-save">Save</button>
+        </div>
       </div>
+      <p class="hint">Empty searches the usual locations. Set it when the install
+        lives elsewhere, such as <code>E:\\Emulators\\RetroArch</code>.</p>
       <p class="hint set-ra-status"></p>
 
       <h4>Saves</h4>
-      <p class="hint">Compares your RetroArch saves and save states with the
-        server and transfers whatever differs. Never runs on its own: a save is
-        the one thing here that cannot be downloaded again if it goes wrong.
-        Anything changed on both sides is reported, not overwritten.</p>
-      <div class="set-path">
-        <button class="set-savesync">Sync saves now</button>
+      <div class="srow">
+        <label>Sync now</label>
+        <div class="ctl"><button class="set-savesync">Sync saves</button></div>
       </div>
+      <p class="hint">Compares your saves and save states with the server and
+        transfers whatever differs. Anything changed on both sides is reported,
+        not overwritten.</p>
       <p class="hint set-savesync-status"></p>
 
       <h4>Library</h4>
-      <p class="hint">Fetch the list of games from the server. Nothing is
-        downloaded — this is the index the grid is built from, so a fresh
-        install shows nothing until it has run once.</p>
-      <div class="set-path">
-        <button class="set-libsync">Sync library</button>
-        <button class="set-libsync-full">Full resync</button>
+      <div class="srow">
+        <label>Fetch game list</label>
+        <div class="ctl">
+          <button class="set-libsync">Sync library</button>
+          <button class="set-libsync-full">Full resync</button>
+        </div>
       </div>
+      <p class="hint">The index the grid is built from. Nothing is downloaded —
+        but a fresh install shows nothing until this has run once.</p>
       <p class="hint set-libsync-status"></p>`;
-  if (id === "appearance") return `      <h4>Appearance</h4>
-      <p class="hint">An animated shader behind the library, drawn on the GPU.
-        Off by default. Costs a little battery on a laptop.</p>
-      <div class="set-path">
-        <button class="set-backdrop">Shader backdrop: off</button>
+  if (id === "appearance") return `      <h4>Shader backdrop</h4>
+      <div class="srow">
+        <label>Enabled</label>
+        <div class="ctl"><button class="set-backdrop">Shader backdrop: off</button></div>
       </div>
-      <p class="hint set-backdrop-status"></p>
-
-      <div class="set-rows bd-controls">
-        <div class="set-row">
-          <span class="set-label">Motion</span>
-          <input class="bd-speed" type="range" min="0" max="400" step="10" />
-          <span class="bd-speed-val"></span>
-        </div>
-        <div class="set-row">
-          <span class="set-label">Brightness</span>
-          <input class="bd-strength" type="range" min="10" max="200" step="5" />
-          <span class="bd-strength-val"></span>
-        </div>
-        <div class="set-row">
-          <span class="set-label">Dark colour</span>
-          <input class="bd-low" type="color" />
-          <button class="bd-low-reset">Use theme</button>
-        </div>
-        <div class="set-row">
-          <span class="set-label">Light colour</span>
-          <input class="bd-high" type="color" />
-          <button class="bd-high-reset">Use theme</button>
-        </div>
+      <div class="srow">
+        <label>Motion</label>
+        <div class="ctl"><input class="bd-speed" type="range" min="0" max="400" step="10" />
+          <span class="bd-speed-val"></span></div>
       </div>
-      <p class="hint">Motion at 0 holds it still. Colours left on "theme" follow
-        whatever palette is in force.</p>`;
+      <div class="srow">
+        <label>Brightness</label>
+        <div class="ctl"><input class="bd-strength" type="range" min="10" max="200" step="5" />
+          <span class="bd-strength-val"></span></div>
+      </div>
+      <div class="srow">
+        <label>Dark colour</label>
+        <div class="ctl"><input class="bd-low" type="color" />
+          <button class="bd-low-reset">Use theme</button></div>
+      </div>
+      <div class="srow">
+        <label>Light colour</label>
+        <div class="ctl"><input class="bd-high" type="color" />
+          <button class="bd-high-reset">Use theme</button></div>
+      </div>
+      <p class="hint">Drawn on the GPU behind the library — not behind this
+        window. Motion at 0 holds it still. Colours left on "theme" follow
+        whatever palette is in force.</p>
+      <p class="hint set-backdrop-status"></p>`;
   if (id === "control") return `      <h4>Controller</h4>
       <p class="hint">Click a button to rebind it. Press the new button on the
         pad, or Esc to leave it unset.</p>
       <p class="hint pad-live">No controller detected.</p>
-      <div class="set-rows">${ACTIONS.map(
+      ${ACTIONS.map(
         (a) => `
-        <div class="set-row pad-row" data-id="${a.id}">
-          <span class="set-label">${a.label}</span>
-          <button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabel(padFor(a.id))}</button>
+        <div class="srow pad-row" data-id="${a.id}">
+          <label>${a.label}</label>
+          <div class="ctl"><button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabel(padFor(a.id))}</button></div>
         </div>`
-      ).join("")}</div>
+      ).join("")}
       <footer><button class="set-pad-reset">Reset controller</button></footer>
 
       <h4>Keyboard</h4>
       <p class="hint">Click a key to rebind it. Press Esc while rebinding to leave it unset.</p>
-      <div class="set-rows">${ACTIONS.map(
+      ${ACTIONS.map(
         (a) => `
-        <div class="set-row" data-id="${a.id}">
-          <span class="set-label">${a.label}</span>
-          <button class="set-key ${keyFor(a.id) ? "" : "unset"}">${keyLabel(keyFor(a.id))}</button>
+        <div class="srow key-row" data-id="${a.id}">
+          <label>${a.label}</label>
+          <div class="ctl"><button class="set-key ${keyFor(a.id) ? "" : "unset"}">${keyLabel(keyFor(a.id))}</button></div>
         </div>`
-      ).join("")}</div>
+      ).join("")}
       <footer>
         <button class="set-reset">Reset to defaults</button>
       </footer>`;
@@ -247,7 +249,7 @@ function wireAppearance(box) {
   const bdBtn = box.querySelector(".set-backdrop");
   const bdStatus = box.querySelector(".set-backdrop-status");
   const paintBackdropButton = () => {
-    const on = backdropRunning();
+    const on = backdropWanted();
     bdBtn.textContent = `Shader backdrop: ${on ? "on" : "off"}`;
     bdBtn.classList.toggle("active", on);
   };
@@ -259,18 +261,10 @@ function wireAppearance(box) {
   } else {
     paintBackdropButton();
     bdBtn.addEventListener("click", () => {
-      if (backdropRunning()) {
-        stopBackdrop();
-        localStorage.setItem("backdrop", "off");
-        bdStatus.textContent = "";
-      } else if (startBackdrop()) {
-        localStorage.setItem("backdrop", "on");
-        bdStatus.textContent = "Running. Colours follow the current theme.";
-      } else {
-        // Supported in principle, refused in practice — a software renderer or
-        // a driver that declined the context.
-        bdStatus.textContent = "Could not start — the driver refused a WebGL2 context.";
-      }
+      // Toggles the library window, not this one. This window has no library
+      // behind it to put a backdrop on.
+      const on = setBackdropWanted(!backdropWanted());
+      bdStatus.textContent = on ? "On in the library window." : "";
       paintBackdropButton();
     });
   }
@@ -319,7 +313,7 @@ function wireControl(box) {
   // Keyboard rows only — the controller rows below carry .pad-row and hold no
   // .set-key, so an unscoped selector would find a null button and throw,
   // taking the whole panel with it.
-  box.querySelectorAll(".set-row:not(.pad-row)").forEach((row) => {
+  box.querySelectorAll(".key-row").forEach((row) => {
     const btn = row.querySelector(".set-key");
     btn.addEventListener("click", () => {
       if (capturing) capturing.btn.textContent = keyLabel(keyFor(capturing.id));
