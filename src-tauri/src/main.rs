@@ -1281,6 +1281,13 @@ struct Status {
     /// is otherwise unanswerable from inside the app.
     data_dir: String,
     config_path: String,
+    /// True when the app has no config.toml and is sitting in a directory that
+    /// already holds other things. It is about to create a library folder, a
+    /// cache and a config here, and dropping all that into someone's Downloads
+    /// or Desktop is rude.
+    crowded_folder: bool,
+    /// What else is in there, for the warning to name.
+    folder_entries: usize,
 }
 
 #[tauri::command]
@@ -1309,6 +1316,8 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
         disk_bytes: util::dir_size(&state.roms_dir) + util::dir_size(&state.media_dir),
         data_dir: abs(Path::new(".")),
         config_path: abs(Path::new("config.toml")),
+        crowded_folder: !Config::exists("config.toml") && neighbours() > 2,
+        folder_entries: neighbours(),
     })
 }
 
@@ -1387,6 +1396,35 @@ fn set_icon_style(state: State<'_, AppState>, key: String) -> CmdResult<String> 
     romm_desktop::config::set_table_entry("config.toml", "icons", "style", style.key())
         .map_err(err)?;
     Ok(style.label().to_owned())
+}
+
+/// How many things sit alongside the app, ignoring what the app itself puts
+/// there.
+///
+/// The app's own executable does not count, and neither does anything it
+/// created — a second run should not report the folder as crowded because of
+/// the library it made on the first.
+fn neighbours() -> usize {
+    const OURS: &[&str] = &[
+        "library", "cache.sqlite3", "config.toml", "data", "state.json",
+        "states-seen.json", "crash.log", "saves-backup",
+    ];
+    let Ok(entries) = std::fs::read_dir(".") else { return 0 };
+    entries
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if name.starts_with('.') || OURS.contains(&name.as_str()) {
+                return false;
+            }
+            // The app itself, under any of the names it ships as.
+            !(name.ends_with(".exe") && name.contains("romm"))
+                && !name.starts_with("romm-desktop")
+                && !name.starts_with("romm-gui")
+                && !name.starts_with("romm-cli")
+                && !name.ends_with(".app")
+        })
+        .count()
 }
 
 fn abs(p: &Path) -> String {

@@ -75,7 +75,12 @@ listen("download-progress", ({ payload }) => {
     ].join(" · ");
     // Both of these are only otherwise discovered by pressing play and having
     // it fail, which is a poor way to learn the app was never configured.
-    if (!s.configured) {
+    if (s.crowded_folder) {
+      // Before anything is created, not after. The app is about to write a
+      // library folder, a cache and a config beside itself, and doing that in
+      // someone's Downloads is how a launcher earns a reputation for mess.
+      showFolderWarning(s);
+    } else if (!s.configured) {
       // Naming the exact path it looked at: "it cannot find my config" is
       // otherwise unanswerable, and the answer is rarely the directory the
       // user expected.
@@ -101,3 +106,49 @@ listen("download-progress", ({ payload }) => {
   installKeys();
   installGamepad();
 })();
+
+/// "You have put me somewhere I am going to make a mess of."
+///
+/// Shown once, before the first sync or download creates anything. Dismissable
+/// rather than blocking: it is advice, and someone who meant to put the app
+/// there should not have to argue with it.
+function showFolderWarning(status) {
+  if (localStorage.getItem("folderWarningSeen") === "yes") return;
+
+  const box = document.createElement("div");
+  box.id = "conflict-overlay";
+  box.innerHTML = `<div class="conflict-box">
+      <header><span class="icon icon-info-on"></span><h2>Give me my own folder</h2></header>
+      <p class="lead">This app writes everything beside its own executable —
+        downloaded games, cover art, the library index, your config.</p>
+      <p class="why">Right now that is:<br><code>${status.data_dir}</code><br>
+        which already has ${status.folder_entries} other item${
+          status.folder_entries === 1 ? "" : "s"
+        } in it.</p>
+      <p class="note">Move the app into a folder of its own and everything it
+        creates stays together — and deleting that one folder reclaims all of
+        it. Nothing has been written yet.</p>
+      <div class="sides">
+        <button class="side" data-ack="ok"><span class="who">Got it</span>
+          <span class="when">do not show this again</span></button>
+        <button class="side" data-ack="later"><span class="who">Remind me</span>
+          <span class="when">ask again next launch</span></button>
+      </div>
+    </div>`;
+
+  box.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-ack]");
+    if (!btn) return;
+    if (btn.dataset.ack === "ok") localStorage.setItem("folderWarningSeen", "yes");
+    box.remove();
+  });
+  document.addEventListener(
+    "keydown",
+    (ev) => {
+      if (ev.key === "Escape" && box.isConnected) box.remove();
+    },
+    { once: true }
+  );
+  document.body.appendChild(box);
+  box.querySelector("[data-ack]").focus();
+}

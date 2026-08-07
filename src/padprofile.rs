@@ -166,7 +166,10 @@ impl PadProfile {
 const DRIVER_DIRS: &[&str] = if cfg!(target_os = "macos") {
     &["mfi", "hid"]
 } else if cfg!(target_os = "windows") {
-    &["dinput", "hid", "sdl2"]
+    // xinput first: it is RetroArch's default input driver on Windows and was
+    // missing from this list entirely, so a machine using it found no profile
+    // and silently fell through to the built-in table.
+    &["xinput", "dinput", "hid", "sdl2"]
 } else {
     &["udev", "sdl2", "linuxraw"]
 };
@@ -276,6 +279,56 @@ fn overlap(a: &str, b: &str) -> Option<usize> {
     } else {
         None
     }
+}
+
+/// Built-in profiles for pads that do not follow their platform's usual
+/// numbering, matched by name.
+///
+/// A fresh RetroArch install can have no `autoconfig/` directory at all, in
+/// which case there is nothing to read and the generic table below is used. That
+/// table is right for an Xbox pad and wrong for anything that numbers its
+/// buttons differently — and when it is wrong the *modifier* moves, so every
+/// hotkey either does nothing or fires on the wrong button.
+///
+/// Each entry is `(name fragment, profile)`. Kept deliberately short: this is
+/// for pads someone has actually reported, not a database.
+const KNOWN: &[(&str, &str)] = &[
+    // 8BitDo Ultimate 2 in Xbox mode. Reported from RetroArch's own binding
+    // screen: Select and Start are the reverse of the usual Xbox order, and the
+    // triggers are on axes 4 and 5 rather than a shared axis 2.
+    #[cfg(target_os = "windows")]
+    (
+        "8bitdo",
+        r#"
+        input_driver = "xinput"
+        input_device = "8BitDo Ultimate 2 (built-in)"
+        input_b_btn = "0"
+        input_a_btn = "1"
+        input_y_btn = "2"
+        input_x_btn = "3"
+        input_l_btn = "4"
+        input_r_btn = "5"
+        input_start_btn = "6"
+        input_select_btn = "7"
+        input_l3_btn = "8"
+        input_r3_btn = "9"
+        input_up_btn = "h0up"
+        input_down_btn = "h0down"
+        input_left_btn = "h0left"
+        input_right_btn = "h0right"
+        input_l2_axis = "+4"
+        input_r2_axis = "+5"
+        "#,
+    ),
+];
+
+/// A built-in profile for `device`, if one is known for it.
+pub fn known(device: Option<&str>) -> Option<PadProfile> {
+    let want = normalize(device?);
+    KNOWN
+        .iter()
+        .find(|(fragment, _)| want.replace(' ', "").contains(fragment))
+        .map(|(_, text)| PadProfile::parse(text))
 }
 
 /// Built-in profiles, used when `<root>/autoconfig` is missing or has nothing
@@ -611,5 +664,48 @@ input_r2_axis = "+5"
         // "Controller" alone is shared by nearly every profile and must not
         // count as a match, or an arbitrary pad wins.
         assert!(overlap(&normalize("DualSense Wireless Controller"), &normalize("Xbox Controller")).is_none());
+    }
+
+    /// The reported failure: an 8BitDo Ultimate 2 on Windows numbers Select and
+    /// Start the reverse of an Xbox pad, so the generic table put the hotkey
+    /// modifier on Start. Every hotkey then needed the wrong button held, which
+    /// reads as "hotkeys do not work on Windows".
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn a_known_pad_beats_the_generic_table() {
+        let p = known(Some("8BitDo Ultimate 2 Wireless Controller")).expect("a known pad");
+        assert_eq!(p.get(MODIFIER).unwrap().value, "7", "Select is 7 on this pad");
+        assert_eq!(p.get(Physical::Start).unwrap().value, "6");
+        assert_eq!(p.get(Physical::RT).unwrap().suffix, "axis");
+        assert_eq!(p.get(Physical::RT).unwrap().value, "+5");
+
+        // The generic table disagrees, which is the whole reason the entry
+        // exists.
+        assert_ne!(
+            fallback().get(MODIFIER).unwrap().value,
+            p.get(MODIFIER).unwrap().value
+        );
+    }
+
+    /// Matching is on the name, so an unrelated pad still gets the generic
+    /// table rather than someone else's numbers.
+    #[test]
+    fn an_unknown_pad_matches_nothing() {
+        assert!(known(Some("Xbox Wireless Controller")).is_none());
+        assert!(known(Some("DualSense Wireless Controller")).is_none());
+        assert!(known(None).is_none());
+    }
+
+    /// Every built-in entry must cover the modifier and every hotkey, or it is
+    /// worse than the generic table it replaces.
+    #[test]
+    fn every_known_profile_covers_the_full_hotkey_set() {
+        for (name, text) in KNOWN {
+            let p = PadProfile::parse(text);
+            assert!(p.get(MODIFIER).is_some(), "{name} has no Select");
+            for (action, button, _) in HOTKEYS {
+                assert!(p.get(*button).is_some(), "{name} is missing {button:?} for {action}");
+            }
+        }
     }
 }

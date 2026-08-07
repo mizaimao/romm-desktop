@@ -332,6 +332,19 @@ video_driver = \"d3d11\"
 
 # Resizing tears without this once the driver is switched.
 video_vsync = \"true\"
+
+# Sync to the content's own framerate rather than the display's.
+#
+# A 144 Hz monitor showing 60 Hz content has to reconcile the two, and d3d11
+# does it by rebuilding the swapchain on every window resize -- which is seconds
+# of black screen each time the window is dragged. Letting the refresh follow
+# the content removes the reconciliation, and on a variable-refresh display it
+# is what you want anyway.
+vrr_runloop_enable = \"true\"
+
+# Fewer buffered frames to throw away when the swapchain is rebuilt, which is
+# the other half of how long that black screen lasts.
+video_max_swapchain_images = \"2\"
 ";
 
     #[cfg(not(target_os = "windows"))]
@@ -395,12 +408,18 @@ video_vsync = \"true\"
     /// hotkeys take raw driver indices, which differ per controller *and* per
     /// operating system. See [`crate::padprofile`].
     pub fn hotkeys(&self, device: Option<&str>) -> String {
-        let profile = padprofile::find(&self.root, device).unwrap_or_else(|| {
-            // No autoconfig directory, or nothing in it for this pad. The
-            // built-in table is right for an Xbox-style controller, which is
-            // the overwhelming majority, and the user's own config still wins.
-            padprofile::fallback()
-        });
+        let profile = padprofile::find(&self.root, device)
+            // A pad known to number its buttons differently from its platform's
+            // usual layout. Checked before the generic table, which would put
+            // the hotkey modifier on the wrong button for it.
+            .or_else(|| padprofile::known(device))
+            .unwrap_or_else(|| {
+                // No autoconfig directory, or nothing in it for this pad. The
+                // built-in table is right for an Xbox-style controller, which is
+                // the overwhelming majority, and the user's own config still
+                // wins.
+                padprofile::fallback()
+            });
         padprofile::hotkey_block(&profile)
     }
 
