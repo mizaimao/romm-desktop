@@ -14,6 +14,7 @@ import { el, state } from "./state.js";
 import { runAction } from "./keys.js";
 import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
+import { scrollDetail } from "./detail.js";
 
 // Rebindable in Settings; padMap() layers the user's choices over the
 // position-based defaults in bindings.js.
@@ -58,6 +59,17 @@ export function pressedActions(pads, map) {
       // than dispatching an action of null.
       if (action && pad.buttons[index]?.pressed) pressed.add(action);
     }
+    // Right stick scrolls the detail pane. Axes 2 and 3 in the W3C standard
+    // layout. Done here rather than as an action because it is continuous
+    // rather than a repeat-fire keypress: how far you push decides how fast it
+    // moves, which a discrete action cannot express.
+    const ry = pad.axes[3] ?? 0;
+    if (Math.abs(ry) > STICK_DEADZONE) {
+      // Squared so a small push creeps and a full push moves properly.
+      const speed = Math.sign(ry) * (Math.abs(ry) ** 2) * 26;
+      scrollDetail(speed);
+    }
+
     // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
     // diagonally it would otherwise report left+up in the same frame and move
     // twice, which reads as the cursor jumping around on its own.

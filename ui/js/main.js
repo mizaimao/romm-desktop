@@ -3,7 +3,7 @@
 import { el, state, trail, invoke, listen } from "./state.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
-import { setSidebar } from "./detail.js";
+import { setSidebar, installDetailResizer } from "./detail.js";
 import { showThemes } from "./themes.js";
 import { showSystems } from "./systems.js";
 import { showCollectionGroups } from "./collections.js";
@@ -97,6 +97,7 @@ listen("download-progress", ({ payload }) => {
   setLayout(state.layout);
   setSidebar(state.sidebar);
   await showPlatforms();
+  installDetailResizer();
   installKeys();
   installGamepad();
 })();

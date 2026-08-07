@@ -116,6 +116,7 @@ export async function showCollectionsIn(group, label) {
 
 export async function showCollectionRoms(id, name) {
   state.view = "collection-roms";
+  state.collection = id;
   el.back.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;

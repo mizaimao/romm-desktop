@@ -1214,8 +1214,8 @@ async fn cmd_themes_get(needle: &str, logos_only: bool) -> Result<()> {
 
     let dir = cfg.themes_dir();
     println!("{} — {}", theme_entry.name, theme_entry.url);
-    println!("cloning into {} …", dir.join(theme_entry.dir_name()).display());
-    let (path, fresh) = theme_remote::install(theme_entry, &dir)?;
+    println!("downloading into {} …", dir.join(theme_entry.dir_name()).display());
+    let (path, fresh) = theme_remote::install(&http, theme_entry, &dir).await?;
     let size = theme_remote::size_of(&path);
     println!(
         "{} ({:.1} MB)",
@@ -1266,7 +1266,7 @@ async fn cmd_themes_update() -> Result<()> {
                 print!("  {name:<28} ");
                 use std::io::Write as _;
                 std::io::stdout().flush().ok();
-                match theme_remote::install(t, &dir) {
+                match theme_remote::install(&http, t, &dir).await {
                     Ok(_) => { println!("ok"); n += 1; }
                     Err(e) => println!("FAILED — {e}"),
                 }

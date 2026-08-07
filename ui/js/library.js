@@ -1,6 +1,6 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
-import { el, state, trail, invoke, convertFileSrc } from "./state.js";
+import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
 import { human, escapeHtml } from "./util.js";
 import { selectRom, play } from "./detail.js";
@@ -121,8 +121,18 @@ export function renderRows(rows, showPlatform) {
   });
 
   if (state.layout === "grid") observeCovers();
-  // Open with something selected so the artwork pane is not blank.
-  if (rows.length) selectRom(rows[0].id);
+  // Put the cursor back where it was in this list, falling back to the top.
+  // Without this, every trip out to the platform grid and back means scrolling
+  // to find your place again — which on a 2,500-game arcade list is the whole
+  // journey a second time.
+  if (rows.length) {
+    const want = rememberedRom(rows) ?? rows[0].id;
+    selectRom(want);
+    const node = el.list.querySelector(`[data-id="${want}"]`);
+    // `nearest` rather than `center`: if the remembered row is already on
+    // screen, scrolling it to the middle moves the list for no reason.
+    node?.scrollIntoView({ block: "nearest" });
+  }
 }
 
 /// Search results, split into one section per console, biggest group first.

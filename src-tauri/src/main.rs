@@ -199,7 +199,7 @@ async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
 
     WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Settings")
-        .inner_size(860.0, 640.0)
+        .inner_size(1000.0, 740.0)
         // Below this the tab rail and a binding row stop fitting side by side.
         .min_inner_size(640.0, 460.0)
         .resizable(true)
@@ -910,7 +910,14 @@ async fn theme_download(
         .ok_or_else(|| format!("{reponame} is not in the themes list"))?;
 
     let dir = state.themes_dir.clone();
-    let (path, fresh) = theme_remote::install(&entry, &dir).map_err(err)?;
+    // Reuses the API client's HTTP stack when there is one; a theme is a
+    // public download, so an unconfigured server does not prevent it.
+    let http = state
+        .client
+        .as_ref()
+        .map(|c| c.http().clone())
+        .unwrap_or(util::http_client(None).map_err(err)?);
+    let (path, fresh) = theme_remote::install(&http, &entry, &dir).await.map_err(err)?;
     let size = theme_remote::size_of(&path);
 
     let slugs: Vec<String> = {

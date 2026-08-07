@@ -1,6 +1,6 @@
 // The sidebar: artwork, metadata, and the play/download actions.
 
-import { el, state, invoke, convertFileSrc } from "./state.js";
+import { el, state, invoke, convertFileSrc, rememberRom } from "./state.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, detailMedia, setOpenHook } from "./lightbox.js";
 import { launch, download } from "./actions.js";
@@ -25,6 +25,7 @@ export function setSidebar(on) {
 
 export async function selectRom(id) {
   state.selected = id;
+  rememberRom(id);
   el.list.querySelectorAll(".row, .gcard").forEach((r) =>
     r.classList.toggle("sel", Number(r.dataset.id) === id)
   );
@@ -237,4 +238,72 @@ function startSlideshow(count) {
 export async function play(d) {
   if (d.downloaded) return launch(d.id);
   return download(d.id, true);
+}
+
+/// A drag handle between the list and the detail pane.
+///
+/// The pane was a fixed 360px, which cropped cover art and wrapped most
+/// metadata lines. It is wider by default now and the width is remembered, so
+/// this is set once rather than every session.
+export function installDetailResizer() {
+  const grip = document.createElement("div");
+  grip.id = "detail-grip";
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-orientation", "vertical");
+  grip.title = "Drag to resize";
+  el.detail.parentNode.insertBefore(grip, el.detail);
+
+  const saved = Number(localStorage.getItem("detailWidth"));
+  if (saved) applyWidth(saved);
+
+  let startX = 0;
+  let startW = 0;
+
+  const onMove = (ev) => {
+    // Dragging left widens the pane: it grows from its left edge.
+    applyWidth(startW + (startX - ev.clientX));
+  };
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    grip.classList.remove("dragging");
+    document.body.classList.remove("resizing-detail");
+    localStorage.setItem("detailWidth", String(el.detail.getBoundingClientRect().width | 0));
+  };
+
+  grip.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    startX = ev.clientX;
+    startW = el.detail.getBoundingClientRect().width;
+    grip.classList.add("dragging");
+    document.body.classList.add("resizing-detail");
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  });
+
+  // Double-click resets, so a pane dragged off screen is recoverable without
+  // clearing storage by hand.
+  grip.addEventListener("dblclick", () => {
+    document.documentElement.style.removeProperty("--detail-w");
+    localStorage.removeItem("detailWidth");
+  });
+}
+
+function applyWidth(px) {
+  // Clamped in code as well as in CSS: the CSS bound stops it rendering wrong,
+  // this stops a nonsense value being written to storage.
+  const max = Math.min(window.innerWidth * 0.7, 900);
+  const clamped = Math.max(300, Math.min(px, max));
+  document.documentElement.style.setProperty("--detail-w", `${clamped}px`);
+}
+
+/// Scroll the detail pane, for the controller's right stick.
+///
+/// The left stick moves the cursor through the list; the right one reads the
+/// pane next to it, which is otherwise unreachable without a mouse.
+export function scrollDetail(amount) {
+  const pane = el.detail?.querySelector(".scroll");
+  if (!pane || el.detail.hidden) return false;
+  pane.scrollTop += amount;
+  return true;
 }
