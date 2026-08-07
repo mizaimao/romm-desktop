@@ -28,6 +28,22 @@ const STICK_DEADZONE = 0.55;
 const held = new Map(); // action -> next fire time
 let running = false;
 
+/// Set while the pad must be ignored until every button is released.
+///
+/// The quit hotkey is Select + A, and both are bound here too — Select opens
+/// Settings, A launches whatever is selected. So the moment RetroArch exited
+/// and this window took focus again, the still-held buttons read as fresh
+/// presses: the game relaunched and Settings opened behind it.
+///
+/// Waiting for release rather than a timeout, because how long someone holds a
+/// quit combo is not something to guess at.
+let settling = false;
+
+export function ignorePadUntilReleased() {
+  settling = true;
+  held.clear();
+}
+
 function fire(action, now) {
   const due = held.get(action);
   if (due === undefined) {
@@ -134,6 +150,13 @@ function step() {
 
   const now = performance.now();
   const pressed = pressedActions(navigator.getGamepads?.() ?? [], map);
+
+  if (settling) {
+    // Nothing is dispatched until the pad is at rest. Anything still down is
+    // left over from whatever we just came back from.
+    if (pressed.size === 0) settling = false;
+    return;
+  }
 
   for (const action of pressed) fire(action, now);
   // Release anything no longer held so the next press fires immediately.

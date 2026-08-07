@@ -11,7 +11,7 @@ import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 import {
   startBackdrop, stopBackdrop, applyBackdropSettings,
-  applyStoredGlassTint, setGlassTint,
+  applyStoredGlassTint, setGlassTint, setGlassStrength,
 } from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
@@ -54,6 +54,7 @@ el.search.addEventListener("input", (e) => {
 // the two have to talk. Without this, toggling it there rendered a shader into
 // the settings panel and left the library untouched.
 listen("glass-tint", ({ payload }) => setGlassTint(payload, { announce: false }));
+listen("glass-strength", ({ payload }) => setGlassStrength(payload, { announce: false }));
 
 listen("backdrop-toggle", ({ payload }) => {
   if (payload) startBackdrop();

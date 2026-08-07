@@ -18,7 +18,7 @@ import { editServer, editAchievements, editScraper } from "./credentials.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, PRESETS,
-  GLASS_PRESETS, glassTint, setGlassTint,
+  GLASS_PRESETS, glassTint, setGlassTint, glassStrength, setGlassStrength,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -142,8 +142,14 @@ export function paneHtml(id) {
           <input class="glass-custom" type="color" />
         </div>
       </div>
-      <p class="hint">Tints the bars, the buttons and the glow behind them —
-        one colour for all of it, the way Aero did.</p>
+      <div class="srow">
+        <label>Tint strength</label>
+        <div class="ctl"><input class="glass-strength" type="range" min="0" max="60" step="2" />
+          <span class="glass-strength-val"></span></div>
+      </div>
+      <p class="hint">Tints the top bar, the buttons and the glow behind them —
+        one colour for all of it. At 0 the glass is clear and only the blur
+        remains.</p>
 
       <h4>Shader backdrop</h4>
       <div class="srow">
@@ -402,6 +408,14 @@ function wireAppearance(box) {
       }
     });
     glassCustom.addEventListener("input", () => setGlassTint(glassCustom.value));
+
+    const strengthEl = box.querySelector(".glass-strength");
+    const strengthOut = box.querySelector(".glass-strength-val");
+    strengthEl.value = String(glassStrength());
+    strengthOut.textContent = `${glassStrength()}%`;
+    strengthEl.addEventListener("input", () => {
+      strengthOut.textContent = `${setGlassStrength(strengthEl.value)}%`;
+    });
   }
 
   // The custom pickers only mean anything on the "custom" scheme; showing them

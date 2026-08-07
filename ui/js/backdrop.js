@@ -344,6 +344,23 @@ export const GLASS_PRESETS = [
 ];
 
 const GLASS_KEY = "glassTint";
+const TINT_KEY = "glassStrength";
+
+/// How much of the tint shows through the glass, as a percentage.
+export function glassStrength() {
+  const n = Number(localStorage.getItem(TINT_KEY));
+  return Number.isFinite(n) && n > 0 ? n : 18;
+}
+
+export function setGlassStrength(pct, { announce = true } = {}) {
+  const value = Math.max(0, Math.min(60, Math.round(Number(pct) || 0)));
+  document.documentElement.style.setProperty("--tint", `${value}%`);
+  if (announce) {
+    localStorage.setItem(TINT_KEY, String(value));
+    window.__TAURI__?.event?.emit?.("glass-strength", value);
+  }
+  return value;
+}
 
 export function glassTint() {
   return localStorage.getItem(GLASS_KEY) || GLASS_PRESETS[0].colour;
@@ -367,4 +384,5 @@ export function setGlassTint(colour, { announce = true } = {}) {
 /// Called at startup in every window that has chrome to tint.
 export function applyStoredGlassTint() {
   setGlassTint(glassTint(), { announce: false });
+  setGlassStrength(glassStrength(), { announce: false });
 }
