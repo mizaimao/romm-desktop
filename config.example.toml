@@ -8,12 +8,22 @@
 url = "http://dev.lan"
 
 # A client token is preferred and takes precedence over username/password.
-# Create one in RomM under API tokens with only the scopes this client uses:
-#   me.read  roms.read  platforms.read  collections.read
-#   assets.read  assets.write  devices.read  devices.write
-# Nothing here writes to your library, so leave every *.write on roms,
-# platforms, users and tasks unchecked. A token can also be revoked from the
-# server without changing your account password.
+# Create one in RomM under API tokens. The complete set this client uses:
+#
+#   me.read           who you are, and the connection check
+#   roms.read         the game list, and downloading a game
+#   platforms.read    the console list
+#   collections.read  your collections and RomM's generated ones
+#   assets.read       reading saves, save states and artwork
+#   assets.write      uploading saves and save states
+#   devices.read      finding this device's sync registration
+#   devices.write     registering it, and the save sync negotiation
+#   firmware.read     BIOS files, which Neo Geo and others cannot run without
+#
+# Nine of the twenty-one. Leave the rest unchecked: nothing here writes to your
+# library, so every *.write on roms, platforms, firmware, collections, users and
+# tasks stays off, along with users.*, tasks.run, playlists.* and logs.read.
+# A token can also be revoked from the server without changing your password.
 #
 # Basic auth still works and is used when no token is set.
 # token = "romm_..."

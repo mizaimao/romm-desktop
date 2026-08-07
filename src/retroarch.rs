@@ -417,9 +417,15 @@ video_max_swapchain_images = \"2\"
         // stick used constantly in play, so the menu opens or the game quits
         // while you are moving. A guess is only safe when being wrong is
         // cheap, and here it is not.
-        match padprofile::find(&self.root, device).or_else(|| padprofile::known(device)) {
+        // Both places RetroArch keeps them: beside the binary for a portable
+        // install, and in its user-data directory for a normal one. The second
+        // is where anything it learned about the connected pad ends up, so
+        // searching only the first found shipped defaults and missed the
+        // profile that is actually in use.
+        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
+        match padprofile::find_in(&roots, device).or_else(|| padprofile::known(device)) {
             Some(profile) => padprofile::hotkey_block(&profile),
-            None => padprofile::no_profile_note(&self.root, device),
+            None => padprofile::no_profile_note(&roots, device),
         }
     }
 

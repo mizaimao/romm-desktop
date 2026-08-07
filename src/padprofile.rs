@@ -182,7 +182,21 @@ const DRIVER_DIRS: &[&str] = if cfg!(target_os = "macos") {
 /// vendor/product suffixes, underscores for spaces, and "Wireless Controller"
 /// against "Xbox Wireless Controller" are all normal.
 pub fn find(root: &Path, device: Option<&str>) -> Option<PadProfile> {
-    let dir = root.join("autoconfig");
+    find_in(&[root.join("autoconfig")], device)
+}
+
+/// As [`find`], searching several autoconfig roots in order.
+///
+/// A portable RetroArch keeps `autoconfig/` beside the binary; a normal Windows
+/// or Linux install ships defaults there but writes anything it learns to its
+/// user-data directory instead. Searching only the install directory found the
+/// shipped profiles and none of the ones RetroArch had actually chosen for the
+/// connected pad — which are the ones that are right.
+pub fn find_in(roots: &[std::path::PathBuf], device: Option<&str>) -> Option<PadProfile> {
+    roots.iter().find_map(|dir| find_one(dir, device))
+}
+
+fn find_one(dir: &Path, device: Option<&str>) -> Option<PadProfile> {
     let wanted = device.map(normalize);
 
     for driver in DRIVER_DIRS {
@@ -485,7 +499,7 @@ pub fn hotkey_block(profile: &PadProfile) -> String {
 ///
 /// The note says which directory was searched, because the usual cause is a
 /// RetroArch that has never been run and therefore has no `autoconfig/` at all.
-pub fn no_profile_note(root: &Path, device: Option<&str>) -> String {
+pub fn no_profile_note(roots: &[std::path::PathBuf], device: Option<&str>) -> String {
     format!(
         "\n# ---- Controller hotkeys ----\n\
          # None bound. RetroArch takes raw driver button indices for these, and\n\
@@ -493,7 +507,7 @@ pub fn no_profile_note(root: &Path, device: Option<&str>) -> String {
          # out of RetroArch's own autoconfig profile for the connected pad.\n\
          #\n\
          # No profile matched{}.\n\
-         # Searched: {}\n\
+         # Searched:\n{}\n\
          #\n\
          # If that directory does not exist, run RetroArch once so it writes its\n\
          # configuration, then launch again. Guessing the indices instead would\n\
@@ -504,7 +518,11 @@ pub fn no_profile_note(root: &Path, device: Option<&str>) -> String {
             Some(d) => format!(" for {d:?}"),
             None => String::new(),
         },
-        root.join("autoconfig").display()
+        roots
+            .iter()
+            .map(|r| format!("#   {}", r.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
     )
 }
 
