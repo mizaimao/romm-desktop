@@ -6,12 +6,12 @@
 
 import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play } from "./detail.js";
-import { showPlatforms, showRoms, setLayout } from "./library.js";
+import { showPlatforms, showRoms, setLayout, setZoom } from "./library.js";
 import { showThemes } from "./themes.js";
 import { escapeHtml } from "./util.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
-import { cycleSection } from "./tabs.js";
+import { cycleSection, resetSection } from "./tabs.js";
 
 function items() {
   return [...el.list.querySelectorAll(".card, .gcard, .row, .tcard")];
@@ -149,7 +149,9 @@ function goBack() {
   const up = trail.pop();
   if (up) return up();
   el.themesBtn.classList.remove("active");
-  showPlatforms();
+  // The section you are in, not always the platform grid — Back from inside a
+  // collection belongs in My collections, not the library.
+  resetSection();
 }
 
 function toggleHelp() {
@@ -237,7 +239,21 @@ export const HANDLERS = {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
   },
   themes: () => (state.view === "themes" ? showPlatforms() : showThemes()),
+  zoomIn: () => nudgeZoom(1),
+  zoomOut: () => nudgeZoom(-1),
 };
+
+/// Step the cover size, staying inside the slider's own range.
+///
+/// Reads the bounds off the slider rather than repeating them, so the pad and
+/// the slider can never disagree about how big "biggest" is.
+function nudgeZoom(direction) {
+  if (el.zoomWrap.hidden) return;
+  const step = Number(el.zoom.step) || 10;
+  const min = Number(el.zoom.min) || 90;
+  const max = Number(el.zoom.max) || 300;
+  setZoom(Math.min(max, Math.max(min, (state.zoom || min) + direction * step)));
+}
 
 /// Run an action by id, as the keyboard would. Shared with the gamepad.
 export function runAction(id) {

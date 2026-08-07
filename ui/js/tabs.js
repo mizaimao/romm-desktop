@@ -92,6 +92,25 @@ export function activeSection() {
   return current;
 }
 
+/// Reopen the current section from the top, discarding where it was parked.
+///
+/// This is what Back does once the crumb trail is empty. It cannot go through
+/// `showSection`, which returns immediately when asked for the section already
+/// showing — correct for a tab press, and the reason Back did nothing at all
+/// from inside a platform: the trail was empty, so it asked for the section it
+/// was already in and got ignored.
+export async function resetSection() {
+  const section = SECTIONS.find((s) => s.id === current);
+  if (!section) return;
+  // Drop the parked position too. Otherwise the next visit to this tab would
+  // restore the platform we just backed out of.
+  parked.delete(current);
+  state.collection = null;
+  state.collectionName = null;
+  trail.length = 0;
+  await section.open();
+}
+
 /// Switch to a section by id. Safe to call with an unknown id.
 export async function showSection(id, { force = false } = {}) {
   const section = SECTIONS.find((s) => s.id === id);

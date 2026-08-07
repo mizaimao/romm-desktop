@@ -417,6 +417,17 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// This build's version, and the server's if we have ever spoken to it.
+///
+/// Both, because "which version am I on" is nearly always asked when something
+/// behaves differently on two machines, and the answer is as often the server
+/// as the client.
+#[tauri::command]
+fn versions(state: State<'_, AppState>) -> CmdResult<(String, Option<String>)> {
+    let server = state.cache.lock().ok().and_then(|c| c.server_version());
+    Ok((env!("CARGO_PKG_VERSION").to_owned(), server))
+}
+
 #[tauri::command]
 fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
     let cache = state.cache.lock().map_err(err)?;
@@ -1888,6 +1899,7 @@ fn main() {
             pending_conflicts: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            versions,
             platforms,
             roms,
             search,

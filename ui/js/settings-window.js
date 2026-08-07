@@ -99,6 +99,26 @@ window.addEventListener("settings-toast", (ev) => {
   toastEl._t = setTimeout(() => (toastEl.hidden = true), 4000);
 });
 
+/// Both version numbers at the foot of the rail.
+///
+/// Left hidden if the call fails rather than showing a blank or a guess: a
+/// wrong version number is worse than none, since the whole point of it is to
+/// answer "are these two machines running the same thing".
+async function showVersions() {
+  const box = document.getElementById("versions");
+  if (!box) return;
+  try {
+    const [client, server] = await window.__TAURI__.core.invoke("versions");
+    box.innerHTML =
+      `RomM Desktop <strong>${client}</strong>` +
+      (server ? `<br>server <strong>${server}</strong>` : "");
+    box.hidden = false;
+  } catch {
+    box.hidden = true;
+  }
+}
+
 applyStoredGlassTint();
+showVersions();
 buildTabs();
 show(localStorage.getItem(REMEMBERED) || TABS[0].id);

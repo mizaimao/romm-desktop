@@ -20,7 +20,11 @@ import { scrollDetail } from "./detail.js";
 // position-based defaults in bindings.js.
 
 // Held directions repeat; one-shot buttons do not.
-const REPEATABLE = new Set(["up", "down", "left", "right", "pageUp", "pageDown"]);
+const REPEATABLE = new Set([
+  "up", "down", "left", "right", "pageUp", "pageDown",
+  // Holding a trigger sweeps the size rather than stepping once per press.
+  "zoomIn", "zoomOut",
+]);
 const FIRST_REPEAT_MS = 380;
 const REPEAT_MS = 110;
 const STICK_DEADZONE = 0.55;
@@ -35,13 +39,34 @@ let running = false;
 /// and this window took focus again, the still-held buttons read as fresh
 /// presses: the game relaunched and Settings opened behind it.
 ///
-/// Waiting for release rather than a timeout, because how long someone holds a
-/// quit combo is not something to guess at.
+/// Waiting for release rather than a fixed timeout, because how long someone
+/// holds a quit combo is not something to guess at.
+///
+/// Release alone turned out not to be enough. Coming back from RetroArch the
+/// pad can report *nothing* held for a frame or two before the real state
+/// arrives — the window regains focus first and the Gamepad API catches up
+/// after — so the still-held quit combo read as released, the lock lifted, and
+/// then the same buttons arrived as a fresh press. A short floor under the
+/// lock covers that gap: input is ignored until the pad is at rest **and** the
+/// floor has passed.
+const SETTLE_FLOOR_MS = 200;
+
 let settling = false;
+let settleUntil = 0;
 
 export function ignorePadUntilReleased() {
   settling = true;
+  settleUntil = performance.now() + SETTLE_FLOOR_MS;
   held.clear();
+}
+
+/// Whether the lock may lift: the pad is at rest *and* the floor has passed.
+///
+/// Split out so the rule can be tested. The bug it encodes is invisible from
+/// the outside — a lock that lifts one frame too early looks exactly like a
+/// game relaunching itself.
+export function settleLifted(pressed, now) {
+  return pressed.size === 0 && now >= settleUntil;
 }
 
 function fire(action, now) {
@@ -152,9 +177,7 @@ function step() {
   const pressed = pressedActions(navigator.getGamepads?.() ?? [], map);
 
   if (settling) {
-    // Nothing is dispatched until the pad is at rest. Anything still down is
-    // left over from whatever we just came back from.
-    if (pressed.size === 0) settling = false;
+    if (settleLifted(pressed, now)) settling = false;
     return;
   }
 

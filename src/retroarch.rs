@@ -319,6 +319,17 @@ video_aspect_ratio_auto = \"true\"
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
 
+# Left stick doubles as the d-pad.
+#
+# Every console here predates the analog stick, so the stick is otherwise dead
+# in every game -- and it is where a thumb naturally sits on a modern pad. Mode
+# 1 is \"Left Analog\": the d-pad keeps working, the stick simply also reports
+# it, so nothing is taken away.
+input_player1_analog_dpad_mode = \"1\"
+input_player2_analog_dpad_mode = \"1\"
+input_player3_analog_dpad_mode = \"1\"
+input_player4_analog_dpad_mode = \"1\"
+
 # Mouse wired to the light gun controls.
 #
 # RetroArch keeps gun binds apart from pad binds and ships them unbound, so a

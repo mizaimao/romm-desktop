@@ -6,7 +6,7 @@ import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { showThemes } from "./themes.js";
 import { showSystems } from "./systems.js";
-import { installTabs, showSection, activeSection } from "./tabs.js";
+import { installTabs, showSection, resetSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 import {
@@ -24,7 +24,7 @@ el.back.addEventListener("click", () => {
   el.systemsBtn.classList.remove("active");
   // Back at the top of a section returns to that section, not always to the
   // library — the tab bar says where you are and it should stay true.
-  showSection(activeSection());
+  resetSection();
 });
 
 el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));

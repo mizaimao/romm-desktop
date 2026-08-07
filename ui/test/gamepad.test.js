@@ -77,6 +77,7 @@ before(async () => {
     ...(await load("keys.js")),
     ...(await load("bindings.js")),
     ...(await load("gamepad.js")),
+    ...(await load("tabs.js")),
   };
 });
 
@@ -264,5 +265,100 @@ describe("the poll loop", () => {
     // WebKit does not always fill in `mapping`. The buttons are still in
     // standard order, so nothing should key off that field.
     assert.deepEqual([...pressedActions([pad([0], { mapping: "" })], ui.padMap())], ["activate"]);
+  });
+});
+
+describe("the triggers resize the covers", () => {
+  test("LT and RT are bound to zoom, not to paging", () => {
+    const map = ui.padMap();
+    assert.equal(map[6], "zoomIn", "LT grows the covers");
+    assert.equal(map[7], "zoomOut", "RT shrinks them");
+    // Paging had to go somewhere; losing it entirely would be a silent
+    // regression rather than a move.
+    assert.equal(map[10], "pageUp");
+    assert.equal(map[11], "pageDown");
+  });
+
+  test("zoom stops at the slider's own limits", () => {
+    const zoom = document.getElementById("zoom");
+    document.getElementById("zoom-wrap").hidden = false;
+    const max = Number(zoom.max);
+    const min = Number(zoom.min);
+
+    ui.state.zoom = max;
+    ui.runAction("zoomIn");
+    assert.equal(ui.state.zoom, max, "cannot grow past the top of the range");
+
+    ui.state.zoom = min;
+    ui.runAction("zoomOut");
+    assert.equal(ui.state.zoom, min, "cannot shrink past the bottom");
+  });
+
+  test("nothing happens where there are no covers to resize", () => {
+    document.getElementById("zoom-wrap").hidden = true;
+    ui.state.zoom = 150;
+    ui.runAction("zoomIn");
+    assert.equal(ui.state.zoom, 150);
+  });
+});
+
+describe("the lock after the emulator exits", () => {
+  /// The quit combo is Select + A, and both are bound in here too. Coming back
+  /// from RetroArch the pad can report nothing held for a frame or two before
+  /// its real state arrives, so "wait for release" alone lifted the lock while
+  /// the combo was still physically down — and the game relaunched itself.
+  test("does not lift on the empty frame right after the emulator exits", () => {
+    ui.ignorePadUntilReleased();
+    const now = performance.now();
+    assert.equal(
+      ui.settleLifted(new Set(), now),
+      false,
+      "an empty frame immediately after the exit is the pad catching up, not a release"
+    );
+  });
+
+  test("lifts once the pad is at rest and the floor has passed", () => {
+    ui.ignorePadUntilReleased();
+    const later = performance.now() + 500;
+    assert.equal(ui.settleLifted(new Set(), later), true);
+  });
+
+  test("stays locked past the floor while a button is still held", () => {
+    ui.ignorePadUntilReleased();
+    const later = performance.now() + 500;
+    assert.equal(
+      ui.settleLifted(new Set(["activate"]), later),
+      false,
+      "the floor is a minimum, not a replacement for waiting"
+    );
+  });
+});
+
+describe("back at the top of a section", () => {
+  /// Back did nothing at all from inside a console: with the crumb trail empty
+  /// it asked for the section it was already in, and switching to the section
+  /// you are already on is correctly a no-op. It has to reopen instead.
+  test("reopens the section rather than asking to switch to it", async () => {
+    cards(`<div class="card" data-slug="snes"></div>`);
+    ui.runAction("activate");
+    await settle();
+    assert.equal(ui.state.view, "roms");
+
+    await ui.resetSection();
+    await settle();
+    assert.equal(ui.state.view, "platforms", "Back must climb out of a console");
+  });
+
+  /// Back has to land on the front of the section you are in, not always on
+  /// the platform grid. The tab bar says where you are and it has to stay true.
+  test("lands on the front of the section you are actually in", async () => {
+    await ui.showSection("mine");
+    await settle();
+    ui.state.view = "collection-roms";
+
+    await ui.resetSection();
+    await settle();
+    assert.equal(ui.activeSection(), "mine", "Back must not tip you into the library");
+    assert.notEqual(ui.state.view, "platforms");
   });
 });

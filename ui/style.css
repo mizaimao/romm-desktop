@@ -46,7 +46,7 @@ header {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--glass) 20%, transparent);
   /* Translucent rather than solid. `color-mix` keeps this tied to the theme
      colour instead of a second hardcoded value that drifts from it. */
   /* Aero glass.
@@ -67,8 +67,9 @@ header {
      Strength is a variable so Appearance can drive it — `--tint` is a
      percentage the whole top bar shares. */
   background: transparent;
-  /* Leave room for the macOS traffic lights. */
-  padding-left: 88px;
+  /* Just clear of the macOS traffic lights, which end at about 70px. It was 88,
+     which left an obvious gap before the first control. */
+  padding-left: 74px;
   -webkit-app-region: drag;
 }
 
@@ -83,15 +84,21 @@ header h1 {
 
 #back {
   background: transparent;
-  color: var(--text);
+  color: color-mix(in srgb, var(--text) 78%, transparent);
   border: 1px solid transparent;
   border-radius: 8px;
-  width: 28px;
+  /* Icon and word together, so it takes its own width rather than a square. */
+  gap: 6px;
+  padding: 5px 10px 5px 6px;
   height: 26px;
   font-size: 16px;
   cursor: pointer;
 }
-#back:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+#back:hover {
+  background: transparent;
+  color: color-mix(in srgb, var(--glass) 45%, white 55%);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--glass) 70%, transparent);
+}
 
 /* Search: the one control in the bar that is a field rather than a button, so
    it keeps a faint recess — a text box with no boundary at all reads as a
@@ -124,9 +131,13 @@ header h1 {
   font-size: 13px;
   cursor: pointer;
 }
+/* Hover lights the label rather than drawing a panel behind it — the same
+   signal the tab strip uses, so the two rows behave alike. A fill here was the
+   last surface left in the top bar. */
 #systems-btn:hover, #settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #themes-btn:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--text);
+  background: transparent;
+  color: color-mix(in srgb, var(--glass) 45%, white 55%);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--glass) 70%, transparent);
 }
 #settings-btn { padding: 6px 10px; }
 
@@ -228,7 +239,10 @@ main {
   /* The second sheet: less tint and a weaker highlight, so it reads as glass
      behind glass rather than one thick slab. */
   background: transparent;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  /* The line under the tabs takes the theme colour rather than a neutral grey,
+     so changing the tint in Appearance moves the whole bar together instead of
+     leaving a grey rule across the top of a coloured window. */
+  border-bottom: 1px solid color-mix(in srgb, var(--glass) 28%, transparent);
 }
 #tabbar .stab {
   appearance: none;
@@ -1279,13 +1293,17 @@ header button {
   border: 1px solid transparent;
   box-shadow: none;
   color: color-mix(in srgb, var(--text) 78%, transparent);
-  transition: background .14s, color .14s, border-color .14s;
+  /* "Hide info" is two words and was breaking across two lines, which made the
+     whole bar taller than the rest of its contents needed. */
+  white-space: nowrap;
+  transition: color .14s, text-shadow .2s, opacity .14s;
 }
 header button:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--text);
+  background: transparent;
+  color: color-mix(in srgb, var(--glass) 45%, white 55%);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--glass) 70%, transparent);
 }
-header button:active { background: color-mix(in srgb, var(--text) 14%, transparent); }
+header button:active { opacity: 0.7; }
 header button:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--glass) 70%, transparent);

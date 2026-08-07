@@ -28,6 +28,8 @@ export const ACTIONS = [
   { id: "settings",label: "Open settings",        fallback: null },
   { id: "prevSection", label: "Previous section",  fallback: "q" },
   { id: "nextSection", label: "Next section",      fallback: "e" },
+  { id: "zoomIn",  label: "Bigger covers",         fallback: "+" },
+  { id: "zoomOut", label: "Smaller covers",        fallback: "-" },
 ];
 
 /// Controller buttons, by W3C "standard mapping" index.
@@ -62,14 +64,20 @@ const PAD_FALLBACK = {
   0: "activate",
   1: "back",
   // The shoulders move between sections — the navigation you use constantly,
-  // and the one thing that should never need the cursor. Paging moved to the
-  // triggers to make room; both are still rebindable.
+  // and the one thing that should never need the cursor.
   4: "prevSection",
   5: "nextSection",
-  6: "pageUp",
-  7: "pageDown",
+  // The triggers resize the covers. They are analog, so they are the closest
+  // thing a pad has to the slider this replaces, and holding one sweeps the
+  // whole range rather than stepping.
+  6: "zoomIn",
+  7: "zoomOut",
   8: "settings",
   9: "help",
+  // Paging moved off the triggers to make room. The stick clicks were the only
+  // buttons still free; both remain rebindable.
+  10: "pageUp",
+  11: "pageDown",
   12: "up",
   13: "down",
   14: "left",
