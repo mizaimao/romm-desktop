@@ -303,6 +303,29 @@ impl Cache {
     }
 
     /// ROMs belonging to one collection.
+    /// Every game in a collection group, each listed once.
+    ///
+    /// `DISTINCT` matters: the "My collections" group holds overlapping lists —
+    /// a game can be in both Arcade Fighting and Arcade Essentials — and
+    /// without it the same download would be queued twice.
+    pub fn roms_in_group(&self, grp: &str) -> Result<Vec<RomRow>> {
+        // A subquery rather than a join: `collections` carries `id`, `name`
+        // and `description` too, and joining it puts those in scope alongside
+        // the same names on `roms`, which SQLite rejects as ambiguous.
+        let sql = format!(
+            "SELECT {ROM_COLUMNS} FROM roms WHERE id IN ( \
+                 SELECT cr.rom_id FROM collection_roms cr \
+                 JOIN collections c ON c.id = cr.collection_id \
+                 WHERE c.grp = ?1) \
+             ORDER BY 2, 3 COLLATE NOCASE"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([grp], rom_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn roms_in_collection(&self, id: &str) -> Result<Vec<RomRow>> {
         let sql = format!(
             "SELECT {ROM_COLUMNS} FROM roms r

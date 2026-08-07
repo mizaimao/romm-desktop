@@ -67,9 +67,11 @@ header {
      Strength is a variable so Appearance can drive it — `--tint` is a
      percentage the whole top bar shares. */
   background: transparent;
-  /* Just clear of the macOS traffic lights, which end at about 70px. It was 88,
-     which left an obvious gap before the first control. */
-  padding-left: 74px;
+  /* The macOS traffic lights end at about 70px and the window is dragged by
+     this bar, so nothing can go left of them. This is as far left as the first
+     control goes without sitting under the close button. */
+  padding-left: 72px;
+  gap: 8px;
   -webkit-app-region: drag;
 }
 
@@ -88,8 +90,11 @@ header h1 {
   border: 1px solid transparent;
   border-radius: 8px;
   /* Icon and word together, so it takes its own width rather than a square. */
-  gap: 6px;
-  padding: 5px 10px 5px 6px;
+  gap: 5px;
+  /* No left padding of its own: the header's clearance already puts it as far
+     left as it can go, and another 6px on top was visible as a gap. */
+  padding: 5px 8px 5px 2px;
+  font-weight: 600;
   height: 26px;
   font-size: 16px;
   cursor: pointer;
@@ -124,11 +129,15 @@ header h1 {
    specificity and the pills would come back. */
 #systems-btn, #settings-btn, #sidebar-btn, #layout-btn, #themes-btn, #collections-btn {
   background: transparent;
-  color: color-mix(in srgb, var(--text) 78%, transparent);
+  color: color-mix(in srgb, var(--text) 80%, transparent);
   border: 1px solid transparent;
   border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  /* Heavier than the body text. With no panel behind them these labels are the
+     whole control, so they have to carry the weight a surface used to. */
+  font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
 }
 /* Hover lights the label rather than drawing a panel behind it — the same
@@ -136,8 +145,12 @@ header h1 {
    last surface left in the top bar. */
 #systems-btn:hover, #settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #themes-btn:hover {
   background: transparent;
-  color: color-mix(in srgb, var(--glass) 45%, white 55%);
-  text-shadow: 0 0 14px color-mix(in srgb, var(--glass) 70%, transparent);
+  color: color-mix(in srgb, var(--glass) 30%, white 70%);
+  /* Two shadows: a tight bright core and a wide soft halo. One alone reads as
+     blur rather than light. */
+  text-shadow:
+    0 0 6px color-mix(in srgb, var(--glass) 90%, transparent),
+    0 0 22px color-mix(in srgb, var(--glass) 65%, transparent);
 }
 #settings-btn { padding: 6px 10px; }
 
@@ -146,8 +159,11 @@ header h1 {
 #systems-btn.active, #themes-btn.active, #collections-btn.active {
   background: transparent;
   border-color: transparent;
-  color: color-mix(in srgb, var(--glass) 55%, white 45%);
-  text-shadow: 0 0 16px color-mix(in srgb, var(--glass) 80%, transparent);
+  font-weight: 700;
+  color: color-mix(in srgb, var(--glass) 25%, white 75%);
+  text-shadow:
+    0 0 7px color-mix(in srgb, var(--glass) 95%, transparent),
+    0 0 26px color-mix(in srgb, var(--glass) 75%, transparent);
 }
 
 #zoom-wrap { display: flex; align-items: center; }
@@ -1292,7 +1308,8 @@ header button {
   background: transparent;
   border: 1px solid transparent;
   box-shadow: none;
-  color: color-mix(in srgb, var(--text) 78%, transparent);
+  font-weight: 600;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
   /* "Hide info" is two words and was breaking across two lines, which made the
      whole bar taller than the rest of its contents needed. */
   white-space: nowrap;
@@ -1300,8 +1317,10 @@ header button {
 }
 header button:hover {
   background: transparent;
-  color: color-mix(in srgb, var(--glass) 45%, white 55%);
-  text-shadow: 0 0 14px color-mix(in srgb, var(--glass) 70%, transparent);
+  color: color-mix(in srgb, var(--glass) 30%, white 70%);
+  text-shadow:
+    0 0 6px color-mix(in srgb, var(--glass) 90%, transparent),
+    0 0 22px color-mix(in srgb, var(--glass) 65%, transparent);
 }
 header button:active { opacity: 0.7; }
 header button:focus-visible {
@@ -1334,7 +1353,9 @@ header button:focus-visible {
   color: color-mix(in srgb, var(--glass) 55%, white 45%);
   /* The glow is on the text itself rather than behind a panel, so there is no
      surface to date. */
-  text-shadow: 0 0 18px color-mix(in srgb, var(--glass) 85%, transparent);
+  text-shadow:
+    0 0 7px color-mix(in srgb, var(--glass) 95%, transparent),
+    0 0 26px color-mix(in srgb, var(--glass) 75%, transparent);
 }
 #tabbar .stab:focus-visible {
   outline: none;

@@ -564,8 +564,6 @@ async fn cmd_sync(full: bool) -> Result<()> {
 /// Sequential transfers waste most of the wall clock on per-request latency
 /// when the files are small — an arcade set averages 4.5 MB.
 async fn cmd_get_platform(slug: &str, jobs: usize) -> Result<()> {
-    use futures_util::StreamExt as _;
-
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
     romm_desktop::apply_cached_server_config(&store);
@@ -573,6 +571,33 @@ async fn cmd_get_platform(slug: &str, jobs: usize) -> Result<()> {
     if rows.is_empty() {
         bail!("no cached roms for platform {slug:?} — try `sync` first");
     }
+    cmd_get_bulk(rows, jobs, &cfg).await
+}
+
+/// Everything in a collection group — `user` is what the app calls
+/// "My collections".
+///
+/// A group rather than one collection because the lists overlap heavily and
+/// picking them off one at a time would mean re-deciding, per list, what has
+/// already been fetched.
+async fn cmd_get_group(grp: &str, jobs: usize) -> Result<()> {
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    romm_desktop::apply_cached_server_config(&store);
+    let rows = store.roms_in_group(grp)?;
+    if rows.is_empty() {
+        bail!("no cached games in collection group {grp:?} — try `sync` first");
+    }
+    cmd_get_bulk(rows, jobs, &cfg).await
+}
+
+/// Fetch a list of games concurrently, reporting as it goes.
+///
+/// Already-complete files are settled by `download::fetch` itself, which
+/// verifies before transferring, so re-running this is cheap and is the way to
+/// resume an interrupted run.
+async fn cmd_get_bulk(rows: Vec<cache::RomRow>, jobs: usize, cfg: &Config) -> Result<()> {
+    use futures_util::StreamExt as _;
 
     let roms_dir = cfg.local_roms_dir();
     let client = std::sync::Arc::new(cfg.server.client()?);
@@ -1444,6 +1469,10 @@ enum Command {
         /// Download an entire platform instead of one game
         #[arg(long)]
         platform: Option<String>,
+        /// Download every game in a collection group. `user` is the app's
+        /// "My collections"; overlapping lists are fetched once.
+        #[arg(long)]
+        collections: Option<String>,
         /// Concurrent transfers when fetching a whole platform
         #[arg(long, default_value_t = 6)]
         jobs: usize,
@@ -1685,11 +1714,16 @@ async fn main() -> Result<()> {
             }
             cmd_probe(term.as_deref(), platform.as_deref(), sample, cores.as_deref(), frames).await
         }
-        Command::Get { term, platform, jobs } => match (term, platform) {
-            (_, Some(slug)) => cmd_get_platform(&slug, jobs).await,
-            (Some(t), None) => cmd_get(&t).await,
-            (None, None) => bail!("give a search term, or --platform <slug>"),
-        },
+        Command::Get { term, platform, collections, jobs } => {
+            match (term, platform, collections) {
+                (_, _, Some(grp)) => cmd_get_group(&grp, jobs).await,
+                (_, Some(slug), None) => cmd_get_platform(&slug, jobs).await,
+                (Some(t), None, None) => cmd_get(&t).await,
+                (None, None, None) => {
+                    bail!("give a search term, --platform <slug>, or --collections <group>")
+                }
+            }
+        }
         Command::HashParity => {
             let cfg = Config::load()?;
             let client =
