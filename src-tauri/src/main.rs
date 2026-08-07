@@ -360,6 +360,29 @@ async fn verify_server(
     }
 }
 
+/// Download the BIOS set from the server.
+///
+/// Optional and explicit: it is 300-odd MB on this server, and a launcher that
+/// pulls that on first run without asking is a launcher people uninstall.
+#[tauri::command]
+async fn sync_bios(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+    let client = state.client.clone().ok_or("not connected to a server")?;
+    let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+    let summary = romm_desktop::bios::sync(&client, &library_root, |done, total, name| {
+        let _ = app.emit("bios-progress", format!("{done}/{total}  {name}"));
+    })
+    .await
+    .map_err(err)?;
+
+    let mut out = summary.headline();
+    if !summary.notes.is_empty() {
+        out.push('\n');
+        out.push_str(&summary.notes.iter().take(6).cloned().collect::<Vec<_>>().join("\n"));
+    }
+    Ok(out)
+}
+
 /// Pull the useful bits out of RomM's merged `metadatum` blob.
 fn meta_strings(meta: &Option<serde_json::Value>, key: &str) -> Vec<String> {
     meta.as_ref()
@@ -1825,6 +1848,7 @@ fn main() {
             systems,
             sync_saves,
             sync_library,
+            sync_bios,
             resolve_save_conflict,
             motion_options,
             set_motion_shader,

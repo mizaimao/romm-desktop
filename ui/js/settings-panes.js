@@ -123,7 +123,16 @@ export function paneHtml(id) {
       </div>
       <p class="hint">The index the grid is built from. Nothing is downloaded —
         but a fresh install shows nothing until this has run once.</p>
-      <p class="hint set-libsync-status"></p>`;
+      <p class="hint set-libsync-status"></p>
+
+      <div class="srow">
+        <label>BIOS files</label>
+        <div class="ctl"><button class="set-bios">Download BIOS</button></div>
+      </div>
+      <p class="hint">Neo Geo, PlayStation and the MAME family will not start
+        without these. Optional and only when you ask — it is a few hundred MB.
+        Needs <code>firmware.read</code> on the token.</p>
+      <p class="hint set-bios-status"></p>`;
   if (id === "appearance") return `      <h4>Shader backdrop</h4>
       <div class="srow">
         <label>Enabled</label>
@@ -261,6 +270,26 @@ function wireGeneral(box) {
   // config.toml fields. Loaded once and written back on change, through a
   // targeted TOML edit so the hand-written comments in that file survive.
   wireConfigFields(box);
+
+  // BIOS. Progress by name rather than a spinner: it is 67 files here, and a
+  // spinner says nothing about whether it is nearly done or barely started.
+  const biosBtn = box.querySelector(".set-bios");
+  const biosStatus = box.querySelector(".set-bios-status");
+  biosBtn?.addEventListener("click", async () => {
+    biosBtn.disabled = true;
+    biosStatus.textContent = "Listing…";
+    const stop = await listen("bios-progress", ({ payload }) => {
+      biosStatus.textContent = String(payload);
+    });
+    try {
+      biosStatus.textContent = await invoke("sync_bios");
+    } catch (e) {
+      biosStatus.textContent = `Failed — ${e}`;
+    } finally {
+      stop?.();
+      biosBtn.disabled = false;
+    }
+  });
 
   // Library. This is the one the Windows build had no way to run: the release
   // ships only the GUI, so a fresh install had an empty cache, an empty grid,

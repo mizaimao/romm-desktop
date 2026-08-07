@@ -28,7 +28,7 @@ members = ["src-tauri"]
 # Do not reintroduce a literal version in either member manifest or in
 # tauri.conf.json — that is the drift this replaced.
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 
 [dependencies]
 anyhow = "1.0.104"

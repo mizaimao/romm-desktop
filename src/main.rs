@@ -24,6 +24,12 @@ use romm_desktop::probe;
 use romm_desktop::shaders;
 use romm_desktop::util::human;
 
+/// Read from disk when it is there so the mapping can be edited without a
+/// rebuild, falling back to the copy compiled into the binary.
+///
+/// The GUI has always done this. The CLI insisted on the file, so `doctor` and
+/// `launch` failed outright on a Windows install that had only the executable
+/// — the one platform where nobody has a source checkout to supply it.
 const CORE_MAP: &str = "data/esde-core-map.json";
 
 /// `[retroarch] root` from config.toml, if set.
@@ -72,7 +78,7 @@ fn cmd_doctor() -> Result<()> {
         ra.cores_dir().display()
     );
 
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let mut ready = Vec::new();
     let mut missing = Vec::new();
     // Resolve the same way a launch does, so this reports what would actually
@@ -118,7 +124,7 @@ fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: boo
     let cfg = Config::load()?;
     let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?
         .with_system_dir(Some(cfg.system_dir()));
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
 
     // Ask the index first: it knows exactly where each game came from, which
     // path inference cannot for an ES-DE tree whose directories are ES-DE
@@ -182,7 +188,7 @@ motion_shader: cfg.shaders.motion.as_deref(),
 fn cmd_suggest() -> Result<()> {
     let cfg = Config::load()?;
     let ra = locate_retroarch(&cfg)?;
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let roms = cfg.local_roms_dir();
     if !roms.is_dir() {
         bail!(
@@ -358,7 +364,7 @@ async fn cmd_install_retroarch(version: Option<&str>) -> Result<()> {
 async fn cmd_cores(install: bool, update: bool) -> Result<()> {
     let cfg = Config::load()?;
     let ra = locate_retroarch(&cfg)?;
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let segment = cores::platform_segment()?;
 
     if update {
@@ -602,7 +608,7 @@ async fn cmd_probe(
 ) -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let ra = locate_retroarch(&cfg)?;
     let scratch = probe::scratch_dir(&cfg.library.local_root);
 
@@ -828,7 +834,7 @@ fn cmd_scan_esde(root: Option<&str>, roms: Option<&str>) -> Result<()> {
     println!("gamelists  {}", layout.gamelists.display());
     println!("media      {}", layout.media.display());
 
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let started = std::time::Instant::now();
     let (games, skipped) = romm_desktop::esde::scan(&layout, &map)?;
     if games.is_empty() {
@@ -1028,7 +1034,7 @@ fn cmd_scan() -> Result<()> {
     if store.rom_count().unwrap_or(0) == 0 {
         bail!("cache is empty — run `sync` first so saves can be resolved to rom ids");
     }
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let root = Path::new(&cfg.saves.root);
     if !root.is_dir() {
         bail!("{} not found — set [saves] root in config.toml", root.display());
@@ -1130,7 +1136,7 @@ async fn cmd_art(needle: &str) -> Result<()> {
 /// Inspect ES-DE themes and install their system logos locally.
 fn cmd_themes(install: bool) -> Result<()> {
     let cfg = Config::load()?;
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
     let slugs: Vec<String> = store.platforms()?.into_iter().map(|p| p.fs_slug).collect();
 
@@ -1226,7 +1232,7 @@ async fn cmd_themes_get(needle: &str, logos_only: bool) -> Result<()> {
     if logos_only {
         // Themes ship hundreds of MB of wallpapers and per-system art we never
         // render. Keep the logos, drop the rest.
-        let map = CoreMap::load(Path::new(CORE_MAP))?;
+        let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
         let store = cache::Cache::open(Path::new(CACHE_DB))?;
         let slugs: Vec<String> =
             store.platforms()?.into_iter().map(|p| p.fs_slug).collect();
@@ -1302,7 +1308,7 @@ fn cmd_browse() -> Result<()> {
     if store.rom_count().unwrap_or(0) == 0 {
         bail!("cache is empty — run `cargo run -- sync` first");
     }
-    let map = CoreMap::load(Path::new(CORE_MAP))?;
+    let map = CoreMap::load_or_embedded(Path::new(CORE_MAP));
     // Missing RetroArch is not fatal; browsing still works, launching doesn't.
     let ra = locate_retroarch(&cfg).ok();
     // Likewise a missing server only disables downloading.
@@ -1461,6 +1467,8 @@ enum Command {
     Hashcheck {
         file: PathBuf,
     },
+    /// Download the BIOS set from the server into the library folder
+    SyncBios,
     /// Sync save files and save states with the server
     SyncSaves {
         /// Report what would happen without writing or uploading anything
@@ -1583,6 +1591,34 @@ async fn cmd_sync_saves(dry_run: bool, keep: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Fetch the BIOS set. Neo Geo and friends will not start without it, and the
+/// failure in the emulator names neither the file nor where it should go.
+async fn cmd_sync_bios() -> Result<()> {
+    let cfg = Config::load()?;
+    let client = cfg.server.client()?;
+    let root = Path::new(&cfg.library.local_root);
+
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let summary = romm_desktop::bios::sync(&client, root, |done, total, name| {
+        if interactive {
+            print!("\r  {done}/{total}  {:<38}", name.chars().take(36).collect::<String>());
+            use std::io::Write as _;
+            std::io::stdout().flush().ok();
+        }
+    })
+    .await?;
+
+    if interactive {
+        println!();
+    }
+    for note in summary.notes.iter().take(10) {
+        println!("  {note}");
+    }
+    println!("{}", summary.headline());
+    println!("into {}", romm_desktop::bios::system_dir(root).display());
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
@@ -1641,6 +1677,7 @@ async fn main() -> Result<()> {
         } => cmd_launch(&rom, go, core.as_deref(), fullscreen),
         Command::Art { term } => cmd_art(&term).await,
         Command::Hashcheck { file } => cmd_hashcheck(&file),
+        Command::SyncBios => cmd_sync_bios().await,
         Command::SyncSaves { dry_run, keep } => cmd_sync_saves(dry_run, keep.as_deref()).await,
     }
 }

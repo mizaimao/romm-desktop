@@ -969,3 +969,66 @@ impl Client {
         resp.json().await.context("decoding uploaded state")
     }
 }
+
+// --- Firmware (BIOS) --------------------------------------------------------
+//
+// RomM keeps the BIOS set alongside the games, which is what makes a second
+// machine cheap to set up: the same server that has the ROMs has the files
+// Neo Geo, PlayStation and the MAME family refuse to start without.
+//
+// Needs the `firmware.read` scope on the token.
+
+/// One BIOS file on the server.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct Firmware {
+    pub id: i64,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub file_size_bytes: i64,
+    #[serde(default)]
+    pub md5_hash: Option<String>,
+    #[serde(default)]
+    pub sha1_hash: Option<String>,
+    /// Where it sits on the server, e.g. `bios/3do`. Not reproduced locally —
+    /// RetroArch wants every BIOS flat in one system directory.
+    #[serde(default)]
+    pub file_path: Option<String>,
+    /// The server checked it against a known-good hash.
+    #[serde(default)]
+    pub is_verified: bool,
+}
+
+impl Client {
+    /// Every BIOS the server holds.
+    pub async fn firmware(&self) -> Result<Vec<Firmware>> {
+        self.get_json("/api/firmware").await
+    }
+
+    /// One BIOS file's bytes.
+    pub async fn firmware_content(&self, id: i64, file_name: &str) -> Result<Vec<u8>> {
+        let url = format!(
+            "{}/api/firmware/{id}/content/{}",
+            self.base,
+            urlencode(file_name)
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", &self.auth)
+            .send()
+            .await
+            .with_context(|| format!("GET {url}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let hint = if status == reqwest::StatusCode::FORBIDDEN {
+                "\n  403 usually means the token lacks the firmware.read scope."
+            } else {
+                ""
+            };
+            bail!("GET {url} -> {status}{hint}");
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+}

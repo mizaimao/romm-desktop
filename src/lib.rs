@@ -4,6 +4,7 @@
 
 pub mod achievements;
 pub mod api;
+pub mod bios;
 pub mod arcade;
 pub mod cache;
 pub mod config;
