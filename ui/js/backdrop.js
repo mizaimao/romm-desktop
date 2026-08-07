@@ -64,11 +64,13 @@ void main() {
   float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
   float n = a * 0.65 + b * 0.35;
 
-  vec3 base = mix(u_low, u_high, smoothstep(0.35, 0.75, n));
+  vec3 base = mix(u_low, u_high, smoothstep(0.30, 0.85, n));
 
-  // Darker towards the edges: the grid sits on top and needs the contrast.
-  float d = distance(uv, vec2(0.5)) * 1.25;
-  base *= 1.0 - smoothstep(0.35, 1.0, d) * 0.55;
+  // Darker towards the edges, and never fully bright in the middle either. The
+  // grid sits on top of all of it and text has to stay readable over the
+  // brightest pixel this can produce, not the average one.
+  float d = distance(uv, vec2(0.5)) * 1.15;
+  base *= 1.0 - smoothstep(0.15, 1.0, d) * 0.75;
 
   colour = vec4(base * u_strength, 1.0);
 }`;
@@ -91,7 +93,10 @@ let running = null;
 ///
 /// Kept in localStorage rather than config.toml: it is a per-screen preference,
 /// and the machine driving a television wants different values from the laptop.
-const DEFAULTS = { speed: 1, strength: 1, low: "", high: "" };
+// Strength well below 1. At full it is a bright glow across the middle of the
+// screen that the cover art has to compete with — the backdrop's whole job is
+// to sit behind the artwork, not next to it.
+const DEFAULTS = { speed: 1, strength: 0.32, low: "", high: "" };
 
 export function backdropSettings() {
   try {

@@ -99,7 +99,7 @@ listen("download-progress", ({ payload }) => {
   setLayout(state.layout);
   setSidebar(state.sidebar);
   installTabs();
-  await showSection("library");
+  await showSection("library", { force: true });
   installDetailResizer();
   installKeys();
   installGamepad();

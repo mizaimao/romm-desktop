@@ -9,7 +9,7 @@
 // this is the one piece of navigation you use constantly and it should not need
 // the cursor.
 
-import { el, state } from "./state.js";
+import { el, state, trail } from "./state.js";
 import { showPlatforms } from "./library.js";
 import { showCollectionGroups, showCollectionsIn } from "./collections.js";
 
@@ -39,21 +39,79 @@ export const SECTIONS = [
 
 let current = "library";
 
+/// Where each section was when you left it: the crumb trail, the platform or
+/// collection that was open, and how far down the list had scrolled.
+///
+/// Without this, switching tabs and switching back dropped you at the top of
+/// the section's front page — so the shoulder buttons, which are meant to be
+/// the cheapest navigation in the app, cost you your place every time.
+const parked = new Map();
+
+function park() {
+  parked.set(current, {
+    trail: [...trail],
+    view: state.view,
+    platform: state.platform,
+    collection: state.collection,
+    scroll: el.list.scrollTop,
+    title: el.title.textContent,
+  });
+}
+
+/// Put a section back exactly as it was left. Returns false when there is
+/// nothing parked, in which case the caller opens the section fresh.
+async function unpark(id) {
+  const was = parked.get(id);
+  if (!was) return false;
+
+  // Re-open whatever screen was showing rather than replaying the trail: the
+  // data may have changed underneath, and a rebuild is cheap.
+  const { showRoms, showPlatforms } = await import("./library.js");
+  const { showCollectionRoms, showCollectionsIn, showCollectionGroups } =
+    await import("./collections.js");
+
+  if (was.view === "roms" && was.platform) await showRoms(was.platform);
+  else if (was.view === "collection-roms" && was.collection)
+    await showCollectionRoms(was.collection, was.title);
+  else if (was.view === "collections" && id === "mine")
+    await showCollectionsIn("user", "My collections");
+  else if (was.view === "collections") await showCollectionGroups({ exclude: ["user"] });
+  else if (was.view === "platforms") await showPlatforms();
+  else return false;
+
+  trail.length = 0;
+  trail.push(...was.trail);
+  // After the list has rendered, or the scroll target does not exist yet.
+  requestAnimationFrame(() => {
+    el.list.scrollTop = was.scroll;
+  });
+  return true;
+}
+
 export function activeSection() {
   return current;
 }
 
 /// Switch to a section by id. Safe to call with an unknown id.
-export async function showSection(id) {
+export async function showSection(id, { force = false } = {}) {
   const section = SECTIONS.find((s) => s.id === id);
   if (!section) return;
+  // Re-selecting the tab you are already on would park the section and then
+  // immediately restore it, losing nothing but doing a pointless rebuild.
+  // `force` is for the first call at startup, where there is nothing to park.
+  if (id === current && !force) return;
+
+  // Save where this section was before leaving it.
+  park();
   current = id;
   paint();
-  // Leaving a section clears the crumb trail: the back button walks *within* a
-  // section, and carrying a trail across a tab switch sends you somewhere you
-  // were never looking at.
-  state.collection = null;
-  await section.open();
+
+  if (!(await unpark(id))) {
+    // Nothing parked — first visit this session.
+    state.collection = null;
+    trail.length = 0;
+    await section.open();
+  }
   paint();
 }
 

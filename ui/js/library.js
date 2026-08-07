@@ -2,7 +2,7 @@
 
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
-import { human, escapeHtml } from "./util.js";
+import { human, escapeHtml, toast } from "./util.js";
 import { selectRom, play } from "./detail.js";
 
 export async function showPlatforms() {
@@ -219,6 +219,8 @@ let coverObserver;
 let coverQueue = [];
 let coverTimer;
 
+let coverErrorShown = false;
+
 function observeCovers() {
   coverObserver?.disconnect();
   coverQueue = [];
@@ -247,7 +249,13 @@ async function flushCovers() {
       if (art) art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;
     }
   } catch (e) {
-    // Leave placeholders; a failed batch is not worth interrupting browsing.
+    // Placeholders stay — a failed batch is not worth interrupting browsing —
+    // but it is said once. Swallowing this entirely meant a grid that fetched
+    // no artwork at all looked exactly like a server with no artwork on it.
+    if (!coverErrorShown) {
+      coverErrorShown = true;
+      toast(`Cover art is not loading — ${e}`, 8000);
+    }
   }
   if (coverQueue.length) setTimeout(flushCovers, 30);
 }
