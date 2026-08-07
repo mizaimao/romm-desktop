@@ -423,7 +423,17 @@ video_max_swapchain_images = \"2\"
         // searching only the first found shipped defaults and missed the
         // profile that is actually in use.
         let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
-        match padprofile::find_in(&roots, device).or_else(|| padprofile::known(device)) {
+        // Ask RetroArch which driver the pad is on rather than guessing an
+        // order. The same controller is numbered differently under each, so a
+        // profile from the wrong directory is valid, plausible and completely
+        // wrong — which is exactly how the modifier ended up on a stick.
+        let driver = padprofile::configured_driver(&[
+            self.data_dir().join("retroarch.cfg"),
+            self.root.join("retroarch.cfg"),
+        ]);
+        match padprofile::find_with_driver(&roots, device, driver.as_deref())
+            .or_else(|| padprofile::known(device))
+        {
             Some(profile) => padprofile::hotkey_block(&profile),
             None => padprofile::no_profile_note(&roots, device),
         }

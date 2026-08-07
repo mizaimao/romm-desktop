@@ -193,13 +193,60 @@ pub fn find(root: &Path, device: Option<&str>) -> Option<PadProfile> {
 /// shipped profiles and none of the ones RetroArch had actually chosen for the
 /// connected pad — which are the ones that are right.
 pub fn find_in(roots: &[std::path::PathBuf], device: Option<&str>) -> Option<PadProfile> {
-    roots.iter().find_map(|dir| find_one(dir, device))
+    find_with_driver(roots, device, None)
 }
 
-fn find_one(dir: &Path, device: Option<&str>) -> Option<PadProfile> {
+/// As [`find_in`], searching `driver`'s directory before any other.
+///
+/// This is the whole ballgame. The same controller has different button numbers
+/// under every input driver, and RetroArch picks the driver — so the order to
+/// search is not a preference, it is a fact recorded in RetroArch's own config
+/// as `input_joypad_driver`.
+///
+/// Guessing it is how the hotkey modifier ended up on a left stick: this machine
+/// runs `sdl2`, the search tried `xinput` and `dinput` first, found a perfectly
+/// valid profile in the wrong driver's directory, and used its indices.
+pub fn find_with_driver(
+    roots: &[std::path::PathBuf],
+    device: Option<&str>,
+    driver: Option<&str>,
+) -> Option<PadProfile> {
+    // The configured driver first, then the usual order as a fallback for an
+    // install that never recorded one.
+    let mut order: Vec<&str> = Vec::new();
+    if let Some(d) = driver.map(str::trim).filter(|d| !d.is_empty()) {
+        order.push(d);
+    }
+    order.extend(DRIVER_DIRS.iter().copied().filter(|d| Some(*d) != driver));
+
+    roots.iter().find_map(|dir| find_one(dir, device, &order))
+}
+
+/// RetroArch's own answer to "which driver is this pad on".
+///
+/// Read from its config rather than assumed. `input_driver` is the keyboard and
+/// mouse; `input_joypad_driver` is the pad, and it is the one that decides
+/// button numbering.
+pub fn configured_driver(config_paths: &[std::path::PathBuf]) -> Option<String> {
+    for path in config_paths {
+        let Ok(text) = std::fs::read_to_string(path) else { continue };
+        for line in text.lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("input_joypad_driver") else { continue };
+            let Some((_, value)) = rest.split_once('=') else { continue };
+            let value = value.trim().trim_matches('"').to_owned();
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn find_one(dir: &Path, device: Option<&str>, order: &[&str]) -> Option<PadProfile> {
     let wanted = device.map(normalize);
 
-    for driver in DRIVER_DIRS {
+    for driver in order {
         let sub = dir.join(driver);
         let Ok(entries) = std::fs::read_dir(&sub) else {
             continue;
@@ -756,5 +803,71 @@ input_r2_axis = "+5"
                 assert!(p.get(*button).is_some(), "{name} is missing {button:?} for {action}");
             }
         }
+    }
+
+    /// The reported failure, as a test. This machine runs `input_joypad_driver
+    /// = "sdl2"`, and searching xinput/dinput first found a valid profile in
+    /// the wrong driver's directory — same pad, different numbers, modifier on
+    /// a stick.
+    #[test]
+    fn the_configured_driver_is_searched_first() {
+        let dir = std::env::temp_dir().join("romm-pad-driver");
+        std::fs::remove_dir_all(&dir).ok();
+
+        // One directory this OS searches by default, and one it does not — the
+        // point being that a configured driver is used even when it is not in
+        // the built-in order, which is the case on the machine that reported
+        // this.
+        let usual = DRIVER_DIRS[0];
+        for (driver, select) in [(usual, "6"), ("sdl2", "4")] {
+            let sub = dir.join("autoconfig").join(driver);
+            std::fs::create_dir_all(&sub).unwrap();
+            std::fs::write(
+                sub.join("pad.cfg"),
+                format!(
+                    "input_device = \"Test Pad\"\ninput_driver = \"{driver}\"\n\
+                     input_select_btn = \"{select}\"\ninput_b_btn = \"0\"\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let roots = [dir.join("autoconfig")];
+        let picked = find_with_driver(&roots, Some("Test Pad"), Some("sdl2")).unwrap();
+        assert_eq!(picked.driver, "sdl2", "the configured driver wins");
+        assert_eq!(picked.get(MODIFIER).unwrap().value, "4");
+
+        // With nothing configured, the usual order applies and finds the other
+        // one — so an install that never recorded a driver still works.
+        let fallback = find_with_driver(&roots, Some("Test Pad"), None).unwrap();
+        assert_eq!(fallback.driver, usual);
+        assert_eq!(fallback.get(MODIFIER).unwrap().value, "6");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `input_driver` is the keyboard and mouse. Reading it instead of
+    /// `input_joypad_driver` picks the wrong directory on any machine where
+    /// they differ — which is this one: dinput for input, sdl2 for the pad.
+    #[test]
+    fn the_pad_driver_is_read_not_the_keyboard_one() {
+        let dir = std::env::temp_dir().join("romm-pad-cfg");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("retroarch.cfg");
+        std::fs::write(
+            &cfg,
+            "input_driver = \"dinput\"\ninput_joypad_driver = \"sdl2\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(configured_driver(std::slice::from_ref(&cfg)).as_deref(), Some("sdl2"));
+
+        // A config without one is not an error; the usual order applies.
+        let bare = dir.join("bare.cfg");
+        std::fs::write(&bare, "video_driver = \"d3d11\"\n").unwrap();
+        assert_eq!(configured_driver(&[bare]), None);
+        // Nor is a missing file.
+        assert_eq!(configured_driver(&[dir.join("nope.cfg")]), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
