@@ -9,6 +9,7 @@ import { showSystems } from "./systems.js";
 import { showCollectionGroups } from "./collections.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
+import { startBackdrop } from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
   el.search.value = "";
@@ -89,6 +90,9 @@ listen("download-progress", ({ payload }) => {
   } catch (e) {
     el.status.textContent = "backend error";
   }
+  // Off by default: it is a preference, and starting a GPU loop uninvited on
+  // someone's machine is not a decision this app should make for them.
+  if (localStorage.getItem("backdrop") === "on") startBackdrop();
   setZoom(state.zoom);
   setLayout(state.layout);
   setSidebar(state.sidebar);

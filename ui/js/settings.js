@@ -6,6 +6,12 @@ import {
 } from "./bindings.js";
 import { toast } from "./util.js";
 import { invoke, listen } from "./state.js";
+import {
+  startBackdrop,
+  stopBackdrop,
+  backdropRunning,
+  backdropSupported,
+} from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the global handler can get
 /// out of the way.
@@ -61,6 +67,14 @@ export function toggleSettings() {
         <button class="set-savesync">Sync saves now</button>
       </div>
       <p class="hint set-savesync-status"></p>
+
+      <h4>Appearance</h4>
+      <p class="hint">An animated shader behind the library, drawn on the GPU.
+        Off by default. Costs a little battery on a laptop.</p>
+      <div class="set-path">
+        <button class="set-backdrop">Shader backdrop: off</button>
+      </div>
+      <p class="hint set-backdrop-status"></p>
 
       <h4>Library</h4>
       <p class="hint">Fetch the list of games from the server. Nothing is
@@ -121,6 +135,40 @@ export function toggleSettings() {
       syncBtn.disabled = false;
     }
   });
+
+  // Shader backdrop. A switch rather than always-on: it runs a GPU loop for as
+  // long as the app is open, which is not a cost to impose on someone who did
+  // not ask for it.
+  const bdBtn = box.querySelector(".set-backdrop");
+  const bdStatus = box.querySelector(".set-backdrop-status");
+  const paintBackdropButton = () => {
+    const on = backdropRunning();
+    bdBtn.textContent = `Shader backdrop: ${on ? "on" : "off"}`;
+    bdBtn.classList.toggle("active", on);
+  };
+  if (!backdropSupported()) {
+    bdBtn.disabled = true;
+    bdBtn.textContent = "Shader backdrop: unavailable";
+    bdStatus.textContent =
+      "This machine's graphics driver does not offer WebGL2 to the app window.";
+  } else {
+    paintBackdropButton();
+    bdBtn.addEventListener("click", () => {
+      if (backdropRunning()) {
+        stopBackdrop();
+        localStorage.setItem("backdrop", "off");
+        bdStatus.textContent = "";
+      } else if (startBackdrop()) {
+        localStorage.setItem("backdrop", "on");
+        bdStatus.textContent = "Running. Colours follow the current theme.";
+      } else {
+        // Supported in principle, refused in practice — a software renderer or
+        // a driver that declined the context.
+        bdStatus.textContent = "Could not start — the driver refused a WebGL2 context.";
+      }
+      paintBackdropButton();
+    });
+  }
 
   // Library. This is the one the Windows build had no way to run: the release
   // ships only the GUI, so a fresh install had an empty cache, an empty grid,

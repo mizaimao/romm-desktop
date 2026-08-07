@@ -989,3 +989,19 @@ button:has(> .icon + span) {
   cursor: pointer;
 }
 .conflict-cancel:hover { background: var(--card, #24242b); }
+
+/* ---- Shader backdrop ----------------------------------------------------
+   A WebGL2 canvas behind the whole app. Fixed and non-interactive: it must
+   never take a click or a focus ring from the grid on top of it. Absent
+   entirely when the machine cannot run it, so nothing here assumes it exists. */
+#backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  /* Rendered at half resolution and stretched: it is out-of-focus noise, so
+     the softness costs nothing and the pixels are worth saving. */
+  image-rendering: auto;
+}
