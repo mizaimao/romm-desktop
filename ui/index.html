@@ -16,12 +16,16 @@
         <input id="zoom" type="range" min="90" max="300" step="10" />
       </label>
       <button id="layout-btn" hidden title="Grid or list"><span class="icon icon-grid"></span><span>Grid</span></button>
-      <button id="collections-btn" title="Browse RomM collections"><span class="icon icon-collections"></span><span>Collections</span></button>
       <button id="systems-btn" title="Per-system emulator and shader"><span class="icon icon-systems"></span><span>Systems</span></button>
       <button id="themes-btn" title="Console icon themes"><span class="icon icon-themes"></span><span>Themes</span></button>
       <button id="settings-btn" title="Settings" aria-label="Settings"><span class="icon icon-settings"></span></button>
       <span id="status"></span>
     </header>
+
+    <!-- Top-level sections. A separate row from the header so the controls up
+         there (search, layout, zoom) stay put while the view changes, and so
+         the shoulder buttons have somewhere obvious to be moving between. -->
+    <nav id="tabbar" role="tablist" aria-label="Sections"></nav>
 
     <main>
       <section id="list"></section>

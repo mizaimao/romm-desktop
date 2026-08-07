@@ -6,7 +6,7 @@ import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { showThemes } from "./themes.js";
 import { showSystems } from "./systems.js";
-import { showCollectionGroups } from "./collections.js";
+import { installTabs, showSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 import { startBackdrop } from "./backdrop.js";
@@ -19,8 +19,9 @@ el.back.addEventListener("click", () => {
   if (up) return up();
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");
-  el.collectionsBtn.classList.remove("active");
-  showPlatforms();
+  // Back at the top of a section returns to that section, not always to the
+  // library — the tab bar says where you are and it should stay true.
+  showSection(activeSection());
 });
 
 el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));
@@ -33,10 +34,6 @@ el.sidebarBtn.addEventListener("click", () => setSidebar(!state.sidebar));
 
 el.systemsBtn.addEventListener("click", () =>
   state.view === "systems" ? showPlatforms() : showSystems()
-);
-
-el.collectionsBtn.addEventListener("click", () =>
-  state.view.startsWith("collection") ? showPlatforms() : showCollectionGroups()
 );
 
 el.themesBtn.addEventListener("click", () =>
@@ -101,7 +98,8 @@ listen("download-progress", ({ payload }) => {
   setZoom(state.zoom);
   setLayout(state.layout);
   setSidebar(state.sidebar);
-  await showPlatforms();
+  installTabs();
+  await showSection("library");
   installDetailResizer();
   installKeys();
   installGamepad();

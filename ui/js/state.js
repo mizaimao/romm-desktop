@@ -32,6 +32,7 @@ export const state = {
 export const trail = [];
 
 export const el = {
+  tabbar: document.getElementById("tabbar"),
   list: document.getElementById("list"),
   detail: document.getElementById("detail"),
   title: document.getElementById("title"),
@@ -40,7 +41,6 @@ export const el = {
   status: document.getElementById("status"),
   toast: document.getElementById("toast"),
   themesBtn: document.getElementById("themes-btn"),
-  collectionsBtn: document.getElementById("collections-btn"),
   systemsBtn: document.getElementById("systems-btn"),
   layoutBtn: document.getElementById("layout-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),

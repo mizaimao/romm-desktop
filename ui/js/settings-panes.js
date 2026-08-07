@@ -16,6 +16,7 @@ import {
 import { invoke, listen } from "./state.js";
 import {
   startBackdrop, stopBackdrop, backdropRunning, backdropSupported,
+  backdropSettings, saveBackdropSettings,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -75,7 +76,32 @@ export function paneHtml(id) {
       <div class="set-path">
         <button class="set-backdrop">Shader backdrop: off</button>
       </div>
-      <p class="hint set-backdrop-status"></p>`;
+      <p class="hint set-backdrop-status"></p>
+
+      <div class="set-rows bd-controls">
+        <div class="set-row">
+          <span class="set-label">Motion</span>
+          <input class="bd-speed" type="range" min="0" max="400" step="10" />
+          <span class="bd-speed-val"></span>
+        </div>
+        <div class="set-row">
+          <span class="set-label">Brightness</span>
+          <input class="bd-strength" type="range" min="10" max="200" step="5" />
+          <span class="bd-strength-val"></span>
+        </div>
+        <div class="set-row">
+          <span class="set-label">Dark colour</span>
+          <input class="bd-low" type="color" />
+          <button class="bd-low-reset">Use theme</button>
+        </div>
+        <div class="set-row">
+          <span class="set-label">Light colour</span>
+          <input class="bd-high" type="color" />
+          <button class="bd-high-reset">Use theme</button>
+        </div>
+      </div>
+      <p class="hint">Motion at 0 holds it still. Colours left on "theme" follow
+        whatever palette is in force.</p>`;
   if (id === "control") return `      <h4>Controller</h4>
       <p class="hint">Click a button to rebind it. Press the new button on the
         pad, or Esc to leave it unset.</p>
@@ -248,6 +274,45 @@ function wireAppearance(box) {
       paintBackdropButton();
     });
   }
+
+  // Live controls. Every change is applied to the running shader immediately —
+  // a colour picker whose result you cannot see is not usable.
+  const cfg = backdropSettings();
+  const speed = box.querySelector(".bd-speed");
+  const speedVal = box.querySelector(".bd-speed-val");
+  const strength = box.querySelector(".bd-strength");
+  const strengthVal = box.querySelector(".bd-strength-val");
+  const low = box.querySelector(".bd-low");
+  const high = box.querySelector(".bd-high");
+
+  const showValues = (c) => {
+    speedVal.textContent = c.speed === 0 ? "still" : `${Math.round(c.speed * 100)}%`;
+    strengthVal.textContent = `${Math.round(c.strength * 100)}%`;
+  };
+  speed.value = String(Math.round(cfg.speed * 100));
+  strength.value = String(Math.round(cfg.strength * 100));
+  // A colour input cannot show "unset", so an empty value reads back as the
+  // theme's own colour and the reset button is what clears it again.
+  low.value = cfg.low || cssColour("--bg", "#0d0d12");
+  high.value = cfg.high || cssColour("--accent", "#2e3358");
+  showValues(cfg);
+
+  speed.addEventListener("input", () =>
+    showValues(saveBackdropSettings({ speed: Number(speed.value) / 100 }))
+  );
+  strength.addEventListener("input", () =>
+    showValues(saveBackdropSettings({ strength: Number(strength.value) / 100 }))
+  );
+  low.addEventListener("input", () => saveBackdropSettings({ low: low.value }));
+  high.addEventListener("input", () => saveBackdropSettings({ high: high.value }));
+  box.querySelector(".bd-low-reset").addEventListener("click", () => {
+    saveBackdropSettings({ low: "" });
+    low.value = cssColour("--bg", "#0d0d12");
+  });
+  box.querySelector(".bd-high-reset").addEventListener("click", () => {
+    saveBackdropSettings({ high: "" });
+    high.value = cssColour("--accent", "#2e3358");
+  });
 }
 
 function wireControl(box) {
@@ -386,4 +451,10 @@ export function captureKey(ev) {
     b.classList.toggle("unset", !k);
   });
   return true;
+}
+
+/// A theme colour as a `#rrggbb` string, for a colour input's initial value.
+function cssColour(name, fallback) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback;
 }

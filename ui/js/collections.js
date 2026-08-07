@@ -25,16 +25,19 @@ function chrome(title) {
   el.zoomWrap.hidden = false;
   el.search.value = "";
   el.title.textContent = title;
-  el.collectionsBtn.classList.add("active");
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");
 }
 
-export async function showCollectionGroups() {
+export async function showCollectionGroups({ exclude = [] } = {}) {
   trail.length = 0;
-  chrome("Collections");
+  chrome("Browse");
 
-  const groups = await invoke("collection_groups");
+  // `user` lives in its own tab now, so showing it here too would be the same
+  // collections in two places with different names.
+  const groups = (await invoke("collection_groups")).filter(
+    (g) => !exclude.includes(g.group)
+  );
   if (!groups.length) {
     el.list.innerHTML = `<div class="empty">No collections on the server. Run a sync, or make one in RomM.</div>`;
     return;

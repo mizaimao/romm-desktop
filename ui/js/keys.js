@@ -10,6 +10,7 @@ import { showPlatforms, showRoms, setLayout } from "./library.js";
 import { showThemes } from "./themes.js";
 import { ACTIONS, actionFor, keyFor, keyLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
+import { cycleSection } from "./tabs.js";
 
 function items() {
   return [...el.list.querySelectorAll(".card, .gcard, .row, .tcard")];
@@ -147,7 +148,6 @@ function goBack() {
   const up = trail.pop();
   if (up) return up();
   el.themesBtn.classList.remove("active");
-  el.collectionsBtn.classList.remove("active");
   showPlatforms();
 }
 
@@ -182,6 +182,8 @@ export const HANDLERS = {
   search: () => el.search.focus(),
   help: toggleHelp,
   settings: toggleSettings,
+  prevSection: () => cycleSection(-1),
+  nextSection: () => cycleSection(1),
   download: () => {
     if (state.selected) import("./actions.js").then((m) => m.download(state.selected, false));
   },

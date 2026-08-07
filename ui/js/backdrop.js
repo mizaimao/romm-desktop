@@ -39,6 +39,7 @@ uniform float u_time;
 uniform vec3  u_low;
 uniform vec3  u_high;
 uniform float u_strength;
+uniform float u_speed;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -58,8 +59,9 @@ void main() {
 
   // Two layers at different scales and speeds, so the motion never reads as one
   // repeating shape.
-  float a = noise(uv * aspect * 3.0 + vec2(u_time * 0.02, u_time * 0.013));
-  float b = noise(uv * aspect * 6.0 - vec2(u_time * 0.011, u_time * 0.017));
+  float t = u_time * u_speed;
+  float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
+  float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
   float n = a * 0.65 + b * 0.35;
 
   vec3 base = mix(u_low, u_high, smoothstep(0.35, 0.75, n));
@@ -85,10 +87,46 @@ function compile(gl, type, src) {
 
 let running = null;
 
+/// What the backdrop looks like, as the user set it.
+///
+/// Kept in localStorage rather than config.toml: it is a per-screen preference,
+/// and the machine driving a television wants different values from the laptop.
+const DEFAULTS = { speed: 1, strength: 1, low: "", high: "" };
+
+export function backdropSettings() {
+  try {
+    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("backdropSettings") || "{}") };
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+
+export function saveBackdropSettings(next) {
+  const merged = { ...backdropSettings(), ...next };
+  localStorage.setItem("backdropSettings", JSON.stringify(merged));
+  // Applied live rather than on restart: a colour picker you cannot see the
+  // result of is a colour picker nobody can use.
+  if (live) live(merged);
+  return merged;
+}
+
+/// Set while running, so settings changes reach the shader without restarting
+/// it — recreating the GL context on every slider tick would stutter.
+let live = null;
+
+function rgb(hex, fallbackVar, fallbackRgb) {
+  const m = String(hex || "").match(/^#?([0-9a-f]{6})$/i);
+  if (m) {
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  }
+  return themeColour(fallbackVar, fallbackRgb);
+}
+
 /// Start the backdrop. Returns a stop function, or null when it could not run —
 /// an old driver, a software renderer, a webview with WebGL switched off. The
 /// app is fully usable without it, so every failure here is silent.
-export function startBackdrop({ strength = 1 } = {}) {
+export function startBackdrop() {
   if (running) return running;
 
   const canvas = document.createElement("canvas");
@@ -130,10 +168,19 @@ export function startBackdrop({ strength = 1 } = {}) {
   const uLow = gl.getUniformLocation(prog, "u_low");
   const uHigh = gl.getUniformLocation(prog, "u_high");
   const uStrength = gl.getUniformLocation(prog, "u_strength");
+  const uSpeed = gl.getUniformLocation(prog, "u_speed");
 
-  gl.uniform3fv(uLow, themeColour("--bg", [0.05, 0.05, 0.07]));
-  gl.uniform3fv(uHigh, themeColour("--accent", [0.18, 0.2, 0.36]));
-  gl.uniform1f(uStrength, strength);
+  const apply = (cfg) => {
+    // An unset colour falls back to the theme's, so the default follows
+    // whatever palette is in force instead of being a second place to maintain.
+    gl.useProgram(prog);
+    gl.uniform3fv(uLow, rgb(cfg.low, "--bg", [0.05, 0.05, 0.07]));
+    gl.uniform3fv(uHigh, rgb(cfg.high, "--accent", [0.18, 0.2, 0.36]));
+    gl.uniform1f(uStrength, cfg.strength);
+    gl.uniform1f(uSpeed, cfg.speed);
+  };
+  apply(backdropSettings());
+  live = apply;
 
   const resize = () => {
     // Half resolution: this is out-of-focus noise, and full-resolution costs
@@ -169,6 +216,7 @@ export function startBackdrop({ strength = 1 } = {}) {
     window.removeEventListener("resize", resize);
     canvas.remove();
     document.documentElement.classList.remove("backdrop-on");
+    live = null;
     running = null;
   };
   return running;

@@ -96,3 +96,30 @@ body.settings-window {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   max-width: 80vw;
 }
+
+/* The backdrop controls are label / control / readout, which the generic
+   two-column binding grid does not fit. */
+#pane .bd-controls { grid-template-columns: 1fr; gap: 8px; }
+#pane .bd-controls .set-row {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+#pane .bd-controls input[type="range"] { width: 100%; }
+#pane .bd-controls input[type="color"] {
+  width: 46px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+}
+#pane .bd-speed-val,
+#pane .bd-strength-val {
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}

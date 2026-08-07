@@ -143,9 +143,54 @@ header h1 {
 
 main {
   display: flex;
-  height: calc(100% - 47px);
+  /* Header plus tab bar. */
+  height: calc(100% - 47px - 38px);
   overflow: hidden;
 }
+
+/* ---- Section tabs -------------------------------------------------------
+   Below the header rather than in it: the header's controls belong to whatever
+   view is showing, and mixing "where am I" with "what can I do here" made both
+   harder to find. */
+#tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 38px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+#tabbar .stab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  opacity: 0.62;
+  font: inherit;
+  padding: 0 14px;
+  cursor: pointer;
+  /* The active marker is a bottom border, so nothing moves when it changes. */
+  border-bottom: 2px solid transparent;
+}
+#tabbar .stab:hover { opacity: 0.85; }
+#tabbar .stab.active {
+  opacity: 1;
+  font-weight: 600;
+  border-bottom-color: var(--accent, #7c8cff);
+}
+#tabbar .stab:focus-visible { outline: 2px solid var(--accent, #7c8cff); outline-offset: -3px; }
+/* The shoulder-button hints, so the mapping is discoverable without opening
+   Settings. Hidden when no pad is connected — they would be a lie. */
+#tabbar .bumper {
+  display: none;
+  align-self: center;
+  opacity: 0.45;
+  font-size: 11px;
+  padding: 0 6px;
+}
+body.has-pad #tabbar .bumper { display: inline; }
+
 
 #list {
   flex: 1;

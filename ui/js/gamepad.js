@@ -150,6 +150,9 @@ export function installGamepad() {
     const name = ev.gamepad.id.replace(/\s*\(.*\)\s*$/, "").trim();
     toast(`Controller connected — ${name || "gamepad"}`);
     state.gamepad = name;
+    // Reveals the shoulder-button hints in the tab bar. Hidden without a pad,
+    // where they would be advice for hardware that is not there.
+    document.body.classList.add("has-pad");
     if (!running) {
       running = true;
       requestAnimationFrame(poll);
@@ -161,6 +164,7 @@ export function installGamepad() {
       running = false;
       held.clear();
       state.gamepad = null;
+      document.body.classList.remove("has-pad");
       toast("Controller disconnected");
     }
   });

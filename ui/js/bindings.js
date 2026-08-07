@@ -26,6 +26,8 @@ export const ACTIONS = [
   { id: "sidebar", label: "Toggle info pane",     fallback: null },
   { id: "themes",  label: "Open themes",          fallback: null },
   { id: "settings",label: "Open settings",        fallback: null },
+  { id: "prevSection", label: "Previous section",  fallback: "q" },
+  { id: "nextSection", label: "Next section",      fallback: "e" },
 ];
 
 /// Controller buttons, by W3C "standard mapping" index.
@@ -59,8 +61,13 @@ const PAD_KEY = "romm.pad";
 const PAD_FALLBACK = {
   0: "activate",
   1: "back",
-  4: "pageUp",
-  5: "pageDown",
+  // The shoulders move between sections — the navigation you use constantly,
+  // and the one thing that should never need the cursor. Paging moved to the
+  // triggers to make room; both are still rebindable.
+  4: "prevSection",
+  5: "nextSection",
+  6: "pageUp",
+  7: "pageDown",
   8: "settings",
   9: "help",
   12: "up",
