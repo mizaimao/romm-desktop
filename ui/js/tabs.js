@@ -10,7 +10,7 @@
 // the cursor.
 
 import { el, state, trail } from "./state.js";
-import { showPlatforms } from "./library.js";
+import { showPlatforms, backToPlatforms } from "./library.js";
 import { showCollectionGroups, showCollectionsIn } from "./collections.js";
 
 /// `user` and `smart` are collections someone made — by hand or as a saved
@@ -21,7 +21,10 @@ export const SECTIONS = [
   {
     id: "library",
     label: "Library",
-    open: () => showPlatforms(),
+    // Coming out of a console plays the opening move in reverse. Everywhere
+    // else there is nothing on screen to come out of, so there is nothing to
+    // carry and it is a plain redraw.
+    open: () => (state.view === "roms" ? backToPlatforms() : showPlatforms()),
   },
   {
     id: "mine",

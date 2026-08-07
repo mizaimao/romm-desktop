@@ -1,6 +1,7 @@
 // The sidebar: artwork, metadata, and the play/download actions.
 
 import { el, state, invoke, convertFileSrc, rememberRom } from "./state.js";
+import { tintFor } from "./tint.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, detailMedia, setOpenHook } from "./lightbox.js";
 import { launch, download } from "./actions.js";
@@ -30,7 +31,7 @@ export async function selectRom(id) {
   // same frame or two elements claim the same name and the transition is
   // skipped entirely.
   const card = el.list.querySelector(`[data-id="${id}"] .art img`);
-  const previous = document.querySelector('[style*="view-transition-name"]');
+  const previous = document.querySelector('[style*="view-transition-name: cover"]');
   if (previous) previous.style.viewTransitionName = "";
   if (card) card.style.viewTransitionName = "cover";
 
@@ -79,6 +80,10 @@ export async function selectRom(id) {
       : "";
 
   el.detail.hidden = !state.sidebar;
+  // The glow around the selection takes the cover's own colour. Started here
+  // rather than awaited: the pane must not wait on a canvas read, so the
+  // colour arrives a frame or two later and simply transitions in.
+  applyTint(id, d.cover ? convertFileSrc(d.cover) : null);
   // Wrapped so the browser can match the tagged card art to the pane's cover
   // and move one into the other, instead of replacing the pane wholesale.
   await withTransition(() => {
@@ -314,6 +319,27 @@ function applyWidth(px) {
   const max = Math.min(window.innerWidth * 0.7, 900);
   const clamped = Math.max(300, Math.min(px, max));
   document.documentElement.style.setProperty("--detail-w", `${clamped}px`);
+}
+
+/// Paint the selection in the colours of the game's own box art.
+///
+/// Set on the two elements that show a selection — the pane and the selected
+/// card or row — rather than on the document, so nothing else in the window
+/// shifts colour and there is nothing to unset when the selection moves.
+///
+/// Guarded by the id: a fast scroll starts one of these per game and they can
+/// finish out of order, so a slow read for a game you have already scrolled
+/// past must not repaint the one you are now on.
+async function applyTint(id, url) {
+  const colour = await tintFor(url);
+  if (state.selected !== id) return;
+
+  const targets = [el.detail, el.list.querySelector(`[data-id="${id}"]`)];
+  for (const node of targets) {
+    if (!node) continue;
+    if (colour) node.style.setProperty("--pick", colour);
+    else node.style.removeProperty("--pick");
+  }
 }
 
 /// Scroll the detail pane, for the controller's right stick.

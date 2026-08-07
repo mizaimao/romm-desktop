@@ -1301,6 +1301,19 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 
 ::view-transition-group(cover) { animation-duration: 260ms; }
 
+/* The console's name moving between the card and the title bar. Slower than
+   the cover, because it travels much further across the window and at 260ms
+   that reads as a jump rather than a move. */
+::view-transition-old(heading),
+::view-transition-new(heading) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+::view-transition-group(heading) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) { animation-duration: 160ms; }
 
@@ -1467,6 +1480,19 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 
 ::view-transition-group(cover) { animation-duration: 260ms; }
 
+/* The console's name moving between the card and the title bar. Slower than
+   the cover, because it travels much further across the window and at 260ms
+   that reads as a jump rather than a move. */
+::view-transition-old(heading),
+::view-transition-new(heading) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+::view-transition-group(heading) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) { animation-duration: 160ms; }
 
@@ -1568,3 +1594,36 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 .prow .have { display: flex; align-items: center; justify-content: center; }
 .prow .pf { opacity: 0.55; }
 .prow .sz { min-width: 12ch; text-align: right; }
+
+/* ---- The selected game's own colour --------------------------------------
+   `--pick` is the dominant colour of that game's box art, set on the selected
+   card and on the detail pane once it has been measured. Everything falls back
+   to the theme colour, so a game with no cover, a cover with no usable colour,
+   or a browser that will not let the pixels be read all look exactly as they
+   did before this existed.
+
+   Only the glow and the edge take it. Tinting the surface as well would make
+   the list flicker through a different colour on every row as you scroll. */
+/* Matched on the inline property rather than on `--pick` having a value,
+   because `rgb(var(--pick) / .5)` with no `--pick` set is invalid at
+   computed-value time — which does not fall back to the theme rule above, it
+   drops the border entirely. This way the tinted rule simply does not apply
+   until there is a colour, and until then the rules above stand. */
+.gcard.sel[style*="--pick"] .art {
+  border-color: rgb(var(--pick) / 0.75);
+  box-shadow: 0 0 26px rgb(var(--pick) / 0.5);
+}
+.gcard.sel .art { transition: border-color .25s, box-shadow .25s; }
+
+.row.sel[style*="--pick"] {
+  border-color: rgb(var(--pick) / 0.6);
+  box-shadow: 0 0 18px rgb(var(--pick) / 0.35);
+}
+.row.sel { transition: border-color .25s, box-shadow .25s; }
+
+#detail { transition: box-shadow .3s; }
+#detail[style*="--pick"] {
+  /* A single lit edge where the pane meets the list, rather than a wash behind
+     the text — the artwork is right there and does not need help. */
+  box-shadow: inset 1px 0 0 rgb(var(--pick) / 0.55), inset 6px 0 22px -8px rgb(var(--pick) / 0.35);
+}

@@ -3,7 +3,7 @@
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
 import { human, escapeHtml, toast } from "./util.js";
-import { selectRom, play } from "./detail.js";
+import { selectRom, play, withTransition } from "./detail.js";
 
 export async function showPlatforms() {
   state.view = "platforms";
@@ -46,9 +46,57 @@ function renderPlatforms(items) {
       : `<div class="rows">${items.map(platformRow).join("")}</div>`;
 
   el.list.querySelectorAll(".card, .prow").forEach((c) =>
-    c.addEventListener("click", () => showRoms(c.dataset.slug))
+    c.addEventListener("click", () => openPlatform(c.dataset.slug, c))
   );
   resetNav();
+}
+
+/// Open a console, carrying its name up into the title bar.
+///
+/// The two are the same words in two places, so the browser is told they are
+/// one element and moves it, rather than fading a grid out and a list in with
+/// no thread between them. That thread is the whole point: it says where the
+/// screen you are now looking at came from.
+///
+/// Falls back to a plain navigation wherever view transitions are missing or
+/// the user has asked for less motion — `withTransition` handles both — so the
+/// tags are cleaned up in a `finally` and never left on an element.
+export async function openPlatform(slug, card) {
+  const label = card?.querySelector(".name, .nm");
+  if (label) label.style.viewTransitionName = "heading";
+  try {
+    await withTransition(async () => {
+      await showRoms(slug);
+      // Tagged inside the callback: the new snapshot is taken after this runs,
+      // and the title only holds the console's name by then.
+      el.title.style.viewTransitionName = "heading";
+    });
+  } finally {
+    el.title.style.viewTransitionName = "";
+    if (label) label.style.viewTransitionName = "";
+  }
+}
+
+/// The same move in reverse, coming back out to the consoles.
+///
+/// Worth the symmetry: a transition that plays going in and not coming out
+/// reads as a glitch rather than as a deliberate direction.
+export async function backToPlatforms() {
+  el.title.style.viewTransitionName = "heading";
+  let label = null;
+  try {
+    await withTransition(async () => {
+      await showPlatforms();
+      label = el.list.querySelector(
+        `[data-slug="${CSS.escape(state.lastPlatform ?? "")}"] .name, ` +
+          `[data-slug="${CSS.escape(state.lastPlatform ?? "")}"] .nm`
+      );
+      if (label) label.style.viewTransitionName = "heading";
+    });
+  } finally {
+    el.title.style.viewTransitionName = "";
+    if (label) label.style.viewTransitionName = "";
+  }
 }
 
 function platformCard(p) {

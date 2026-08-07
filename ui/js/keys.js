@@ -6,7 +6,7 @@
 
 import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play } from "./detail.js";
-import { showPlatforms, showRoms, setLayout, setZoom } from "./library.js";
+import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
 import { showThemes } from "./themes.js";
 import { escapeHtml } from "./util.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
@@ -133,7 +133,9 @@ function activate() {
   // nothing at all until you nudged the stick first. Fall back to the first
   // item so the button always does something.
   const node = nodes[focusedIndex(nodes)] ?? nodes[0];
-  if (node.dataset.slug) showRoms(node.dataset.slug);
+  // Through openPlatform, not showRoms: the controller should get the same
+  // transition the mouse does, and a click handler is not the place to keep it.
+  if (node.dataset.slug) openPlatform(node.dataset.slug, node);
   else if (node.dataset.id) invoke("rom_detail", { id: Number(node.dataset.id) }).then(play);
   // Collection cards already carry the navigation in their click handler,
   // which knows the group it came from; reuse it rather than duplicating.
