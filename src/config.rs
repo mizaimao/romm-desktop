@@ -23,6 +23,8 @@ pub struct Config {
     #[serde(default)]
     pub shaders: ShadersCfg,
     #[serde(default)]
+    pub lightgun: LightgunCfg,
+    #[serde(default)]
     pub icons: IconsCfg,
     #[serde(default)]
     pub esde: EsdeCfg,
@@ -248,6 +250,19 @@ impl Default for ShadersCfg {
     fn default() -> Self {
         Self { enabled: true, by_platform: BTreeMap::new(), motion: None }
     }
+}
+
+/// Systems switched over to a light gun.
+///
+/// Its own section rather than a flag on each platform because on most of
+/// these consoles the gun takes the port a second pad would use, so leaving it
+/// on breaks two-player games. Keeping it in one visible list makes it obvious
+/// what has been switched.
+#[derive(Debug, Default, Deserialize)]
+pub struct LightgunCfg {
+    /// Platform slug -> `"on"`. Anything else, or absent, means off.
+    #[serde(default)]
+    pub by_platform: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

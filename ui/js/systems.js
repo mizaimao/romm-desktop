@@ -32,12 +32,28 @@ function render(rows, motion) {
     ${motionMarkup(motion)}
     <table class="systbl">
       <thead>
-        <tr><th>System</th><th>Games</th><th>Display</th><th>Emulator</th><th>Shader</th></tr>
+        <tr><th>System</th><th>Games</th><th>Display</th><th>Emulator</th><th>Shader</th>
+            <th title="Aim with the mouse in light gun games">Light gun</th></tr>
       </thead>
       <tbody>${rows.map(rowMarkup).join("")}</tbody>
     </table>
     <p class="syshint">Changes are written to config.toml and apply to the next game you launch.
       Emulators not installed are marked — use <code>cores --install</code> to fetch them.</p>`;
+
+  el.list.querySelectorAll('input[data-field="lightgun"]').forEach((box) =>
+    box.addEventListener("change", async () => {
+      const { slug, field } = box.dataset;
+      try {
+        toast(await invoke("set_system_choice", {
+          slug,
+          field,
+          value: box.checked ? "on" : "off",
+        }));
+      } catch (e) {
+        toast(String(e), 8000);
+      }
+    })
+  );
 
   el.list.querySelectorAll("select").forEach((sel) =>
     sel.addEventListener("change", async () => {
@@ -108,11 +124,22 @@ function rowMarkup(s) {
        </select>`
     : `<span class="dim">no RetroArch</span>`;
 
+  // Only for consoles that had a gun, and off by default: on most of them the
+  // gun goes in the port a second pad would use, so leaving it on everywhere
+  // would quietly break two-player games.
+  const gun = s.gun
+    ? `<label class="gun" title="${escapeHtml(s.gun)} in place of a pad — aim with the mouse, left button fires">
+         <input type="checkbox" data-slug="${s.slug}" data-field="lightgun" ${s.gun_on ? "checked" : ""} />
+         <span>${escapeHtml(s.gun)}</span>
+       </label>`
+    : `<span class="dim">—</span>`;
+
   return `<tr>
     <td class="sysname">${escapeHtml(s.name)}<div class="dim">${s.slug}</div></td>
     <td class="num">${s.rom_count}</td>
     <td><span class="badge ${s.display === "Handheld" ? "hh" : "crt"}">${s.display}</span></td>
     <td>${cores}</td>
     <td>${shaders}</td>
+    <td>${gun}</td>
   </tr>`;
 }

@@ -25,6 +25,11 @@ pub struct User {
 pub struct Platform {
     pub id: i64,
     pub fs_slug: String,
+    /// RomM's own slug, which is not always the folder name — `sms` against
+    /// `mastersystem`, `genesis` against `megadrive`. The console pictures
+    /// under `/assets/platforms/` are keyed by this one.
+    #[serde(default)]
+    pub slug: String,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]

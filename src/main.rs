@@ -146,6 +146,7 @@ async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscree
         shader_overrides: &cfg.shaders.by_platform,
         core_overrides: &cfg.cores.overrides,
         core_per_game: &cfg.cores.per_game,
+        lightgun: &cfg.lightgun.by_platform,
         core_override,
 motion_shader: cfg.shaders.motion.as_deref(),
         refresh_hz: None,
@@ -518,6 +519,21 @@ async fn cmd_sync(full: bool) -> Result<()> {
             Err(e) => eprintln!("warning: storing collections failed ({e})"),
         },
         Err(e) => eprintln!("warning: could not fetch collections ({e}); kept the previous set"),
+    }
+
+    // Console pictures for the platform grid, straight from the server. Only
+    // the ones not already cached, so this is a no-op after the first sync.
+    match client.platforms().await {
+        Ok(list) => {
+            let pairs: Vec<(String, String)> =
+                list.iter().map(|p| (p.slug.clone(), p.fs_slug.clone())).collect();
+            match romm_desktop::platformicon::ensure(&client, &cfg.media_dir(), &pairs).await {
+                Ok(n) if n > 0 => println!("console pictures: {n} fetched"),
+                Ok(_) => {}
+                Err(e) => eprintln!("warning: console pictures failed ({e})"),
+            }
+        }
+        Err(e) => eprintln!("warning: could not list platforms for pictures ({e})"),
     }
 
     // A sync rewrites names from the server, so restore the real arcade titles

@@ -119,6 +119,16 @@ pub struct RomRow {
 }
 
 /// Columns every `RomRow` query selects, in order.
+/// Every game in a starred collection.
+///
+/// Two ways in, because there are two ways to star something. RomM flags a
+/// collection it considers a favourite, and a person marks one by putting a
+/// star in the name — which is what happened on this library. Reading both
+/// means the app agrees with whichever the user did.
+const FAVOURITE_ROMS: &str = "SELECT cr.rom_id FROM collection_roms cr \
+                              JOIN collections c ON c.id = cr.collection_id \
+                              WHERE c.is_favorite = 1 OR c.name LIKE '★%'";
+
 const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name), \
                            fs_name, COALESCE(fs_size_bytes, 0), md5_hash, sha1_hash, \
                            cover_path, screenshot_path, screenshots_json, \
@@ -487,10 +497,28 @@ impl Cache {
         Ok(rows.into_iter().filter(|p| p.rom_count > 0).collect())
     }
 
+    /// Games you have starred, as a set of ids.
+    ///
+    /// RomM has no per-game favourite of its own — a favourite there is a
+    /// *collection*, either one the server has flagged or one you named with a
+    /// star, which is what the "★ Best of …" collections on this library are.
+    /// So a game counts as a favourite when it is in one of those, and this
+    /// stays true whether the starring happened here or on the web.
+    pub fn favourite_ids(&self) -> Result<std::collections::HashSet<i64>> {
+        let mut stmt = self.conn.prepare(FAVOURITE_ROMS)?;
+        let ids = stmt
+            .query_map([], |r| r.get::<_, i64>(0))?
+            .collect::<Result<std::collections::HashSet<_>, _>>()?;
+        Ok(ids)
+    }
+
     pub fn roms_for(&self, platform_slug: &str) -> Result<Vec<RomRow>> {
+        // Favourites first, then alphabetical within each group. A console
+        // page is a wall of a few hundred names; the handful you actually play
+        // being at the top is the difference between browsing and searching.
         let sql = format!(
             "SELECT {ROM_COLUMNS} FROM roms WHERE platform_slug = ?1 \
-             ORDER BY 3 COLLATE NOCASE"
+             ORDER BY (id IN ({FAVOURITE_ROMS})) DESC, 3 COLLATE NOCASE"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt

@@ -53,6 +53,12 @@ pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
             // enough to matter and slow enough that games still register it.
             ("fceumm_turbo_delay", "3"),
         ],
+        // The rest have their rapid-fire buttons on always; the option only
+        // sets how fast they repeat. Left alone the default is slower than
+        // anyone wants from a button labelled turbo.
+        (_, "mesen") => &[("mesen_controllerturbospeed", "Fast")],
+        (_, "gambatte") => &[("gambatte_turbo_period", "4")],
+        (_, "gpsp") => &[("gpsp_turbo_period", "4")],
         _ => &[],
     }
 }
@@ -61,9 +67,35 @@ pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
 const PAD_Y: &str = "1";
 const PAD_X: &str = "9";
 
+/// Cores whose emulated pad has rapid-fire copies of its face buttons.
+///
+/// These are the two-button consoles, where the pad has spare buttons that the
+/// original hardware never had: the NES had B and A, so an Xbox pad running it
+/// has two face buttons doing nothing, and the core hands them back as rapid
+/// versions of the two real ones.
+///
+/// Every core here uses the same convention — **Turbo A on RetroPad X, Turbo B
+/// on RetroPad Y** — which was read out of the core binaries themselves rather
+/// than assumed. Each one declares its buttons to the frontend as a list of
+/// names, and `Turbo A` / `Turbo B` sit in the X and Y slots in all of them.
+///
+/// Absent on purpose:
+///
+/// * `snes9x` — the SNES uses all four face buttons, so its rapid-fire is on
+///   L2/R2/L3/R3 instead. Those are analog triggers and stick clicks on a
+///   modern pad, and the core's own note says brushing one mid-game engages
+///   rapid fire and breaks anything that needs a button held down.
+/// * `genesis_plus_gx` — no rapid fire of any kind, on any of the four
+///   consoles it emulates.
+/// * `mednafen_pce` — has it, but as an option that converts button I into an
+///   autofire button rather than adding a separate one, which costs you the
+///   normal press.
+const TURBO_CORES: &[&str] =
+    &["fceumm", "mesen", "nestopia", "gambatte", "mgba", "gpsp"];
+
 /// Input remap lines for a platform, if any.
 ///
-/// FCEUmm binds Turbo B to RetroPad Y and Turbo A to RetroPad X. On an Xbox
+/// The cores put Turbo B on RetroPad Y and Turbo A on RetroPad X. On an Xbox
 /// pad RetroPad Y is the *west* button (X) and RetroPad X is the *north* one
 /// (Y), so out of the box X gives rapid B and Y gives rapid A — the opposite
 /// of what was asked. Swapping the two fixes it.
@@ -72,18 +104,18 @@ const PAD_X: &str = "9";
 /// ambiguous about whether the key is the physical button or the one the core
 /// sees. Exchanging a pair gives the same result under either reading, so this
 /// needs no assumption about the direction.
-pub fn remap(platform: &str, core: &str) -> Vec<String> {
-    match (platform, core) {
-        ("nes" | "famicom", "fceumm") => (1..=2)
-            .flat_map(|p| {
-                [
-                    format!("input_player{p}_btn_x = \"{PAD_Y}\""),
-                    format!("input_player{p}_btn_y = \"{PAD_X}\""),
-                ]
-            })
-            .collect(),
-        _ => Vec::new(),
+pub fn remap(_platform: &str, core: &str) -> Vec<String> {
+    if !TURBO_CORES.contains(&core) {
+        return Vec::new();
     }
+    (1..=2)
+        .flat_map(|p| {
+            [
+                format!("input_player{p}_btn_x = \"{PAD_Y}\""),
+                format!("input_player{p}_btn_y = \"{PAD_X}\""),
+            ]
+        })
+        .collect()
 }
 
 /// The directory name RetroArch uses for a core's own settings.
@@ -94,6 +126,11 @@ pub fn remap(platform: &str, core: &str) -> Vec<String> {
 pub fn core_dir_name(core: &str) -> Option<&'static str> {
     match core {
         "fceumm" => Some("FCEUmm"),
+        "mesen" => Some("Mesen"),
+        "nestopia" => Some("Nestopia"),
+        "gambatte" => Some("Gambatte"),
+        "mgba" => Some("mGBA"),
+        "gpsp" => Some("gpSP"),
         "mame2003_plus" => Some("MAME 2003-Plus"),
         "mame2003" => Some("MAME 2003"),
         _ => None,
@@ -102,11 +139,11 @@ pub fn core_dir_name(core: &str) -> Option<&'static str> {
 
 /// Human summary of what was applied, for the launch output.
 pub fn describe(platform: &str, core: &str) -> Option<String> {
+    if TURBO_CORES.contains(&core) {
+        return Some("rapid fire: X = rapid A, Y = rapid B (Xbox layout)".to_owned());
+    }
     if core_options(platform, core).is_empty() {
         return None;
-    }
-    if platform == "nes" || platform == "famicom" {
-        return Some("rapid fire: X = rapid A, Y = rapid B (Xbox layout)".to_owned());
     }
     if core.starts_with("mame2003") {
         return Some("skipping the MAME disclaimer and warning screens".to_owned());
@@ -131,12 +168,40 @@ mod tests {
         }
     }
 
+    /// The consoles with two buttons all have to get rapid fire, whichever
+    /// core they are set to. Getting this right on the NES and not the Game Boy
+    /// is the failure that looks like the feature works.
+    #[test]
+    fn every_two_button_console_gets_rapid_fire() {
+        for (platform, core) in [
+            ("nes", "fceumm"),
+            ("famicom", "mesen"),
+            ("nes", "nestopia"),
+            ("gb", "gambatte"),
+            ("gbc", "gambatte"),
+            ("gba", "mgba"),
+            ("gba", "gpsp"),
+        ] {
+            assert_eq!(
+                remap(platform, core).len(),
+                4,
+                "{platform}/{core}: two buttons swapped, for two players"
+            );
+            assert!(describe(platform, core).is_some(), "{platform}/{core}");
+        }
+    }
+
     /// The redirect is global once enabled, so it must stay off for everything
     /// that does not need it — otherwise every other core starts reading our
     /// options file instead of the user's own.
     #[test]
     fn nothing_is_applied_to_a_platform_that_does_not_need_it() {
-        for (platform, core) in [("snes", "snes9x"), ("nes", "mesen"), ("arcade", "fbneo")] {
+        // snes9x and genesis_plus_gx are the deliberate omissions from
+        // TURBO_CORES — see the note there — so they are the honest check that
+        // the redirect stays off rather than a core nobody has looked at.
+        for (platform, core) in
+            [("snes", "snes9x"), ("genesis", "genesis_plus_gx"), ("arcade", "fbneo")]
+        {
             assert!(core_options(platform, core).is_empty(), "{platform}/{core}");
             assert!(remap(platform, core).is_empty(), "{platform}/{core}");
             assert!(describe(platform, core).is_none(), "{platform}/{core}");
@@ -149,8 +214,20 @@ mod tests {
     /// and forgetting `core_dir_name` must fail here rather than in play.
     #[test]
     fn every_core_with_options_also_has_a_directory_name() {
-        // The platforms this module knows about, paired with the core each
-        // entry is keyed on.
+        // Every core that gets rapid fire, not a hand-listed few: adding one
+        // to TURBO_CORES and forgetting its directory name is exactly the
+        // mistake this is here to catch.
+        for core in TURBO_CORES {
+            assert!(
+                !remap("", core).is_empty(),
+                "{core} is listed as a turbo core but emits no remap"
+            );
+            assert!(
+                core_dir_name(core).is_some(),
+                "{core} has settings to write but no config directory name, \
+                 so prepare_tweaks would discard them"
+            );
+        }
         for (platform, core) in [("nes", "fceumm"), ("famicom", "fceumm")] {
             if !core_options(platform, core).is_empty() || !remap(platform, core).is_empty() {
                 assert!(

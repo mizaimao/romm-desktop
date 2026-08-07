@@ -184,3 +184,24 @@ root = "./Saves"
 # A conflict is never resolved automatically either way: if both sides changed
 # since the last sync, both are left alone and it says so.
 auto_sync = true
+
+# ---------------------------------------------------------------------------
+# Light gun
+# ---------------------------------------------------------------------------
+#
+# Systems to play with the mouse as a light gun. Easier to set from
+# Settings -> Systems than by hand, which is where the switch lives.
+#
+# Off everywhere by default, and deliberately: on the NES, SNES and Mega Drive
+# the gun goes in the *second* controller port, so switching one of these on
+# turns player two's pad into a gun and two-player games stop working. Turn it
+# on for a console while you are playing gun games and off again afterwards.
+#
+# The mouse is already bound to the trigger at all times -- left button fires,
+# right button shoots off-screen, which is how most gun games reload. That
+# costs nothing when no gun is in use, so it needs no setting.
+#
+#   nes = "on"
+#   arcade = "on"
+
+[lightgun.by_platform]

@@ -27,7 +27,11 @@ export async function showPlatforms() {
     .map(
       (p) => `
       <div class="card" data-slug="${p.slug}">
-        <div class="logo"><span class="wordtype">${escapeHtml(p.slug)}</span></div>
+        <div class="logo">${
+          p.logo
+            ? `<img class="${p.logo_wordmark ? "wordmark" : "art"}" src="${convertFileSrc(p.logo)}" alt="" />`
+            : `<span class="wordtype">${escapeHtml(p.slug)}</span>`
+        }</div>
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="meta">
           <span class="dot ${p.playable ? "on" : ""}"></span>
@@ -164,9 +168,9 @@ function listMarkup(rows, showPlatform) {
   return `<div class="rows">${rows
     .map(
       (r) => `
-      <div class="row" data-id="${r.id}">
+      <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}">
         <span class="have">${r.downloaded ? "▣" : ""}</span>
-        <span class="nm">${escapeHtml(r.name)}</span>
+        <span class="nm">${r.favourite ? `<span class="star">★</span>` : ""}${escapeHtml(r.name)}</span>
         ${showPlatform ? `<span class="pf">${r.platform}</span>` : ""}
         <span class="sz">${human(r.size_bytes)}</span>
       </div>`
@@ -188,7 +192,9 @@ function gridMarkup(rows, platform) {
           ? ` style="--ar:${state.aspects[r.platform].toFixed(3)}"`
           : ""
       }>
-        <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
+        <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span>${
+          r.favourite ? `<span class="star">★</span>` : ""
+        }</div>
         <div class="gname">${escapeHtml(r.name)}</div>
         <div class="gmeta">${r.downloaded ? "▣ " : ""}${human(r.size_bytes)}</div>
       </div>`

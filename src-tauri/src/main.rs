@@ -44,6 +44,8 @@ struct AppState {
     user_retroarch_cfg: PathBuf,
     shaders_enabled: bool,
     shader_overrides: Mutex<std::collections::BTreeMap<String, String>>,
+    /// Systems switched over to a light gun, so gun games aim with the mouse.
+    lightgun: Mutex<std::collections::BTreeMap<String, String>>,
     /// Strobe/BFI pass chained onto CRT shaders, if the user enabled one.
     motion_shader: Mutex<Option<String>>,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
@@ -85,6 +87,8 @@ struct RomView {
     platform: String,
     size_bytes: i64,
     downloaded: bool,
+    /// In a starred collection. Shown with a star and sorted to the top.
+    favourite: bool,
 }
 
 #[derive(Serialize)]
@@ -164,6 +168,21 @@ async fn sync_library(app: tauri::AppHandle, state: State<'_, AppState>, full: b
         Err(_) => 0,
     };
 
+    // Console pictures for the platform grid. Cheap — a few KB of vector art
+    // each, only for platforms not already cached — and it means the grid has
+    // real artwork without anyone downloading a theme for it.
+    let _ = app.emit("sync-progress", "console pictures…");
+    let icons = match client.platforms().await {
+        Ok(list) => {
+            let pairs: Vec<(String, String)> =
+                list.iter().map(|p| (p.slug.clone(), p.fs_slug.clone())).collect();
+            romm_desktop::platformicon::ensure(&client, &state.media_dir, &pairs)
+                .await
+                .unwrap_or(0)
+        }
+        Err(_) => 0,
+    };
+
     // A sync rewrites names from the server, so the real arcade titles go back
     // afterwards rather than before.
     let names = romm_desktop::arcade::names(Path::new("data/arcade-names.json"));
@@ -177,7 +196,7 @@ async fn sync_library(app: tauri::AppHandle, state: State<'_, AppState>, full: b
         if pruned > 0 { format!(", {pruned} removed") } else { String::new() },
         if collections > 0 { format!(", {collections} collections") } else { String::new() },
         if renamed > 0 { format!(", {renamed} arcade titles") } else { String::new() },
-    ))
+    ) + &if icons > 0 { format!(", {icons} console pictures") } else { String::new() })
 }
 
 /// Open the Settings window, or focus it if it is already up.
@@ -406,9 +425,15 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
         .into_iter()
         .map(|p| PlatformView {
             playable: resolve_core(&state, &p.fs_slug).is_some(),
+            // A theme, if one is installed, then the console picture from the
+            // server. The theme wins because installing one is a deliberate
+            // choice and this is the fallback that means nobody has to.
             logo: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
+                .or_else(|| romm_desktop::platformicon::installed(&state.media_dir, &p.fs_slug))
                 .map(|p| p.display().to_string()),
-            logo_wordmark: current_style(&state) == theme::IconStyle::Logo,
+            logo_wordmark: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
+                .is_some()
+                && current_style(&state) == theme::IconStyle::Logo,
             cover_aspect: media::cover_aspect(&state.media_dir, &p.fs_slug),
             slug: p.fs_slug,
             name: p.display_name,
@@ -419,8 +444,16 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
 
 /// Shape cache rows for the list/grid, marking what is already on disk.
 fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomView> {
+    // One query for the whole list rather than one per row.
+    let favourites = state
+        .cache
+        .lock()
+        .ok()
+        .and_then(|c| c.favourite_ids().ok())
+        .unwrap_or_default();
     rows.into_iter()
         .map(|r| RomView {
+            favourite: favourites.contains(&r.id),
             downloaded: row_path(state, &r).is_some(),
             id: r.id,
             name: r.name,
@@ -809,6 +842,7 @@ async fn launch_rom(
     let per_game = state.core_per_game.lock().map_err(err)?.clone();
     let shader_overrides = state.shader_overrides.lock().map_err(err)?.clone();
     let motion = state.motion_shader.lock().map_err(err)?.clone();
+    let lightgun = state.lightgun.lock().map_err(err)?.clone();
     let lib = state.roms_dir.parent().unwrap_or(Path::new("."));
     let req = romm_desktop::launch::Request {
         rom: &path,
@@ -825,6 +859,7 @@ async fn launch_rom(
         core_override: None,
         pad: pad.as_deref(),
         achievements: Some(&state.achievements),
+        lightgun: &lightgun,
     };
     // Fetch what is missing before planning. `plan` only ever picks among cores
     // already on disk, so without this a fresh install — which has none — fails
@@ -1160,6 +1195,10 @@ struct SystemView {
     shader: Option<String>,
     emulators: Vec<EmulatorOption>,
     shaders: Vec<ShaderOptionView>,
+    /// What this console's light gun was called, when it had one. `None` means
+    /// no switch is offered for this system.
+    gun: Option<String>,
+    gun_on: bool,
 }
 
 /// Per-system configuration, ES-DE style: every alternative emulator the theme
@@ -1209,6 +1248,13 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
                 .unwrap_or_default();
 
             SystemView {
+                gun: romm_desktop::lightgun::label(&slug).map(str::to_owned),
+                gun_on: state
+                    .lightgun
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&slug)
+                    .is_some_and(|v| v.trim() == "on"),
                 core: resolve_core(&state, &slug),
                 shader: if state.shaders_enabled {
                     shaders::preset_for(
@@ -1325,6 +1371,7 @@ fn set_system_choice(
     let table = match field.as_str() {
         "core" => "cores.overrides",
         "shader" => "shaders.by_platform",
+        "lightgun" => "lightgun.by_platform",
         other => return Err(format!("unknown field {other}")),
     };
     romm_desktop::config::set_table_entry("config.toml", table, &slug, &value).map_err(err)?;
@@ -1337,6 +1384,9 @@ fn set_system_choice(
         }
         "shader" => {
             state.shader_overrides.lock().map_err(err)?.insert(slug.clone(), value.clone());
+        }
+        "lightgun" => {
+            state.lightgun.lock().map_err(err)?.insert(slug.clone(), value.clone());
         }
         _ => {}
     }
@@ -1823,6 +1873,7 @@ fn main() {
             user_retroarch_cfg: cfg.user_retroarch_config(),
             shaders_enabled: cfg.shaders.enabled,
             shader_overrides: Mutex::new(cfg.shaders.by_platform.clone()),
+            lightgun: Mutex::new(cfg.lightgun.by_platform.clone()),
             motion_shader: Mutex::new(cfg.shaders.motion.clone()),
             // From config, not hardcoded: index 0 is `logo`, which is ES-DE's
             // wordmark art — a picture of the system's name. The grid wants

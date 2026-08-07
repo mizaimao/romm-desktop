@@ -319,6 +319,25 @@ video_aspect_ratio_auto = \"true\"
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
 
+# Mouse wired to the light gun controls.
+#
+# RetroArch keeps gun binds apart from pad binds and ships them unbound, so a
+# gun game aims with the pointer -- that part is read directly -- and then the
+# trigger does nothing. These cost nothing when no gun is in use: they only
+# apply to a port a core has been told holds a gun, which is off unless it is
+# switched on for that system in Settings -> Systems.
+#
+# Left button fires, right button shoots off-screen (how most gun games
+# reload), middle is Start.
+input_player1_mouse_index = \"0\"
+input_player1_gun_trigger_mbtn = \"1\"
+input_player1_gun_offscreen_shot_mbtn = \"2\"
+input_player1_gun_start_mbtn = \"3\"
+input_player2_mouse_index = \"0\"
+input_player2_gun_trigger_mbtn = \"1\"
+input_player2_gun_offscreen_shot_mbtn = \"2\"
+input_player2_gun_start_mbtn = \"3\"
+
 ";
 
     /// Windows-only additions, appended to `OVERRIDES` there.

@@ -47,6 +47,9 @@ pub struct Request<'a> {
     pub pad: Option<&'a str>,
     /// RetroAchievements. `None` leaves the user's own settings alone.
     pub achievements: Option<&'a crate::achievements::Settings>,
+    /// Systems where the gun replaces a pad, so light gun games can be aimed
+    /// with the mouse. Off unless the platform is in here.
+    pub lightgun: &'a BTreeMap<String, String>,
 }
 
 /// A resolved, ready-to-spawn launch.
@@ -191,12 +194,16 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     if let Some(note) = req.achievements.and_then(crate::achievements::describe) {
         notes.push(note);
     }
+    let gun = gun_enabled(req.lightgun, req.platform);
+    if let Some(note) = crate::lightgun::describe(req.platform, gun) {
+        notes.push(note);
+    }
 
     // Point RetroArch at the generated chain when there is one. Passing the
     // absolute path rather than a catalogue name keeps config_lines honest:
     // it only ever emits a shader it has verified exists.
     let extra = format!(
-        "{}{}{}{}{}",
+        "{}{}{}{}{}{}",
         match &chained {
             Some(p) => format!(
                 "\n# Base shader with a motion pass chained on.\n\
@@ -213,7 +220,8 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         },
         ra.system_dir_line(),
         ra.prepare_tweaks(req.library_root, req.platform, &core),
-        req.achievements.map(crate::achievements::config_lines).unwrap_or_default()
+        req.achievements.map(crate::achievements::config_lines).unwrap_or_default(),
+        crate::lightgun::config_lines(req.platform, gun),
     );
     let overrides = ra
         .write_overrides_full(req.library_root, Some(req.user_cfg), &extra, req.pad)
@@ -229,9 +237,34 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     })
 }
 
+/// Whether the light gun switch is on for a platform.
+///
+/// Stored as text rather than a bool because it rides the same per-platform
+/// config table as the core and shader choices, which are strings. Anything
+/// that is not an explicit yes counts as off — a half-written value should
+/// leave port 2 as a pad, not turn it into a gun.
+fn gun_enabled(map: &BTreeMap<String, String>, platform: &str) -> bool {
+    map.get(platform)
+        .map(|v| matches!(v.trim(), "on" | "true" | "yes" | "1"))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_light_gun_switch_is_off_unless_it_is_explicitly_on() {
+        let mut map = BTreeMap::new();
+        assert!(!gun_enabled(&map, "nes"));
+        map.insert("nes".to_owned(), "off".to_owned());
+        assert!(!gun_enabled(&map, "nes"));
+        // A value written by an older build, or by hand, that is neither.
+        map.insert("nes".to_owned(), String::new());
+        assert!(!gun_enabled(&map, "nes"));
+        map.insert("nes".to_owned(), "on".to_owned());
+        assert!(gun_enabled(&map, "nes"));
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("romm-launch-test-{name}"));

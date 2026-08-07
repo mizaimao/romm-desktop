@@ -283,6 +283,8 @@ impl App {
             // best profile for this OS's input driver.
             pad: None,
             achievements: Some(&self.achievements),
+            // The TUI has no Systems screen to switch it on from.
+            lightgun: &std::collections::BTreeMap::new(),
         };
         let plan = match crate::launch::plan(ra, &self.map, &req) {
             Ok(p) => p,
