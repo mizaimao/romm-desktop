@@ -34,6 +34,19 @@ pub type Opt = (&'static str, &'static str);
 /// this needs two independent ones.
 pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
     match (platform, core) {
+        // MAME shows a disclaimer, then a warnings screen listing every ROM it
+        // is unhappy about, and waits on each. On a set this size that is
+        // several seconds of reading before every single arcade game. Both
+        // screens are informational -- the game either runs or it does not,
+        // and the warning does not change which.
+        (_, "mame2003_plus") => &[
+            ("mame2003-plus_skip_disclaimer", "enabled"),
+            ("mame2003-plus_skip_warnings", "enabled"),
+        ],
+        (_, "mame2003") => &[
+            ("mame2003_skip_disclaimer", "enabled"),
+            ("mame2003_skip_warnings", "enabled"),
+        ],
         ("nes" | "famicom", "fceumm") => &[
             ("fceumm_turbo_enable", "Both"),
             // Frames between repeats. 3 is roughly 10 presses/second, fast
@@ -81,6 +94,8 @@ pub fn remap(platform: &str, core: &str) -> Vec<String> {
 pub fn core_dir_name(core: &str) -> Option<&'static str> {
     match core {
         "fceumm" => Some("FCEUmm"),
+        "mame2003_plus" => Some("MAME 2003-Plus"),
+        "mame2003" => Some("MAME 2003"),
         _ => None,
     }
 }
@@ -92,6 +107,9 @@ pub fn describe(platform: &str, core: &str) -> Option<String> {
     }
     if platform == "nes" || platform == "famicom" {
         return Some("rapid fire: X = rapid A, Y = rapid B (Xbox layout)".to_owned());
+    }
+    if core.starts_with("mame2003") {
+        return Some("skipping the MAME disclaimer and warning screens".to_owned());
     }
     Some(format!("{} core options applied", core_options(platform, core).len()))
 }

@@ -58,6 +58,15 @@ body.settings-window {
 /* ---- Pane -------------------------------------------------------------- */
 
 #pane {
+  /* style.css styles bare `main` as a flex row for the library layout, and this
+     window's pane is also a <main>. Inheriting that turned every heading, hint
+     and row into a flex item side by side — the settings pane laid out
+     horizontally with the text wrapping one word per line. Reset explicitly
+     rather than renaming the element, so the next thing style.css gives `main`
+     cannot do this again. */
+  display: block;
+  height: auto;
+  min-height: 0;
   padding: 18px 22px 32px;
   overflow-y: auto;
 }

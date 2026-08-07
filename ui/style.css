@@ -1101,3 +1101,32 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   border: 1px solid var(--line);
 }
 #shortcuts .pad-readout .hint { opacity: 0.6; font-size: 12px; }
+
+/* ---- Section transitions -------------------------------------------------
+   A slide in the direction you moved, so LB and RB feel like turning pages
+   rather than the list being replaced under you. Which way it goes is the whole
+   point: an animation that plays the same both ways tells you nothing about
+   where you went.
+
+   Short — 180ms. Long enough to read as motion, short enough that holding a
+   bumper to move two tabs does not feel like waiting for it. */
+#list.turn-left { animation: turn-from-right 180ms ease-out; }
+#list.turn-right { animation: turn-from-left 180ms ease-out; }
+
+@keyframes turn-from-right {
+  from { opacity: 0; transform: translateX(26px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes turn-from-left {
+  from { opacity: 0; transform: translateX(-26px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The tab label leads slightly, so the eye is already where the content is
+   about to arrive. */
+#tabbar .stab.active { transition: opacity 140ms, border-color 140ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  #list.turn-left,
+  #list.turn-right { animation: none; }
+}

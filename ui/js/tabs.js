@@ -101,6 +101,9 @@ export async function showSection(id, { force = false } = {}) {
   // `force` is for the first call at startup, where there is nothing to park.
   if (id === current && !force) return;
 
+  const from = SECTIONS.findIndex((s) => s.id === current);
+  const to = SECTIONS.findIndex((s) => s.id === id);
+
   // Save where this section was before leaving it.
   park();
   current = id;
@@ -113,6 +116,20 @@ export async function showSection(id, { force = false } = {}) {
     await section.open();
   }
   paint();
+  if (!force) slide(to > from ? "right" : "left");
+}
+
+/// Play the page turn, in the direction the section moved.
+///
+/// Applied after the new content is in place rather than before: animating the
+/// outgoing list would mean holding the old rows on screen while the new ones
+/// load, and a bumper held down would queue transitions behind each other.
+function slide(direction) {
+  el.list.classList.remove("turn-left", "turn-right");
+  // Forces the animation to restart when the same direction is played twice in
+  // a row; without it the second press does nothing visible.
+  void el.list.offsetWidth;
+  el.list.classList.add(direction === "right" ? "turn-right" : "turn-left");
 }
 
 /// Move by `delta` through the sections, wrapping.

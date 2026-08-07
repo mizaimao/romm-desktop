@@ -9,7 +9,7 @@ import { selectRom, setSidebar, play } from "./detail.js";
 import { showPlatforms, showRoms, setLayout } from "./library.js";
 import { showThemes } from "./themes.js";
 import { escapeHtml } from "./util.js";
-import { ACTIONS, actionFor, keyFor, keyLabel } from "./bindings.js";
+import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection } from "./tabs.js";
 
@@ -178,19 +178,30 @@ function toggleHelp() {
     requestAnimationFrame(tick);
     const pad = (navigator.getGamepads?.() ?? []).find(Boolean);
     if (!pad) return;
+    // The index alone is not the answer. A rebind clears whatever else held
+    // that button by writing null, so a button can be reported as pressed and
+    // still be bound to nothing — which looks exactly like the app ignoring it.
+    const map = padMap();
     const down = pad.buttons
       .map((b, i) => (b.pressed ? i : null))
-      .filter((i) => i !== null);
+      .filter((i) => i !== null)
+      .map((i) => {
+        const action = map[i];
+        const label = action
+          ? ACTIONS.find((a) => a.id === action)?.label || action
+          : "<em>not bound</em>";
+        return `${i} → ${label}`;
+      });
     const axes = pad.axes
-      .map((v, i) => (Math.abs(v) > 0.35 ? `axis${i}:${v.toFixed(2)}` : null))
+      .map((v, i) => (Math.abs(v) > 0.35 ? `axis${i}: ${v.toFixed(2)}` : null))
       .filter(Boolean);
     out.innerHTML =
       `<strong>${escapeHtml(pad.id)}</strong><br>` +
       `mapping: ${pad.mapping || "(none reported)"} · ${pad.buttons.length} buttons<br>` +
-      `pressed: <strong>${down.length ? down.join(", ") : "nothing"}</strong>` +
-      (axes.length ? `<br>axes: ${axes.join(", ")}` : "") +
-      `<br><span class="hint">Hold a button to see its index. If D-pad left ` +
-      `reports something other than 14, that is the binding to change.</span>`;
+      `pressed: <strong>${down.length ? down.join(" · ") : "nothing"}</strong>` +
+      (axes.length ? `<br>${axes.join(" · ")}` : "") +
+      `<br><span class="hint">A button that says "not bound" is why it does ` +
+      `nothing — Settings · Control · Reset controller puts the defaults back.</span>`;
   };
   requestAnimationFrame(tick);
 }
