@@ -368,9 +368,9 @@ export function glassTint() {
 
 /// Apply the tint to this document, and tell the other window.
 ///
-/// Both windows want it: the library has the bars, and Settings has the same
-/// controls in its own document. A tint applied in one and not the other is
-/// worse than no tint, because it looks like a bug.
+/// Both windows want it: the library has the cards, Settings has its own
+/// controls. A tint applied in one and not the other is worse than no tint,
+/// because it looks like a bug.
 export function setGlassTint(colour, { announce = true } = {}) {
   const value = /^#[0-9a-f]{6}$/i.test(colour) ? colour : GLASS_PRESETS[0].colour;
   document.documentElement.style.setProperty("--glass", value);

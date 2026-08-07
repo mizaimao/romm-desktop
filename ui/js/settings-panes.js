@@ -147,7 +147,7 @@ export function paneHtml(id) {
         <div class="ctl"><input class="glass-strength" type="range" min="0" max="60" step="2" />
           <span class="glass-strength-val"></span></div>
       </div>
-      <p class="hint">Tints the top bar, the buttons and the glow behind them —
+      <p class="hint">Tints the cards, the selection glow and the controls —
         one colour for all of it. At 0 the glass is clear and only the blur
         remains.</p>
 
