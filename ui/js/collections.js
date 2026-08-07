@@ -120,6 +120,10 @@ export async function showCollectionsIn(group, label) {
 export async function showCollectionRoms(id, name) {
   state.view = "collection-roms";
   state.collection = id;
+  // The collection's own name, kept apart from the rendered title. Restoring a
+  // parked section used to hand the title back as the name, so "Arcade Sports —
+  // 256 games" became the name and gained a second "— 256 games" every time.
+  state.collectionName = name;
   el.back.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;

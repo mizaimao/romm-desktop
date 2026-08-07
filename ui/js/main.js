@@ -67,15 +67,60 @@ listen("backdrop-settings", ({ payload }) => {
   applyBackdropSettings(payload);
 });
 
+/// Anything worth watching gets a speed and a size, not just a moving bar.
+///
+/// Below a few megabytes it is over before it can be read, so the threshold
+/// keeps a bar from flashing up with numbers nobody had time to see. A disc
+/// image is a different matter: minutes of waiting with no idea whether it is
+/// moving at 2 MB/s or 40.
+const PROGRESS_DETAIL_BYTES = 5 * 1024 * 1024;
+
+/// Rate is measured from the first tick of *this* transfer rather than from
+/// zero, so a resumed download reports what it is doing now instead of
+/// crediting itself with the part it did not transfer.
+let dlStart = null;
+
 listen("download-progress", ({ payload }) => {
   const [id, done, total] = payload;
+  if (state.selected !== id) return;
+
   const prog = document.getElementById("prog");
-  if (prog && state.selected === id) {
+  if (prog) {
     prog.hidden = false;
     prog.max = total || 1;
     prog.value = done;
   }
+
+  const label = document.getElementById("prog-text");
+  if (!label) return;
+  if (total < PROGRESS_DETAIL_BYTES) {
+    label.hidden = true;
+    return;
+  }
+
+  const now = performance.now();
+  if (!dlStart || done < dlStart.done) dlStart = { at: now, done };
+  const seconds = (now - dlStart.at) / 1000;
+  const rate = seconds > 0.4 ? (done - dlStart.done) / seconds : 0;
+  const left = rate > 0 ? (total - done) / rate : null;
+
+  label.hidden = false;
+  label.textContent =
+    `${human(done)} of ${human(total)}` +
+    ` · ${total ? Math.round((done / total) * 100) : 0}%` +
+    (rate > 0 ? ` · ${human(rate)}/s` : "") +
+    (left !== null && left > 2 ? ` · ${formatEta(left)} left` : "");
+
+  // A finished transfer is reported as (1, 1); clear the baseline so the next
+  // one measures itself rather than inheriting this one's start.
+  if (done >= total) dlStart = null;
 });
+
+function formatEta(seconds) {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  return m < 60 ? `${m}m ${Math.round(seconds % 60)}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
 
 (async function init() {
   try {

@@ -15,6 +15,9 @@ export const state = {
   aspects: {},
   /// The collection currently open, so its position can be remembered too.
   collection: null,
+  /// Its name, separate from the rendered title. The title carries a count and
+  /// re-deriving one from the other appends it twice.
+  collectionName: null,
   /// List key -> the rom id last selected in it. Coming back to a console or a
   /// collection puts the cursor where you left it rather than at the top, which
   /// otherwise means re-finding your place on every single trip in and out.

@@ -54,7 +54,7 @@ function park() {
     platform: state.platform,
     collection: state.collection,
     scroll: el.list.scrollTop,
-    title: el.title.textContent,
+    name: state.collectionName,
   });
 }
 
@@ -72,7 +72,7 @@ async function unpark(id) {
 
   if (was.view === "roms" && was.platform) await showRoms(was.platform);
   else if (was.view === "collection-roms" && was.collection)
-    await showCollectionRoms(was.collection, was.title);
+    await showCollectionRoms(was.collection, was.name);
   else if (was.view === "collections" && id === "mine")
     await showCollectionsIn("user", "My collections");
   else if (was.view === "collections") await showCollectionGroups({ exclude: ["user"] });

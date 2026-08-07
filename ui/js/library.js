@@ -27,11 +27,7 @@ export async function showPlatforms() {
     .map(
       (p) => `
       <div class="card" data-slug="${p.slug}">
-        <div class="logo">${
-          p.logo
-            ? `<img class="${p.logo_wordmark ? "wordmark" : "art"}" src="${convertFileSrc(p.logo)}" alt="" />`
-            : `<span class="ph">${escapeHtml(p.slug)}</span>`
-        }</div>
+        <div class="logo"><span class="wordtype">${escapeHtml(p.slug)}</span></div>
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="meta">
           <span class="dot ${p.playable ? "on" : ""}"></span>
@@ -145,14 +141,19 @@ function groupedMarkup(rows) {
     (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])
   );
 
+  // One group is not a grouping. A collection that happens to hold games from a
+  // single console got a heading repeating what the title already said, sitting
+  // over the first row and cropping it.
+  const single = ordered.length === 1;
+
   return ordered
     .map(
       ([platform, items]) => `
       <section class="pgroup">
-        <h2 class="ghead">
+        ${single ? "" : `<h2 class="ghead">
           <span class="gslug">${escapeHtml(platform)}</span>
           <span class="gcount">${items.length}</span>
-        </h2>
+        </h2>`}
         ${state.layout === "grid" ? gridMarkup(items, platform) : listMarkup(items, false)}
       </section>`
     )

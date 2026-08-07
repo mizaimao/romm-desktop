@@ -122,6 +122,7 @@ export async function selectRom(id) {
         <button class="ghost" id="dl" ${d.downloaded ? "disabled" : ""}>Download</button>
       </div>
       <progress id="prog" hidden></progress>
+      <div id="prog-text" hidden></div>
     </div>`;
   });
 
