@@ -14,9 +14,10 @@ import {
   padFor, setPad, resetPad, padLabel,
 } from "./bindings.js";
 import { invoke, listen } from "./state.js";
+import { editServer, editAchievements, editScraper } from "./credentials.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
-  backdropWanted, setBackdropWanted,
+  backdropWanted, setBackdropWanted, PRESETS,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -64,28 +65,46 @@ export function paneHtml(id) {
         not overwritten.</p>
       <p class="hint set-savesync-status"></p>
 
+      <h4>Server</h4>
+      <div class="srow">
+        <label>RomM server</label>
+        <div class="ctl">
+          <button class="cred-open" data-cred="server">Edit…</button>
+          <span class="cred-summary" data-cred-summary="server"></span>
+        </div>
+      </div>
+      <p class="hint">Address and credentials, with a connection check before
+        anything is written.</p>
+
       <h4>Achievements</h4>
       <div class="srow">
         <label>RetroAchievements</label>
-        <div class="ctl"><button class="cf-ach-enabled" data-field="achievements_enabled">…</button></div>
+        <div class="ctl"><button data-field="achievements_enabled">…</button></div>
       </div>
       <div class="srow">
-        <label>Username</label>
-        <div class="ctl"><input class="cf-text" data-field="achievements_username"
-          type="text" spellcheck="false" placeholder="your RA account name" /></div>
-      </div>
-      <div class="srow">
-        <label>Token</label>
-        <div class="ctl"><input class="cf-text" data-field="achievements_token"
-          type="password" spellcheck="false" placeholder="from RetroArch's config" /></div>
+        <label>Account</label>
+        <div class="ctl">
+          <button class="cred-open" data-cred="achievements">Edit…</button>
+          <span class="cred-summary" data-cred-summary="achievements"></span>
+        </div>
       </div>
       <div class="srow">
         <label>Hardcore mode</label>
-        <div class="ctl"><button class="cf-ach-hardcore" data-field="achievements_hardcore">…</button></div>
+        <div class="ctl"><button data-field="achievements_hardcore">…</button></div>
       </div>
       <p class="hint">Hardcore disables save states, fast-forward and rewind —
-        four of the hotkeys this app binds. Both a username and a token are
-        needed; either alone authenticates nothing.</p>
+        four of the hotkeys this app binds.</p>
+
+      <h4>ScreenScraper</h4>
+      <div class="srow">
+        <label>Account</label>
+        <div class="ctl">
+          <button class="cred-open" data-cred="scraper">Edit…</button>
+          <span class="cred-summary" data-cred-summary="scraper"></span>
+        </div>
+      </div>
+      <p class="hint">Stored but not used yet — kept with the rest of the
+        configuration rather than in someone's notes.</p>
 
       <h4>Library</h4>
       <div class="srow">
@@ -111,8 +130,12 @@ export function paneHtml(id) {
         <div class="ctl"><button class="set-backdrop">Shader backdrop: off</button></div>
       </div>
       <div class="srow">
+        <label>Colour scheme</label>
+        <div class="ctl"><select class="bd-preset"></select></div>
+      </div>
+      <div class="srow">
         <label>Motion</label>
-        <div class="ctl"><input class="bd-speed" type="range" min="0" max="400" step="10" />
+        <div class="ctl"><input class="bd-speed" type="range" min="300" max="700" step="25" />
           <span class="bd-speed-val"></span></div>
       </div>
       <div class="srow">
@@ -120,12 +143,12 @@ export function paneHtml(id) {
         <div class="ctl"><input class="bd-strength" type="range" min="10" max="200" step="5" />
           <span class="bd-strength-val"></span></div>
       </div>
-      <div class="srow">
+      <div class="srow bd-custom">
         <label>Dark colour</label>
         <div class="ctl"><input class="bd-low" type="color" />
           <button class="bd-low-reset">Use theme</button></div>
       </div>
-      <div class="srow">
+      <div class="srow bd-custom">
         <label>Light colour</label>
         <div class="ctl"><input class="bd-high" type="color" />
           <button class="bd-high-reset">Use theme</button></div>
@@ -313,8 +336,25 @@ function wireAppearance(box) {
   const low = box.querySelector(".bd-low");
   const high = box.querySelector(".bd-high");
 
+  // The custom pickers only mean anything on the "custom" scheme; showing them
+  // beside a preset invites changing one and watching nothing happen.
+  const preset = box.querySelector(".bd-preset");
+  preset.innerHTML = PRESETS.map(
+    (p) => `<option value="${p.id}">${p.label}</option>`
+  ).join("");
+  preset.value = cfg.preset || "midnight";
+  const showCustom = () => {
+    const on = preset.value === "custom";
+    box.querySelectorAll(".bd-custom").forEach((r) => (r.hidden = !on));
+  };
+  showCustom();
+  preset.addEventListener("change", () => {
+    saveBackdropSettings({ preset: preset.value });
+    showCustom();
+  });
+
   const showValues = (c) => {
-    speedVal.textContent = c.speed === 0 ? "still" : `${Math.round(c.speed * 100)}%`;
+    speedVal.textContent = `${Math.round(c.speed * 100)}%`;
     strengthVal.textContent = `${Math.round(c.strength * 100)}%`;
   };
   speed.value = String(Math.round(cfg.speed * 100));
@@ -523,6 +563,42 @@ async function wireConfigFields(box) {
       toast(`Could not save — ${e}`, 8000);
     }
   };
+
+  // Credentials live behind a button and inside a dialog: nothing is written
+  // until Save, and a stored secret is never handed back to be displayed.
+  const summarise = () => {
+    const set = (name, text) => {
+      const el = box.querySelector(`[data-cred-summary="${name}"]`);
+      if (el) el.textContent = text;
+    };
+    set("server", current.server_url ? `${current.server_url}${current.server_token_set ? " · token set" : ""}` : "not configured");
+    set("achievements", current.achievements_username
+      ? `${current.achievements_username}${current.achievements_token_set ? " · token set" : ""}`
+      : "not configured");
+    set("scraper", current.scraper_ssid ? current.scraper_ssid : "not configured");
+  };
+  summarise();
+
+  for (const btn of box.querySelectorAll(".cred-open")) {
+    btn.addEventListener("click", async () => {
+      const which = btn.dataset.cred;
+      const editor =
+        which === "server" ? editServer : which === "achievements" ? editAchievements : editScraper;
+      const out = await editor(current);
+      if (!out) return;
+      for (const [field, value] of Object.entries(out)) {
+        // A blank secret means "keep what is stored", not "clear it" — the
+        // dialog never shows the existing value, so blank is the normal state
+        // for a field nobody touched.
+        const secret = field.includes("token") || field.includes("password");
+        if (secret && !value) continue;
+        await save(field, value);
+        current[field] = value;
+        if (secret) current[`${field}_set`] = true;
+      }
+      summarise();
+    });
+  }
 
   for (const node of fields) {
     const field = node.dataset.field;

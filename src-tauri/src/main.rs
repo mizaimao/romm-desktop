@@ -217,9 +217,15 @@ async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
 #[derive(Serialize)]
 struct ConfigFields {
     library_root: String,
+    server_url: String,
+    server_username: String,
+    /// Present or not, never the value. A settings pane has no reason to hand a
+    /// credential back to the webview to display; the box shows "set" and lets
+    /// you replace it.
+    server_token_set: bool,
     achievements_enabled: bool,
     achievements_username: String,
-    achievements_token: String,
+    achievements_token_set: bool,
     achievements_hardcore: bool,
     shaders_enabled: bool,
     /// Present so the UI can say where it is writing, and warn when there is
@@ -233,9 +239,16 @@ fn config_fields() -> CmdResult<ConfigFields> {
     let cfg = Config::load().unwrap_or_default();
     Ok(ConfigFields {
         library_root: cfg.library.local_root.clone(),
+        server_url: cfg.server.url.clone(),
+        server_username: cfg.server.username.clone(),
+        server_token_set: cfg.server.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
         achievements_enabled: cfg.achievements.enabled,
         achievements_username: cfg.achievements.username.clone().unwrap_or_default(),
-        achievements_token: cfg.achievements.token.clone().unwrap_or_default(),
+        achievements_token_set: cfg
+            .achievements
+            .token
+            .as_deref()
+            .is_some_and(|t| !t.trim().is_empty()),
         achievements_hardcore: cfg.achievements.hardcore,
         shaders_enabled: cfg.shaders.enabled,
         config_path: abs(Path::new("config.toml")),
@@ -256,6 +269,13 @@ fn config_fields() -> CmdResult<ConfigFields> {
 fn set_config_field(field: String, value: String) -> CmdResult<String> {
     let (table, key) = match field.as_str() {
         "library_root" => ("library", "local_root"),
+        "server_url" => ("server", "url"),
+        "server_token" => ("server", "token"),
+        "server_username" => ("server", "username"),
+        "scraper_ssid" => ("scraper", "ssid"),
+        "scraper_sspassword" => ("scraper", "sspassword"),
+        "scraper_devid" => ("scraper", "devid"),
+        "scraper_devpassword" => ("scraper", "devpassword"),
         "achievements_enabled" => ("achievements", "enabled"),
         "achievements_username" => ("achievements", "username"),
         "achievements_token" => ("achievements", "token"),
@@ -288,6 +308,56 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
             .map_err(err)?;
     }
     Ok(format!("{key} saved — restart to apply"))
+}
+
+/// Try the credentials without saving them.
+///
+/// The point of a Verify button is to answer "will this work" *before* it is
+/// committed, so this builds a throwaway client from whatever is in the box
+/// rather than from the running config.
+#[tauri::command]
+async fn verify_server(
+    url: String,
+    token: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+) -> CmdResult<String> {
+    let client = api::Client::with_auth(
+        url.trim(),
+        username.as_deref().unwrap_or_default(),
+        password.as_deref().unwrap_or_default(),
+        token.as_deref(),
+    )
+    .map_err(err)?;
+
+    // Heartbeat first: it needs no credentials, so a failure here is the server
+    // or the network rather than the token, and saying which saves a lot of
+    // guessing.
+    let version = match client.heartbeat().await {
+        Ok(hb) => hb.system.version,
+        Err(e) => {
+            return Err(format!(
+                "cannot reach {} — {}",
+                url.trim(),
+                e.to_string().lines().next().unwrap_or("no answer")
+            ));
+        }
+    };
+
+    // Then something that does need them.
+    match client.me().await {
+        Ok(me) => {
+            let count = client.rom_count().await.unwrap_or(0);
+            Ok(format!(
+                "Connected to RomM {version} as {} — {count} games",
+                me.username
+            ))
+        }
+        Err(e) => Err(format!(
+            "reached the server (RomM {version}) but the credentials were refused — {}",
+            e.to_string().lines().next().unwrap_or("")
+        )),
+    }
 }
 
 /// Pull the useful bits out of RomM's merged `metadatum` blob.
@@ -1764,7 +1834,8 @@ fn main() {
             status,
             open_settings,
             config_fields,
-            set_config_field
+            set_config_field,
+            verify_server
         ])
         .run(tauri::generate_context!())
         .expect("running tauri application");

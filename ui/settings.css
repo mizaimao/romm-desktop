@@ -144,3 +144,39 @@ body.settings-window {
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
 }
+
+/* Credentials dialog. Wider than a conflict card because a server address and a
+   token are long, and wrapping one mid-string makes it unreadable. */
+.cred-box { width: min(40rem, 92vw); }
+.cred-box .srow { grid-template-columns: 140px 1fr; }
+.cred-box input {
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+.cred-actions { display: flex; gap: 8px; margin-top: 14px; }
+.cred-actions button {
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.cred-actions .cred-save { border-color: var(--accent, #7c8cff); }
+.cred-status { min-height: 1.2em; }
+.cred-status.bad { color: #ff8a7a; opacity: 1; }
+.cred-summary { opacity: 0.6; font-size: 12px; }
+#pane select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}

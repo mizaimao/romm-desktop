@@ -96,14 +96,53 @@ let running = null;
 // Strength well below 1. At full it is a bright glow across the middle of the
 // screen that the cover art has to compete with — the backdrop's whole job is
 // to sit behind the artwork, not next to it.
-const DEFAULTS = { speed: 1, strength: 0.32, low: "", high: "" };
+const DEFAULTS = { speed: 4, strength: 0.32, low: "", high: "", preset: "midnight" };
+
+/// Dark palettes, because this sits behind cover art at night on a television.
+///
+/// Each is a dark base and a slightly-lit accent; the shader blends between
+/// them, so the pair is the whole scheme. Kept deliberately low in value — a
+/// bright pair produces a backdrop that competes with the artwork no matter
+/// what the brightness slider says.
+export const PRESETS = [
+  { id: "midnight",  label: "Midnight",  low: "#0b0d16", high: "#2a3566" },
+  { id: "ember",     label: "Ember",     low: "#140b09", high: "#5c2418" },
+  { id: "moss",      label: "Moss",      low: "#0a1210", high: "#1f4a37" },
+  { id: "plum",      label: "Plum",      low: "#120a16", high: "#452b5e" },
+  { id: "slate",     label: "Slate",     low: "#0f1113", high: "#333a42" },
+  { id: "rust",      label: "Rust",      low: "#150f09", high: "#5e3a17" },
+  { id: "abyss",     label: "Abyss",     low: "#06090c", high: "#12414d" },
+  { id: "wine",      label: "Wine",      low: "#130a0e", high: "#54203a" },
+  { id: "custom",    label: "Custom",    low: null,      high: null },
+];
+
+/// The colours a preset resolves to, or the user's own for "custom".
+export function presetColours(cfg) {
+  const p = PRESETS.find((x) => x.id === cfg.preset);
+  if (!p || p.id === "custom") return { low: cfg.low, high: cfg.high };
+  return { low: p.low, high: p.high };
+}
+
+/// Motion, as the slider expresses it.
+///
+/// Below about 3 the drift is too slow to read as movement at all — it looks
+/// like a still image with a rendering cost. The slider covers the range that
+/// actually differs.
+export const SPEED_MIN = 3;
+export const SPEED_MAX = 7;
 
 export function backdropSettings() {
+  let stored;
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem("backdropSettings") || "{}") };
+    stored = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("backdropSettings") || "{}") };
   } catch {
-    return { ...DEFAULTS };
+    stored = { ...DEFAULTS };
   }
+  // Settings saved before the scale changed hold values below the new floor,
+  // which would leave the slider pinned at one end showing a speed it cannot
+  // express.
+  stored.speed = Math.min(SPEED_MAX, Math.max(SPEED_MIN, Number(stored.speed) || DEFAULTS.speed));
+  return stored;
 }
 
 /// Apply settings to the running shader. Does not store and does not announce.
@@ -213,11 +252,13 @@ export function startBackdrop() {
   const uSpeed = gl.getUniformLocation(prog, "u_speed");
 
   const apply = (cfg) => {
-    // An unset colour falls back to the theme's, so the default follows
-    // whatever palette is in force instead of being a second place to maintain.
+    // A preset supplies the pair; "custom" falls through to the user's own, and
+    // an unset custom colour falls through again to the theme's — so the
+    // default follows the palette rather than being a second place to maintain.
+    const { low, high } = presetColours(cfg);
     gl.useProgram(prog);
-    gl.uniform3fv(uLow, rgb(cfg.low, "--bg", [0.05, 0.05, 0.07]));
-    gl.uniform3fv(uHigh, rgb(cfg.high, "--accent", [0.18, 0.2, 0.36]));
+    gl.uniform3fv(uLow, rgb(low, "--bg", [0.05, 0.05, 0.07]));
+    gl.uniform3fv(uHigh, rgb(high, "--accent", [0.18, 0.2, 0.36]));
     gl.uniform1f(uStrength, cfg.strength);
     gl.uniform1f(uSpeed, cfg.speed);
   };
