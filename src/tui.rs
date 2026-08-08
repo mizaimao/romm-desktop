@@ -285,6 +285,9 @@ impl App {
             achievements: Some(&self.achievements),
             // The TUI has no Systems screen to switch it on from.
             lightgun: &std::collections::BTreeMap::new(),
+            // No way to ask a terminal how big the display is; leave the
+            // emulator's own window settings alone.
+            screen: None,
         };
         let plan = match crate::launch::plan(ra, &self.map, &req) {
             Ok(p) => p,

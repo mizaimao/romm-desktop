@@ -50,6 +50,9 @@ pub struct Request<'a> {
     /// Systems where the gun replaces a pad, so light gun games can be aimed
     /// with the mouse. Off unless the platform is in here.
     pub lightgun: &'a BTreeMap<String, String>,
+    /// The usable area of the display, in the units RetroArch's own window
+    /// sizing uses on this platform. `None` leaves the window alone.
+    pub screen: Option<(u32, u32)>,
 }
 
 /// A resolved, ready-to-spawn launch.
@@ -203,7 +206,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     // absolute path rather than a catalogue name keeps config_lines honest:
     // it only ever emits a shader it has verified exists.
     let extra = format!(
-        "{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}",
         match &chained {
             Some(p) => format!(
                 "\n# Base shader with a motion pass chained on.\n\
@@ -222,6 +225,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         ra.prepare_tweaks(req.library_root, req.platform, &core),
         req.achievements.map(crate::achievements::config_lines).unwrap_or_default(),
         crate::lightgun::config_lines(req.platform, gun),
+        crate::retroarch::window_lines(req.screen),
     );
     let overrides = ra
         .write_overrides_full(req.library_root, Some(req.user_cfg), &extra, req.pad)

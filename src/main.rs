@@ -147,6 +147,9 @@ async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscree
         core_overrides: &cfg.cores.overrides,
         core_per_game: &cfg.cores.per_game,
         lightgun: &cfg.lightgun.by_platform,
+        // The CLI prints a command rather than owning a window, so it has no
+        // display to measure and does not touch the emulator's window size.
+        screen: None,
         core_override,
 motion_shader: cfg.shaders.motion.as_deref(),
         refresh_hz: None,
@@ -1375,7 +1378,6 @@ fn cmd_hashcheck(path: &Path) -> Result<()> {
 }
 
 /// Stage 2 — browse the cache.
-#[cfg(feature = "tui")]
 fn cmd_browse() -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
@@ -1422,7 +1424,6 @@ enum Command {
         full: bool,
     },
     /// Terminal library browser
-    #[cfg(feature = "tui")]
     Browse,
     /// Test which cores actually run a game, or a sample of a platform.
     ///
@@ -1703,7 +1704,6 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Check => cmd_check().await,
         Command::Sync { full } => cmd_sync(full).await,
-        #[cfg(feature = "tui")]
         Command::Browse => cmd_browse(),
         Command::Collections { group } => cmd_collections(group.as_deref()),
         Command::ScanEsde { root, roms } => cmd_scan_esde(root.as_deref(), roms.as_deref()),

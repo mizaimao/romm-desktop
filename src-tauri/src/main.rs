@@ -827,11 +827,43 @@ async fn download_rom(
 
 /// Launch a ROM in RetroArch. Blocks until the emulator exits.
 ///
+/// The display the app is on, in the units RetroArch's window sizing uses.
+///
+/// Not a single number, because the two platforms disagree. Windows sizes
+/// windows in device pixels, so a 4K screen at 150% scaling wants 3840. macOS
+/// sizes them in points, so the same physical screen wants the logical figure —
+/// pass it the device pixels there and the window is asked to be twice the size
+/// of the display, which the compositor answers by clamping it to a shape
+/// neither centred nor the size that was asked for.
+///
+/// Asked of the monitor rather than of the webview: `window.screen` reports CSS
+/// pixels, which is the logical figure on both, so it is wrong on exactly one
+/// of them and looks right while being tested on the other.
+fn work_area(app: &tauri::AppHandle) -> Option<(u32, u32)> {
+    use tauri::Manager as _;
+
+    // The monitor the library window is on, so launching from a laptop screen
+    // with an external display attached sizes for the one being looked at.
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten())?;
+
+    let size = monitor.size();
+    if cfg!(target_os = "macos") {
+        let scale = monitor.scale_factor().max(1.0);
+        Some(((size.width as f64 / scale) as u32, (size.height as f64 / scale) as u32))
+    } else {
+        Some((size.width, size.height))
+    }
+}
+
 /// `pad` is the name the frontend's Gamepad API reports for the connected
 /// controller, used to pick the RetroArch autoconfig profile the gamepad
 /// hotkeys are derived from. Absent when nothing is connected.
 #[tauri::command]
 async fn launch_rom(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: i64,
     pad: Option<String>,
@@ -871,6 +903,7 @@ async fn launch_rom(
         pad: pad.as_deref(),
         achievements: Some(&state.achievements),
         lightgun: &lightgun,
+        screen: work_area(&app),
     };
     // Fetch what is missing before planning. `plan` only ever picks among cores
     // already on disk, so without this a fresh install — which has none — fails

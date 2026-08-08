@@ -148,6 +148,52 @@ fn binary_candidates(root: &Path) -> Vec<(PathBuf, PathBuf)> {
     }
 }
 
+/// How much of the display the game window fills.
+///
+/// Not all of it. A window exactly the size of the work area is the same size
+/// as a maximised one, and on both macOS and Windows that ends up flush against
+/// an edge with no way to grab the title bar — so a sliver is left, which also
+/// makes it obvious at a glance that this is a window and the desktop is still
+/// behind it.
+const SCREEN_FILL: f32 = 0.94;
+
+/// Open the game window as large as it sensibly goes, in the middle of the
+/// screen.
+///
+/// RetroArch's default is a small window wherever the window manager decides to
+/// put it, which on a second launch is usually not where the first one was.
+///
+/// `video_window_custom_size_enable` is the switch that makes RetroArch use an
+/// explicit size rather than a multiple of the core's own resolution — without
+/// it the width and height below are read and ignored, which looks exactly like
+/// the setting not working. Position is deliberately *not* set:
+/// `video_window_save_positions` stays off, and with it off RetroArch centres
+/// the window itself, which is both what was wanted and one less thing to get
+/// wrong on a multi-monitor desk.
+pub fn window_lines(screen: Option<(u32, u32)>) -> String {
+    let Some((w, h)) = screen else {
+        return String::new();
+    };
+    if w == 0 || h == 0 {
+        return String::new();
+    }
+    let (w, h) = (
+        (w as f32 * SCREEN_FILL) as u32,
+        (h as f32 * SCREEN_FILL) as u32,
+    );
+    format!(
+        "\n# As large as the display sensibly allows, centred. Centring is\n\
+         # RetroArch's own behaviour when it has no saved position, so no\n\
+         # coordinates are written -- it picks the right monitor by itself.\n\
+         video_fullscreen = \"false\"\n\
+         video_window_save_positions = \"false\"\n\
+         video_window_custom_size_enable = \"true\"\n\
+         video_window_width = \"{w}\"\n\
+         video_window_height = \"{h}\"\n"
+    )
+}
+
+
 impl RetroArch {
     /// Locate an install. `configured` wins; otherwise probe known roots.
     pub fn locate(configured: Option<&str>) -> Result<Self> {
@@ -765,6 +811,53 @@ input_r2_axis = "+5"
     /// The user's own file is appended last, because `--appendconfig` gives the
     /// final assignment of a key. This is the promise the README makes: we never
     /// modify their retroarch.cfg and never win an argument with it.
+    /// The switch that makes the size read at all. Writing a width and height
+    /// without it is the failure that looks like RetroArch ignoring settings.
+    #[test]
+    fn a_custom_size_is_useless_without_the_switch_that_enables_it() {
+        let out = window_lines(Some((2560, 1440)));
+        assert!(out.contains("video_window_custom_size_enable = \"true\""), "{out}");
+        assert!(out.contains("video_window_width"), "{out}");
+    }
+
+    /// No position is written. RetroArch centres a window it has no saved
+    /// position for, and coordinates would have to name a monitor correctly.
+    #[test]
+    fn the_window_is_centred_by_leaving_the_position_alone() {
+        let out = window_lines(Some((2560, 1440)));
+        assert!(!out.contains("video_window_offset"), "{out}");
+        assert!(!out.contains("video_windowed_position"), "{out}");
+        assert!(out.contains("video_window_save_positions = \"false\""), "{out}");
+    }
+
+    /// A window the exact size of the display is a maximised one with no title
+    /// bar left to grab. It has to come in from the edges.
+    #[test]
+    fn the_window_is_a_little_smaller_than_the_display() {
+        let out = window_lines(Some((1000, 1000)));
+        let read = |key: &str| -> u32 {
+            out.lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split('"').nth(1))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0)
+        };
+        for key in ["video_window_width", "video_window_height"] {
+            let v = read(key);
+            assert!(v < 1000, "{key} = {v}, which fills the whole display");
+            assert!(v > 850, "{key} = {v}, which wastes the screen");
+        }
+    }
+
+    /// Nothing known about the display means nothing written: the emulator's
+    /// own window settings are the user's, and a guess would overwrite them.
+    #[test]
+    fn an_unknown_display_leaves_the_window_settings_alone() {
+        assert_eq!(window_lines(None), "");
+        assert_eq!(window_lines(Some((0, 1080))), "");
+        assert_eq!(window_lines(Some((1920, 0))), "");
+    }
+
     #[test]
     fn the_users_own_settings_come_last() {
         let dir = scratch("user-last");
