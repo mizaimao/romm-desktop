@@ -31,6 +31,7 @@ pub mod savebackup;
 pub mod saves;
 pub mod savesync;
 pub mod statesync;
+#[cfg(feature = "tui")]
 pub mod tui;
 pub mod util;
 

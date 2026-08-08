@@ -10,13 +10,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # The whole backend — API client, cache, downloader, RetroArch launcher — is
 # reused from the core crate. This crate only adds a window.
-romm-desktop = { path = ".." }
+# Without the terminal browser: this crate opens a window, and linking a second
+# interface it can never show costs build time and binary size for nothing.
+romm-desktop = { path = "..", default-features = false }
 
 # protocol-asset lets the webview load local cover art and videos
 # through asset: URLs; it must match assetProtocol in tauri.conf.json.
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tauri-plugin-dialog = "2.7.2"

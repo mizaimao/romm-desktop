@@ -1375,6 +1375,7 @@ fn cmd_hashcheck(path: &Path) -> Result<()> {
 }
 
 /// Stage 2 — browse the cache.
+#[cfg(feature = "tui")]
 fn cmd_browse() -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
@@ -1421,6 +1422,7 @@ enum Command {
         full: bool,
     },
     /// Terminal library browser
+    #[cfg(feature = "tui")]
     Browse,
     /// Test which cores actually run a game, or a sample of a platform.
     ///
@@ -1701,6 +1703,7 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Check => cmd_check().await,
         Command::Sync { full } => cmd_sync(full).await,
+        #[cfg(feature = "tui")]
         Command::Browse => cmd_browse(),
         Command::Collections { group } => cmd_collections(group.as_deref()),
         Command::ScanEsde { root, roms } => cmd_scan_esde(root.as_deref(), roms.as_deref()),
