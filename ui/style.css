@@ -669,7 +669,22 @@ body.has-pad #tabbar .bumper { display: inline; }
   margin: 0 0 14px;
 }
 #detail .rating { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-#detail .rating .stars { color: #e0b13a; font-size: 15px; letter-spacing: 1px; }
+#detail .rating .stars {
+  position: relative;
+  display: inline-block;
+  font-size: 15px;
+  letter-spacing: 1px;
+  /* The two rows must line up exactly, so neither may wrap or be spaced by the
+     surrounding text layout. */
+  white-space: nowrap;
+}
+#detail .rating .stars-off { color: color-mix(in srgb, var(--text) 22%, transparent); }
+#detail .rating .stars-on {
+  position: absolute;
+  inset: 0 auto 0 0;
+  overflow: hidden;
+  color: #e0b13a;
+}
 #detail .rating .num { color: var(--dim); font-size: 11px; }
 
 /* ES-DE artwork strip */

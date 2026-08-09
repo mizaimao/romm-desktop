@@ -23,13 +23,26 @@ export function row(label, value) {
 }
 
 /// RomM stores ratings 0-100; show five stars plus the raw number.
+/// Five stars filled to `rating` out of 100.
+///
+/// Two rows of the same five characters, one over the other, the top one
+/// clipped to the score. Nothing else needs a glyph that might not exist: the
+/// half star was U+2BE8, which almost no system font carries, so it rendered as
+/// the browser's missing-glyph box — a striped rectangle sitting in the middle
+/// of the row.
+///
+/// Clipping also gets the score right rather than near it. 69/100 is 3.45
+/// stars; rounding to the nearest half showed 3.5 and threw away the
+/// difference between 69 and 71.
 export function starBar(rating) {
-  const n = Math.round((rating / 100) * 5 * 2) / 2;
-  const full = Math.floor(n);
-  const half = n - full >= 0.5;
-  const stars = "★".repeat(full) + (half ? "⯨" : "") + "☆".repeat(5 - full - (half ? 1 : 0));
-  return `<div class="rating"><span class="stars">${stars}</span>
-          <span class="num">${Math.round(rating)}/100</span></div>`;
+  const pct = Math.max(0, Math.min(100, Number(rating) || 0));
+  return `<div class="rating">
+      <span class="stars" role="img" aria-label="${Math.round(pct)} out of 100">
+        <span class="stars-off">★★★★★</span>
+        <span class="stars-on" style="width:${pct}%">★★★★★</span>
+      </span>
+      <span class="num">${Math.round(pct)}/100</span>
+    </div>`;
 }
 
 let toastTimer;
