@@ -613,10 +613,11 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     };
     let as_url = |p: Option<std::path::PathBuf>| p.map(|p| p.display().to_string());
 
-    let cover = media::ensure(
-        client.as_deref(), &media_root, &media_key, &stem,
-        media::COVERS, row.cover_path.as_deref(),
-    ).await;
+    // ES-DE's own art, picked the way its Canvas theme picks it. RomM's cover
+    // is no longer consulted: it is a second scrape from a different source,
+    // and one game's art coming from one place and the next game's from
+    // another is the inconsistency this replaces.
+    let cover = media::ensure_art(client.as_deref(), &media_root, &media_key, &stem).await;
     let screenshots = media::ensure_set(
         client.as_deref(), &media_root, &media_key, &stem,
         &row.screenshots(),
@@ -727,27 +728,15 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
         for row in chunk {
             let client = state.client.clone();
             let media_root = state.media_dir.clone();
-            let (id, platform, fs_name, small, large) = (
-                row.id,
-                row.platform_slug.clone(),
-                row.fs_name.clone(),
-                row.cover_small_path.clone(),
-                row.cover_path.clone(),
-            );
+            let (id, platform, fs_name) =
+                (row.id, row.platform_slug.clone(), row.fs_name.clone());
             set.spawn(async move {
                 let stem = Path::new(&fs_name)
                     .file_stem()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or(fs_name);
-                let cover = media::ensure_thumb(
-                    client.as_deref(),
-                    &media_root,
-                    &platform,
-                    &stem,
-                    small.as_deref(),
-                    large.as_deref(),
-                )
-                .await;
+                let cover =
+                    media::ensure_art(client.as_deref(), &media_root, &platform, &stem).await;
                 CoverView { id, cover: cover.map(|p| p.display().to_string()) }
             });
         }
@@ -1898,6 +1887,14 @@ fn main() {
         .map(|ra| ra.with_system_dir(Some(cfg.system_dir())));
     let roms_dir = cfg.local_roms_dir();
     let media_dir = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
+
+    // Artwork now comes from ES-DE alone. Anything fetched from RomM before
+    // that goes, once, or the art chain would keep finding it and only the
+    // games nobody had browsed yet would look consistent.
+    match romm_desktop::media::drop_romm_covers(&media_dir) {
+        0 => {}
+        n => eprintln!("cleared {n} cover(s) fetched from RomM; artwork now comes from ES-DE"),
+    }
 
     tauri::Builder::default()
         // Native folder picker for the RetroArch location setting.

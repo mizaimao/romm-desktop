@@ -41,7 +41,40 @@ pub const ESDE_TYPES: &[(&str, &[&str])] = &[
 /// Path prefix the media symlinks live under, relative to the server root.
 const ESDE_BASE: &str = "/assets/romm/resources/esde-media";
 
+/// What to show for a game, in the order ES-DE's Canvas theme asks for it.
+///
+/// ES-DE themes name a *list* of media types and take the first that exists;
+/// Canvas's default gamelist asks for `miximage, cover`. Screenshot is on the
+/// end here because Canvas's larger-font variants fall back to it, and because
+/// something drawn from the game itself beats nothing.
+///
+/// Miximage first is not a stylistic preference, it is the only one of the
+/// three that is a consistent shape. On this library every miximage is
+/// 1280x960 whatever the console, while the covers run from 0.73 to 1.37 —
+/// portrait on the NES, landscape on the SNES, square on the Game Boy Advance —
+/// so a grid built on covers is ragged no matter how carefully they were
+/// scraped. That raggedness is what the covers looked wrong for.
+pub const ART_CHAIN: &[&str] = &[MIXIMAGES, COVERS, SCREENSHOTS];
+
+/// ES-DE system directories to search for a RomM platform's media.
+///
+/// The two naming schemes agree almost everywhere, and where they do not it is
+/// silent: the media is on the server, the app asks for a directory that does
+/// not exist, and the console simply has no artwork. Arcade is the case here —
+/// ES-DE scrapes MAME romsets under `mame`, RomM calls the platform `arcade` —
+/// and it is the largest console in this library.
+pub fn esde_dirs(platform: &str) -> Vec<&str> {
+    let mut out = vec![platform];
+    out.extend(match platform {
+        "arcade" => ["mame"].as_slice(),
+        "mame" => ["arcade"].as_slice(),
+        _ => [].as_slice(),
+    });
+    out
+}
+
 /// ES-DE media subdirectory names, in the order the UI prefers them.
+pub const MIXIMAGES: &str = "miximages";
 pub const COVERS: &str = "covers";
 pub const SCREENSHOTS: &str = "screenshots";
 pub const VIDEOS: &str = "videos";
@@ -143,13 +176,83 @@ pub async fn ensure_esde(
     let client = client?;
     let exts = ESDE_TYPES.iter().find(|(k, _)| *k == kind).map(|(_, e)| *e)?;
 
-    for ext in exts {
-        let server_path = format!("{ESDE_BASE}/{platform}/{kind}/{stem}.{ext}");
-        match fetch(client, &server_path, media_root, platform, stem, kind).await {
-            Ok(p) => return Some(p),
-            // A miss here is ordinary: not every game has every media type,
-            // and we are probing extensions.
-            Err(_) => continue,
+    for dir in esde_dirs(platform) {
+        for ext in exts {
+            let server_path = format!("{ESDE_BASE}/{dir}/{kind}/{stem}.{ext}");
+            // Saved under the platform, not the directory it was found in, so
+            // every later lookup finds it without knowing about the aliasing.
+            match fetch(client, &server_path, media_root, platform, stem, kind).await {
+                Ok(p) => return Some(p),
+                // A miss here is ordinary: not every game has every media
+                // type, and we are probing extensions.
+                Err(_) => continue,
+            }
+        }
+    }
+    None
+}
+
+/// Marker recording that the cache has been cleared of RomM-sourced artwork.
+const ESDE_ONLY_MARKER: &str = ".art-from-esde";
+
+/// Throw away artwork downloaded from RomM before the app moved to ES-DE.
+///
+/// The cache keeps art by *kind*, not by where it came from, so a cover fetched
+/// from RomM last week and one scraped from ScreenScraper sit side by side in
+/// `covers/` and cannot be told apart. Leaving them means the art chain finds
+/// the RomM copy first for every game already browsed — the mixing this change
+/// exists to stop, made invisible by the fact that it only affects games you
+/// happened to look at before.
+///
+/// So both directories go once. `covers` refills from ES-DE on demand;
+/// `covers_thumb` is no longer part of the chain at all and refills never.
+/// Nothing here is authored — every file is a copy of something on the server.
+///
+/// Runs once per media root, recorded by a marker file, so it does not delete a
+/// freshly rebuilt cache on the next launch. Returns how many files went.
+pub fn drop_romm_covers(media_root: &Path) -> usize {
+    let marker = media_root.join(ESDE_ONLY_MARKER);
+    if marker.exists() || !media_root.is_dir() {
+        return 0;
+    }
+
+    let mut removed = 0;
+    let Ok(platforms) = std::fs::read_dir(media_root) else {
+        return 0;
+    };
+    for platform in platforms.flatten() {
+        for kind in [COVERS, COVERS_THUMB] {
+            let dir = platform.path().join(kind);
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                if entry.path().is_file() && std::fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    let _ = std::fs::write(&marker, b"artwork comes from ES-DE only; see media.rs
+");
+    removed
+}
+
+/// The image to show for a game: the first thing in [`ART_CHAIN`] that exists.
+///
+/// Only ES-DE's own media. RomM's cover is deliberately not consulted — it is a
+/// second scrape from a different source, and a library that shows one game's
+/// art from one place and the next game's from another is exactly the
+/// inconsistency this replaces.
+pub async fn ensure_art(
+    client: Option<&api::Client>,
+    media_root: &Path,
+    platform: &str,
+    stem: &str,
+) -> Option<PathBuf> {
+    for kind in ART_CHAIN {
+        if let Some(p) = ensure_esde(client, media_root, platform, stem, kind).await {
+            return Some(p);
         }
     }
     None
@@ -307,7 +410,10 @@ pub fn image_size(path: &Path) -> Option<(u32, u32)> {
 /// Returns `None` until enough covers are cached to be confident.
 pub fn cover_aspect(media_root: &Path, platform: &str) -> Option<f32> {
     let mut ratios: Vec<f32> = Vec::new();
-    for kind in [COVERS_THUMB, COVERS] {
+    // The same chain the grid draws from, in the same order. Measuring
+    // `covers` while the grid shows miximages would size every card to the
+    // wrong shape, and it would be a stale measurement of art nothing renders.
+    for kind in ART_CHAIN.iter().copied() {
         let dir = media_root.join(platform).join(kind);
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -527,5 +633,64 @@ mod tests {
 
         let got = ensure_set(None, &root, "snes", "Zelda", &[]).await;
         assert_eq!(got.len(), 1, "the local screenshot is still found with no server list");
+    }
+
+    /// Arcade is the whole reason this exists: ES-DE scrapes MAME romsets
+    /// under `mame` while RomM calls the platform `arcade`, and the mismatch
+    /// is silent — the art is on the server and the console just looks
+    /// unscraped.
+    #[test]
+    fn arcade_media_is_looked_for_under_mame_as_well() {
+        assert!(esde_dirs("arcade").contains(&"mame"), "{:?}", esde_dirs("arcade"));
+        assert!(esde_dirs("mame").contains(&"arcade"), "{:?}", esde_dirs("mame"));
+        // The platform's own name always comes first, so an exact match is
+        // never passed over in favour of an alias.
+        assert_eq!(esde_dirs("arcade")[0], "arcade");
+        assert_eq!(esde_dirs("snes"), vec!["snes"]);
+    }
+
+    /// Miximage first is the point. It is the only one of the three that is a
+    /// consistent shape across consoles, so putting covers ahead of it would
+    /// reintroduce the ragged grid this replaced.
+    #[test]
+    fn the_art_chain_prefers_the_one_consistent_shape() {
+        assert_eq!(ART_CHAIN[0], MIXIMAGES);
+        assert!(ART_CHAIN.contains(&COVERS));
+        assert!(!ART_CHAIN.contains(&COVERS_THUMB), "thumbs are RomM-sourced");
+    }
+
+    #[test]
+    fn clearing_romm_artwork_leaves_everything_else_alone() {
+        let root = std::env::temp_dir().join("romm-media-purge");
+        let _ = std::fs::remove_dir_all(&root);
+        for (kind, name) in [
+            (COVERS, "a.png"),
+            (COVERS_THUMB, "a.png"),
+            (MIXIMAGES, "a.png"),
+            (SCREENSHOTS, "a.png"),
+            ("videos", "a.mp4"),
+        ] {
+            let dir = root.join("snes").join(kind);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+
+        assert_eq!(drop_romm_covers(&root), 2, "only covers and thumbs go");
+        assert!(!root.join("snes").join(COVERS).join("a.png").exists());
+        assert!(!root.join("snes").join(COVERS_THUMB).join("a.png").exists());
+        // Everything else is ES-DE's and has to survive; miximages in
+        // particular is what the grid now draws from.
+        assert!(root.join("snes").join(MIXIMAGES).join("a.png").exists());
+        assert!(root.join("snes").join(SCREENSHOTS).join("a.png").exists());
+        assert!(root.join("snes").join("videos").join("a.mp4").exists());
+
+        // Second run must do nothing: a rebuilt cache is the normal state on
+        // every launch after the first, and clearing it each time would mean
+        // re-downloading the whole library's artwork daily.
+        std::fs::write(root.join("snes").join(COVERS).join("b.png"), b"x").unwrap();
+        assert_eq!(drop_romm_covers(&root), 0);
+        assert!(root.join("snes").join(COVERS).join("b.png").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -1181,21 +1181,12 @@ async fn cmd_art(needle: &str) -> Result<()> {
         for (kind, _) in media::ESDE_TYPES {
             let before =
                 media::find_local(&media_root, &rom.platform_slug, &stem, kind).is_some();
-            // RomM's own copies for the two types it knows; the ES-DE tree for
-            // everything else.
-            let got = match *kind {
-                media::COVERS if rom.cover_path.is_some() => {
-                    media::ensure(
-                        client.as_ref(), &media_root, &rom.platform_slug, &stem,
-                        kind, rom.cover_path.as_deref(),
-                    ).await
-                }
-                _ => {
-                    media::ensure_esde(
-                        client.as_ref(), &media_root, &rom.platform_slug, &stem, kind,
-                    ).await
-                }
-            };
+            // Every type comes from the ES-DE tree now, covers included: the
+            // app no longer reads RomM's own copies, so reporting them here
+            // would list artwork it will never show.
+            let got = media::ensure_esde(
+                client.as_ref(), &media_root, &rom.platform_slug, &stem, kind,
+            ).await;
             let how = match (&got, before) {
                 (Some(_), true) => "local",
                 (Some(_), false) => "FETCHED",
