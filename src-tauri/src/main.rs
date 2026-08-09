@@ -861,6 +861,50 @@ fn set_list_art(state: State<'_, AppState>, value: String) -> CmdResult<String> 
     Ok(format!("game lists now show {value}"))
 }
 
+/// Fetch artwork for games that have none, through the server's ScreenScraper
+/// account.
+///
+/// Serial and unhurried on purpose: ScreenScraper throttles by account tier and
+/// answers an exceeded allowance with a rejection rather than a picture, so a
+/// run that hurries finishes fast and fetches nothing. The allowance being
+/// spent is the server's, shared with anything else pointed at it.
+#[tauri::command]
+async fn scrape_missing(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    platform: Option<String>,
+) -> CmdResult<String> {
+    use romm_desktop::scrape;
+
+    let client = state
+        .client
+        .clone()
+        .ok_or("no server configured — set [server] in config.toml")?;
+    let media_root = state.media_dir.clone();
+
+    let todo = {
+        let cache = state.cache.lock().map_err(err)?;
+        scrape::missing(&cache, &media_root, platform.as_deref()).map_err(err)?
+    };
+    if todo.is_empty() {
+        return Ok("every game already has artwork".to_owned());
+    }
+
+    let _ = app.emit("scrape-progress", format!("{} to look up…", todo.len()));
+    let mut report = scrape::Report::default();
+    for (i, row) in todo.iter().enumerate() {
+        let _ = scrape::fill_one(&client, &media_root, row, &mut report).await;
+        if (i + 1).is_multiple_of(10) || i + 1 == todo.len() {
+            let _ = app.emit(
+                "scrape-progress",
+                format!("{}/{} — {} found", i + 1, todo.len(), report.fetched),
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    Ok(report.describe())
+}
+
 /// Fetch a game's video and hand back its path, downloading it if needed.
 ///
 /// Deliberately a separate command from `rom_detail`, and deliberately slow:
@@ -2003,6 +2047,7 @@ fn main() {
             pending_conflicts: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            scrape_missing,
             list_art_options,
             set_list_art,
             game_video,

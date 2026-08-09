@@ -19,6 +19,20 @@ pub struct User {
     pub role: String,
 }
 
+/// One identification candidate from the server's metadata lookup.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Match {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// ScreenScraper's game id, when it recognised the file.
+    #[serde(default)]
+    pub ss_id: Option<i64>,
+    /// A complete, ready-to-fetch ScreenScraper media URL, built by the server.
+    /// Empty when ScreenScraper had no match or is not enabled there.
+    #[serde(default)]
+    pub ss_url_cover: String,
+}
+
 // Mirrors the server schema rather than only the fields read today.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -452,6 +466,24 @@ impl Client {
     ///
     /// Tolerant per family: a server with smart collections disabled, or a
     /// virtual kind that errors, costs that group rather than the whole sync.
+    /// Ask the server to identify a game against its metadata sources.
+    ///
+    /// The same call RomM's own web interface makes when it offers you match
+    /// candidates, and the reason this app needs no ScreenScraper credentials:
+    /// the server holds them and hands back ready-made media URLs for whichever
+    /// sources it has enabled.
+    ///
+    /// `rom_id` matters as much as the name — the server has the file's hashes
+    /// and matches on those first, which is how an arcade romset called
+    /// `pkscram.zip` finds its real title.
+    pub async fn identify(&self, rom_id: i64, name: &str) -> Result<Vec<Match>> {
+        let path = format!(
+            "/api/search/roms?rom_id={rom_id}&search_by=name&search_term={}",
+            urlencode(name)
+        );
+        self.get_json(&path).await
+    }
+
     pub async fn all_collections(&self) -> Result<Vec<Collection>> {
         let mut out = self.collections().await.unwrap_or_default();
         out.extend(self.smart_collections().await.unwrap_or_default());

@@ -535,6 +535,14 @@ impl Cache {
         Ok(ids)
     }
 
+    /// Every game, ordered as the platform pages order them.
+    pub fn all_roms(&self) -> Result<Vec<RomRow>> {
+        let sql = format!("SELECT {ROM_COLUMNS} FROM roms ORDER BY 2, 3 COLLATE NOCASE");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], rom_from_row)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn roms_for(&self, platform_slug: &str) -> Result<Vec<RomRow>> {
         // Favourites first, then alphabetical within each group. A console
         // page is a wall of a few hundred names; the handful you actually play

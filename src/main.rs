@@ -566,6 +566,57 @@ async fn cmd_sync(full: bool) -> Result<()> {
 ///
 /// Sequential transfers waste most of the wall clock on per-request latency
 /// when the files are small — an arcade set averages 4.5 MB.
+/// Fill in artwork for games ES-DE never scraped.
+///
+/// One at a time and unhurried. ScreenScraper throttles by account tier and
+/// answers an exceeded allowance with a rejection rather than a picture, so a
+/// run that hammers it finishes quickly and fetches nothing — and the account
+/// being spent is the server's, shared with anything else pointed at it.
+async fn cmd_scrape(platform: Option<&str>, limit: Option<usize>, dry_run: bool) -> Result<()> {
+    use romm_desktop::scrape;
+
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let client = cfg.server.client()?;
+    let media_root = cfg.media_dir();
+
+    let mut todo = scrape::missing(&store, &media_root, platform)?;
+    let total_missing = todo.len();
+    if let Some(n) = limit {
+        todo.truncate(n);
+    }
+
+    println!(
+        "{total_missing} game(s) with no artwork{}{}",
+        platform.map(|p| format!(" on {p}")).unwrap_or_default(),
+        if todo.len() < total_missing { format!("; doing {}", todo.len()) } else { String::new() },
+    );
+    if dry_run {
+        for row in todo.iter().take(40) {
+            println!("  {} [{}]", row.name, row.platform_slug);
+        }
+        if todo.len() > 40 {
+            println!("  … and {} more", todo.len() - 40);
+        }
+        return Ok(());
+    }
+
+    let mut report = scrape::Report::default();
+    let started = std::time::Instant::now();
+    for (i, row) in todo.iter().enumerate() {
+        if let Err(e) = scrape::fill_one(&client, &media_root, row, &mut report).await {
+            eprintln!("  {}: {e}", row.name);
+        }
+        if (i + 1).is_multiple_of(25) || i + 1 == todo.len() {
+            println!("  {}/{} in {:.0}s", i + 1, todo.len(), started.elapsed().as_secs_f64());
+        }
+        // Deliberate. See the note above about whose allowance this is.
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    println!("{}", report.describe());
+    Ok(())
+}
+
 async fn cmd_get_platform(slug: &str, jobs: usize) -> Result<()> {
     let cfg = Config::load()?;
     let store = cache::Cache::open(Path::new(CACHE_DB))?;
@@ -1471,6 +1522,19 @@ enum Command {
         #[arg(long, default_value_t = 6)]
         jobs: usize,
     },
+    /// Fetch artwork for games that have none, through the server's own
+    /// ScreenScraper account
+    Scrape {
+        /// One platform, e.g. `megadrive`. Omit for the whole library.
+        #[arg(long)]
+        platform: Option<String>,
+        /// Stop after this many, for a look before committing to a long run.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// List what would be fetched and fetch nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Check our content_hash implementation against the server's
     HashParity,
     /// Inspect local saves and states
@@ -1717,6 +1781,9 @@ async fn main() -> Result<()> {
                     bail!("give a search term, --platform <slug>, or --collections <group>")
                 }
             }
+        }
+        Command::Scrape { platform, limit, dry_run } => {
+            cmd_scrape(platform.as_deref(), limit, dry_run).await
         }
         Command::HashParity => {
             let cfg = Config::load()?;

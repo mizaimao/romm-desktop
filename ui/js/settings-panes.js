@@ -134,7 +134,18 @@ export function paneHtml(id) {
       <p class="hint">Neo Geo, PlayStation and the MAME family will not start
         without these. Optional and only when you ask — it is a few hundred MB.
         Needs <code>firmware.read</code> on the token.</p>
-      <p class="hint set-bios-status"></p>`;
+      <p class="hint set-bios-status"></p>
+
+      <div class="srow">
+        <label>Missing artwork</label>
+        <div class="ctl"><button class="set-scrape">Find missing artwork</button></div>
+      </div>
+      <p class="hint">For games ES-DE never scraped. Asks your RomM server to
+        identify each one and fetches the box art ScreenScraper has for it —
+        your server already holds the ScreenScraper account, so this needs no
+        login and no SD card. Slow on purpose: it is one game at a time so the
+        server's allowance is not spent in a burst.</p>
+      <p class="hint set-scrape-status"></p>`;
   if (id === "appearance") return `      <h4>Artwork</h4>
       <div class="srow">
         <label>Game list shows</label>
@@ -300,6 +311,27 @@ function wireGeneral(box) {
   // config.toml fields. Loaded once and written back on change, through a
   // targeted TOML edit so the hand-written comments in that file survive.
   wireConfigFields(box);
+
+  // Missing artwork.
+  const scrapeBtn = box.querySelector(".set-scrape");
+  const scrapeStatus = box.querySelector(".set-scrape-status");
+  scrapeBtn?.addEventListener("click", async () => {
+    scrapeBtn.disabled = true;
+    scrapeStatus.textContent = "Counting…";
+    const stop = await listen("scrape-progress", ({ payload }) => {
+      scrapeStatus.textContent = String(payload);
+    });
+    try {
+      scrapeStatus.textContent = await invoke("scrape_missing", { platform: null });
+      // The grid is showing blanks for exactly these games.
+      window.__TAURI__?.event?.emit?.("art-changed");
+    } catch (e) {
+      scrapeStatus.textContent = `Failed — ${e}`;
+    } finally {
+      stop?.();
+      scrapeBtn.disabled = false;
+    }
+  });
 
   // BIOS. Progress by name rather than a spinner: it is 67 files here, and a
   // spinner says nothing about whether it is nearly done or barely started.
