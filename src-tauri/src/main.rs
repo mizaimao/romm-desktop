@@ -46,6 +46,9 @@ struct AppState {
     shader_overrides: Mutex<std::collections::BTreeMap<String, String>>,
     /// Systems switched over to a light gun, so gun games aim with the mouse.
     lightgun: Mutex<std::collections::BTreeMap<String, String>>,
+    /// Which ES-DE artwork the list and the info pane draw.
+    list_art: Mutex<String>,
+    detail_art: String,
     /// Strobe/BFI pass chained onto CRT shaders, if the user enabled one.
     motion_shader: Mutex<Option<String>>,
     /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
@@ -103,7 +106,16 @@ struct RomDetail {
     core_label: Option<String>,
     /// Local media, as `asset:` URLs the webview can load directly.
     cover: Option<String>,
+    /// Present only when the video is already on this machine. The pane never
+    /// downloads one: see `has_video`.
     video: Option<String>,
+    /// Whether a gameplay video exists at all, local or on the server.
+    ///
+    /// Separate from `video` because the pane shows an indicator, not a
+    /// player. A video is tens of megabytes against tens of kilobytes for
+    /// every other kind of media a game has, and fetching one to find out
+    /// whether it existed happened for every game the cursor touched.
+    has_video: bool,
     /// Every screenshot we could resolve; the UI cycles through them.
     screenshots: Vec<String>,
     /// ES-DE artwork by type — 3dboxes, miximages, marquees, fanart and the
@@ -617,16 +629,17 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     // is no longer consulted: it is a second scrape from a different source,
     // and one game's art coming from one place and the next game's from
     // another is the inconsistency this replaces.
-    let cover = media::ensure_art(client.as_deref(), &media_root, &media_key, &stem).await;
+    let cover =
+        media::ensure_art(client.as_deref(), &media_root, &media_key, &stem, &state.detail_art)
+            .await;
     let screenshots = media::ensure_set(
         client.as_deref(), &media_root, &media_key, &stem,
         &row.screenshots(),
     ).await;
-    // No server-side video exists on this deployment; local only.
-    let video = media::ensure_esde(
-        client.as_deref(), &media_root, &media_key, &stem, media::VIDEOS,
-    )
-    .await;
+    // Only if it is already here. Downloading is what the play button does.
+    let video = media::find_local(&media_root, &media_key, &stem, media::VIDEOS);
+    let has_video = video.is_some()
+        || media::video_exists(client.as_deref(), &media_root, &media_key, &stem).await;
 
     // Manuals are PDFs, which the webview renders natively.
     let manual = media::ensure(
@@ -637,8 +650,9 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     // Everything ES-DE has for this game, fetched lazily and cached.
     let mut art = std::collections::BTreeMap::new();
     for (kind, _) in media::ESDE_TYPES {
-        if matches!(*kind, media::COVERS | media::SCREENSHOTS) {
-            continue; // handled above, from RomM's own copies
+        // Videos are fetched by the play button, never by looking at a game.
+        if matches!(*kind, media::VIDEOS) {
+            continue;
         }
         if let Some(p) = media::ensure_esde(
             client.as_deref(), &media_root, &media_key, &stem, kind,
@@ -668,6 +682,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     Ok(RomDetail {
         cover: as_url(cover),
         video: as_url(video),
+        has_video,
         screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
         art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
@@ -722,6 +737,7 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
             .collect::<Vec<_>>()
     };
 
+    let list_art = state.list_art.lock().map_err(err)?.clone();
     let mut out = Vec::with_capacity(rows.len());
     for chunk in rows.chunks(CONCURRENCY) {
         let mut set = tokio::task::JoinSet::new();
@@ -730,13 +746,15 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
             let media_root = state.media_dir.clone();
             let (id, platform, fs_name) =
                 (row.id, row.platform_slug.clone(), row.fs_name.clone());
+            let art = list_art.clone();
             set.spawn(async move {
                 let stem = Path::new(&fs_name)
                     .file_stem()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or(fs_name);
                 let cover =
-                    media::ensure_art(client.as_deref(), &media_root, &platform, &stem).await;
+                    media::ensure_art(client.as_deref(), &media_root, &platform, &stem, &art)
+                        .await;
                 CoverView { id, cover: cover.map(|p| p.display().to_string()) }
             });
         }
@@ -816,6 +834,60 @@ async fn download_rom(
 
 /// Launch a ROM in RetroArch. Blocks until the emulator exits.
 ///
+/// The artwork choices for a game list, and which one is in force.
+#[tauri::command]
+fn list_art_options(state: State<'_, AppState>) -> CmdResult<(Vec<(String, String)>, String)> {
+    let current = state.list_art.lock().map_err(err)?.clone();
+    let choices = media::LIST_ART_CHOICES
+        .iter()
+        .map(|(k, label)| ((*k).to_owned(), (*label).to_owned()))
+        .collect();
+    Ok((choices, current))
+}
+
+/// Change what the game lists draw.
+///
+/// The cached image for a game is keyed by kind, so switching does not throw
+/// anything away — art already fetched for the old choice stays where it is and
+/// is there again if you switch back.
+#[tauri::command]
+fn set_list_art(state: State<'_, AppState>, value: String) -> CmdResult<String> {
+    if !media::LIST_ART_CHOICES.iter().any(|(k, _)| *k == value) {
+        return Err(format!("unknown artwork type {value}"));
+    }
+    romm_desktop::config::set_table_entry("config.toml", "media", "list_art", &value)
+        .map_err(err)?;
+    *state.list_art.lock().map_err(err)? = value.clone();
+    Ok(format!("game lists now show {value}"))
+}
+
+/// Fetch a game's video and hand back its path, downloading it if needed.
+///
+/// Deliberately a separate command from `rom_detail`, and deliberately slow:
+/// this is the one moment someone has asked for a video, so it is the one
+/// moment worth spending tens of megabytes on.
+#[tauri::command]
+async fn game_video(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+
+    let stem = Path::new(&row.fs_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| row.fs_name.clone());
+    let (scope_dir, scope_key) = media_scope(&state, &row);
+    let (media_root, media_key) = (scope_dir.to_path_buf(), scope_key.to_owned());
+    let client = state.client.clone();
+
+    media::ensure_esde(client.as_deref(), &media_root, &media_key, &stem, media::VIDEOS)
+        .await
+        .map(|p| p.display().to_string())
+        .ok_or_else(|| format!("no video for {}", row.name))
+}
+
 /// The display the app is on, in the units RetroArch's window sizing uses.
 ///
 /// Not a single number, because the two platforms disagree. Windows sizes
@@ -1915,6 +1987,8 @@ fn main() {
             shaders_enabled: cfg.shaders.enabled,
             shader_overrides: Mutex::new(cfg.shaders.by_platform.clone()),
             lightgun: Mutex::new(cfg.lightgun.by_platform.clone()),
+            list_art: Mutex::new(cfg.media.list_art.clone()),
+            detail_art: cfg.media.detail_art.clone(),
             motion_shader: Mutex::new(cfg.shaders.motion.clone()),
             // From config, not hardcoded: index 0 is `logo`, which is ES-DE's
             // wordmark art — a picture of the system's name. The grid wants
@@ -1929,6 +2003,9 @@ fn main() {
             pending_conflicts: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            list_art_options,
+            set_list_art,
+            game_video,
             versions,
             platforms,
             roms,

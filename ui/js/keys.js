@@ -5,7 +5,7 @@
 // `.tcard` (themes), so one implementation serves every view.
 
 import { el, state, trail, invoke } from "./state.js";
-import { selectRom, setSidebar, play } from "./detail.js";
+import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
 import { showThemes } from "./themes.js";
 import { escapeHtml } from "./util.js";
@@ -241,6 +241,7 @@ export const HANDLERS = {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
   },
   themes: () => (state.view === "themes" ? showPlatforms() : showThemes()),
+  video: playVideo,
   zoomIn: () => nudgeZoom(1),
   zoomOut: () => nudgeZoom(-1),
 };

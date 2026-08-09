@@ -14,6 +14,7 @@ import {
   padFor, setPad, resetPad, padLabel,
 } from "./bindings.js";
 import { invoke, listen } from "./state.js";
+import { toast, escapeHtml } from "./util.js";
 import { editServer, editAchievements, editScraper } from "./credentials.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
@@ -134,7 +135,18 @@ export function paneHtml(id) {
         without these. Optional and only when you ask — it is a few hundred MB.
         Needs <code>firmware.read</code> on the token.</p>
       <p class="hint set-bios-status"></p>`;
-  if (id === "appearance") return `      <h4>Glass</h4>
+  if (id === "appearance") return `      <h4>Artwork</h4>
+      <div class="srow">
+        <label>Game list shows</label>
+        <div class="ctl"><select class="list-art"></select></div>
+      </div>
+      <p class="hint">What each game shows in the list and grid. Cartridge or
+        disc by default — it is what you recognise a game by, and within one
+        console they are all the same shape, so the grid stays even. Anything a
+        console has no version of falls back to the miximage. The info pane
+        always shows the miximage.</p>
+
+      <h4>Glass</h4>
       <div class="srow">
         <label>Window colour</label>
         <div class="ctl">
@@ -347,6 +359,30 @@ function wireGeneral(box) {
 }
 
 function wireAppearance(box) {
+  // What the game lists draw. Populated from the backend rather than listed
+  // here, so the names cannot drift from the directories they map to.
+  const artSel = box.querySelector(".list-art");
+  if (artSel) {
+    invoke("list_art_options")
+      .then(([choices, current]) => {
+        artSel.innerHTML = choices
+          .map(([k, label]) =>
+            `<option value="${k}" ${k === current ? "selected" : ""}>${escapeHtml(label)}</option>`
+          )
+          .join("");
+      })
+      .catch(() => (artSel.disabled = true));
+    artSel.addEventListener("change", async () => {
+      try {
+        toast(await invoke("set_list_art", { value: artSel.value }));
+        // The library window redraws itself; this one cannot reach its DOM.
+        window.__TAURI__?.event?.emit?.("art-changed");
+      } catch (e) {
+        toast(String(e), 8000);
+      }
+    });
+  }
+
   // Shader backdrop. A switch rather than always-on: it runs a GPU loop for as
   // long as the app is open, which is not a cost to impose on someone who did
   // not ask for it.

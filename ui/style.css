@@ -1627,3 +1627,34 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
      the text — the artwork is right there and does not need help. */
   box-shadow: inset 1px 0 0 rgb(var(--pick) / 0.55), inset 6px 0 22px -8px rgb(var(--pick) / 0.35);
 }
+
+/* ---- Gameplay video -----------------------------------------------------
+   A button, not a player.
+
+   ES-DE starts the video by itself after a pause and plays its audio, so you
+   end up muting it to browse and then have no sound when you actually want to
+   watch something. Here nothing plays until asked — and because asking is
+   deliberate, it plays with sound.
+
+   Styled as a control rather than a label so it is obviously pressable: this is
+   the thing that was hard to find. */
+.vidbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 4px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--pick, var(--glass)) 45%, transparent);
+  background: color-mix(in srgb, var(--pick, var(--glass)) 12%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.vidbtn:hover {
+  background: color-mix(in srgb, var(--pick, var(--glass)) 22%, transparent);
+  border-color: color-mix(in srgb, var(--pick, var(--glass)) 70%, transparent);
+}
+.vidbtn[data-busy] { opacity: 0.6; cursor: progress; }

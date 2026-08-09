@@ -25,6 +25,8 @@ pub struct Config {
     #[serde(default)]
     pub lightgun: LightgunCfg,
     #[serde(default)]
+    pub media: MediaCfg,
+    #[serde(default)]
     pub icons: IconsCfg,
     #[serde(default)]
     pub esde: EsdeCfg,
@@ -249,6 +251,34 @@ pub struct ShadersCfg {
 impl Default for ShadersCfg {
     fn default() -> Self {
         Self { enabled: true, by_platform: BTreeMap::new(), motion: None }
+    }
+}
+
+/// Which ES-DE artwork the interface shows where.
+#[derive(Debug, Deserialize)]
+pub struct MediaCfg {
+    /// The image on each game in the list or grid. Cartridge art by default:
+    /// it is the thing you recognise a game by when you owned it, and within a
+    /// console every cartridge is the same shape, so the grid stays even.
+    #[serde(default = "cart_art")]
+    pub list_art: String,
+    /// The image in the info pane. The miximage, which already combines box,
+    /// screenshot and logo, so the pane says everything at once.
+    #[serde(default = "mix_art")]
+    pub detail_art: String,
+}
+
+fn cart_art() -> String {
+    "physicalmedia".to_owned()
+}
+
+fn mix_art() -> String {
+    "miximages".to_owned()
+}
+
+impl Default for MediaCfg {
+    fn default() -> Self {
+        Self { list_art: cart_art(), detail_art: mix_art() }
     }
 }
 

@@ -50,34 +50,27 @@ export async function selectRom(id) {
   if (state.selected !== id) return;
   const shots = d.screenshots || [];
 
-  // Screenshots on top (cycled when there are several), cover below.
-  const top = shots.length
-    ? `<div class="shots" id="shots">
-         ${shots
-           .map((s, i) => `<img src="${convertFileSrc(s)}" class="${i === 0 ? "on" : ""}" alt="" />`)
-           .join("")}
-         ${
-           shots.length > 1
-             ? `<div class="dots">${shots
-                 .map((_, i) => `<span class="${i === 0 ? "on" : ""}"></span>`)
-                 .join("")}</div>
-                <button class="nav prev">‹</button><button class="nav next">›</button>`
-             : ""
-         }
-       </div>`
-    : d.video
-      ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
-      : "";
+  // No slideshow and no player at the top any more: the miximage below already
+  // carries a screenshot, the box and the logo in one picture, so cycling
+  // through screenshots above it was the same information twice.
+  const top = "";
 
   // The other half of the morph: same name as the tagged card art, so the
   // browser treats them as one element moving rather than two fading.
   const cover = d.cover
     ? `<img class="cover" style="view-transition-name: cover" src="${convertFileSrc(d.cover)}" alt="" />`
     : "";
-  const video =
-    shots.length && d.video
-      ? `<video src="${convertFileSrc(d.video)}" controls muted loop></video>`
-      : "";
+
+  // An indicator, not a player. ES-DE starts the video by itself after a pause
+  // and plays its audio, which leaves you muting the emulator to browse and
+  // then having no sound when you actually want to watch something. So this
+  // says a video exists and waits to be asked — and because being asked is
+  // explicit, it plays with sound.
+  const video = d.has_video
+    ? `<button id="playvid" class="vidbtn" title="Play the gameplay video (Y)">
+         <span class="icon icon-play"></span><span>Gameplay video</span>
+       </button>`
+    : "";
 
   el.detail.hidden = !state.sidebar;
   // The glow around the selection takes the cover's own colour. Started here
@@ -131,7 +124,6 @@ export async function selectRom(id) {
     </div>`;
   });
 
-  if (shots.length > 1) startSlideshow(shots.length);
   wireArtwork(d);
 
   document.getElementById("play").addEventListener("click", () => play(d));
@@ -200,6 +192,36 @@ function artStrip(d) {
     .join("")}</div>`;
 }
 
+/// Play the selected game's video, fetching it first if it is not here yet.
+///
+/// Exported because the controller reaches it too — this is the button ES-DE
+/// buries in a sidebar, and burying it again behind a mouse would miss the
+/// point.
+export async function playVideo() {
+  const id = state.selected;
+  if (id === null) return;
+  const btn = document.getElementById("playvid");
+  if (!btn) return; // no video for this game
+  if (btn.dataset.busy) return;
+
+  btn.dataset.busy = "1";
+  const label = btn.querySelector("span:not(.icon)");
+  const was = label?.textContent;
+  if (label) label.textContent = "Fetching…";
+  try {
+    const path = await invoke("game_video", { id });
+    // Still the same game? A slow fetch must not open a video over whatever
+    // was scrolled to in the meantime.
+    if (state.selected !== id) return;
+    openLightbox([{ src: convertFileSrc(path), kind: "video", caption: "Gameplay" }], 0);
+  } catch (e) {
+    toast(String(e), 6000);
+  } finally {
+    delete btn.dataset.busy;
+    if (label && was) label.textContent = was;
+  }
+}
+
 /// Clicking artwork opens it full size, starting at what was clicked.
 function wireArtwork(d) {
   const media = detailMedia(d);
@@ -216,9 +238,7 @@ function wireArtwork(d) {
     openLightbox(media, Math.max(idx, 0));
   });
   el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.caption === "Cover"));
-  el.detail.querySelectorAll("video").forEach((v) =>
-    v.addEventListener("dblclick", openAt((m) => m.kind === "video"))
-  );
+  document.getElementById("playvid")?.addEventListener("click", playVideo);
   el.detail.querySelectorAll(".artstrip figure").forEach((fig) =>
     fig.addEventListener("click", () => {
       const kind = fig.dataset.art;

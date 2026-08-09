@@ -30,6 +30,7 @@ export const ACTIONS = [
   { id: "nextSection", label: "Next section",      fallback: "e" },
   { id: "zoomIn",  label: "Bigger covers",         fallback: "+" },
   { id: "zoomOut", label: "Smaller covers",        fallback: "-" },
+  { id: "video",   label: "Play gameplay video",   fallback: "v" },
 ];
 
 /// Controller buttons, by W3C "standard mapping" index.
@@ -72,6 +73,9 @@ const PAD_FALLBACK = {
   // whole range rather than stepping.
   6: "zoomIn",
   7: "zoomOut",
+  // The top face button plays the gameplay video. It is the one thing ES-DE
+  // has that is genuinely hard to find, so here it is on a button.
+  3: "video",
   8: "settings",
   9: "help",
   // Paging moved off the triggers to make room. The stick clicks were the only

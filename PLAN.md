@@ -911,3 +911,33 @@ connected, so the picture could follow the hardware. Logged rather than started.
   precisely so they have somewhere to go.
 * The Control tab is the two old binding tables moved across unchanged. They now
   sit in a two-column grid, which is an improvement in density and nothing else.
+
+## 18. Bulk download — what it has to ask before it starts
+
+Parked, to be built with the "grab this for the trip" button. The button takes a
+platform or a collection; this section is about what else it takes.
+
+Artwork is not one thing and the sizes are not close. A game's static art is
+tens of kilobytes per type; its video is tens of megabytes. Fetching everything
+for a 2,400-game collection is two orders of magnitude more transfer than
+fetching what is actually shown, and nearly all of it would never be looked at.
+So the download asks, with these defaults:
+
+* **Artwork** — on, and *minimal* by default: the one image the game list is
+  set to draw, plus the miximage the info pane shows. Two files per game covers
+  everything the interface displays without opening anything.
+* **Full static set** — off. Every image type ES-DE has: box front and back, 3D
+  box, cartridge, screenshot, title screen, marquee, fanart. For someone who
+  wants the artwork strip in the info pane populated offline.
+* **Videos** — off, and its own checkbox rather than part of "full", because it
+  is the one choice that changes the size of the download by a factor of ten.
+* **Manuals** — off, own checkbox.
+
+The estimate shown next to the button has to move with the checkboxes. "25.6 GB"
+against "31 GB" is the difference between a download that finishes before a
+flight and one that does not, and it is not guessable from the game count.
+
+Related: the app already fetches art lazily and caches by kind, so a bulk
+download is a warm-up of that same cache, not a second mechanism. Whatever it
+fetches, browsing later finds locally.
+

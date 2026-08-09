@@ -2,7 +2,7 @@
 
 import { el, state, trail, invoke, listen } from "./state.js";
 import { human, toast } from "./util.js";
-import { showPlatforms, runSearch, setLayout, setZoom } from "./library.js";
+import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { showThemes } from "./themes.js";
 import { showSystems } from "./systems.js";
@@ -25,6 +25,14 @@ el.back.addEventListener("click", () => {
   // Back at the top of a section returns to that section, not always to the
   // library — the tab bar says where you are and it should stay true.
   resetSection();
+});
+
+// Settings runs in its own document and cannot touch this one, so the artwork
+// choice comes back as an event. Redrawn from the backend rather than from
+// what is on screen: the images themselves have changed, not their layout.
+listen("art-changed", () => {
+  if (state.view === "platforms") return;
+  if (state.rows.length) renderRows(state.rows, state.view === "search");
 });
 
 el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));

@@ -56,6 +56,35 @@ const ESDE_BASE: &str = "/assets/romm/resources/esde-media";
 /// scraped. That raggedness is what the covers looked wrong for.
 pub const ART_CHAIN: &[&str] = &[MIXIMAGES, COVERS, SCREENSHOTS];
 
+/// The art types a game list can be set to show, in the order Settings offers
+/// them, with the label to show for each.
+pub const LIST_ART_CHOICES: &[(&str, &str)] = &[
+    (PHYSICALMEDIA, "Cartridge or disc"),
+    (MIXIMAGES, "Miximage"),
+    (COVERS, "Box art"),
+    ("3dboxes", "Box art (3D)"),
+    (TITLESCREENS, "Title screen"),
+    (SCREENSHOTS, "Screenshot"),
+    (MARQUEES, "Marquee"),
+];
+
+/// The chain to try when a game list is set to `preferred`.
+///
+/// A preference is not a promise: no console has every type, and one of them
+/// cannot have the default at all. Cartridge art does not exist for arcade
+/// machines — they have no cartridge — so an arcade grid asking for one would
+/// be empty on every row no matter how completely it had been scraped. The
+/// fallbacks are what keep a choice from emptying a console.
+pub fn art_chain(preferred: &str) -> Vec<&str> {
+    let mut chain = vec![preferred];
+    for kind in ART_CHAIN {
+        if !chain.contains(kind) {
+            chain.push(kind);
+        }
+    }
+    chain
+}
+
 /// ES-DE system directories to search for a RomM platform's media.
 ///
 /// The two naming schemes agree almost everywhere, and where they do not it is
@@ -75,9 +104,12 @@ pub fn esde_dirs(platform: &str) -> Vec<&str> {
 
 /// ES-DE media subdirectory names, in the order the UI prefers them.
 pub const MIXIMAGES: &str = "miximages";
+pub const PHYSICALMEDIA: &str = "physicalmedia";
 pub const COVERS: &str = "covers";
 pub const SCREENSHOTS: &str = "screenshots";
 pub const VIDEOS: &str = "videos";
+pub const TITLESCREENS: &str = "titlescreens";
+pub const MARQUEES: &str = "marquees";
 /// Thumbnails for the grid. Not an ES-DE directory — ES-DE has no thumb
 /// concept — but kept in the same tree so one delete clears everything.
 pub const COVERS_THUMB: &str = "covers_thumb";
@@ -249,13 +281,52 @@ pub async fn ensure_art(
     media_root: &Path,
     platform: &str,
     stem: &str,
+    preferred: &str,
 ) -> Option<PathBuf> {
-    for kind in ART_CHAIN {
+    for kind in art_chain(preferred) {
         if let Some(p) = ensure_esde(client, media_root, platform, stem, kind).await {
             return Some(p);
         }
     }
     None
+}
+
+/// Whether a gameplay video exists, without downloading one.
+///
+/// Videos are tens of megabytes and every other kind of media here is tens of
+/// kilobytes, so fetching one just to find out whether it exists costs more
+/// than everything else a game shows put together — and until now that happened
+/// for every game the cursor touched. A HEAD answers the same question for the
+/// price of a header.
+pub async fn video_exists(
+    client: Option<&api::Client>,
+    media_root: &Path,
+    platform: &str,
+    stem: &str,
+) -> bool {
+    if find_local(media_root, platform, stem, VIDEOS).is_some() {
+        return true;
+    }
+    let Some(client) = client else {
+        return false;
+    };
+    let exts = ESDE_TYPES.iter().find(|(k, _)| *k == VIDEOS).map(|(_, e)| *e);
+    for dir in esde_dirs(platform) {
+        for ext in exts.unwrap_or(&[]) {
+            let url = format!("{}{ESDE_BASE}/{dir}/{VIDEOS}/{stem}.{ext}", client.base());
+            let ok = client
+                .http()
+                .head(&url)
+                .header("Authorization", client.auth())
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success());
+            if ok {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Grid thumbnail: the small cover if the server has one, otherwise whatever
@@ -692,5 +763,37 @@ mod tests {
         assert!(root.join("snes").join(COVERS).join("b.png").exists());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A preference cannot be a promise. Arcade machines have no cartridge, so
+    /// an arcade grid asking for one would be empty on every row however
+    /// completely it had been scraped.
+    #[test]
+    fn a_choice_that_a_console_cannot_satisfy_still_falls_back() {
+        let chain = art_chain(PHYSICALMEDIA);
+        assert_eq!(chain[0], PHYSICALMEDIA, "the choice is honoured first");
+        assert!(chain.contains(&MIXIMAGES), "and something always follows it");
+    }
+
+    /// Choosing a type that is already a fallback must not list it twice, or
+    /// every miss costs two round trips to the same missing file.
+    #[test]
+    fn choosing_a_fallback_type_does_not_duplicate_it() {
+        let chain = art_chain(MIXIMAGES);
+        assert_eq!(chain[0], MIXIMAGES);
+        assert_eq!(chain.iter().filter(|k| **k == MIXIMAGES).count(), 1, "{chain:?}");
+    }
+
+    /// Settings offers these by name; a label with no directory behind it is a
+    /// choice that silently shows nothing.
+    #[test]
+    fn every_offered_choice_is_a_real_media_directory() {
+        for (kind, label) in LIST_ART_CHOICES {
+            assert!(
+                ESDE_TYPES.iter().any(|(k, _)| k == kind),
+                "{label} maps to {kind}, which ES-DE does not have"
+            );
+        }
+        assert_eq!(LIST_ART_CHOICES[0].0, PHYSICALMEDIA, "cartridge art is the default");
     }
 }
