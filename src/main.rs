@@ -566,6 +566,79 @@ async fn cmd_sync(full: bool) -> Result<()> {
 ///
 /// Sequential transfers waste most of the wall clock on per-request latency
 /// when the files are small — an arcade set averages 4.5 MB.
+/// Classify probe logs gathered on another machine.
+///
+/// The probing runs where it is cheap — a headless server, in parallel — and
+/// the judging happens here, through the same `read_verdict` the local probe
+/// uses. One implementation of "did it run", not two that drift.
+fn cmd_probe_report(file: &str) -> Result<()> {
+    use romm_desktop::probe::{Verdict, core_title, read_verdict};
+    use std::collections::BTreeMap;
+
+    let store = cache::Cache::open(Path::new(CACHE_DB)).ok();
+    let titles: BTreeMap<String, String> = store
+        .as_ref()
+        .and_then(|c| c.roms_for("arcade").ok())
+        .map(|rows| rows.into_iter().map(|r| (r.fs_name, r.name)).collect())
+        .unwrap_or_default();
+
+    let text = std::fs::read_to_string(file)
+        .with_context(|| format!("reading {file}"))?;
+
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut mislabelled = Vec::new();
+    let mut broken = Vec::new();
+    let mut total = 0;
+
+    for line in text.lines() {
+        let mut cols = line.split('\t');
+        let (Some(rom), Some(_core), Some(log)) = (cols.next(), cols.next(), cols.next())
+        else {
+            continue;
+        };
+        total += 1;
+        let log = log.replace('\u{1f}', "\n");
+        let (verdict, evidence) = read_verdict(&log);
+        *counts.entry(verdict.label()).or_default() += 1;
+
+        if !verdict.ok() && verdict != Verdict::IsBios {
+            broken.push((rom.to_owned(), verdict.label(), evidence));
+        }
+        // The core knows the game's real title. Comparing it with the library's
+        // label is free here, because the run already had to read the log.
+        if let (Some(real), Some(ours)) = (core_title(&log), titles.get(rom)) {
+            let norm = |s: &str| {
+                s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>()
+            };
+            if !norm(&real).starts_with(&norm(ours)) && !norm(ours).starts_with(&norm(&real)) {
+                mislabelled.push((rom.to_owned(), ours.clone(), real));
+            }
+        }
+    }
+
+    println!("{total} games probed\n");
+    for (label, n) in &counts {
+        println!("  {label:24} {n:>5}");
+    }
+
+    println!("\n--- not playable ({}) ---", broken.len());
+    for (rom, label, why) in broken.iter().take(40) {
+        println!("  {rom:24} {label:22} {}", why.chars().take(70).collect::<String>());
+    }
+    if broken.len() > 40 {
+        println!("  … and {} more", broken.len() - 40);
+    }
+
+    println!("\n--- label disagrees with the emulator ({}) ---", mislabelled.len());
+    for (rom, ours, real) in mislabelled.iter().take(30) {
+        println!("  {rom:20} yours: {:32} core: {}", ours.chars().take(30).collect::<String>(), real);
+    }
+    if mislabelled.len() > 30 {
+        println!("  … and {} more", mislabelled.len() - 30);
+    }
+    Ok(())
+}
+
 /// Report artwork coverage, and what is worth trying to fix.
 async fn cmd_coverage(probe: bool, sample: usize) -> Result<()> {
     use romm_desktop::coverage::{self, Kind};
@@ -1678,6 +1751,12 @@ enum Command {
         #[arg(long, default_value_t = 40)]
         sample: usize,
     },
+    /// Classify probe logs collected elsewhere (see
+    /// scripts/probe-arcade-remote.sh), using the same rules as `probe`
+    ProbeReport {
+        /// TSV of `romset<TAB>core<TAB>log`, newlines encoded as 0x1f.
+        file: String,
+    },
     /// Check our content_hash implementation against the server's
     HashParity,
     /// Inspect local saves and states
@@ -1929,6 +2008,7 @@ async fn main() -> Result<()> {
             cmd_scrape(platform.as_deref(), game.as_deref(), limit, videos, dry_run).await
         }
         Command::Coverage { probe, sample } => cmd_coverage(probe, sample).await,
+        Command::ProbeReport { file } => cmd_probe_report(&file),
         Command::HashParity => {
             let cfg = Config::load()?;
             let client =

@@ -195,6 +195,11 @@ pub fn read_verdict(log: &str) -> (Verdict, String) {
         {
             return (Verdict::CoreFailed, line.trim().to_owned());
         }
+        // MAME cores never say "successfully started"; the signal that they
+        // loaded the game is the geometry they report back to the frontend.
+        if line.contains("[Core]: Geometry:") {
+            started.get_or_insert_with(|| line.trim().to_owned());
+        }
         if line.contains("Content ran for a total of") {
             ran_line = Some(line.trim().to_owned());
         }
@@ -206,18 +211,23 @@ pub fn read_verdict(log: &str) -> (Verdict, String) {
         return (Verdict::RanWithMissingFiles, l);
     }
 
+    // The core's own word beats the clock. RetroArch reports runtime in whole
+    // seconds, so on a fast machine sixty frames round to "00 seconds" — and
+    // reading that as a refusal marks every healthy game on a quick host as
+    // broken. Which is exactly what happened the first time this ran on a
+    // server rather than a laptop.
+    if let Some(l) = started {
+        return (Verdict::Ran, l);
+    }
+
     match ran_line {
-        // "00 hours, 00 minutes, 00 seconds" means it never actually emulated
-        // anything, which is a refusal the core did not log explicitly.
+        // No such claim from the core, and nothing emulated: a refusal the core
+        // did not log explicitly.
         Some(l) if l.contains("00 hours, 00 minutes, 00 seconds") => {
             (Verdict::RefusedContent, l)
         }
         Some(l) => (Verdict::Ran, l),
-        // The core said it started but RetroArch never wrote a runtime line.
-        None => match started {
-            Some(l) => (Verdict::Ran, l),
-            None => (Verdict::Inconclusive, "no verdict line in the log".to_owned()),
-        },
+        None => (Verdict::Inconclusive, "no verdict line in the log".to_owned()),
     }
 }
 
@@ -308,6 +318,26 @@ mod tests {
         let (v, _) = read_verdict(log);
         assert_eq!(v, Verdict::IsBios);
         assert!(!v.ok());
+    }
+
+    /// Straight from a headless server run. Sixty frames took under a second,
+    /// so RetroArch rounded the runtime to zero — and the old rule called a
+    /// perfectly good launch a refusal. On a slower laptop this never showed.
+    #[test]
+    fn a_core_that_says_it_started_is_believed_over_a_rounded_clock() {
+        let log = "[libretro INFO] [FBNeo] No missing files, proceeding\n\
+             [libretro INFO] [FBNeo] Driver mslug was successfully started : game's full name is Metal Slug - Super Vehicle-001\n\
+             [INFO] [Core]: Content ran for a total of: 00 hours, 00 minutes, 00 seconds.";
+        assert_eq!(read_verdict(log).0, Verdict::Ran);
+    }
+
+    /// But a missing romset still outranks the core's claim to have started —
+    /// that is the whole point of the stricter rule.
+    #[test]
+    fn starting_does_not_excuse_an_incomplete_romset() {
+        let log = "[libretro INFO] [FBNeo] Driver x was successfully started : game's full name is X\n\
+             [libretro INFO] [FBNeo] This game is known but one of your romsets is missing files for THIS VERSION of FBNeo.";
+        assert_eq!(read_verdict(log).0, Verdict::RanWithMissingFiles);
     }
 
     #[test]
