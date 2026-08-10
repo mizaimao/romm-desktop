@@ -19,6 +19,47 @@ pub struct User {
     pub role: String,
 }
 
+/// Every ScreenScraper media URL the server resolved for a game.
+///
+/// These are the server's own — it built them, it stores them, and it serves
+/// them back on `/api/roms/{id}`. Reading them is reading your own library.
+/// Nothing here is assembled by this app.
+///
+/// Present only for games the server actually matched against ScreenScraper. A
+/// game it identified some other way, or not at all, has none of these.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SsMedia {
+    #[serde(default)]
+    pub box2d_url: Option<String>,
+    #[serde(default)]
+    pub box2d_back_url: Option<String>,
+    #[serde(default)]
+    pub box3d_url: Option<String>,
+    #[serde(default)]
+    pub physical_url: Option<String>,
+    #[serde(default)]
+    pub miximage_url: Option<String>,
+    #[serde(default)]
+    pub screenshot_url: Option<String>,
+    #[serde(default)]
+    pub title_screen_url: Option<String>,
+    #[serde(default)]
+    pub marquee_url: Option<String>,
+    #[serde(default)]
+    pub fanart_url: Option<String>,
+    #[serde(default)]
+    pub manual_url: Option<String>,
+    #[serde(default)]
+    pub video_url: Option<String>,
+}
+
+/// A game as the server knows it, for the fields the scraper needs.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RomMedia {
+    #[serde(default)]
+    pub ss_metadata: Option<SsMedia>,
+}
+
 /// One identification candidate from the server's metadata lookup.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Match {
@@ -476,6 +517,12 @@ impl Client {
     /// `rom_id` matters as much as the name — the server has the file's hashes
     /// and matches on those first, which is how an arcade romset called
     /// `pkscram.zip` finds its real title.
+    /// The ScreenScraper media the server already holds for a game.
+    pub async fn rom_media(&self, rom_id: i64) -> Result<SsMedia> {
+        let rom: RomMedia = self.get_json(&format!("/api/roms/{rom_id}")).await?;
+        Ok(rom.ss_metadata.unwrap_or_default())
+    }
+
     pub async fn identify(&self, rom_id: i64, name: &str) -> Result<Vec<Match>> {
         let path = format!(
             "/api/search/roms?rom_id={rom_id}&search_by=name&search_term={}",

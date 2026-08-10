@@ -576,6 +576,7 @@ async fn cmd_scrape(
     platform: Option<&str>,
     game: Option<&str>,
     limit: Option<usize>,
+    videos: bool,
     dry_run: bool,
 ) -> Result<()> {
     use romm_desktop::scrape;
@@ -624,7 +625,7 @@ async fn cmd_scrape(
     let mut report = scrape::Report::default();
     let started = std::time::Instant::now();
     for (i, row) in todo.iter().enumerate() {
-        if let Err(e) = scrape::fill_one(&client, &media_root, row, &mut report).await {
+        if let Err(e) = scrape::fill_one(&client, &media_root, row, videos, &mut report).await {
             eprintln!("  {}: {e}", row.name);
         }
         if (i + 1).is_multiple_of(25) || i + 1 == todo.len() {
@@ -1554,6 +1555,10 @@ enum Command {
         /// Stop after this many, for a look before committing to a long run.
         #[arg(long)]
         limit: Option<usize>,
+        /// Also fetch the gameplay video. Off by default: a video is tens of
+        /// megabytes against tens of kilobytes for every picture.
+        #[arg(long)]
+        videos: bool,
         /// List what would be fetched and fetch nothing.
         #[arg(long)]
         dry_run: bool,
@@ -1805,8 +1810,8 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::Scrape { platform, game, limit, dry_run } => {
-            cmd_scrape(platform.as_deref(), game.as_deref(), limit, dry_run).await
+        Command::Scrape { platform, game, limit, videos, dry_run } => {
+            cmd_scrape(platform.as_deref(), game.as_deref(), limit, videos, dry_run).await
         }
         Command::HashParity => {
             let cfg = Config::load()?;

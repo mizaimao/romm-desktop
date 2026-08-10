@@ -22,17 +22,26 @@
 //! offers you match candidates. Fetching one is being an ordinary client of
 //! your own server. Nothing is borrowed and nothing is pretended.
 //!
-//! The cost of staying inside that line: the server builds one URL per game,
-//! for the 2D box. Cartridge art, miximages and the rest would mean assembling
-//! ScreenScraper calls the server never made, under its name, which is the
-//! first option wearing a different hat.
+//! The full set comes from the same place. A game the server has matched
+//! against ScreenScraper carries `ss_metadata`: every media URL it resolved —
+//! 2D box, back, 3D box, cartridge, miximage, screenshot, title screen,
+//! marquee, fanart, manual, video. Those are the server's own URLs, stored on
+//! the server, served back on `/api/roms/{id}`, so reading them is reading your
+//! own library. Nothing is assembled here, which is the line that matters:
+//! rewriting the `media=` parameter to invent requests the server never made
+//! would be the first option wearing a different hat.
+//!
+//! A game the server matched some other way — IGDB, LaunchBox, or nothing — has
+//! no `ss_metadata`, and then all that is available is the single 2D box URL
+//! the search endpoint builds on demand. So the result is uneven by design, and
+//! honest about which games got what.
 //!
 //! ## Where the art goes
 //!
-//! Into the same local cache the ES-DE tree is copied to, filed under `covers`,
-//! because a 2D box is what it is. So it lands as the third link of the art
-//! chain: a console showing cartridges keeps showing cartridges, and only the
-//! games that had nothing gain a box.
+//! Into the same local cache the ES-DE tree is copied to, each type filed under
+//! the ES-DE directory that means the same thing — so a scraped game is
+//! indistinguishable from one ES-DE scraped, and the art chain, the card
+//! sizing and the info pane all work on it without knowing where it came from.
 
 use anyhow::Result;
 use std::path::Path;
@@ -89,6 +98,36 @@ pub fn missing(cache: &Cache, media_root: &Path, platform: Option<&str>) -> Resu
         .collect())
 }
 
+/// Which ES-DE directory each of the server's ScreenScraper URLs belongs in.
+///
+/// Named pairs rather than a guess at the far end: `physical_url` is a
+/// cartridge and ES-DE calls that `physicalmedia`, and getting one of these
+/// wrong files a picture where nothing will ever look for it.
+fn urls_for(m: &crate::api::SsMedia, videos: bool) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    let mut add = |kind: &'static str, url: &Option<String>| {
+        if let Some(u) = url.as_ref().filter(|u| !u.is_empty()) {
+            out.push((kind, u.clone()));
+        }
+    };
+    add(media::PHYSICALMEDIA, &m.physical_url);
+    add(media::MIXIMAGES, &m.miximage_url);
+    add(media::COVERS, &m.box2d_url);
+    add("backcovers", &m.box2d_back_url);
+    add("3dboxes", &m.box3d_url);
+    add(media::SCREENSHOTS, &m.screenshot_url);
+    add(media::TITLESCREENS, &m.title_screen_url);
+    add(media::MARQUEES, &m.marquee_url);
+    add("fanart", &m.fanart_url);
+    add("manuals", &m.manual_url);
+    // Videos are tens of megabytes against tens of kilobytes for everything
+    // else here, so they are the one type that has to be asked for.
+    if videos {
+        add(media::VIDEOS, &m.video_url);
+    }
+    out
+}
+
 /// Fetch artwork for one game. Returns whether anything landed.
 ///
 /// Every step is allowed to come back empty. A romset with no ScreenScraper
@@ -98,50 +137,99 @@ pub async fn fill_one(
     client: &Client,
     media_root: &Path,
     row: &RomRow,
+    videos: bool,
     report: &mut Report,
 ) -> Result<bool> {
     let stem = stem_of(&row.fs_name);
 
-    let matches = match client.identify(row.id, &row.name).await {
-        Ok(m) => m,
-        Err(_) => {
-            report.failed += 1;
-            return Ok(false);
-        }
-    };
-    let Some(hit) = matches.iter().find(|m| !m.ss_url_cover.is_empty()) else {
-        if matches.is_empty() {
-            report.unmatched += 1;
-        } else {
-            report.no_art += 1;
-        }
-        return Ok(false);
-    };
-
-    // Straight to ScreenScraper, at the address the server gave us, with no
-    // Authorization header — that is our server's credential, not theirs.
-    let resp = client.http().get(&hit.ss_url_cover).send().await;
-    let bytes = match resp {
-        Ok(r) if r.status().is_success() => r.bytes().await.unwrap_or_default(),
-        _ => {
-            report.failed += 1;
-            return Ok(false);
-        }
-    };
-    // ScreenScraper answers a throttled or unknown request with a short plain
-    // text body and a 200, so size is the honest test of whether this is a
-    // picture. Every real cover is tens of kilobytes.
-    if bytes.len() < 1024 {
-        report.no_art += 1;
+    // The ES-DE tree wins, and it is checked against the *server*, not just
+    // what happens to be cached here. `missing` only looks locally, because
+    // seven HEADs per game before any work started would cost more than the
+    // run; that makes it a prefilter, and this is the real test. Without it a
+    // console fully scraped in ES-DE would get ScreenScraper boxes written over
+    // the top of art nobody had happened to browse yet.
+    if media::ensure_art(Some(client), media_root, &row.platform_slug, &stem, media::MIXIMAGES)
+        .await
+        .is_some()
+    {
+        report.had_art += 1;
         return Ok(false);
     }
 
-    let dir = media_root.join(&row.platform_slug).join(media::COVERS);
-    std::fs::create_dir_all(&dir)?;
-    let ext = if bytes.starts_with(b"\x89PNG") { "png" } else { "jpg" };
-    std::fs::write(dir.join(format!("{stem}.{ext}")), &bytes)?;
-    report.fetched += 1;
-    Ok(true)
+    // Everything the server already resolved, which is the whole set.
+    let media_urls = match client.rom_media(row.id).await {
+        Ok(m) => urls_for(&m, videos),
+        Err(_) => Vec::new(),
+    };
+
+    // Nothing stored means the server matched this game some other way, or not
+    // at all. The search endpoint will still build a 2D box URL on demand.
+    let media_urls = if media_urls.is_empty() {
+        match client.identify(row.id, &row.name).await {
+            Ok(matches) => match matches.iter().find(|m| !m.ss_url_cover.is_empty()) {
+                Some(hit) => vec![(media::COVERS, hit.ss_url_cover.clone())],
+                None => {
+                    if matches.is_empty() {
+                        report.unmatched += 1;
+                    } else {
+                        report.no_art += 1;
+                    }
+                    return Ok(false);
+                }
+            },
+            Err(_) => {
+                report.failed += 1;
+                return Ok(false);
+            }
+        }
+    } else {
+        media_urls
+    };
+
+    let mut landed = false;
+    for (kind, url) in media_urls {
+        // Straight to ScreenScraper, at the address the server gave us, and
+        // with no Authorization header: that is our server's credential, not
+        // theirs.
+        let bytes = match client.http().get(&url).send().await {
+            Ok(r) if r.status().is_success() => r.bytes().await.unwrap_or_default(),
+            _ => continue,
+        };
+        // A throttled or unknown request comes back as 200 with a line of
+        // text, so size is the honest test of whether this is a picture.
+        if bytes.len() < 1024 {
+            continue;
+        }
+        let dir = media_root.join(&row.platform_slug).join(kind);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join(format!("{stem}.{}", extension_for(kind, &bytes))), &bytes)?;
+        landed = true;
+    }
+
+    if landed {
+        report.fetched += 1;
+    } else {
+        report.no_art += 1;
+    }
+    Ok(landed)
+}
+
+/// The extension to save under, read from the bytes rather than the URL.
+///
+/// ScreenScraper's media endpoint carries the type in a query parameter, not in
+/// a path, so the URL says nothing about what came back — and `find_local`
+/// matches on the stem and needs the real extension to be there.
+fn extension_for(kind: &str, bytes: &[u8]) -> &'static str {
+    if kind == media::VIDEOS {
+        return "mp4";
+    }
+    if bytes.starts_with(b"%PDF") {
+        return "pdf";
+    }
+    if bytes.starts_with(b"\x89PNG") {
+        return "png";
+    }
+    "jpg"
 }
 
 fn stem_of(fs_name: &str) -> String {
@@ -171,5 +259,111 @@ mod tests {
         assert_eq!(stem_of("Sonic (USA).md"), "Sonic (USA)");
         assert_eq!(stem_of("pkscram"), "pkscram");
         assert_eq!(stem_of("Game.v1.2.zip"), "Game.v1.2");
+    }
+
+    use crate::api::SsMedia;
+
+    fn full() -> SsMedia {
+        let u = |s: &str| Some(s.to_owned());
+        SsMedia {
+            box2d_url: u("b2d"),
+            box2d_back_url: u("back"),
+            box3d_url: u("b3d"),
+            physical_url: u("cart"),
+            miximage_url: u("mix"),
+            screenshot_url: u("shot"),
+            title_screen_url: u("title"),
+            marquee_url: u("marquee"),
+            fanart_url: u("fan"),
+            manual_url: u("manual"),
+            video_url: u("video"),
+        }
+    }
+
+    /// Every directory this writes into has to be one ES-DE actually uses, or
+    /// the picture lands somewhere nothing will ever look for it — and it looks
+    /// exactly like a game that failed to scrape.
+    #[test]
+    fn every_media_type_lands_in_a_real_esde_directory() {
+        for (kind, _) in urls_for(&full(), true) {
+            assert!(
+                media::ESDE_TYPES.iter().any(|(k, _)| *k == kind),
+                "{kind} is not an ES-DE media directory"
+            );
+        }
+    }
+
+    /// The full set is the point of reading the server's stored metadata: a
+    /// single box would have been available without it.
+    #[test]
+    fn the_whole_set_is_taken_including_the_cartridge() {
+        let got: Vec<&str> = urls_for(&full(), false).into_iter().map(|(k, _)| k).collect();
+        for want in [
+            media::PHYSICALMEDIA,
+            media::MIXIMAGES,
+            media::COVERS,
+            "3dboxes",
+            media::MARQUEES,
+            media::TITLESCREENS,
+        ] {
+            assert!(got.contains(&want), "{want} missing from {got:?}");
+        }
+    }
+
+    /// A video is tens of megabytes against tens of kilobytes for every
+    /// picture, so it is the one type that must never arrive unasked. Getting
+    /// this backwards turns a 2,700-game run into a hundred-gigabyte one.
+    #[test]
+    fn a_video_is_never_fetched_unless_it_was_asked_for() {
+        let without: Vec<&str> = urls_for(&full(), false).into_iter().map(|(k, _)| k).collect();
+        assert!(!without.contains(&media::VIDEOS), "{without:?}");
+
+        let with: Vec<&str> = urls_for(&full(), true).into_iter().map(|(k, _)| k).collect();
+        assert!(with.contains(&media::VIDEOS));
+    }
+
+    /// A game with only some media must yield only those, not empty strings
+    /// standing in for the rest.
+    #[test]
+    fn absent_and_empty_urls_are_both_skipped() {
+        let partial = SsMedia {
+            box2d_url: Some("b2d".to_owned()),
+            physical_url: Some(String::new()),
+            ..Default::default()
+        };
+        let got: Vec<&str> = urls_for(&partial, true).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(got, vec![media::COVERS], "an empty string is not a URL");
+    }
+
+    /// ScreenScraper's media endpoint names the type in a query parameter, not
+    /// in a path, so the URL says nothing about what came back. The bytes do,
+    /// and `find_local` needs the real extension to find the file again.
+    #[test]
+    fn the_extension_comes_from_the_bytes_not_the_url() {
+        assert_eq!(extension_for(media::COVERS, b"\x89PNG\r\n"), "png");
+        assert_eq!(extension_for(media::COVERS, b"\xff\xd8\xff\xe0"), "jpg");
+        assert_eq!(extension_for("manuals", b"%PDF-1.4"), "pdf");
+        // A video is not sniffed: mp4 has no magic at offset zero worth
+        // trusting, and the endpoint only ever returns one.
+        assert_eq!(extension_for(media::VIDEOS, b"\x00\x00\x00 ftyp"), "mp4");
+    }
+
+    /// The prefilter is local-only by design, so anything cached under any link
+    /// of the art chain takes a game out of the list. That is what let a stale
+    /// RomM screenshot hide a game from the very pass meant to fix it.
+    #[test]
+    fn anything_already_cached_takes_a_game_out_of_the_list() {
+        let root = std::env::temp_dir().join("romm-scrape-missing");
+        let _ = std::fs::remove_dir_all(&root);
+        for kind in media::ART_CHAIN {
+            std::fs::create_dir_all(root.join("snes").join(kind)).unwrap();
+        }
+        let has = |kind: &str| {
+            media::find_local(&root, "snes", "Game", kind).is_some()
+        };
+        assert!(!has(media::SCREENSHOTS));
+        std::fs::write(root.join("snes").join(media::SCREENSHOTS).join("Game.jpg"), b"x").unwrap();
+        assert!(has(media::SCREENSHOTS), "a screenshot counts as artwork here");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

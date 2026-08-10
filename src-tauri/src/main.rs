@@ -893,7 +893,7 @@ async fn scrape_missing(
     let _ = app.emit("scrape-progress", format!("{} to look up…", todo.len()));
     let mut report = scrape::Report::default();
     for (i, row) in todo.iter().enumerate() {
-        let _ = scrape::fill_one(&client, &media_root, row, &mut report).await;
+        let _ = scrape::fill_one(&client, &media_root, row, false, &mut report).await;
         if (i + 1).is_multiple_of(10) || i + 1 == todo.len() {
             let _ = app.emit(
                 "scrape-progress",
