@@ -225,7 +225,7 @@ pub async fn ensure_esde(
 }
 
 /// Marker recording that the cache has been cleared of RomM-sourced artwork.
-const ESDE_ONLY_MARKER: &str = ".art-from-esde";
+const ESDE_ONLY_MARKER: &str = ".art-from-esde-2";
 
 /// Throw away artwork downloaded from RomM before the app moved to ES-DE.
 ///
@@ -236,9 +236,18 @@ const ESDE_ONLY_MARKER: &str = ".art-from-esde";
 /// exists to stop, made invisible by the fact that it only affects games you
 /// happened to look at before.
 ///
-/// So both directories go once. `covers` refills from ES-DE on demand;
-/// `covers_thumb` is no longer part of the chain at all and refills never.
-/// Nothing here is authored — every file is a copy of something on the server.
+/// So those directories go once. `covers` and `screenshots` refill from ES-DE
+/// on demand; `covers_thumb` is no longer part of the chain at all and refills
+/// never. Nothing here is authored — every file is a copy of something on the
+/// server.
+///
+/// Screenshots matter as much as covers and were missed the first time. They
+/// are the last link of the art chain, so a game with a RomM screenshot cached
+/// counted as having artwork: it showed a screenshot where the rest of the
+/// console showed cartridges, and — worse — the "find missing artwork" pass
+/// skipped it, because from the outside it looked like a game that already had
+/// some. That is why the marker has a number: a machine that ran the first
+/// version has to run this one too.
 ///
 /// Runs once per media root, recorded by a marker file, so it does not delete a
 /// freshly rebuilt cache on the next launch. Returns how many files went.
@@ -253,7 +262,7 @@ pub fn drop_romm_covers(media_root: &Path) -> usize {
         return 0;
     };
     for platform in platforms.flatten() {
-        for kind in [COVERS, COVERS_THUMB] {
+        for kind in [COVERS, COVERS_THUMB, SCREENSHOTS] {
             let dir = platform.path().join(kind);
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 continue;
@@ -746,13 +755,15 @@ mod tests {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
 
-        assert_eq!(drop_romm_covers(&root), 2, "only covers and thumbs go");
+        assert_eq!(drop_romm_covers(&root), 3, "covers, thumbs and screenshots go");
         assert!(!root.join("snes").join(COVERS).join("a.png").exists());
         assert!(!root.join("snes").join(COVERS_THUMB).join("a.png").exists());
+        // Screenshots are the last link of the art chain, so a stale RomM one
+        // counted as artwork and hid the game from the fill-in pass.
+        assert!(!root.join("snes").join(SCREENSHOTS).join("a.png").exists());
         // Everything else is ES-DE's and has to survive; miximages in
         // particular is what the grid now draws from.
         assert!(root.join("snes").join(MIXIMAGES).join("a.png").exists());
-        assert!(root.join("snes").join(SCREENSHOTS).join("a.png").exists());
         assert!(root.join("snes").join("videos").join("a.mp4").exists());
 
         // Second run must do nothing: a rebuilt cache is the normal state on

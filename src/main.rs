@@ -572,7 +572,12 @@ async fn cmd_sync(full: bool) -> Result<()> {
 /// answers an exceeded allowance with a rejection rather than a picture, so a
 /// run that hammers it finishes quickly and fetches nothing — and the account
 /// being spent is the server's, shared with anything else pointed at it.
-async fn cmd_scrape(platform: Option<&str>, limit: Option<usize>, dry_run: bool) -> Result<()> {
+async fn cmd_scrape(
+    platform: Option<&str>,
+    game: Option<&str>,
+    limit: Option<usize>,
+    dry_run: bool,
+) -> Result<()> {
     use romm_desktop::scrape;
 
     let cfg = Config::load()?;
@@ -581,6 +586,21 @@ async fn cmd_scrape(platform: Option<&str>, limit: Option<usize>, dry_run: bool)
     let media_root = cfg.media_dir();
 
     let mut todo = scrape::missing(&store, &media_root, platform)?;
+    // A single game is asked for by name, and the point of asking is usually to
+    // see whether the route works at all — so it is *not* filtered by whether
+    // the game already has artwork. Re-fetching one on purpose is the whole
+    // request.
+    if let Some(term) = game {
+        let want = term.to_lowercase();
+        let rows = match platform {
+            Some(p) => store.roms_for(p)?,
+            None => store.all_roms()?,
+        };
+        todo = rows.into_iter().filter(|r| r.name.to_lowercase().contains(&want)).collect();
+        if todo.is_empty() {
+            bail!("no game matches {term:?}");
+        }
+    }
     let total_missing = todo.len();
     if let Some(n) = limit {
         todo.truncate(n);
@@ -1528,6 +1548,9 @@ enum Command {
         /// One platform, e.g. `megadrive`. Omit for the whole library.
         #[arg(long)]
         platform: Option<String>,
+        /// A single game, by name. For trying the route before a long run.
+        #[arg(long)]
+        game: Option<String>,
         /// Stop after this many, for a look before committing to a long run.
         #[arg(long)]
         limit: Option<usize>,
@@ -1782,8 +1805,8 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::Scrape { platform, limit, dry_run } => {
-            cmd_scrape(platform.as_deref(), limit, dry_run).await
+        Command::Scrape { platform, game, limit, dry_run } => {
+            cmd_scrape(platform.as_deref(), game.as_deref(), limit, dry_run).await
         }
         Command::HashParity => {
             let cfg = Config::load()?;
