@@ -67,6 +67,8 @@ pub struct Report {
     pub box_only: usize,
     /// Set the first time the server refused a write.
     pub needs_write_scope: bool,
+    /// Covers pushed back to the server, replacing whatever it had.
+    pub covers_pushed: usize,
 }
 
 impl Report {
@@ -79,6 +81,9 @@ impl Report {
             self.unmatched,
             if self.failed > 0 { format!(", {} failed", self.failed) } else { String::new() },
         );
+        if self.covers_pushed > 0 {
+            out.push_str(&format!("; {} cover(s) pushed to the server", self.covers_pushed));
+        }
         if self.needs_write_scope {
             out.push_str(&format!(
                 "\n{} game(s) got the box only. The rest of the set — cartridge, \
@@ -233,6 +238,8 @@ pub async fn fill_one(
     };
 
     let mut landed = false;
+    // Kept so the server's own copy can be replaced with the same picture.
+    let mut cover: Option<Vec<u8>> = None;
     for (kind, url) in media_urls {
         // Straight to ScreenScraper, at the address the server gave us, and
         // with no Authorization header: that is our server's credential, not
@@ -248,16 +255,33 @@ pub async fn fill_one(
         }
         let dir = media_root.join(&row.platform_slug).join(kind);
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(format!("{stem}.{}", extension_for(kind, &bytes))), &bytes)?;
+        let file_name = format!("{stem}.{}", extension_for(kind, &bytes));
+        std::fs::write(dir.join(&file_name), &bytes)?;
+        media::record_scraped(media_root, &row.platform_slug, kind, &file_name);
+        if kind == media::COVERS {
+            cover = Some(bytes.to_vec());
+        }
         landed = true;
     }
 
-    if landed {
-        report.fetched += 1;
-    } else {
+    if !landed {
         report.no_art += 1;
+        return Ok(false);
     }
-    Ok(landed)
+    report.fetched += 1;
+
+    // Put the same picture on the server, so the RomM web interface and any
+    // other client show what this app shows rather than whichever earlier
+    // scrape happened to win. Never fatal: the art is already on disk here, and
+    // failing to share it is not a reason to call the game a failure.
+    if let Some(bytes) = cover {
+        match client.upload_cover(row.id, &format!("{stem}.png"), bytes).await {
+            Ok(true) => report.covers_pushed += 1,
+            Ok(false) => report.needs_write_scope = true,
+            Err(_) => {}
+        }
+    }
+    Ok(true)
 }
 
 /// The extension to save under, read from the bytes rather than the URL.
@@ -435,5 +459,14 @@ mod tests {
         let msg = r.describe();
         assert!(!msg.contains("roms.write"), "{msg}");
         assert!(!msg.contains("box only"), "{msg}");
+    }
+
+    /// Pushing covers back is worth reporting, and a run that pushed none must
+    /// not claim to have.
+    #[test]
+    fn covers_pushed_back_are_counted_only_when_there_were_some() {
+        let r = Report { fetched: 12, covers_pushed: 12, ..Default::default() };
+        assert!(r.describe().contains("12 cover(s) pushed"), "{}", r.describe());
+        assert!(!Report { fetched: 12, ..Default::default() }.describe().contains("pushed"));
     }
 }

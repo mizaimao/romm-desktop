@@ -317,6 +317,33 @@ pub async fn ensure_esde(
     None
 }
 
+/// Everything this app scraped itself, as paths relative to the media root.
+///
+/// The rest of `downloaded_media` is a copy of what is already on the server —
+/// re-fetchable, and pointless to send back. These files are the ones that
+/// exist nowhere else, so anything that later pushes artwork onto the server's
+/// ES-DE tree needs to know which they are, and a folder of mixed origins
+/// cannot say.
+///
+/// A plain list, at the root of the media folder, so it can be handed to rsync
+/// or read by eye without this app.
+const SCRAPED_MANIFEST: &str = ".scraped.txt";
+
+/// Note a file this app fetched from ScreenScraper.
+///
+/// Appends rather than rewrites: a run is thousands of files and holding the
+/// whole list in memory to rewrite it each time buys nothing. Duplicates are
+/// possible if a game is scraped twice and are the reader's problem — a sorted
+/// unique is one `sort -u` away, and losing an entry matters more than
+/// repeating one.
+pub fn record_scraped(media_root: &Path, platform: &str, kind: &str, file_name: &str) {
+    use std::io::Write as _;
+    let path = media_root.join(SCRAPED_MANIFEST);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{platform}/{kind}/{file_name}");
+    }
+}
+
 /// Marker recording that the cache has been cleared of RomM-sourced artwork.
 const ESDE_ONLY_MARKER: &str = ".art-from-esde-2";
 
@@ -965,6 +992,31 @@ mod tests {
         assert_eq!(esde_dirs_learned(&root, "arcade").len(), 2);
 
         clear_art_index(&root, "arcade");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The rest of the media folder is a copy of what the server already has,
+    /// so a later push needs to know which files exist nowhere else. A folder
+    /// of mixed origins cannot say, and getting this wrong means either
+    /// uploading the server's own art back to it or losing the scraped art.
+    #[test]
+    fn the_manifest_records_a_path_the_media_root_can_be_walked_with() {
+        let root = std::env::temp_dir().join("romm-scraped-manifest");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        record_scraped(&root, "megadrive", COVERS, "Road Rash (USA, Europe).png");
+        record_scraped(&root, "arcade", PHYSICALMEDIA, "colony7.png");
+
+        let text = std::fs::read_to_string(root.join(SCRAPED_MANIFEST)).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "appended, not overwritten: {lines:?}");
+        assert_eq!(lines[0], "megadrive/covers/Road Rash (USA, Europe).png");
+        // Relative to the media root, so it joins onto either end of a copy.
+        for line in &lines {
+            assert!(!line.starts_with('/'), "{line} is absolute");
+            assert_eq!(line.split('/').count(), 3, "{line} is not platform/kind/file");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 }

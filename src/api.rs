@@ -556,6 +556,38 @@ impl Client {
         Ok(true)
     }
 
+    /// Replace a game's cover on the server with an image we hold.
+    ///
+    /// So the RomM web interface, and anything else pointed at the server,
+    /// shows the same picture this app does rather than whatever earlier
+    /// scrape happened to win. The server re-encodes what it is given.
+    ///
+    /// `Ok(false)` for a refusal, matching `set_screenscraper_match`: a token
+    /// without write permission should slow nothing down and stop nothing.
+    pub async fn upload_cover(&self, rom_id: i64, file_name: &str, bytes: Vec<u8>) -> Result<bool> {
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(file_name.to_owned())
+            .mime_str("image/png")?;
+        let resp = self
+            .http
+            .put(format!("{}/api/roms/{rom_id}", self.base))
+            .header("Authorization", self.auth())
+            .multipart(reqwest::multipart::Form::new().part("artwork", part))
+            .send()
+            .await
+            .with_context(|| format!("uploading cover for rom {rom_id}"))?;
+
+        if resp.status() == reqwest::StatusCode::FORBIDDEN
+            || resp.status() == reqwest::StatusCode::UNAUTHORIZED
+        {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            bail!("PUT /api/roms/{rom_id} (artwork) -> {}", resp.status());
+        }
+        Ok(true)
+    }
+
     pub async fn identify(&self, rom_id: i64, name: &str) -> Result<Vec<Match>> {
         let path = format!(
             "/api/search/roms?rom_id={rom_id}&search_by=name&search_term={}",
