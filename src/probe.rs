@@ -31,8 +31,19 @@ use crate::retroarch::RetroArch;
 /// What a single (game, core) probe concluded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
-    /// The core loaded the content and ran frames.
+    /// The core loaded the content and ran frames, with no complaint about the
+    /// romset.
     Ran,
+    /// The core started the game but said files were missing from the romset.
+    ///
+    /// Its own category because it is neither a pass nor a refusal, and calling
+    /// it either is wrong in a way that matters: the emulator is up, something
+    /// is on screen, and the game is running with pieces absent — wrong
+    /// graphics, no sound, a crash three levels in. Counting these as successes
+    /// is how a set gets called healthy while being quietly broken.
+    RanWithMissingFiles,
+    /// A BIOS or device romset, which is not a game and cannot be played.
+    IsBios,
     /// The core refused the content — wrong system, missing romset files,
     /// version mismatch.
     RefusedContent,
@@ -46,6 +57,8 @@ impl Verdict {
     pub fn label(self) -> &'static str {
         match self {
             Verdict::Ran => "ran",
+            Verdict::RanWithMissingFiles => "ran, romset incomplete",
+            Verdict::IsBios => "not a game (BIOS)",
             Verdict::RefusedContent => "refused content",
             Verdict::CoreFailed => "core failed to load",
             Verdict::Inconclusive => "inconclusive",
@@ -127,9 +140,50 @@ pub fn probe_one(ra: &RetroArch, rom: &Path, core: &str, frames: u32, scratch: &
 ///
 /// Order matters: a failure line is conclusive even though the log also
 /// contains the "Content ran for" line that a success would produce.
+/// The name the core itself knows the game by, from its startup line.
+///
+/// FBNeo announces `Driver X was successfully started : game's full name is Y`.
+/// That Y is the arcade database's own title, which is the honest thing to
+/// check a library's labelling against — it comes from the emulator that will
+/// run it, not from a scraper.
+pub fn core_title(log: &str) -> Option<String> {
+    log.lines()
+        .find_map(|l| l.split("game's full name is ").nth(1))
+        .map(|s| s.trim().trim_end_matches('.').to_owned())
+}
+
+/// Phrases each core uses when a romset is incomplete.
+///
+/// Taken from the core binaries rather than guessed. The FBNeo one is the case
+/// that matters most: the game starts, so every signal short of reading this
+/// line says success.
+const MISSING_FILE_MARKERS: &[&str] = &[
+    // FBNeo
+    "romsets is missing files",
+    "Missing files, aborting",
+    // MAME 2003+ and MAME
+    "Required files are missing",
+    "NOT FOUND",
+    "WRONG CHECKSUM",
+];
+
 pub fn read_verdict(log: &str) -> (Verdict, String) {
     let mut ran_line = None;
+    let mut missing = None;
+    let mut started = None;
+
     for line in log.lines() {
+        // A BIOS is not a game. FBNeo says so outright, and without this they
+        // read as refusals and look like broken dumps.
+        if line.contains("Bioses aren't meant to be launched this way") {
+            return (Verdict::IsBios, line.trim().to_owned());
+        }
+        if MISSING_FILE_MARKERS.iter().any(|m| line.contains(m)) {
+            missing = Some(line.trim().to_owned());
+        }
+        if line.contains("was successfully started") {
+            started = Some(line.trim().to_owned());
+        }
         if line.contains("[Content]: Failed to load content")
             || line.contains("Failed to load content")
         {
@@ -146,6 +200,12 @@ pub fn read_verdict(log: &str) -> (Verdict, String) {
         }
     }
 
+    // An incomplete romset outranks everything below it. The game may well have
+    // started; that is exactly the case this verdict exists to name.
+    if let Some(l) = missing {
+        return (Verdict::RanWithMissingFiles, l);
+    }
+
     match ran_line {
         // "00 hours, 00 minutes, 00 seconds" means it never actually emulated
         // anything, which is a refusal the core did not log explicitly.
@@ -153,7 +213,11 @@ pub fn read_verdict(log: &str) -> (Verdict, String) {
             (Verdict::RefusedContent, l)
         }
         Some(l) => (Verdict::Ran, l),
-        None => (Verdict::Inconclusive, "no verdict line in the log".to_owned()),
+        // The core said it started but RetroArch never wrote a runtime line.
+        None => match started {
+            Some(l) => (Verdict::Ran, l),
+            None => (Verdict::Inconclusive, "no verdict line in the log".to_owned()),
+        },
     }
 }
 
@@ -188,4 +252,76 @@ pub fn probe_cores(
 /// rather than a hidden system temp dir.
 pub fn scratch_dir(library_root: &str) -> PathBuf {
     PathBuf::from(library_root).join("probe")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The case that has been miscounted repeatedly: the game *starts*, the
+    /// runtime is non-zero, RetroArch is happy — and the romset is incomplete.
+    /// Every signal short of reading the core's own line says success.
+    #[test]
+    fn a_game_that_starts_with_files_missing_is_not_a_pass() {
+        let log = "[libretro INFO] [FBNeo] Driver kof98 was successfully started : game's full name is The King of Fighters '98\n\
+             [libretro INFO] [FBNeo] This game is known but one of your romsets is missing files for THIS VERSION of FBNeo.\n\
+             [INFO] [Core]: Content ran for a total of: 00 hours, 00 minutes, 03 seconds.";
+        let (v, _) = read_verdict(log);
+        assert_eq!(v, Verdict::RanWithMissingFiles);
+        assert!(!v.ok(), "an incomplete romset must never count as running");
+    }
+
+    #[test]
+    fn mames_wording_for_the_same_thing_is_caught_too() {
+        for line in [
+            "[libretro INFO] Required files are missing, the game cannot be run.",
+            "[libretro INFO] [MAME 2003+] gfx1.rom     NOT FOUND",
+            "[libretro INFO] WRONG CHECKSUM for rom foo.bin",
+        ] {
+            let log = format!("{line}\n[INFO] [Core]: Content ran for a total of: 00 hours, 00 minutes, 04 seconds.");
+            assert_eq!(read_verdict(&log).0, Verdict::RanWithMissingFiles, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_clean_run_is_still_a_pass() {
+        let log = "[libretro INFO] [FBNeo] Driver kovsh was successfully started : game's full name is Knights of Valour Super Heroes\n\
+             [libretro INFO] [FBNeo] No missing files, proceeding\n\
+             [INFO] [Core]: Content ran for a total of: 00 hours, 00 minutes, 01 seconds.";
+        let (v, _) = read_verdict(log);
+        assert_eq!(v, Verdict::Ran);
+        assert!(v.ok());
+    }
+
+    /// "No missing files, proceeding" contains the word missing. Matching it
+    /// would turn every healthy romset into a failure.
+    #[test]
+    fn the_reassuring_message_is_not_read_as_a_complaint() {
+        let log = "[libretro INFO] [FBNeo] No missing files, proceeding\n\
+             [INFO] [Core]: Content ran for a total of: 00 hours, 00 minutes, 02 seconds.";
+        assert_eq!(read_verdict(log).0, Verdict::Ran);
+    }
+
+    #[test]
+    fn a_bios_is_reported_as_a_bios_rather_than_a_broken_game() {
+        let log = "[libretro INFO] [FBNeo] Bioses aren't meant to be launched this way";
+        let (v, _) = read_verdict(log);
+        assert_eq!(v, Verdict::IsBios);
+        assert!(!v.ok());
+    }
+
+    #[test]
+    fn zero_runtime_is_still_a_refusal() {
+        let log = "[INFO] [Core]: Content ran for a total of: 00 hours, 00 minutes, 00 seconds.";
+        assert_eq!(read_verdict(log).0, Verdict::RefusedContent);
+    }
+
+    /// The core knows what the game is really called, which is the honest thing
+    /// to check a library's labelling against.
+    #[test]
+    fn the_cores_own_title_is_recoverable_from_the_log() {
+        let log = "[libretro INFO] [FBNeo] Driver mslug was successfully started : game's full name is Metal Slug - Super Vehicle-001";
+        assert_eq!(core_title(log).as_deref(), Some("Metal Slug - Super Vehicle-001"));
+        assert_eq!(core_title("nothing here"), None);
+    }
 }
