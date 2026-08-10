@@ -61,18 +61,34 @@ pub struct Report {
     /// The server could not identify the file at all.
     pub unmatched: usize,
     pub failed: usize,
+    /// Games that got only a box because the server would not accept the
+    /// match. Counted rather than reported per game: it is one cause with one
+    /// fix, and saying it 2,700 times is not 2,700 pieces of information.
+    pub box_only: usize,
+    /// Set the first time the server refused a write.
+    pub needs_write_scope: bool,
 }
 
 impl Report {
     pub fn describe(&self) -> String {
-        format!(
+        let mut out = format!(
             "{} fetched, {} already had art, {} not on ScreenScraper, {} unidentified{}",
             self.fetched,
             self.had_art,
             self.no_art,
             self.unmatched,
             if self.failed > 0 { format!(", {} failed", self.failed) } else { String::new() },
-        )
+        );
+        if self.needs_write_scope {
+            out.push_str(&format!(
+                "\n{} game(s) got the box only. The rest of the set — cartridge, \
+                 miximage, marquee — needs the server to record the match, and \
+                 this token may not write. Add `roms.write` to it in RomM under \
+                 Settings, Client tokens, then run this again.",
+                self.box_only
+            ));
+        }
+        out
     }
 }
 
@@ -162,28 +178,58 @@ pub async fn fill_one(
         Err(_) => Vec::new(),
     };
 
-    // Nothing stored means the server matched this game some other way, or not
-    // at all. The search endpoint will still build a 2D box URL on demand.
-    let media_urls = if media_urls.is_empty() {
-        match client.identify(row.id, &row.name).await {
-            Ok(matches) => match matches.iter().find(|m| !m.ss_url_cover.is_empty()) {
-                Some(hit) => vec![(media::COVERS, hit.ss_url_cover.clone())],
-                None => {
-                    if matches.is_empty() {
-                        report.unmatched += 1;
-                    } else {
-                        report.no_art += 1;
-                    }
-                    return Ok(false);
-                }
-            },
+    // Nothing stored means the server identified this game some other way —
+    // IGDB, LaunchBox — or not at all. Ask it what ScreenScraper thinks the
+    // file is, and then tell it, so it resolves and keeps the whole set. That
+    // is the same thing RomM's own match button does, and the only route to
+    // more than a single box.
+    let media_urls = if !media_urls.is_empty() {
+        media_urls
+    } else {
+        let matches = match client.identify(row.id, &row.name).await {
+            Ok(m) => m,
             Err(_) => {
                 report.failed += 1;
                 return Ok(false);
             }
+        };
+        let Some(hit) = matches.iter().find(|m| m.ss_id.is_some() || !m.ss_url_cover.is_empty())
+        else {
+            if matches.is_empty() {
+                report.unmatched += 1;
+            } else {
+                report.no_art += 1;
+            }
+            return Ok(false);
+        };
+
+        let mut full = Vec::new();
+        if let Some(ss_id) = hit.ss_id {
+            match client.set_screenscraper_match(row.id, ss_id).await {
+                // Recorded. Read back what it resolved, which is the whole set.
+                Ok(true) => {
+                    if let Ok(m) = client.rom_media(row.id).await {
+                        full = urls_for(&m, videos);
+                    }
+                }
+                // Not allowed to write. Carry on with the one URL that needs no
+                // permission, and let the report say why once.
+                Ok(false) => {
+                    report.needs_write_scope = true;
+                }
+                Err(_) => {}
+            }
         }
-    } else {
-        media_urls
+        if full.is_empty() {
+            if hit.ss_url_cover.is_empty() {
+                report.no_art += 1;
+                return Ok(false);
+            }
+            report.box_only += 1;
+            vec![(media::COVERS, hit.ss_url_cover.clone())]
+        } else {
+            full
+        }
     };
 
     let mut landed = false;
@@ -365,5 +411,29 @@ mod tests {
         std::fs::write(root.join("snes").join(media::SCREENSHOTS).join("Game.jpg"), b"x").unwrap();
         assert!(has(media::SCREENSHOTS), "a screenshot counts as artwork here");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A permission problem is one cause with one fix. Reported once, with the
+    /// fix in it — not as 2,700 identical failures, and not silently as a run
+    /// that simply produced worse art than it should have.
+    #[test]
+    fn a_token_that_cannot_write_is_explained_once_and_actionably() {
+        let r = Report { fetched: 900, box_only: 900, needs_write_scope: true, ..Default::default() };
+        let msg = r.describe();
+        assert!(msg.contains("900 fetched"), "{msg}");
+        assert!(msg.contains("roms.write"), "the message has to name the scope: {msg}");
+        assert!(msg.contains("Client tokens"), "and where to set it: {msg}");
+        // Once, not per game.
+        assert_eq!(msg.matches("roms.write").count(), 1, "{msg}");
+    }
+
+    /// A run where the server accepted every match must not mention scopes at
+    /// all: a warning that fires on success trains you to ignore it.
+    #[test]
+    fn a_clean_run_says_nothing_about_permissions() {
+        let r = Report { fetched: 40, ..Default::default() };
+        let msg = r.describe();
+        assert!(!msg.contains("roms.write"), "{msg}");
+        assert!(!msg.contains("box only"), "{msg}");
     }
 }

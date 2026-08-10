@@ -523,6 +523,39 @@ impl Client {
         Ok(rom.ss_metadata.unwrap_or_default())
     }
 
+    /// Tell the server which ScreenScraper game a file is.
+    ///
+    /// The server then resolves and stores ScreenScraper's whole media set for
+    /// it — the same thing RomM's own "match" button does, and the only way to
+    /// get more than a single box for a game it identified from somewhere else.
+    /// Reversible from RomM with `unmatch_metadata`.
+    ///
+    /// `Ok(false)` means the token is not allowed to write. That is not an
+    /// error worth stopping a run for: the caller falls back to the one URL it
+    /// can get without writing, and says so once at the end rather than 2,700
+    /// times.
+    pub async fn set_screenscraper_match(&self, rom_id: i64, ss_id: i64) -> Result<bool> {
+        let form = reqwest::multipart::Form::new().text("ss_id", ss_id.to_string());
+        let resp = self
+            .http
+            .put(format!("{}/api/roms/{rom_id}", self.base))
+            .header("Authorization", self.auth())
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("matching rom {rom_id} to ScreenScraper {ss_id}"))?;
+
+        if resp.status() == reqwest::StatusCode::FORBIDDEN
+            || resp.status() == reqwest::StatusCode::UNAUTHORIZED
+        {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            bail!("PUT /api/roms/{rom_id} -> {}", resp.status());
+        }
+        Ok(true)
+    }
+
     pub async fn identify(&self, rom_id: i64, name: &str) -> Result<Vec<Match>> {
         let path = format!(
             "/api/search/roms?rom_id={rom_id}&search_by=name&search_term={}",
