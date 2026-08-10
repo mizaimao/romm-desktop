@@ -198,7 +198,13 @@ pub async fn fill_one(
                 return Ok(false);
             }
         };
-        let Some(hit) = matches.iter().find(|m| m.ss_id.is_some() || !m.ss_url_cover.is_empty())
+        let Some(hit) = matches
+            .iter()
+            .filter(|m| {
+                m.name.as_deref().is_none_or(|n| plausible_match(&row.name, n))
+                    || m.name.as_deref().is_none_or(|n| plausible_match(&stem, n))
+            })
+            .find(|m| m.ss_id.is_some() || !m.ss_url_cover.is_empty())
         else {
             if matches.is_empty() {
                 report.unmatched += 1;
@@ -300,6 +306,61 @@ fn extension_for(kind: &str, bytes: &[u8]) -> &'static str {
         return "png";
     }
     "jpg"
+}
+
+/// Whether a candidate the server offered is plausibly the same game.
+///
+/// The server returns candidates, not answers, and the top one is sometimes a
+/// different game. It is always the same shape of mistake: a sequel matched to
+/// the original, because the original's name is a prefix of the sequel's and
+/// whatever scores the match does not care about the numeral on the end. On one
+/// console this put Road Rash's box on Road Rash II, PGA Tour Golf's on III,
+/// King of the Monsters' on 2 — and then pushed each one to the server as that
+/// game's cover, which is worse than leaving it blank.
+///
+/// So the numeral has to agree. Both bare, or both the same: `Road Rash` and
+/// `Road Rash II` do not match, and neither do `HardBall '94` and `HardBall
+/// III`. Names that share no opening word are rejected outright, which is what
+/// catches the pairs that are not sequels at all.
+fn plausible_match(rom_name: &str, candidate: &str) -> bool {
+    let (a, b) = (normalise(rom_name), normalise(candidate));
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if edition(&a) != edition(&b) {
+        return false;
+    }
+    // The first word carries most of a title's identity, and a candidate that
+    // does not share it is not a near miss.
+    a.split(' ').next() == b.split(' ').next()
+}
+
+/// Lowercase, without the bracketed region and revision tags, and without
+/// punctuation — so `Boogerman: A Pick and Flick Adventure` and
+/// `Boogerman - A Pick and Flick Adventure` are the same string.
+fn normalise(name: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    for c in name.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            _ if depth > 0 => {}
+            c if c.is_alphanumeric() || c == '\'' => out.extend(c.to_lowercase()),
+            _ => out.push(' '),
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The thing that tells one entry in a series from another: a trailing number,
+/// a roman numeral, or a year. `None` for a title that has none.
+fn edition(normalised: &str) -> Option<String> {
+    let last = normalised.split(' ').next_back()?;
+    let is_roman = !last.is_empty() && last.chars().all(|c| "ivx".contains(c));
+    let is_number = last.chars().all(|c| c.is_ascii_digit()) && !last.is_empty();
+    let is_year = last.starts_with('\'') && last.len() == 3;
+    (is_roman || is_number || is_year).then(|| last.to_owned())
 }
 
 fn stem_of(fs_name: &str) -> String {
@@ -468,5 +529,56 @@ mod tests {
         let r = Report { fetched: 12, covers_pushed: 12, ..Default::default() };
         assert!(r.describe().contains("12 cover(s) pushed"), "{}", r.describe());
         assert!(!Report { fetched: 12, ..Default::default() }.describe().contains("pushed"));
+    }
+
+    /// The five real collisions from one Mega Drive run. Each put another
+    /// game's box on the shelf and pushed it to the server as that game's
+    /// cover, which is worse than leaving the card blank.
+    #[test]
+    fn a_sequel_is_never_matched_to_the_game_it_follows() {
+        for (rom, candidate) in [
+            ("Road Rash II (USA, Europe)", "Road Rash"),
+            ("PGA Tour Golf III (USA, Europe)", "PGA Tour Golf"),
+            ("HardBall III (USA)", "HardBall '94"),
+            ("King of the Monsters 2 (USA)", "King of the Monsters"),
+            ("Chavez II (USA)", "Boxing Legends of the Ring"),
+        ] {
+            assert!(!plausible_match(rom, candidate), "{rom} accepted {candidate}");
+            // And not the other way round either.
+            assert!(!plausible_match(candidate, rom), "{candidate} accepted {rom}");
+        }
+    }
+
+    /// Rejecting too much is the other failure, and it looks like a scraper
+    /// that simply does not work. Punctuation and region tags differ between
+    /// the filename and every metadata source; none of that is a mismatch.
+    #[test]
+    fn the_same_game_written_differently_still_matches() {
+        for (rom, candidate) in [
+            ("Boogerman - A Pick and Flick Adventure (USA)", "Boogerman: A Pick and Flick Adventure"),
+            ("Road Rash (USA, Europe)", "Road Rash"),
+            ("Sonic The Hedgehog 2 (World)", "Sonic the Hedgehog 2"),
+            ("Streets of Rage II (Japan)", "Streets of Rage II"),
+            ("Aladdin (USA) (Rev A)", "Aladdin"),
+        ] {
+            assert!(plausible_match(rom, candidate), "{rom} rejected {candidate}");
+        }
+    }
+
+    #[test]
+    fn the_numeral_is_what_separates_one_entry_from_the_next() {
+        assert_eq!(edition(&normalise("Road Rash II")), Some("ii".to_owned()));
+        assert_eq!(edition(&normalise("King of the Monsters 2")), Some("2".to_owned()));
+        assert_eq!(edition(&normalise("HardBall '94")), Some("'94".to_owned()));
+        assert_eq!(edition(&normalise("Road Rash")), None);
+        // A title merely ending in a word is not an edition.
+        assert_eq!(edition(&normalise("Streets of Rage")), None);
+    }
+
+    #[test]
+    fn region_tags_and_punctuation_fall_away() {
+        assert_eq!(normalise("Boogerman: A Pick and Flick Adventure (USA) [!]"),
+                   "boogerman a pick and flick adventure");
+        assert_eq!(normalise("Road Rash (USA, Europe)"), "road rash");
     }
 }
