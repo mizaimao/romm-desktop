@@ -634,6 +634,9 @@ async fn cmd_scrape(
         // Deliberate. See the note above about whose allowance this is.
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
+    for platform in todo.iter().map(|r| r.platform_slug.as_str()).collect::<std::collections::BTreeSet<_>>() {
+        romm_desktop::media::clear_art_index(&media_root, platform);
+    }
     println!("{}", report.describe());
     Ok(())
 }

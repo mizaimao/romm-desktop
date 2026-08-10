@@ -764,6 +764,11 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
             }
         }
     }
+    // Keep what this batch learned, so scrolling back over the same cards — and
+    // the next launch — costs nothing.
+    for platform in rows.iter().map(|r| r.platform_slug.as_str()).collect::<std::collections::BTreeSet<_>>() {
+        media::save_art_index(&state.media_dir, platform);
+    }
     Ok(out)
 }
 
@@ -901,6 +906,10 @@ async fn scrape_missing(
             );
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    // Those games have art now, so what the grid learned about them is wrong.
+    for platform in todo.iter().map(|r| r.platform_slug.as_str()).collect::<std::collections::BTreeSet<_>>() {
+        media::clear_art_index(&state.media_dir, platform);
     }
     Ok(report.describe())
 }

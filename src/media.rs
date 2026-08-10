@@ -85,6 +85,80 @@ pub fn art_chain(preferred: &str) -> Vec<&str> {
     chain
 }
 
+/// What a platform's art lookups have already learned.
+///
+/// Two facts, both cheap to record and expensive to rediscover:
+///
+/// * which games have no ES-DE art at all, so they are asked about once
+///   instead of on every scroll past them
+/// * which ES-DE directory this platform's media actually lives in, so the
+///   alias that never matches stops being tried first
+///
+/// Without this, one screen of arcade cards costs about 1,900 requests —
+/// nineteen per game, because a miss walks four media types across two
+/// directory names across three extensions before giving up — and scrolling
+/// back over the same cards costs the same again. Measured on this library:
+/// 4.2 seconds for a hundred cards on a quiet LAN, and it is the whole reason
+/// the grid looks like the server is not answering.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct ArtIndex {
+    /// File stems with no ES-DE art of any kind.
+    no_art: std::collections::HashSet<String>,
+    /// The ES-DE directory that has actually produced art here.
+    dir: Option<String>,
+}
+
+/// Per-platform indexes, loaded once and shared. Behind a mutex because the
+/// grid resolves eight cards at a time.
+static INDEX: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, ArtIndex>>,
+> = std::sync::OnceLock::new();
+
+fn index_path(media_root: &Path, platform: &str) -> std::path::PathBuf {
+    media_root.join(platform).join(".art-index.json")
+}
+
+fn with_index<T>(
+    media_root: &Path,
+    platform: &str,
+    f: impl FnOnce(&mut ArtIndex) -> T,
+) -> T {
+    let cell = INDEX.get_or_init(Default::default);
+    let mut map = cell.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = map.entry(platform.to_owned()).or_insert_with(|| {
+        std::fs::read_to_string(index_path(media_root, platform))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    });
+    f(entry)
+}
+
+/// Persist what has been learned. Cheap enough to call after a batch of cards.
+///
+/// Best-effort throughout: this is an optimisation, and a media root that
+/// cannot be written to should mean a slower grid, not a broken one.
+pub fn save_art_index(media_root: &Path, platform: &str) {
+    let Some(cell) = INDEX.get() else { return };
+    let map = cell.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(entry) = map.get(platform) else { return };
+    let path = index_path(media_root, platform);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(text) = serde_json::to_string(entry) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// Forget what a platform has learned, after new art has been fetched for it.
+pub fn clear_art_index(media_root: &Path, platform: &str) {
+    if let Some(cell) = INDEX.get() {
+        cell.lock().unwrap_or_else(|e| e.into_inner()).remove(platform);
+    }
+    let _ = std::fs::remove_file(index_path(media_root, platform));
+}
+
 /// ES-DE system directories to search for a RomM platform's media.
 ///
 /// The two naming schemes agree almost everywhere, and where they do not it is
@@ -100,6 +174,20 @@ pub fn esde_dirs(platform: &str) -> Vec<&str> {
         _ => [].as_slice(),
     });
     out
+}
+
+/// As [`esde_dirs`], with the one that has actually worked here tried first.
+///
+/// Arcade is why: its media lives under `mame`, so trying `arcade` first means
+/// every single lookup pays for a directory that has never once answered.
+fn esde_dirs_learned(media_root: &Path, platform: &str) -> Vec<String> {
+    let mut dirs: Vec<String> = esde_dirs(platform).into_iter().map(str::to_owned).collect();
+    if let Some(known) = with_index(media_root, platform, |i| i.dir.clone())
+        && let Some(at) = dirs.iter().position(|d| *d == known)
+    {
+        dirs.swap(0, at);
+    }
+    dirs
 }
 
 /// ES-DE media subdirectory names, in the order the UI prefers them.
@@ -208,13 +296,18 @@ pub async fn ensure_esde(
     let client = client?;
     let exts = ESDE_TYPES.iter().find(|(k, _)| *k == kind).map(|(_, e)| *e)?;
 
-    for dir in esde_dirs(platform) {
+    for dir in esde_dirs_learned(media_root, platform) {
         for ext in exts {
             let server_path = format!("{ESDE_BASE}/{dir}/{kind}/{stem}.{ext}");
             // Saved under the platform, not the directory it was found in, so
             // every later lookup finds it without knowing about the aliasing.
             match fetch(client, &server_path, media_root, platform, stem, kind).await {
-                Ok(p) => return Some(p),
+                Ok(p) => {
+                    // Remember which name answered, so the alias that never
+                    // does stops being tried first.
+                    with_index(media_root, platform, |i| i.dir = Some(dir.clone()));
+                    return Some(p);
+                }
                 // A miss here is ordinary: not every game has every media
                 // type, and we are probing extensions.
                 Err(_) => continue,
@@ -292,10 +385,27 @@ pub async fn ensure_art(
     stem: &str,
     preferred: &str,
 ) -> Option<PathBuf> {
+    // Anything already here is free, and has to be checked before the index is
+    // consulted: a game recorded as having none may since have been scraped.
+    for kind in art_chain(preferred) {
+        if let Some(p) = find_local(media_root, platform, stem, kind) {
+            return Some(p);
+        }
+    }
+    // Asked about once, not on every scroll past it.
+    if with_index(media_root, platform, |i| i.no_art.contains(stem)) {
+        return None;
+    }
+
     for kind in art_chain(preferred) {
         if let Some(p) = ensure_esde(client, media_root, platform, stem, kind).await {
             return Some(p);
         }
+    }
+    // Only worth recording when there was a server to ask. Offline, everything
+    // would look absent and the whole library would be written off.
+    if client.is_some() {
+        with_index(media_root, platform, |i| i.no_art.insert(stem.to_owned()));
     }
     None
 }
@@ -806,5 +916,55 @@ mod tests {
             );
         }
         assert_eq!(LIST_ART_CHOICES[0].0, PHYSICALMEDIA, "cartridge art is the default");
+    }
+
+    /// The symptom this exists for: one screen of arcade cards costs about
+    /// nineteen requests per game, and scrolling back over the same cards used
+    /// to cost the same again.
+    #[tokio::test]
+    async fn a_game_with_no_art_is_only_asked_about_once() {
+        let root = std::env::temp_dir().join("romm-art-index");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("snes")).unwrap();
+
+        // No client: nothing can be asked, and nothing may be recorded either.
+        assert!(ensure_art(None, &root, "snes", "Nope", MIXIMAGES).await.is_none());
+        assert!(
+            !with_index(&root, "snes", |i| i.no_art.contains("Nope")),
+            "offline, every game looks absent — writing that down would blank the library"
+        );
+
+        // Recorded by hand, since a real miss needs a server to have answered.
+        with_index(&root, "snes", |i| i.no_art.insert("Nope".to_owned()));
+        save_art_index(&root, "snes");
+        assert!(root.join("snes").join(".art-index.json").is_file());
+
+        // Art that turns up later has to win over the record of its absence,
+        // or a scrape would fill in files the grid then refuses to look at.
+        std::fs::create_dir_all(root.join("snes").join(MIXIMAGES)).unwrap();
+        std::fs::write(root.join("snes").join(MIXIMAGES).join("Nope.png"), b"x").unwrap();
+        assert!(ensure_art(None, &root, "snes", "Nope", MIXIMAGES).await.is_some());
+
+        clear_art_index(&root, "snes");
+        assert!(!root.join("snes").join(".art-index.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Arcade media lives under `mame`, so trying `arcade` first means every
+    /// lookup pays for a directory that has never once answered.
+    #[test]
+    fn the_directory_that_answers_gets_tried_first() {
+        let root = std::env::temp_dir().join("romm-art-dirhint");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        assert_eq!(esde_dirs_learned(&root, "arcade")[0], "arcade", "the platform's own name by default");
+        with_index(&root, "arcade", |i| i.dir = Some("mame".to_owned()));
+        assert_eq!(esde_dirs_learned(&root, "arcade")[0], "mame");
+        // Both are still tried; the hint reorders, it does not exclude.
+        assert_eq!(esde_dirs_learned(&root, "arcade").len(), 2);
+
+        clear_art_index(&root, "arcade");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
