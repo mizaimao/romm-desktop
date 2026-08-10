@@ -36,8 +36,10 @@ echo "==> pushing $SRC to $HOST:$STAGING"
 # The dot-files are this app's own bookkeeping — the negative-lookup index, the
 # scraped manifest, the cache-cleared marker. They are about this machine and
 # mean nothing on the server.
-rsync -a --info=progress2 --human-readable \
-  --ignore-existing \
+# Plain flags only. macOS ships openrsync, which speaks protocol 29 and has
+# none of rsync 3's niceties -- --info=progress2 is not a flag it knows, and it
+# answers an unknown flag with a usage dump rather than a message saying so.
+rsync -a --ignore-existing \
   --exclude '.*' \
   --exclude 'covers_thumb/' \
   -e "/usr/bin/ssh -o BatchMode=yes" \
@@ -53,10 +55,14 @@ through docker because you are in the docker group and sudo is not open:
 
   ssh $HOST
   docker run --rm -v /home/frank:/h alpine \\
-    sh -c 'cp -rn /h/esde-staging/. $LIVE/ && echo done'
+    sh -c 'cp -rn /h/esde-staging/. /h/romm/resources/esde-media/ && echo done'
 
   # then, once the app shows the art, reclaim the space:
   rm -rf $STAGING
+
+Both paths are written as the container sees them. /home/frank is mounted at /h,
+so a host path on either side of that cp fails with "No such file or directory" —
+which reads like the destination is missing when it is only spelled wrong.
 
 -n keeps anything already on the server: the copy only adds. Both paths are on
 the same disk, so it is fast and needs no second 90 GB.

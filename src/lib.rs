@@ -9,6 +9,7 @@ pub mod arcade;
 pub mod cache;
 pub mod config;
 pub mod coremap;
+pub mod coverage;
 pub mod cores;
 pub mod download;
 pub mod esde;

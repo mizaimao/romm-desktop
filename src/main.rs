@@ -566,6 +566,107 @@ async fn cmd_sync(full: bool) -> Result<()> {
 ///
 /// Sequential transfers waste most of the wall clock on per-request latency
 /// when the files are small — an arcade set averages 4.5 MB.
+/// Report artwork coverage, and what is worth trying to fix.
+async fn cmd_coverage(probe: bool, sample: usize) -> Result<()> {
+    use romm_desktop::coverage::{self, Kind};
+    use std::collections::BTreeMap;
+
+    let cfg = Config::load()?;
+    let store = cache::Cache::open(Path::new(CACHE_DB))?;
+    let media_root = cfg.media_dir();
+    let client = cfg.server.client().ok();
+
+    let mut rows: BTreeMap<String, coverage::Row> = BTreeMap::new();
+    let mut gaps: BTreeMap<String, Vec<cache::RomRow>> = BTreeMap::new();
+
+    for rom in store.all_roms()? {
+        let stem = Path::new(&rom.fs_name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| rom.fs_name.clone());
+        let has_art = media::ART_CHAIN
+            .iter()
+            .any(|k| media::find_local(&media_root, &rom.platform_slug, &stem, k).is_some());
+        let row = rows.entry(rom.platform_slug.clone()).or_default();
+        match coverage::classify(&rom.fs_name) {
+            Kind::Official => {
+                row.official += 1;
+                if has_art {
+                    row.official_with_art += 1;
+                } else {
+                    gaps.entry(rom.platform_slug.clone()).or_default().push(rom);
+                }
+            }
+            Kind::Unofficial => {
+                row.unofficial += 1;
+                if has_art {
+                    row.unofficial_with_art += 1;
+                }
+            }
+        }
+    }
+
+    // Ask the server whether ScreenScraper knows each gap. A sample per
+    // platform rather than all of them: the answer is a rate, and one request
+    // per game across nine thousand is an hour to learn a percentage.
+    if probe && let Some(client) = client.as_ref() {
+        for (platform, missing) in &gaps {
+            let row = rows.get_mut(platform).expect("platform seen above");
+            for rom in missing.iter().take(sample) {
+                let known = client
+                    .identify(rom.id, &rom.name)
+                    .await
+                    .map(|m| m.iter().any(|c| c.ss_id.is_some() || !c.ss_url_cover.is_empty()))
+                    .unwrap_or(false);
+                row.probed += 1;
+                if !known {
+                    row.not_in_database += 1;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            }
+            // Scale the sample up to the whole gap, so the estimate is about
+            // the platform rather than about the first forty names in it.
+            let gap = row.official - row.official_with_art;
+            if row.probed > 0 && gap > row.probed {
+                row.not_in_database = row.not_in_database * gap / row.probed;
+            }
+            println!("  probed {platform}…");
+        }
+        println!();
+    }
+
+    println!(
+        "{:16}{:>8}{:>9}{:>10}{:>12}{:>11}",
+        "platform", "released", "with art", "coverage", "no entry", "scrapeable"
+    );
+    for (platform, r) in &rows {
+        println!(
+            "{:16}{:>8}{:>9}{:>9.0}%{:>12}{:>11}",
+            platform,
+            r.official,
+            r.official_with_art,
+            r.percent(),
+            if probe { r.not_in_database.to_string() } else { "-".to_owned() },
+            if probe { r.worth_scraping().to_string() } else { "-".to_owned() },
+        );
+    }
+    let t = coverage::totals(&rows);
+    println!(
+        "\n{:16}{:>8}{:>9}{:>9.0}%{:>12}{:>11}",
+        "TOTAL",
+        t.official,
+        t.official_with_art,
+        t.percent(),
+        if probe { t.not_in_database.to_string() } else { "-".to_owned() },
+        if probe { t.worth_scraping().to_string() } else { "-".to_owned() },
+    );
+    println!(
+        "\n{} hacks, prototypes and unlicensed dumps excluded ({} of them have art anyway)",
+        t.unofficial, t.unofficial_with_art
+    );
+    Ok(())
+}
+
 /// Fill in artwork for games ES-DE never scraped.
 ///
 /// One at a time and unhurried. ScreenScraper throttles by account tier and
@@ -1566,6 +1667,17 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Artwork coverage, separating gaps that can be filled from dumps that
+    /// could never have art
+    Coverage {
+        /// Ask the server whether ScreenScraper has an entry for each gap.
+        /// Slow — one request per game — so it takes a limit.
+        #[arg(long)]
+        probe: bool,
+        /// How many games to probe per platform.
+        #[arg(long, default_value_t = 40)]
+        sample: usize,
+    },
     /// Check our content_hash implementation against the server's
     HashParity,
     /// Inspect local saves and states
@@ -1816,6 +1928,7 @@ async fn main() -> Result<()> {
         Command::Scrape { platform, game, limit, videos, dry_run } => {
             cmd_scrape(platform.as_deref(), game.as_deref(), limit, videos, dry_run).await
         }
+        Command::Coverage { probe, sample } => cmd_coverage(probe, sample).await,
         Command::HashParity => {
             let cfg = Config::load()?;
             let client =
