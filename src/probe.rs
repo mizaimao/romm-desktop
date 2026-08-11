@@ -96,6 +96,14 @@ config_save_on_exit = \"false\"
 video_driver = \"null\"
 audio_driver = \"null\"
 menu_driver = \"null\"
+# Input too, and for a reason that only shows on a machine without a desktop:
+# RetroArch picks an input driver from the video driver, and with video nulled
+# it finds none and exits with \"Cannot initialize input driver\" -- *after* the
+# core has loaded the game and reported its geometry. On macOS the Cocoa
+# frontend supplies one regardless, so this passed there and failed everywhere
+# else, marking every MAME game a refusal when the frontend was what died.
+input_driver = \"null\"
+joypad_driver = \"null\"
 video_fullscreen = \"false\"
 # A probe must not inherit or write save state, or it would pollute real saves.
 savestate_auto_load = \"false\"
