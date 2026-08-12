@@ -129,7 +129,10 @@ export function paneHtml(id) {
 
       <div class="srow">
         <label>BIOS files</label>
-        <div class="ctl"><button class="set-bios">Download BIOS</button></div>
+        <div class="ctl">
+          <button class="set-bios">Check BIOS</button>
+          <progress class="set-bios-bar" hidden max="1" value="0"></progress>
+        </div>
       </div>
       <p class="hint">Neo Geo, PlayStation and the MAME family will not start
         without these. Optional and only when you ask — it is a few hundred MB.
@@ -207,30 +210,27 @@ export function paneHtml(id) {
         window. Motion at 0 holds it still. Colours left on "theme" follow
         whatever palette is in force.</p>
       <p class="hint set-backdrop-status"></p>`;
-  if (id === "control") return `      <h4>Controller</h4>
-      <p class="hint">Click a button to rebind it. Press the new button on the
-        pad, or Esc to leave it unset.</p>
+  if (id === "control") return `      <h4>Bindings</h4>
+      <p class="hint">Every action with its key and its controller button side
+        by side. Click either to rebind — press the new key or button, or Esc to
+        leave it unset.</p>
       <p class="hint pad-live">No controller detected.</p>
-      ${ACTIONS.map(
-        (a) => `
-        <div class="srow pad-row" data-id="${a.id}">
-          <label>${a.label}</label>
-          <div class="ctl"><button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabel(padFor(a.id))}</button></div>
-        </div>`
-      ).join("")}
-      <footer><button class="set-pad-reset">Reset controller</button></footer>
-
-      <h4>Keyboard</h4>
-      <p class="hint">Click a key to rebind it. Press Esc while rebinding to leave it unset.</p>
-      ${ACTIONS.map(
-        (a) => `
-        <div class="srow key-row" data-id="${a.id}">
-          <label>${a.label}</label>
-          <div class="ctl"><button class="set-key ${keyFor(a.id) ? "" : "unset"}">${keyLabel(keyFor(a.id))}</button></div>
-        </div>`
-      ).join("")}
+      <table class="bindtbl">
+        <thead><tr><th>Action</th><th>Keyboard</th><th>Controller</th></tr></thead>
+        <tbody>
+        ${ACTIONS.map(
+          (a) => `
+          <tr data-id="${a.id}">
+            <td class="bindname">${a.label}</td>
+            <td class="key-cell"><button class="set-key ${keyFor(a.id) ? "" : "unset"}">${keyLabel(keyFor(a.id))}</button></td>
+            <td class="pad-cell"><button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabel(padFor(a.id))}</button></td>
+          </tr>`
+        ).join("")}
+        </tbody>
+      </table>
       <footer>
-        <button class="set-reset">Reset to defaults</button>
+        <button class="set-reset">Reset keyboard</button>
+        <button class="set-pad-reset">Reset controller</button>
       </footer>`;
   return "";
 }
@@ -337,11 +337,27 @@ function wireGeneral(box) {
   // spinner says nothing about whether it is nearly done or barely started.
   const biosBtn = box.querySelector(".set-bios");
   const biosStatus = box.querySelector(".set-bios-status");
-  biosBtn?.addEventListener("click", async () => {
+  const biosBar = box.querySelector(".set-bios-bar");
+
+  // Two presses rather than one. The old button started a sync and said nothing
+  // until the listing came back — indistinguishable from a control that does
+  // nothing — and where the files were already present it did all that work to
+  // report "already complete". Now the first press asks, and downloading is
+  // only offered when there is something to download.
+  let biosPlan = null;
+
+  async function startBios() {
     biosBtn.disabled = true;
-    biosStatus.textContent = "Listing…";
+    biosBar.hidden = false;
+    biosBar.max = biosPlan.total;
+    biosBar.value = 0;
+    // A count alone does not show progress at a glance; the bar does, and the
+    // filename says which one a stall is sitting on.
     const stop = await listen("bios-progress", ({ payload }) => {
-      biosStatus.textContent = String(payload);
+      const [done, total, name] = payload;
+      biosBar.max = total;
+      biosBar.value = done;
+      biosStatus.textContent = `${done}/${total}  ${name}`;
     });
     try {
       biosStatus.textContent = await invoke("sync_bios");
@@ -349,6 +365,31 @@ function wireGeneral(box) {
       biosStatus.textContent = `Failed — ${e}`;
     } finally {
       stop?.();
+      biosBar.hidden = true;
+      biosBtn.disabled = false;
+      biosBtn.textContent = "Check BIOS";
+      biosPlan = null;
+    }
+  }
+
+  biosBtn?.addEventListener("click", async () => {
+    if (biosPlan) return startBios();
+    biosBtn.disabled = true;
+    biosStatus.textContent = "Asking the server…";
+    try {
+      const [total, have, bytes] = await invoke("bios_status");
+      if (have >= total) {
+        biosStatus.textContent = `All ${total} BIOS files are already here.`;
+        biosPlan = null;
+      } else {
+        biosPlan = { total, have, bytes };
+        biosStatus.textContent =
+          `${total - have} of ${total} missing, about ${(bytes / 1e6).toFixed(0)} MB.`;
+        biosBtn.textContent = `Download ${total - have} files`;
+      }
+    } catch (e) {
+      biosStatus.textContent = `Failed — ${e}`;
+    } finally {
       biosBtn.disabled = false;
     }
   });
@@ -534,11 +575,9 @@ function wireAppearance(box) {
 }
 
 function wireControl(box) {
-  // Keyboard rows only — the controller rows below carry .pad-row and hold no
-  // .set-key, so an unscoped selector would find a null button and throw,
-  // taking the whole panel with it.
-  box.querySelectorAll(".key-row").forEach((row) => {
-    const btn = row.querySelector(".set-key");
+  box.querySelectorAll("tr[data-id]").forEach((row) => {
+    const btn = row.querySelector(".key-cell .set-key");
+    if (!btn) return;
     btn.addEventListener("click", () => {
       if (capturing) capturing.btn.textContent = keyLabel(keyFor(capturing.id));
       capturing = { id: row.dataset.id, btn };
@@ -576,8 +615,9 @@ function wireControl(box) {
   };
   requestAnimationFrame(tick);
 
-  box.querySelectorAll(".pad-row").forEach((row) => {
-    const btn = row.querySelector(".set-pad");
+  box.querySelectorAll("tr[data-id]").forEach((row) => {
+    const btn = row.querySelector(".pad-cell .set-pad");
+    if (!btn) return;
     btn.addEventListener("click", () => {
       stopPadCapture();
       btn.textContent = "press a button…";
@@ -624,9 +664,9 @@ function startPadCapture(id, btn) {
 }
 
 function redrawPadRows() {
-  document.querySelectorAll("#settings .pad-row").forEach((row) => {
-    const b = row.querySelector(".set-pad");
-    if (b.classList.contains("capturing")) return;
+  document.querySelectorAll("#settings tr[data-id]").forEach((row) => {
+    const b = row.querySelector(".pad-cell .set-pad");
+    if (!b || b.classList.contains("capturing")) return;
     const i = padFor(row.dataset.id);
     b.textContent = padLabel(i);
     b.classList.toggle("unset", i === null);
@@ -661,9 +701,9 @@ export function captureKey(ev) {
   capturing = null;
 
   // Another row may have lost its key to this one; redraw them all.
-  document.querySelectorAll("#settings .set-row:not(.pad-row)").forEach((row) => {
-    const b = row.querySelector(".set-key");
-    if (b.classList.contains("capturing")) return;
+  document.querySelectorAll("#settings tr[data-id]").forEach((row) => {
+    const b = row.querySelector(".key-cell .set-key");
+    if (!b || b.classList.contains("capturing")) return;
     const k = keyFor(row.dataset.id);
     b.textContent = keyLabel(k);
     b.classList.toggle("unset", !k);

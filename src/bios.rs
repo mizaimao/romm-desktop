@@ -183,6 +183,38 @@ fn already_have(path: &Path, want: &Firmware) -> bool {
 /// `progress` is called with `(done, total, name)` so a frontend can show which
 /// file it is on — the set is 67 files on this server and a bare spinner says
 /// nothing about how far through it is.
+/// What a BIOS sync would do, without doing any of it.
+///
+/// The button that starts one used to sit silent for as long as the listing
+/// took, which reads as a control that does nothing. Asking first costs one
+/// request and answers the only questions worth asking: is this already done,
+/// and how much would it fetch.
+pub async fn status(client: &Client, library_root: &Path) -> Result<(usize, usize, u64)> {
+    let list = client
+        .firmware()
+        .await
+        .context("listing BIOS files (does the token have firmware.read?)")?;
+    let dest = system_dir(library_root);
+
+    let mut have = 0;
+    let mut bytes = 0u64;
+    for fw in &list {
+        if fw.file_name.is_empty() {
+            continue;
+        }
+        let leaf = Path::new(&fw.file_name)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| fw.file_name.clone());
+        if already_have(&dest.join(&leaf), fw) {
+            have += 1;
+        } else {
+            bytes += fw.file_size_bytes.max(0) as u64;
+        }
+    }
+    Ok((list.len(), have, bytes))
+}
+
 pub async fn sync(
     client: &Client,
     library_root: &Path,

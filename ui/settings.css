@@ -222,3 +222,59 @@ body.settings-window {
   white-space: nowrap;
 }
 #versions strong { font-weight: 600; color: color-mix(in srgb, var(--text) 70%, transparent); }
+
+/* ---- Bindings -----------------------------------------------------------
+   One table instead of two stacked lists. The keyboard and the controller bind
+   the same set of actions, so listing them separately meant scrolling past
+   twenty rows to compare a key with its button — and reading each action's name
+   twice to do it. Side by side, the comparison is the layout. */
+.bindtbl {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 8px;
+}
+.bindtbl th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
+}
+.bindtbl td {
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 30%, transparent);
+}
+.bindtbl .bindname { font-size: 13px; }
+.bindtbl .key-cell, .bindtbl .pad-cell { width: 170px; }
+
+/* Bigger hit targets. These were sized for a dense list and were genuinely
+   hard to hit — a binding button is a thing you aim at deliberately, not a
+   label, so it gets the height of one. */
+.bindtbl .set-key,
+.bindtbl .set-pad {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* The same applies to every control in the panel: the old 11px buttons in a
+   28px row were fiddly on a trackpad. */
+#pane button,
+#pane select {
+  min-height: 30px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+#pane .srow { min-height: 38px; }
+
+.set-bios-bar {
+  width: 160px;
+  height: 8px;
+  margin-left: 10px;
+  vertical-align: middle;
+}

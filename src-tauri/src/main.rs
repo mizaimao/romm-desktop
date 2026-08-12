@@ -230,7 +230,9 @@ async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
 
     WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Settings")
-        .inner_size(1000.0, 740.0)
+        // Wider than it was: the bindings table is three columns now, and at
+        // 1000 the action names wrapped to two lines each.
+        .inner_size(1180.0, 780.0)
         // Below this the tab rail and a binding row stop fitting side by side.
         .min_inner_size(640.0, 460.0)
         .resizable(true)
@@ -395,13 +397,25 @@ async fn verify_server(
 ///
 /// Optional and explicit: it is 300-odd MB on this server, and a launcher that
 /// pulls that on first run without asking is a launcher people uninstall.
+/// What a BIOS sync would do — total files, how many are here, bytes to fetch.
+///
+/// Its own command so the button can answer immediately instead of sitting
+/// silent through a listing, which is indistinguishable from a control that
+/// does nothing.
+#[tauri::command]
+async fn bios_status(state: State<'_, AppState>) -> CmdResult<(usize, usize, u64)> {
+    let client = state.client.clone().ok_or("not connected to a server")?;
+    let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+    romm_desktop::bios::status(&client, &library_root).await.map_err(err)
+}
+
 #[tauri::command]
 async fn sync_bios(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
     let client = state.client.clone().ok_or("not connected to a server")?;
     let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
 
     let summary = romm_desktop::bios::sync(&client, &library_root, |done, total, name| {
-        let _ = app.emit("bios-progress", format!("{done}/{total}  {name}"));
+        let _ = app.emit("bios-progress", (done, total, name.to_owned()));
     })
     .await
     .map_err(err)?;
@@ -2249,6 +2263,7 @@ fn main() {
             pending_conflicts: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            bios_status,
             download_set,
             recent_games,
             download_estimate,
