@@ -424,3 +424,15 @@ describe("grid / list on the consoles screen", () => {
     assert.equal(openedPlatform(), "gb");
   });
 });
+
+describe("the pad while a game is running", () => {
+  // The obvious test — suspend, press the quit combo, assert nothing opened —
+  // could not be made to fail with the guard removed. `step` returns early on
+  // several checks before it reaches the dispatcher, and every attempt ended up
+  // asserting on a poll that never ran. A test that passes either way is worse
+  // than none, so this is left to the machine it actually affects.
+  // Same story for "resuming re-arms the lock": it passed with the re-arm
+  // removed, because settleLifted reads module state the previous test had
+  // already left in the right shape. Removed rather than kept as decoration.
+});
+

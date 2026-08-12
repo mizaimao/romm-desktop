@@ -60,6 +60,29 @@ export function ignorePadUntilReleased() {
   held.clear();
 }
 
+/// Set for as long as a game is running.
+///
+/// Waiting for the pad to be released is not enough while the emulator is up.
+/// The pad goes to rest a second after launch, the lock lifts, and this window
+/// carries on polling behind the game for the whole session — so the buttons
+/// pressed to quit are read here as they are pressed, and the app relaunches
+/// the game it was told to leave.
+///
+/// It never showed on macOS, where the webview stops receiving gamepad events
+/// once it loses focus. WebView2 on Windows keeps delivering them, so there the
+/// entire session is one long stream of input nobody meant for this window.
+let suspended = false;
+
+export function suspendPad() {
+  suspended = true;
+  held.clear();
+}
+
+export function resumePad() {
+  suspended = false;
+  ignorePadUntilReleased();
+}
+
 /// Whether the lock may lift: the pad is at rest *and* the floor has passed.
 ///
 /// Split out so the rule can be tested. The bug it encodes is invisible from
@@ -173,6 +196,9 @@ function step() {
     return;
   }
 
+  // Nothing here is ours while the emulator owns the screen.
+  if (suspended) return;
+
   const now = performance.now();
   const pressed = pressedActions(navigator.getGamepads?.() ?? [], map);
 
@@ -186,6 +212,12 @@ function step() {
   for (const action of [...held.keys()]) {
     if (!pressed.has(action)) held.delete(action);
   }
+}
+
+/// Run one poll, for tests. The loop itself is driven by rAF, which a test
+/// cannot wait on deterministically.
+export function stepForTest() {
+  step();
 }
 
 export function installGamepad() {

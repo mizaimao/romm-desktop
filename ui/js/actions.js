@@ -4,7 +4,7 @@
 import { state, invoke } from "./state.js";
 import { toast } from "./util.js";
 import { askConflicts, conflictsFrom, askOffline, offlineFrom } from "./conflicts.js";
-import { ignorePadUntilReleased } from "./gamepad.js";
+import { suspendPad, resumePad } from "./gamepad.js";
 
 /// Display refresh in Hz, measured rather than asked for: no web API reports
 /// it, and Tauri's Monitor exposes size, position and scale factor but not
@@ -44,14 +44,13 @@ export async function launch(id, { resolving = false, skipSync = false } = {}) {
     // The pad is very likely still held: this call does not return until the
     // emulator exits, and the way out of a game is a button combination.
     // Whatever is down belongs to that, not to us.
-    ignorePadUntilReleased();
+    suspendPad();
     const result = await invoke("launch_rom", {
       id,
       pad: state.gamepad,
       refresh: await measureRefresh(),
       skipSync,
     });
-    ignorePadUntilReleased();
     toast(result);
   } catch (e) {
     // A save that changed in two places stops the launch rather than picking a
@@ -76,6 +75,11 @@ export async function launch(id, { resolving = false, skipSync = false } = {}) {
     }
 
     toast(`Launch failed — ${e}`, 8000);
+  } finally {
+    // In `finally`, not after the await: a launch that throws — a save
+    // conflict, a missing core, an unreachable server — would otherwise leave
+    // the controller ignored for good, with no way back but restarting.
+    resumePad();
   }
 }
 
