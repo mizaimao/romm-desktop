@@ -1673,3 +1673,57 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   border-color: color-mix(in srgb, var(--pick, var(--glass)) 70%, transparent);
 }
 .vidbtn[data-busy] { opacity: 0.6; cursor: progress; }
+
+/* ---- Take offline -------------------------------------------------------
+   The estimate is the reason this dialog exists, so it is the largest thing in
+   it and it moves the moment a box is ticked. A person cannot otherwise tell
+   that videos multiply the download by ten. */
+#bulk-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+.bulk-panel {
+  width: min(560px, 92vw);
+  padding: 22px 24px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+.bulk-panel h3 { margin: 0 0 6px; font-size: 16px; }
+.bulk-est {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--glass) 40%, white 60%);
+}
+.bulk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 2px;
+  font-size: 13px;
+}
+.bulk-row > span:first-child { min-width: 84px; }
+.bulk-row select { flex: 1; }
+.bulk-check { cursor: pointer; }
+.bulk-check input { accent-color: var(--accent); }
+.bulk-check em { color: var(--dim); font-style: normal; }
+.bulk-panel .hint { margin: 2px 0 10px 96px; font-size: 11.5px; color: var(--dim); }
+.bulk-space { margin: 14px 0 0; font-size: 12px; color: var(--dim); }
+/* A refusal has to look like one: this is the only thing standing between an
+   hour of transfer and a full disk. */
+.bulk-space.bad { color: #e0736a; font-weight: 600; }
+.bulk-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* How much of a collection is already here — the question a card could not
+   answer before, and the one that matters before travelling. */
+.ccard .here { color: var(--ok, #6fcf7f); }
+
+/* The recent row sits above the consoles and is not one of them. */
+.recent { margin-bottom: 18px; }

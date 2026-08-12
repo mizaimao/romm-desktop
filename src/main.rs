@@ -661,7 +661,7 @@ async fn cmd_coverage(probe: bool, sample: usize) -> Result<()> {
             .iter()
             .any(|k| media::find_local(&media_root, &rom.platform_slug, &stem, k).is_some());
         let row = rows.entry(rom.platform_slug.clone()).or_default();
-        match coverage::classify(&rom.fs_name) {
+        match coverage::classify_in(&rom.platform_slug, &rom.fs_name) {
             Kind::Official => {
                 row.official += 1;
                 if has_art {

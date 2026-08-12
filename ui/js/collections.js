@@ -21,6 +21,7 @@ function chrome(title) {
   el.back.hidden = false;
   el.detail.hidden = true;
   el.layoutBtn.hidden = true;
+  el.grabBtn.hidden = true;
   el.sidebarBtn.hidden = true;
   el.zoomWrap.hidden = false;
   el.search.value = "";
@@ -84,7 +85,9 @@ export async function showCollectionsIn(group, label) {
         <div class="card" data-cid="${escapeHtml(c.id)}">
           <div class="logo mosaic"><span class="ph">${escapeHtml(c.name.slice(0, 2))}</span></div>
           <div class="name">${c.is_favorite ? "★ " : ""}${escapeHtml(c.name)}</div>
-          <div class="meta">${c.rom_count} games</div>
+          <div class="meta">${c.rom_count} games${
+            c.local_count ? ` · <span class="here">${c.local_count} here</span>` : ""
+          }</div>
         </div>`
       )
       .join("");
@@ -125,6 +128,7 @@ export async function showCollectionRoms(id, name) {
   // 256 games" became the name and gained a second "— 256 games" every time.
   state.collectionName = name;
   el.back.hidden = false;
+  el.grabBtn.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;
   el.zoomWrap.hidden = state.layout !== "grid";

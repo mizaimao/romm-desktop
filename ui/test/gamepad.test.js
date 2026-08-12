@@ -35,8 +35,15 @@ let dom, invoked, pads, ui;
 function reply(cmd, args) {
   if (cmd === "rom_detail") return { id: args.id, downloaded: false, files: [] };
   if (cmd === "status") return { configured: true };
+  if (cmd === "recent_games") return recentGames;
+  if (cmd === "download_estimate") return [estimateSummary, estimateFits, "note"];
   return [];
 }
+
+/// What `recent_games` should answer with, per test.
+let recentGames = [];
+let estimateSummary = "10 game(s), about 1.0 GB";
+let estimateFits = true;
 
 /// Let the promise chain a UI action kicked off run to completion, so its
 /// failures land inside the test that caused them.
@@ -73,6 +80,16 @@ before(async () => {
   // jsdom has no layout, so it does not implement this at all. The app calls it
   // whenever it moves the cursor; without a stand-in every such path throws.
   dom.window.Element.prototype.scrollIntoView = function () {};
+  // jsdom has no IntersectionObserver, and the cover loader builds one on every
+  // render. A stand-in that observes nothing is right for these tests: they are
+  // about what is drawn, not about lazy loading.
+  class FakeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  dom.window.IntersectionObserver = FakeObserver;
+  globalThis.IntersectionObserver = FakeObserver;
 
   const load = (m) => import(join(uiDir, "js", m));
   ui = {
@@ -82,12 +99,16 @@ before(async () => {
     ...(await load("gamepad.js")),
     ...(await load("tabs.js")),
     ...(await load("library.js")),
+    ...(await load("bulk.js")),
   };
 });
 
 beforeEach(async () => {
   invoked.length = 0;
   pads = [];
+  recentGames = [];
+  estimateFits = true;
+  document.getElementById("bulk-overlay")?.remove();
   document.getElementById("list").innerHTML = "";
   ui.state.view = "platforms";
   ui.state.platform = null;
@@ -436,3 +457,72 @@ describe("the pad while a game is running", () => {
   // already left in the right shape. Removed rather than kept as decoration.
 });
 
+describe("continue playing", () => {
+  test("the row is absent entirely when nothing has been played", async () => {
+    recentGames = [];
+    await ui.showPlatforms();
+    await settle();
+    assert.equal(document.querySelector(".recent"), null,
+      "an empty row explaining itself is worse than no row");
+  });
+
+  test("recent games appear above the consoles, in the order given", async () => {
+    recentGames = [
+      { id: 7, name: "Chrono Trigger", platform: "snes", downloaded: true },
+      { id: 8, name: "Gunstar Heroes", platform: "megadrive", downloaded: false },
+    ];
+    await ui.showPlatforms();
+    await settle();
+    const strip = document.querySelector(".recent");
+    assert.ok(strip, "the row should be drawn");
+    const names = [...strip.querySelectorAll(".gname")].map((n) => n.textContent);
+    assert.deepEqual(names, ["Chrono Trigger", "Gunstar Heroes"]);
+    // Above the consoles, not after them: it is the first thing you look at.
+    assert.equal(document.getElementById("list").firstElementChild, strip);
+  });
+});
+
+describe("take offline", () => {
+  test("the estimate is asked for as soon as the dialog opens", async () => {
+    ui.askDownload({ platform: "snes" });
+    await settle();
+    const asked = invoked.filter((c) => c.cmd === "download_estimate");
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].args.platform, "snes");
+    // The cheap options are what a person gets without choosing.
+    assert.equal(asked[0].args.art, "minimal");
+    assert.equal(asked[0].args.videos, false, "videos must never be on by default");
+  });
+
+  test("ticking videos re-asks, because it changes the answer tenfold", async () => {
+    ui.askDownload({ platform: "snes" });
+    await settle();
+    const before = invoked.filter((c) => c.cmd === "download_estimate").length;
+    const box = document.querySelector(".bulk-videos");
+    box.checked = true;
+    box.dispatchEvent(new window.Event("change"));
+    await settle();
+    const after = invoked.filter((c) => c.cmd === "download_estimate");
+    assert.equal(after.length, before + 1, "the estimate must follow the checkbox");
+    assert.equal(after.at(-1).args.videos, true);
+  });
+
+  /// The whole point of asking the disk first: refusing here costs nothing,
+  /// and refusing an hour in costs a half-written game and a full disk.
+  test("a download that will not fit cannot be started", async () => {
+    estimateFits = false;
+    ui.askDownload({ platform: "psx" });
+    await settle();
+    assert.equal(document.querySelector(".bulk-go").disabled, true,
+      "the button must be dead when the disk cannot take it");
+    assert.ok(document.querySelector(".bulk-space").classList.contains("bad"),
+      "and it has to look like a refusal");
+  });
+
+  test("a download that fits is offered", async () => {
+    estimateFits = true;
+    ui.askDownload({ platform: "gb" });
+    await settle();
+    assert.equal(document.querySelector(".bulk-go").disabled, false);
+  });
+});

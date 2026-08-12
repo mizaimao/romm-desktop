@@ -19,6 +19,17 @@ pub struct User {
     pub role: String,
 }
 
+/// The server's per-user record for a game.
+///
+/// `last_played` lives here rather than on the game because it is about a
+/// person, not a file — which is also why the recent list is the same on every
+/// machine signed in as you.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RomUser {
+    #[serde(default)]
+    pub last_played: Option<String>,
+}
+
 /// Every ScreenScraper media URL the server resolved for a game.
 ///
 /// These are the server's own — it built them, it stores them, and it serves
@@ -96,6 +107,9 @@ pub struct Platform {
 #[derive(Debug, Deserialize)]
 pub struct Rom {
     pub id: i64,
+    /// Per-user state the server keeps, including when this was last played.
+    #[serde(default)]
+    pub rom_user: Option<RomUser>,
     /// Display title, e.g. `"'88 Games"`. Distinct from `fs_name`.
     #[serde(default)]
     pub name: Option<String>,

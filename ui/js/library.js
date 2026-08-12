@@ -17,6 +17,7 @@ export async function showPlatforms() {
   // thirty-five pictures of them.
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = true;
+  el.grabBtn.hidden = true;
   el.zoomWrap.hidden = state.layout !== "grid";
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");
@@ -29,8 +30,43 @@ export async function showPlatforms() {
   state.platforms = items;
 
   renderPlatforms(items);
+  await showRecent();
 
   restorePlatformCursor();
+}
+
+/// A row of the games you played most recently, above the consoles.
+///
+/// The timestamps are the server's, so this is the same list on every machine —
+/// which is the point: the thing you were in the middle of is rarely on the
+/// computer you are now sitting at. Absent entirely when nothing has been
+/// played, rather than an empty row explaining itself.
+async function showRecent() {
+  let rows = [];
+  try {
+    rows = await invoke("recent_games", { limit: 8 });
+  } catch {
+    return;
+  }
+  if (!rows.length) return;
+
+  const strip = document.createElement("section");
+  strip.className = "recent";
+  strip.innerHTML =
+    `<h2 class="ghead"><span class="gslug">Continue playing</span></h2>` +
+    `<div class="gcards">${rows.map((r) => `
+       <div class="gcard" data-id="${r.id}">
+         <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
+         <div class="gname">${escapeHtml(r.name)}</div>
+         <div class="gmeta">${r.downloaded ? "▣ " : ""}${r.platform}</div>
+       </div>`).join("")}</div>`;
+  el.list.prepend(strip);
+  strip.querySelectorAll(".gcard").forEach((c) =>
+    c.addEventListener("click", () => selectRom(Number(c.dataset.id)))
+  );
+  // Re-observe after prepending, so these cards get covers like any others.
+  // The observer was set up before this row existed.
+  observeCovers();
 }
 
 /// Draw the consoles, in whichever layout is selected.
@@ -153,6 +189,7 @@ export async function showRoms(slug) {
   el.back.hidden = false;
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = false;
+  el.grabBtn.hidden = false;
   el.zoomWrap.hidden = state.layout !== "grid";
   el.search.value = "";
   state.rows = await invoke("roms", { platform: slug });

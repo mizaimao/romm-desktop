@@ -8,6 +8,7 @@ export async function showThemes() {
   el.back.hidden = false;
   el.detail.hidden = true;
   el.layoutBtn.hidden = true;
+  el.grabBtn.hidden = true;
   el.sidebarBtn.hidden = true;
   el.zoomWrap.hidden = true;
   el.themesBtn.classList.add("active");

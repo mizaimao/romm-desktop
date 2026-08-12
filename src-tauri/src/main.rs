@@ -440,6 +440,189 @@ fn versions(state: State<'_, AppState>) -> CmdResult<(String, Option<String>)> {
     Ok((env!("CARGO_PKG_VERSION").to_owned(), server))
 }
 
+/// The games played most recently, for the row at the top of the library.
+///
+/// Server timestamps, so the list is the same wherever you sign in — the point
+/// is picking up where you left off, and that is rarely the machine you are
+/// sitting at now.
+#[tauri::command]
+fn recent_games(state: State<'_, AppState>, limit: Option<usize>) -> CmdResult<Vec<RomView>> {
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.recently_played(limit.unwrap_or(8)).map_err(err)?
+    };
+    Ok(to_views(&state, rows))
+}
+
+/// What a bulk download would cost, before starting one.
+#[tauri::command]
+fn download_estimate(
+    state: State<'_, AppState>,
+    platform: Option<String>,
+    collection: Option<String>,
+    art: String,
+    videos: bool,
+    manuals: bool,
+) -> CmdResult<(String, bool, String)> {
+    use romm_desktop::{bulk, diskspace};
+
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        match (&platform, &collection) {
+            (_, Some(id)) => cache.roms_in_collection(id).map_err(err)?,
+            (Some(p), _) => cache.roms_for(p).map_err(err)?,
+            _ => return Err("nothing chosen".into()),
+        }
+    };
+    let want = bulk::Want {
+        roms: true,
+        art: match art.as_str() {
+            "none" => bulk::Art::None,
+            "full" => bulk::Art::Full,
+            _ => bulk::Art::Minimal,
+        },
+        videos,
+        manuals,
+    };
+    let est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
+    let (fits, note) = match diskspace::fits(&state.roms_dir, est.total()) {
+        diskspace::Fit::Yes { available } => {
+            (true, format!("{:.0} GB free", available as f64 / 1e9))
+        }
+        diskspace::Fit::No { available, short } => (
+            false,
+            format!(
+                "only {:.0} GB free — {:.0} GB short, counting the {} GB this leaves spare",
+                available as f64 / 1e9,
+                short as f64 / 1e9,
+                diskspace::MARGIN / 1_000_000_000,
+            ),
+        ),
+        // Never a refusal: turning a failed syscall into "you cannot download"
+        // would be a worse bug than the one the check exists to prevent.
+        diskspace::Fit::Unknown => (true, "could not read free space".to_owned()),
+    };
+    Ok((est.describe(), fits, note))
+}
+
+/// Download a whole platform or collection, with the media that was asked for.
+///
+/// Refuses up front when it would not fit. The failure without that check is
+/// the worst kind: an hour of transfer, a full disk, and both a half-written
+/// game and no room to clear it.
+#[tauri::command]
+async fn download_set(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    platform: Option<String>,
+    collection: Option<String>,
+    art: String,
+    videos: bool,
+    manuals: bool,
+) -> CmdResult<String> {
+    use romm_desktop::{bulk, diskspace};
+
+    let client = state.client.clone().ok_or("no server configured")?;
+    let rows = {
+        let cache = state.cache.lock().map_err(err)?;
+        match (&platform, &collection) {
+            (_, Some(id)) => cache.roms_in_collection(id).map_err(err)?,
+            (Some(p), _) => cache.roms_for(p).map_err(err)?,
+            _ => return Err("nothing chosen".into()),
+        }
+    };
+    let want = bulk::Want {
+        roms: true,
+        art: match art.as_str() {
+            "none" => bulk::Art::None,
+            "full" => bulk::Art::Full,
+            _ => bulk::Art::Minimal,
+        },
+        videos,
+        manuals,
+    };
+    let est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
+    if let diskspace::Fit::No { short, .. } = diskspace::fits(&state.roms_dir, est.total()) {
+        return Err(format!(
+            "not enough room — {:.1} GB short. Free some space or take less media.",
+            short as f64 / 1e9
+        ));
+    }
+
+    let media_root = state.media_dir.clone();
+    let list_art = state.list_art.lock().map_err(err)?.clone();
+    let mut games = 0usize;
+    let total = rows.len();
+
+    for (i, row) in rows.iter().enumerate() {
+        if row_path(&state, row).is_none() {
+            let members = if row.multi_file {
+                client.member_hashes(row.id).await
+            } else {
+                Vec::new()
+            };
+            let target = romm_desktop::download::Target {
+                rom_id: row.id,
+                members: &members,
+                fs_name: &row.fs_name,
+                platform_slug: &row.platform_slug,
+                expected_size: (row.fs_size_bytes > 0).then_some(row.fs_size_bytes as u64),
+                md5: row.md5_hash.as_deref(),
+                sha1: row.sha1_hash.as_deref(),
+                multi_file: row.multi_file,
+            };
+            if romm_desktop::download::fetch(
+                client.http(), client.base(), client.auth(), &target, &state.roms_dir, |_, _| {},
+            )
+            .await
+            .is_ok()
+            {
+                games += 1;
+            }
+        }
+
+        let stem = Path::new(&row.fs_name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| row.fs_name.clone());
+        // Whatever media was asked for. `ensure_*` skip anything already here,
+        // so re-running after an interruption costs a stat rather than a fetch.
+        if want.art != bulk::Art::None {
+            let _ = media::ensure_art(
+                Some(&client), &media_root, &row.platform_slug, &stem, &list_art,
+            ).await;
+            let _ = media::ensure_art(
+                Some(&client), &media_root, &row.platform_slug, &stem, media::MIXIMAGES,
+            ).await;
+        }
+        if want.art == bulk::Art::Full {
+            for (kind, _) in media::ESDE_TYPES {
+                if matches!(*kind, media::VIDEOS) {
+                    continue;
+                }
+                let _ = media::ensure_esde(
+                    Some(&client), &media_root, &row.platform_slug, &stem, kind,
+                ).await;
+            }
+        }
+        if want.videos {
+            let _ = media::ensure_esde(
+                Some(&client), &media_root, &row.platform_slug, &stem, media::VIDEOS,
+            ).await;
+        }
+        if want.manuals {
+            let _ = media::ensure_esde(
+                Some(&client), &media_root, &row.platform_slug, &stem, "manuals",
+            ).await;
+        }
+
+        if (i + 1) % 5 == 0 || i + 1 == total {
+            let _ = app.emit("bulk-progress", format!("{}/{} — {games} downloaded", i + 1, total));
+        }
+    }
+    Ok(format!("{games} game(s) downloaded, {total} checked"))
+}
+
 #[tauri::command]
 fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
     let cache = state.cache.lock().map_err(err)?;
@@ -514,6 +697,12 @@ struct CollectionView {
     /// A few member ROM ids — the card fetches their covers through the same
     /// local cache the game grids use, so this works offline too.
     sample_ids: Vec<i64>,
+    /// How many of its games are downloaded here.
+    ///
+    /// The question a collection card cannot otherwise answer: "can I play any
+    /// of this on a plane". Counted rather than stored, because a file can be
+    /// deleted from under us and a stale count is worse than none.
+    local_count: i64,
 }
 
 /// Plural label for a group, since the server's names are singular slugs.
@@ -560,6 +749,10 @@ fn collections_in(state: State<'_, AppState>, group: String) -> CmdResult<Vec<Co
         .map_err(err)?
         .into_iter()
         .map(|c| CollectionView {
+            local_count: cache
+                .roms_in_collection(&c.id)
+                .map(|rows| rows.iter().filter(|r| row_path(&state, r).is_some()).count() as i64)
+                .unwrap_or(0),
             sample_ids: c.sample_ids,
             id: c.id,
             name: c.name,
@@ -2056,6 +2249,9 @@ fn main() {
             pending_conflicts: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            download_set,
+            recent_games,
+            download_estimate,
             scrape_missing,
             list_art_options,
             set_list_art,

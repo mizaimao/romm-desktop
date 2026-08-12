@@ -86,7 +86,7 @@ pub struct PlatformRow {
     pub rom_count: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RomRow {
     /// Used for `/api/roms/{id}/content/{fs_name}`.
     pub id: i64,
@@ -205,6 +205,10 @@ impl Cache {
             // ES-DE libraries live wherever the user put them, so a game's
             // location cannot be derived from <roms>/<slug>/<fs_name>.
             ("local_path", "TEXT"), ("esde_system", "TEXT"),
+            // When the server last saw this game played. Drives the row of
+            // recent games, and comes from the server rather than being
+            // recorded here, so it follows you between machines.
+            ("last_played", "TEXT"),
         ] {
             let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} {ty}"), []);
         }
@@ -535,6 +539,24 @@ impl Cache {
         Ok(ids)
     }
 
+    /// The games played most recently, newest first.
+    ///
+    /// Server-side timestamps, so this is the same list on every machine — the
+    /// point of it is picking up where you left off, and "where you left off"
+    /// is rarely the machine you are now sitting at.
+    pub fn recently_played(&self, limit: usize) -> Result<Vec<RomRow>> {
+        let sql = format!(
+            "SELECT {ROM_COLUMNS} FROM roms \
+             WHERE last_played IS NOT NULL AND last_played <> '' \
+             ORDER BY last_played DESC LIMIT ?1"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([limit as i64], rom_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Every game, ordered as the platform pages order them.
     pub fn all_roms(&self) -> Result<Vec<RomRow>> {
         let sql = format!("SELECT {ROM_COLUMNS} FROM roms ORDER BY 2, 3 COLLATE NOCASE");
@@ -696,9 +718,10 @@ impl Cache {
                                           screenshot_path, screenshots_json,
                                           cover_small_path, summary, meta_json,
                                           alt_names_json, regions_json,
-                                          manual_path, youtube_id, multi_file)
+                                          manual_path, youtube_id, multi_file,
+                                          last_played)
                          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
-                                ?14,?15,?16,?17,?18,?19,?20)
+                                ?14,?15,?16,?17,?18,?19,?20,?21)
                          ON CONFLICT(id) DO UPDATE SET
                             platform_slug = excluded.platform_slug,
                             name          = excluded.name,
@@ -718,7 +741,12 @@ impl Cache {
                             regions_json   = excluded.regions_json,
                             manual_path    = excluded.manual_path,
                             youtube_id     = excluded.youtube_id,
-                            multi_file     = excluded.multi_file",
+                            multi_file     = excluded.multi_file,
+                            -- Only when the server has one. An incremental
+                            -- pull can return a row with no per-user block,
+                            -- and letting that null out the timestamp would
+                            -- empty the recent list on every sync.
+                            last_played    = COALESCE(excluded.last_played, roms.last_played)",
                         params![
                             rom.id,
                             rom.platform_fs_slug.clone().unwrap_or_default(),
@@ -740,6 +768,7 @@ impl Cache {
                             rom.path_manual,
                             rom.youtube_video_id,
                             rom.has_multiple_files as i64,
+                            rom.rom_user.as_ref().and_then(|u| u.last_played.clone()),
                         ],
                     )?;
                 }
@@ -1051,5 +1080,73 @@ mod tests {
         let (files, exts) = c.server_exclusions().expect("stored");
         assert_eq!(files, ["custom.nfo"]);
         assert_eq!(exts, ["sav"]);
+    }
+
+    /// The row of recent games is only useful if it survives a sync. An
+    /// incremental pull can return a game with no per-user block at all, and
+    /// letting that overwrite the timestamp empties the list every time.
+    #[test]
+    fn a_sync_without_per_user_data_does_not_forget_when_a_game_was_played() {
+        let c = cache("last-played");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        add_rom(&c, 10, "snes", "Chrono Trigger", "ct.sfc");
+        c.conn
+            .execute("UPDATE roms SET last_played = '2026-08-01T10:00:00' WHERE id = 10", [])
+            .unwrap();
+        assert_eq!(c.recently_played(5).unwrap().len(), 1);
+
+        // What an incremental sync does when the server sends no rom_user.
+        c.conn
+            .execute(
+                "INSERT INTO roms(id, platform_slug, name, fs_name, fs_size_bytes, last_played)
+                 VALUES(10,'snes','Chrono Trigger','ct.sfc',0,NULL)
+                 ON CONFLICT(id) DO UPDATE SET
+                    last_played = COALESCE(excluded.last_played, roms.last_played)",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            c.recently_played(5).unwrap().len(),
+            1,
+            "the timestamp must survive a sync that did not mention it"
+        );
+    }
+
+    #[test]
+    fn recent_games_come_back_newest_first_and_never_the_unplayed() {
+        let c = cache("recent-order");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        for (id, name, when) in [
+            (1, "Older", Some("2026-01-01T00:00:00")),
+            (2, "Newer", Some("2026-08-01T00:00:00")),
+            (3, "Never", None),
+        ] {
+            add_rom(&c, id, "snes", name, &format!("{name}.sfc"));
+            if let Some(w) = when {
+                c.conn
+                    .execute("UPDATE roms SET last_played = ?1 WHERE id = ?2", rusqlite::params![w, id])
+                    .unwrap();
+            }
+        }
+        let got = c.recently_played(10).unwrap();
+        assert_eq!(got.len(), 2, "a game never played has no place in a recent list");
+        assert_eq!(got[0].name, "Newer");
+        assert_eq!(got[1].name, "Older");
+    }
+
+    #[test]
+    fn the_recent_list_honours_its_limit() {
+        let c = cache("recent-limit");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        for i in 1..=8 {
+            add_rom(&c, i, "snes", &format!("Game {i}"), &format!("g{i}.sfc"));
+            c.conn
+                .execute(
+                    "UPDATE roms SET last_played = ?1 WHERE id = ?2",
+                    rusqlite::params![format!("2026-08-{:02}T00:00:00", i), i],
+                )
+                .unwrap();
+        }
+        assert_eq!(c.recently_played(3).unwrap().len(), 3);
     }
 }

@@ -1,6 +1,7 @@
 // Entry point: wire the header controls and load the first view.
 
 import { el, state, trail, invoke, listen } from "./state.js";
+import { askDownload } from "./bulk.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
@@ -42,6 +43,16 @@ el.layoutBtn.addEventListener("click", () =>
 );
 
 el.sidebarBtn.addEventListener("click", () => setSidebar(!state.sidebar));
+
+// Whatever is on screen is what gets taken: a console page downloads that
+// console, a collection page that collection.
+el.grabBtn.addEventListener("click", () =>
+  askDownload(
+    state.view === "collection-roms" && state.collection
+      ? { collection: state.collection, name: state.collectionName }
+      : { platform: state.platform }
+  )
+);
 
 el.systemsBtn.addEventListener("click", () =>
   state.view === "systems" ? showPlatforms() : showSystems()

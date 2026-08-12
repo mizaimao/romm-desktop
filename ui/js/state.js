@@ -49,6 +49,7 @@ export const el = {
   themesBtn: document.getElementById("themes-btn"),
   systemsBtn: document.getElementById("systems-btn"),
   layoutBtn: document.getElementById("layout-btn"),
+  grabBtn: document.getElementById("grab-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),
   lb: document.getElementById("lightbox"),
   settingsBtn: document.getElementById("settings-btn"),

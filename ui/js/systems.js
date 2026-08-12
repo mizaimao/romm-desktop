@@ -9,6 +9,7 @@ export async function showSystems() {
   el.back.hidden = false;
   el.detail.hidden = true;
   el.layoutBtn.hidden = true;
+  el.grabBtn.hidden = true;
   el.sidebarBtn.hidden = true;
   el.zoomWrap.hidden = true;
   el.themesBtn.classList.remove("active");

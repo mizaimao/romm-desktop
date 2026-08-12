@@ -43,7 +43,34 @@ const UNOFFICIAL_TAGS: &[&str] = &[
     "bootleg", "program",
 ];
 
+/// Files known to be unrunnable whatever we do, from `data/unavailable-roms.json`.
+///
+/// Compiled in rather than read at run time: it is a fact about a romset, not a
+/// setting, and a missing file should not silently turn thirteen permanent
+/// failures back into thirteen outstanding tasks.
+const UNAVAILABLE: &str = include_str!("../data/unavailable-roms.json");
+
+/// Whether this file is one nothing can run.
+///
+/// These are counted with the hacks and prototypes rather than as gaps. The zip
+/// holds a different regional revision than the driver of that name expects, so
+/// no amount of scraping or configuration reaches them — only a different dump
+/// does, and that is not a task this app can close.
+pub fn unavailable(platform: &str, fs_name: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(UNAVAILABLE)
+        .ok()
+        .and_then(|v| v.get(platform)?.get(fs_name).map(|_| true))
+        .unwrap_or(false)
+}
+
 /// Classify a file by the tags in its name.
+pub fn classify_in(platform: &str, fs_name: &str) -> Kind {
+    if unavailable(platform, fs_name) {
+        return Kind::Unofficial;
+    }
+    classify(fs_name)
+}
+
 pub fn classify(fs_name: &str) -> Kind {
     let mut inside = String::new();
     let mut depth = 0i32;
@@ -190,5 +217,20 @@ mod tests {
         // Nothing probed means nothing ruled out — every gap still counts.
         let r = Row { official: 100, official_with_art: 60, ..Default::default() };
         assert_eq!(r.worth_scraping(), 40);
+    }
+
+    /// The thirteen arcade romsets nothing can run. They are a permanent fact
+    /// about a dump, not an outstanding task, and counting them as gaps means
+    /// the number never closes and stops being read.
+    #[test]
+    fn romsets_nothing_can_run_are_not_counted_as_gaps() {
+        assert!(unavailable("arcade", "avengers.zip"));
+        assert!(unavailable("arcade", "vball.zip"));
+        assert_eq!(classify_in("arcade", "avengers.zip"), Kind::Unofficial);
+        // Only for the platform they were recorded under, and only for the
+        // exact file: a same-named dump on another system is a different game.
+        assert!(!unavailable("megadrive", "avengers.zip"));
+        assert!(!unavailable("arcade", "mslug.zip"));
+        assert_eq!(classify_in("arcade", "mslug.zip"), Kind::Official);
     }
 }
