@@ -17,7 +17,9 @@ export async function showPlatforms() {
   // thirty-five pictures of them.
   el.layoutBtn.hidden = false;
   el.sidebarBtn.hidden = true;
-  el.grabBtn.hidden = true;
+  // Offered here as well as inside a console: burying it one level down means
+  // it is only found by someone who already knows it exists.
+  el.grabBtn.hidden = false;
   el.zoomWrap.hidden = state.layout !== "grid";
   el.themesBtn.classList.remove("active");
   el.systemsBtn.classList.remove("active");

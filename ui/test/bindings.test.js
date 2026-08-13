@@ -69,3 +69,24 @@ describe("keyboard and controller side by side", () => {
     assert.equal(new Set(ids).size, ids.length, `duplicated rows: ${ids}`);
   });
 });
+
+describe("the settings tabs", () => {
+  /// The BIOS control sat at the bottom of General under six unrelated
+  /// headings — RetroArch, saves, server, achievements, ScreenScraper — and was
+  /// simply not found. The things that go and fetch something now have their
+  /// own tab.
+  test("fetching things has its own tab, and it holds the BIOS control", async () => {
+    const { TABS, paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    assert.ok(TABS.some((t) => t.id === "library"), "no library tab");
+
+    const lib = new JSDOM(`<body>${paneHtml("library")}</body>`).window.document;
+    assert.ok(lib.querySelector(".set-bios"), "BIOS control is not on the library tab");
+    assert.ok(lib.querySelector(".set-bios-bar"), "and it needs a progress bar");
+    assert.ok(lib.querySelector(".set-libsync"), "library sync belongs here too");
+    assert.ok(lib.querySelector(".set-scrape"), "so does missing artwork");
+
+    // And it is no longer buried in General.
+    const gen = new JSDOM(`<body>${paneHtml("general")}</body>`).window.document;
+    assert.equal(gen.querySelector(".set-bios"), null, "still duplicated in General");
+  });
+});

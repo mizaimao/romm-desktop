@@ -10,6 +10,7 @@ import { showSystems } from "./systems.js";
 import { installTabs, showSection, resetSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
+import { warmRefresh } from "./actions.js";
 import {
   startBackdrop, stopBackdrop, applyBackdropSettings,
   applyStoredGlassTint, setGlassTint, setGlassStrength,
@@ -188,6 +189,9 @@ function formatEta(seconds) {
   installDetailResizer();
   installKeys();
   installGamepad();
+  // Measure the display now. It costs 24 animation frames, and taken on demand
+  // that wait landed between pressing play and the game being asked for.
+  warmRefresh();
 })();
 
 /// "You have put me somewhere I am going to make a mess of."

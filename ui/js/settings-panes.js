@@ -38,6 +38,10 @@ export const TABS = [
   { id: "general", label: "General" },
   { id: "appearance", label: "Appearance" },
   { id: "control", label: "Control" },
+  // Its own tab because these are the things that go and fetch something, and
+  // at the bottom of General under six unrelated headings the BIOS control was
+  // simply not found.
+  { id: "library", label: "Library" },
 ];
 
 /// Markup for one tab. Unknown ids return nothing rather than throwing, so a
@@ -108,7 +112,9 @@ export function paneHtml(id) {
       <p class="hint">Stored but not used yet — kept with the rest of the
         configuration rather than in someone's notes.</p>
 
-      <h4>Library</h4>
+`;
+
+  if (id === "library") return `      <h4>Library</h4>
       <div class="srow">
         <label>Folder</label>
         <div class="ctl"><input class="cf-text" data-field="library_root"
@@ -149,6 +155,7 @@ export function paneHtml(id) {
         login and no SD card. Slow on purpose: it is one game at a time so the
         server's allowance is not spent in a burst.</p>
       <p class="hint set-scrape-status"></p>`;
+
   if (id === "appearance") return `      <h4>Artwork</h4>
       <div class="srow">
         <label>Game list shows</label>
@@ -242,6 +249,7 @@ export function paneHtml(id) {
 export function wirePane(id, box) {
   stopPadCapture();
   if (id === "general") return wireGeneral(box);
+  if (id === "library") return wireLibrary(box);
   if (id === "appearance") return wireAppearance(box);
   if (id === "control") return wireControl(box);
 }
@@ -311,7 +319,12 @@ function wireGeneral(box) {
   // config.toml fields. Loaded once and written back on change, through a
   // targeted TOML edit so the hand-written comments in that file survive.
   wireConfigFields(box);
+}
 
+/// The tab that fetches things: the game index, BIOS, and artwork the
+/// scrapers missed. Each reports before it works and while it works, because a
+/// button that goes quiet for a minute reads as one that does nothing.
+function wireLibrary(box) {
   // Missing artwork.
   const scrapeBtn = box.querySelector(".set-scrape");
   const scrapeStatus = box.querySelector(".set-scrape-status");
@@ -430,6 +443,7 @@ function wireGeneral(box) {
     runLibSync(e.currentTarget, true)
   );
 }
+
 
 function wireAppearance(box) {
   // What the game lists draw. Populated from the backend rather than listed

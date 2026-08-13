@@ -1,7 +1,7 @@
 // Download and launch, kept separate from the pane that triggers them so the
 // grid can call them on double-click without importing the whole sidebar.
 
-import { state, invoke } from "./state.js";
+import { state, invoke, listen } from "./state.js";
 import { toast } from "./util.js";
 import { askConflicts, conflictsFrom, askOffline, offlineFrom } from "./conflicts.js";
 import { suspendPad, resumePad } from "./gamepad.js";
@@ -12,8 +12,16 @@ import { suspendPad, resumePad } from "./gamepad.js";
 /// median rather than mean so one hitched frame does not drag the estimate.
 ///
 /// Cached after the first read: this costs ~24 frames, and a launch should not
-/// wait on it twice.
+/// wait on it twice. It is also taken at idle rather than on demand, because
+/// the first launch of a session otherwise waited out those frames — most of a
+/// second on a 30Hz-throttled window — before the request to start the game had
+/// even been sent.
 let refreshHz = null;
+
+/// Take the measurement now, while nobody is waiting for it.
+export function warmRefresh() {
+  measureRefresh();
+}
 
 function measureRefresh(frames = 24) {
   if (refreshHz !== null) return Promise.resolve(refreshHz);
@@ -36,6 +44,9 @@ function measureRefresh(frames = 24) {
 }
 
 export async function launch(id, { resolving = false, skipSync = false } = {}) {
+  // Declared out here so the error paths can drop the listener too: `const`
+  // inside the try block is not in scope in the catch.
+  let stop;
   try {
     toast("Launching…");
     // The connected pad's name picks which RetroArch autoconfig profile the
@@ -45,14 +56,19 @@ export async function launch(id, { resolving = false, skipSync = false } = {}) {
     // emulator exits, and the way out of a game is a button combination.
     // Whatever is down belongs to that, not to us.
     suspendPad();
+    stop = await listen("launch-progress", ({ payload }) => {
+      toast(String(payload), 30_000);
+    });
     const result = await invoke("launch_rom", {
       id,
       pad: state.gamepad,
       refresh: await measureRefresh(),
       skipSync,
     });
+    stop?.();
     toast(result);
   } catch (e) {
+    stop?.();
     // A save that changed in two places stops the launch rather than picking a
     // winner. Ask, then start again — the second attempt syncs cleanly because
     // the conflict is gone by then.

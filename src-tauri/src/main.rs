@@ -469,8 +469,14 @@ fn recent_games(state: State<'_, AppState>, limit: Option<usize>) -> CmdResult<V
 }
 
 /// What a bulk download would cost, before starting one.
+///
+/// Async, though it awaits nothing. A synchronous Tauri command runs on the
+/// main thread, and this one asks the filesystem whether each game is already
+/// here — one call per game, so on a 2,400-game console the window stopped
+/// answering for seconds. Off the main thread it is the same work while the
+/// interface keeps drawing.
 #[tauri::command]
-fn download_estimate(
+async fn download_estimate(
     state: State<'_, AppState>,
     platform: Option<String>,
     collection: Option<String>,
@@ -1237,11 +1243,21 @@ async fn launch_rom(
         Some(&row.fs_name),
         |_| true, // ignore what is installed; that is the point
     );
+    // Say what is happening. Between pressing play and the emulator appearing
+    // there are four things that can take a visible moment — fetching a core,
+    // fetching a shader pack, fetching BIOS, and asking the server about saves
+    // — and none of them used to announce itself. A window that goes quiet for
+    // several seconds reads as one that has hung, and gives nothing to report
+    // when it is slow.
+    let say = |what: &str| {
+        let _ = app.emit("launch-progress", what.to_owned());
+    };
     let mut fetched = Vec::new();
     // Reuses the API client's HTTP stack; without a configured server there is
     // nothing to download from anyway.
     if let (Some(core), Some(api)) = (wanted.as_deref(), state.client.as_ref()) {
         let http = api.http();
+        say("checking the emulator core…");
         match romm_desktop::cores::ensure(http, ra, core).await {
             Ok(true) => fetched.push(format!("downloaded the {core} core")),
             Ok(false) => {}
@@ -1250,6 +1266,7 @@ async fn launch_rom(
             Err(e) => fetched.push(format!("could not fetch {core}: {e}")),
         }
         if state.shaders_enabled {
+            say("checking shaders…");
             match shaders::ensure_pack(http, ra).await {
                 Ok(true) => fetched.push("downloaded the shader pack".to_owned()),
                 Ok(false) => {}
@@ -1260,6 +1277,7 @@ async fn launch_rom(
         // install one is advice delivered at the exact moment they cannot see
         // why the screen is black. Only what this platform actually needs.
         let library_root = state.roms_dir.parent().unwrap_or(Path::new("."));
+        say("checking BIOS files…");
         match romm_desktop::bios::ensure(api, library_root, core, &row.platform_slug).await {
             Ok(0) => {}
             Ok(n) => fetched.push(format!("fetched {n} BIOS file(s)")),
@@ -1280,6 +1298,7 @@ async fn launch_rom(
         notes.push("saves: not synced — you chose to play anyway".to_owned());
         AutoSync::default()
     } else {
+        say("checking saves with the server…");
         auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await
     };
     if let Some(note) = pre.note {
@@ -1304,6 +1323,7 @@ async fn launch_rom(
         ));
     }
 
+    say("starting RetroArch…");
     let status = plan.run(ra, &path, false).map_err(err)?;
 
     let post = if skip_sync.unwrap_or(false) {

@@ -483,46 +483,66 @@ describe("continue playing", () => {
 });
 
 describe("take offline", () => {
-  test("the estimate is asked for as soon as the dialog opens", async () => {
+  /// The size is asked for, not assumed. Counting what is already on disk is
+  /// one filesystem call per game, and on a 2,500-game collection doing that on
+  /// every checkbox froze the window for seconds.
+  test("opening the dialog does not count anything", async () => {
     ui.askDownload({ platform: "snes" });
+    await settle();
+    assert.equal(
+      invoked.filter((c) => c.cmd === "download_estimate").length,
+      0,
+      "nothing should be counted until asked"
+    );
+  });
+
+  test("checking the size asks once, with the cheap defaults", async () => {
+    ui.askDownload({ platform: "snes" });
+    await settle();
+    document.querySelector(".bulk-size").click();
     await settle();
     const asked = invoked.filter((c) => c.cmd === "download_estimate");
     assert.equal(asked.length, 1);
     assert.equal(asked[0].args.platform, "snes");
-    // The cheap options are what a person gets without choosing.
     assert.equal(asked[0].args.art, "minimal");
     assert.equal(asked[0].args.videos, false, "videos must never be on by default");
   });
 
-  test("ticking videos re-asks, because it changes the answer tenfold", async () => {
+  /// A figure computed before a checkbox moved is a wrong figure. It is cleared
+  /// rather than silently left on screen next to different options.
+  test("changing an option clears the figure instead of recomputing", async () => {
     ui.askDownload({ platform: "snes" });
     await settle();
+    document.querySelector(".bulk-size").click();
+    await settle();
     const before = invoked.filter((c) => c.cmd === "download_estimate").length;
+
     const box = document.querySelector(".bulk-videos");
     box.checked = true;
     box.dispatchEvent(new window.Event("change"));
     await settle();
-    const after = invoked.filter((c) => c.cmd === "download_estimate");
-    assert.equal(after.length, before + 1, "the estimate must follow the checkbox");
-    assert.equal(after.at(-1).args.videos, true);
+
+    assert.equal(
+      invoked.filter((c) => c.cmd === "download_estimate").length,
+      before,
+      "a checkbox must not trigger the expensive count"
+    );
+    assert.ok(
+      !document.querySelector(".bulk-est").textContent.includes("GB"),
+      "the stale figure must not sit next to the new options"
+    );
   });
 
-  /// The whole point of asking the disk first: refusing here costs nothing,
-  /// and refusing an hour in costs a half-written game and a full disk.
+  /// The whole point of asking the disk: refusing here costs nothing, refusing
+  /// an hour in costs a half-written game and a full disk.
   test("a download that will not fit cannot be started", async () => {
     estimateFits = false;
     ui.askDownload({ platform: "psx" });
     await settle();
-    assert.equal(document.querySelector(".bulk-go").disabled, true,
-      "the button must be dead when the disk cannot take it");
-    assert.ok(document.querySelector(".bulk-space").classList.contains("bad"),
-      "and it has to look like a refusal");
-  });
-
-  test("a download that fits is offered", async () => {
-    estimateFits = true;
-    ui.askDownload({ platform: "gb" });
+    document.querySelector(".bulk-size").click();
     await settle();
-    assert.equal(document.querySelector(".bulk-go").disabled, false);
+    assert.equal(document.querySelector(".bulk-go").disabled, true);
+    assert.ok(document.querySelector(".bulk-space").classList.contains("bad"));
   });
 });
+

@@ -15,19 +15,42 @@ let open = null;
 /// Ask what to take, then take it.
 ///
 /// `what` is `{platform}` or `{collection, name}`.
-export function askDownload(what) {
+export async function askDownload(what) {
   // `isConnected`, not just a non-null reference: if the overlay is removed by
   // anything other than its own close button, a bare null check would leave
   // this permanently convinced a dialog is up and refuse to open another.
   if (open?.isConnected) return;
-  const title = what.name ?? what.platform;
+
+  // Opened from the consoles page, nothing is chosen yet, so the dialog has to
+  // ask. Opened from inside a console or collection, the thing on screen is
+  // obviously what you meant and asking again would be a step for nothing.
+  let picker = "";
+  if (!what.platform && !what.collection) {
+    let list = [];
+    try {
+      list = await invoke("platforms");
+    } catch {
+      return toast("Could not read the platform list");
+    }
+    if (!list.length) return toast("Nothing to download yet — sync first");
+    picker = `
+      <label class="bulk-row">
+        <span>What</span>
+        <select class="bulk-target">
+          ${list.map((p) => `<option value="${p.slug}">${escapeHtml(p.name)} — ${p.rom_count} games</option>`).join("")}
+        </select>
+      </label>`;
+    what = { ...what, platform: list[0].slug };
+  }
+  const title = what.name ?? what.platform ?? "a console";
 
   const box = document.createElement("div");
   box.id = "bulk-overlay";
   box.innerHTML = `
     <div class="bulk-panel" role="dialog" aria-label="Download ${escapeHtml(title)}">
       <h3>Take ${escapeHtml(title)} with you</h3>
-      <p class="bulk-est">Working out the size…</p>
+      ${picker}
+      <p class="bulk-est">Choose what to take, then check the size.</p>
 
       <label class="bulk-row">
         <span>Artwork</span>
@@ -53,6 +76,7 @@ export function askDownload(what) {
       <p class="bulk-space"></p>
       <div class="bulk-buttons">
         <button class="ghost bulk-cancel">Cancel</button>
+        <button class="ghost bulk-size">Check size</button>
         <button class="primary bulk-go">Download</button>
       </div>
     </div>`;
@@ -60,6 +84,10 @@ export function askDownload(what) {
   open = box;
 
   const q = (s) => box.querySelector(s);
+  const target = () => ({
+    platform: q(".bulk-target") ? q(".bulk-target").value : (what.platform ?? null),
+    collection: q(".bulk-target") ? null : (what.collection ?? null),
+  });
   const close = () => {
     box.remove();
     open = null;
@@ -67,11 +95,12 @@ export function askDownload(what) {
 
   async function refresh() {
     const est = q(".bulk-est");
-    est.textContent = "Working out the size…";
+    const btn = q(".bulk-size");
+    btn.disabled = true;
+    est.textContent = "Counting…";
     try {
       const [summary, fits, note] = await invoke("download_estimate", {
-        platform: what.platform ?? null,
-        collection: what.collection ?? null,
+        ...target(),
         art: q(".bulk-art").value,
         videos: q(".bulk-videos").checked,
         manuals: q(".bulk-manuals").checked,
@@ -85,12 +114,24 @@ export function askDownload(what) {
     } catch (e) {
       est.textContent = String(e);
       q(".bulk-go").disabled = true;
+    } finally {
+      btn.disabled = false;
     }
   }
 
-  for (const sel of [".bulk-art", ".bulk-videos", ".bulk-manuals"]) {
-    q(sel).addEventListener("change", refresh);
+  // Changing a box invalidates the last figure rather than recomputing it.
+  // Counting what is already on disk means one filesystem call per game, and
+  // doing that on every tick of a checkbox stalled the window for seconds.
+  for (const sel of [".bulk-art", ".bulk-videos", ".bulk-manuals", ".bulk-target"]) {
+    if (!q(sel)) continue;
+    q(sel).addEventListener("change", () => {
+      q(".bulk-est").textContent = "Choose what to take, then check the size.";
+      q(".bulk-space").textContent = "";
+      q(".bulk-space").classList.remove("bad");
+      q(".bulk-go").disabled = false;
+    });
   }
+  q(".bulk-size").addEventListener("click", refresh);
   q(".bulk-cancel").addEventListener("click", close);
   box.addEventListener("keydown", (e) => e.key === "Escape" && close());
 
@@ -103,8 +144,7 @@ export function askDownload(what) {
     });
     try {
       toast(await invoke("download_set", {
-        platform: what.platform ?? null,
-        collection: what.collection ?? null,
+        ...target(),
         art: q(".bulk-art").value,
         videos: q(".bulk-videos").checked,
         manuals: q(".bulk-manuals").checked,
@@ -118,5 +158,4 @@ export function askDownload(what) {
     }
   });
 
-  refresh();
 }

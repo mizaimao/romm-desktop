@@ -189,7 +189,14 @@ pub fn window_lines(screen: Option<(u32, u32)>) -> String {
          video_window_save_positions = \"false\"\n\
          video_window_custom_size_enable = \"true\"\n\
          video_window_width = \"{w}\"\n\
-         video_window_height = \"{h}\"\n"
+         video_window_height = \"{h}\"\n\
+         # And the ceiling, which is separate and silently wins. A RetroArch\n\
+         # set up on a 1080p monitor keeps auto_width_max = 1920 forever, so on\n\
+         # a 4K screen the window lands at a quarter of the area no matter what\n\
+         # size was asked for -- which looks exactly like the size being\n\
+         # ignored.\n\
+         video_window_auto_width_max = \"{w}\"\n\
+         video_window_auto_height_max = \"{h}\"\n"
     )
 }
 
@@ -828,6 +835,23 @@ input_r2_axis = "+5"
         assert!(!out.contains("video_window_offset"), "{out}");
         assert!(!out.contains("video_windowed_position"), "{out}");
         assert!(out.contains("video_window_save_positions = \"false\""), "{out}");
+    }
+
+    /// The ceiling is a separate setting that silently wins. RetroArch keeps
+    /// whatever `auto_width_max` it was last configured with, so one set up on
+    /// a 1080p monitor caps every window at 1920x1080 forever — and on a 4K
+    /// screen that is a quarter of the area, which reads as the requested size
+    /// being ignored rather than capped.
+    #[test]
+    fn the_size_is_written_alongside_the_ceiling_that_would_cap_it() {
+        let out = window_lines(Some((3840, 2160)));
+        let w = out.lines().find(|l| l.starts_with("video_window_width")).unwrap();
+        let cap = out.lines().find(|l| l.starts_with("video_window_auto_width_max")).unwrap();
+        let val = |l: &str| l.split('"').nth(1).unwrap().to_owned();
+        assert_eq!(val(w), val(cap), "a ceiling below the requested size caps it");
+        let h = out.lines().find(|l| l.starts_with("video_window_height")).unwrap();
+        let hcap = out.lines().find(|l| l.starts_with("video_window_auto_height_max")).unwrap();
+        assert_eq!(val(h), val(hcap));
     }
 
     /// A window the exact size of the display is a maximised one with no title
