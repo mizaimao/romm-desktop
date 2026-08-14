@@ -43,7 +43,7 @@ function measureRefresh(frames = 24) {
   });
 }
 
-export async function launch(id, { resolving = false, skipSync = false } = {}) {
+export async function launch(id, { resolving = false, skipSync = false, entrySlot = null } = {}) {
   // Declared out here so the error paths can drop the listener too: `const`
   // inside the try block is not in scope in the catch.
   let stop;
@@ -64,6 +64,7 @@ export async function launch(id, { resolving = false, skipSync = false } = {}) {
       pad: state.gamepad,
       refresh: await measureRefresh(),
       skipSync,
+      entrySlot,
     });
     stop?.();
     toast(result);
@@ -78,7 +79,7 @@ export async function launch(id, { resolving = false, skipSync = false } = {}) {
       if (!answered) return toast("Launch cancelled — saves left as they were");
       // `resolving` guards the retry: if it somehow conflicts again we report
       // it rather than reopening the dialog forever.
-      return launch(id, { resolving: true });
+      return launch(id, { resolving: true, entrySlot });
     }
     // Saves could not be checked at all. Ask rather than deciding: starting
     // silently risks an hour on top of a stale save, and refusing would mean a
@@ -87,7 +88,7 @@ export async function launch(id, { resolving = false, skipSync = false } = {}) {
     if (offline && !skipSync) {
       const go = await askOffline(offline);
       if (!go) return toast("Launch cancelled");
-      return launch(id, { skipSync: true });
+      return launch(id, { skipSync: true, entrySlot });
     }
 
     toast(`Launch failed — ${e}`, 8000);

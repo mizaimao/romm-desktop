@@ -34,6 +34,7 @@ pub mod savebackup;
 pub mod scrape;
 pub mod saves;
 pub mod savesync;
+pub mod states;
 pub mod statesync;
 pub mod tui;
 pub mod util;

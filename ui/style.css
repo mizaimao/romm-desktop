@@ -687,6 +687,71 @@ body.has-pad #tabbar .bumper { display: inline; }
 }
 #detail .rating .num { color: var(--dim); font-size: 11px; }
 
+/* The save-state shelf.
+   A horizontal strip rather than a grid: these are a handful of items in a
+   meaningful order — where you left off, then the slots — and a grid would
+   reflow that order at every pane width. */
+#detail .shelf { margin: 4px 0 16px; }
+#detail .shelf-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+#detail .shelf-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+#detail .state {
+  flex: 0 0 116px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+}
+#detail .state:hover:not([disabled]) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* The autosave: RetroArch loads it itself, so there is nothing to click. Kept
+   on the shelf anyway — it is usually the most recent thing there, and a shelf
+   that hid it would look wrong to anyone who knew it existed. */
+#detail .state[disabled] { cursor: default; opacity: 0.72; }
+#detail .state img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+  background: #000;
+  margin: 0 0 4px;
+}
+#detail .state-blank {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+#detail .state-label {
+  font-size: 11.5px;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#detail .state-when { font-size: 10.5px; color: var(--dim); padding: 0 6px; }
+
 /* ES-DE artwork strip */
 #detail .artstrip {
   display: grid;
@@ -1779,3 +1844,55 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 
 /* The recent row sits above the consoles and is not one of them. */
 .recent { margin-bottom: 18px; }
+
+/* ---- Play history ---- */
+.hist { padding: 8px 4px 40px; max-width: 900px; }
+.hist-top {
+  display: flex;
+  gap: 36px;
+  margin-bottom: 6px;
+}
+.hist-top div { display: flex; flex-direction: column; }
+.hist-top strong { font-size: 30px; font-weight: 650; line-height: 1.1; }
+.hist-top span { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.07em; }
+.hist-note { font-size: 12px; color: var(--dim); margin: 0 0 22px; max-width: 62ch; line-height: 1.5; }
+.hist h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  margin: 26px 0 10px;
+}
+.hist-list { display: flex; flex-direction: column; gap: 3px; }
+.hist-row {
+  display: grid;
+  /* Fixed first and last columns so the bars share one baseline: sizing the
+     name column to its contents would stagger every bar by a different amount
+     and the comparison the page exists for stops working. */
+  grid-template-columns: 190px 1fr 110px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.hist-row:hover { background: color-mix(in srgb, var(--glass) 16%, transparent); }
+.hist-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-name em { color: var(--dim); font-style: normal; font-size: 11px; margin-left: 8px; }
+.hist-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--glass) 22%, transparent);
+  overflow: hidden;
+}
+.hist-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+}
+.hist-time { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.hist-game { grid-template-columns: 1fr 150px; }
+.hist-empty { padding: 60px 20px; max-width: 54ch; }
+.hist-empty h2 { font-size: 18px; margin: 0 0 10px; }
+.hist-empty p { color: var(--dim); font-size: 13px; line-height: 1.6; }

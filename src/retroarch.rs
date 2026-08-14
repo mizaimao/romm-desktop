@@ -406,6 +406,11 @@ input_player1_mouse_index = \"0\"
 input_player1_gun_trigger_mbtn = \"1\"
 input_player1_gun_offscreen_shot_mbtn = \"2\"
 input_player1_gun_start_mbtn = \"3\"
+# A save state with no picture is a slot number, and a slot number is not
+# something anybody remembers. RetroArch writes the frame beside the state when
+# asked; nothing can produce one after the fact.
+savestate_thumbnail_enable = \"true\"
+
 input_player2_mouse_index = \"0\"
 input_player2_gun_trigger_mbtn = \"1\"
 input_player2_gun_offscreen_shot_mbtn = \"2\"
@@ -595,7 +600,7 @@ input_player2_gun_start_mbtn = \"3\"
         fullscreen: bool,
         overrides: Option<&Path>,
     ) -> Result<Command> {
-        self.launch_command_full(core, rom, fullscreen, overrides, None)
+        self.launch_command_full(core, rom, fullscreen, overrides, None, None)
     }
 
     /// The full form, including an explicit shader preset.
@@ -614,6 +619,7 @@ input_player2_gun_start_mbtn = \"3\"
         fullscreen: bool,
         overrides: Option<&Path>,
         shader: Option<&Path>,
+        entry_slot: Option<u32>,
     ) -> Result<Command> {
         let core_path = self.core_path(core);
         if !core_path.is_file() {
@@ -641,6 +647,12 @@ input_player2_gun_start_mbtn = \"3\"
         }
         if fullscreen {
             cmd.arg("-f");
+        }
+        // Start in a save state rather than at the title screen. RetroArch
+        // takes the slot number, not a path, which is why the shelf keeps
+        // RetroArch's own slot names rather than inventing its own.
+        if let Some(slot) = entry_slot {
+            cmd.arg(format!("--entryslot={slot}"));
         }
         Ok(cmd)
     }
@@ -731,7 +743,7 @@ input_player2_gun_start_mbtn = \"3\"
         fullscreen: bool,
         overrides: Option<&Path>,
     ) -> Result<std::process::ExitStatus> {
-        self.launch_full(core, rom, fullscreen, overrides, None)
+        self.launch_full(core, rom, fullscreen, overrides, None, None)
     }
 
     /// As [`Self::launch_with`], with an explicit shader preset.
@@ -742,8 +754,10 @@ input_player2_gun_start_mbtn = \"3\"
         fullscreen: bool,
         overrides: Option<&Path>,
         shader: Option<&Path>,
+        entry_slot: Option<u32>,
     ) -> Result<std::process::ExitStatus> {
-        let mut cmd = self.launch_command_full(core, rom, fullscreen, overrides, shader)?;
+        let mut cmd =
+            self.launch_command_full(core, rom, fullscreen, overrides, shader, entry_slot)?;
         let status = cmd
             .status()
             .with_context(|| format!("spawning {}", self.binary.display()))?;

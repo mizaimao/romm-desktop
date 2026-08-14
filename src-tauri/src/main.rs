@@ -454,6 +454,144 @@ fn versions(state: State<'_, AppState>) -> CmdResult<(String, Option<String>)> {
     Ok((env!("CARGO_PKG_VERSION").to_owned(), server))
 }
 
+/// One save state, as the shelf in the info pane shows it.
+#[derive(Serialize)]
+struct StateView {
+    slot: String,
+    label: String,
+    /// Absolute path to the picture RetroArch saved with the state, if there is
+    /// one. The page turns it into something it can load; states written before
+    /// thumbnails were switched on have none and never will.
+    thumb: Option<String>,
+    when: Option<String>,
+    size_bytes: u64,
+    core: String,
+    /// False for the autosave, which has no slot number to enter.
+    resumable: bool,
+}
+
+/// The save states this game has.
+#[tauri::command]
+fn game_states(state: State<'_, AppState>, id: i64) -> CmdResult<Vec<StateView>> {
+    let Some(ra) = state.retroarch.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let cache = state.cache.lock().map_err(err)?;
+    let Some(row) = cache.rom_by_id(id).map_err(err)? else {
+        return Ok(Vec::new());
+    };
+    let now = std::time::SystemTime::now();
+    Ok(romm_desktop::states::shelf(&ra.root, &cache, &state.map, &row.fs_name)
+        .map_err(err)?
+        .into_iter()
+        .map(|s| StateView {
+            resumable: s.entry_slot().is_some(),
+            when: s.modified.map(|t| romm_desktop::states::ago(t, now)),
+            thumb: s.thumb.map(|p| p.display().to_string()),
+            slot: s.slot,
+            label: s.label,
+            size_bytes: s.size,
+            core: s.core,
+        })
+        .collect())
+}
+
+/// Time played, by console and by game.
+#[derive(Serialize)]
+struct History {
+    total_seconds: i64,
+    sessions: i64,
+    games: i64,
+    platforms: Vec<PlatformTime>,
+    top: Vec<GameTime>,
+    /// Games opened more than once and still barely played.
+    abandoned: Vec<GameTime>,
+}
+
+#[derive(Serialize)]
+struct PlatformTime {
+    slug: String,
+    name: String,
+    seconds: i64,
+    spelled: String,
+    sessions: i64,
+    games: i64,
+}
+
+#[derive(Serialize)]
+struct GameTime {
+    id: i64,
+    name: String,
+    platform: String,
+    seconds: i64,
+    spelled: String,
+    sessions: i64,
+    last: Option<String>,
+}
+
+/// What the library has actually been used for.
+///
+/// Only sessions this app started. Anything played through ES-DE, on the
+/// handheld, or before this existed is not here and cannot be — which is worth
+/// saying on the page, because a total that looks like a lifetime figure and is
+/// really a few weeks is a number that misleads.
+#[tauri::command]
+fn play_history(state: State<'_, AppState>) -> CmdResult<History> {
+    let cache = state.cache.lock().map_err(err)?;
+    let names: std::collections::HashMap<String, String> = cache
+        .platforms()
+        .map(|ps| ps.into_iter().map(|p| (p.fs_slug, p.display_name)).collect())
+        .unwrap_or_default();
+    let (total_seconds, sessions, games) = cache.play_totals().map_err(err)?;
+
+    let platforms = cache
+        .play_by_platform()
+        .map_err(err)?
+        .into_iter()
+        .map(|(slug, seconds, sessions, games)| PlatformTime {
+            name: names.get(&slug).cloned().unwrap_or_else(|| slug.clone()),
+            spelled: romm_desktop::util::spell_duration(seconds),
+            slug,
+            seconds,
+            sessions,
+            games,
+        })
+        .collect();
+
+    let game = |(r, seconds, sessions, last): (cache::RomRow, i64, i64, String)| GameTime {
+        id: r.id,
+        name: r.name,
+        platform: names.get(&r.platform_slug).cloned().unwrap_or(r.platform_slug),
+        spelled: romm_desktop::util::spell_duration(seconds),
+        seconds,
+        sessions,
+        last: Some(last),
+    };
+
+    Ok(History {
+        total_seconds,
+        sessions,
+        games,
+        platforms,
+        top: cache.play_by_game(12).map_err(err)?.into_iter().map(game).collect(),
+        // Twice or more, under half an hour all told.
+        abandoned: cache
+            .abandoned(2, 1800, 12)
+            .map_err(err)?
+            .into_iter()
+            .map(|(r, seconds, sessions)| GameTime {
+                id: r.id,
+                name: r.name,
+                platform: names.get(&r.platform_slug).cloned().unwrap_or(r.platform_slug),
+                spelled: romm_desktop::util::spell_duration(seconds),
+                seconds,
+                sessions,
+                last: None,
+            })
+            .collect(),
+    })
+}
+
 /// The games played most recently, for the row at the top of the library.
 ///
 /// Server timestamps, so the list is the same wherever you sign in — the point
@@ -1247,6 +1385,8 @@ async fn launch_rom(
     refresh: Option<f32>,
     // Set by the retry after the user answered an offline warning.
     skip_sync: Option<bool>,
+    // A save state to start in, chosen from the shelf in the info pane.
+    entry_slot: Option<u32>,
 ) -> CmdResult<String> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
@@ -1265,6 +1405,7 @@ async fn launch_rom(
     let lightgun = state.lightgun.lock().map_err(err)?.clone();
     let lib = state.roms_dir.parent().unwrap_or(Path::new("."));
     let req = romm_desktop::launch::Request {
+        entry_slot,
         rom: &path,
         platform: &row.platform_slug,
         fs_name: &row.fs_name,
@@ -1374,7 +1515,20 @@ async fn launch_rom(
     }
 
     say("starting RetroArch…");
+    let began = std::time::Instant::now();
+    let started_at = romm_desktop::util::now_iso();
     let status = plan.run(ra, &path, false).map_err(err)?;
+
+    // How long that took is the only record of it. RetroArch tells nobody, and
+    // the server's `last_played` only moves when something tells the server —
+    // which nothing here did, so playing a game on this machine used to leave
+    // no trace on this machine at all.
+    let seconds = began.elapsed().as_secs() as i64;
+    if let Ok(cache) = state.cache.lock()
+        && let Ok(true) = cache.record_play(row.id, &started_at, seconds)
+    {
+        notes.push(format!("played for {}", romm_desktop::util::spell_duration(seconds)));
+    }
 
     let post = if skip_sync.unwrap_or(false) {
         AutoSync::default()
@@ -2336,6 +2490,8 @@ fn main() {
             bios_status,
             download_set,
             recent_games,
+            game_states,
+            play_history,
             download_estimate,
             scrape_missing,
             list_art_options,

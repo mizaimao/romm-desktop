@@ -41,6 +41,8 @@ pub struct Request<'a> {
     /// Display refresh in Hz, as measured by the frontend. Sets how many
     /// subframes the motion pass gets; None falls back to a safe 2.
     pub refresh_hz: Option<f32>,
+    /// Start in this save-state slot instead of at the title screen.
+    pub entry_slot: Option<u32>,
     /// Name the connected controller reports, used to pick the RetroArch
     /// autoconfig profile the gamepad hotkeys are derived from. None means
     /// "whatever this OS's input driver would use".
@@ -57,6 +59,8 @@ pub struct Request<'a> {
 
 /// A resolved, ready-to-spawn launch.
 pub struct Plan {
+    /// Load this save-state slot on startup, for "carry on from this one".
+    pub entry_slot: Option<u32>,
     pub core: String,
     pub core_label: Option<String>,
     pub shader: Option<PathBuf>,
@@ -75,6 +79,7 @@ impl Plan {
             fullscreen,
             self.overrides.as_deref(),
             self.shader.as_deref(),
+            self.entry_slot,
         )
     }
 
@@ -86,6 +91,7 @@ impl Plan {
             fullscreen,
             self.overrides.as_deref(),
             self.shader.as_deref(),
+            self.entry_slot,
         )
     }
 }
@@ -232,6 +238,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         .ok();
 
     Ok(Plan {
+        entry_slot: req.entry_slot,
         core_label: map.label_for(&core).map(str::to_owned),
         core,
         shader,

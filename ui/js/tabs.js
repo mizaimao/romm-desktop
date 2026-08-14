@@ -12,6 +12,7 @@
 import { el, state, trail } from "./state.js";
 import { showPlatforms, backToPlatforms } from "./library.js";
 import { showCollectionGroups, showCollectionsIn } from "./collections.js";
+import { showHistory } from "./history.js";
 
 /// `user` and `smart` are collections someone made — by hand or as a saved
 /// filter. Everything else RomM generates from metadata: genre, franchise,
@@ -37,6 +38,11 @@ export const SECTIONS = [
     id: "browse",
     label: "Browse",
     open: () => showCollectionGroups({ exclude: ["user"] }),
+  },
+  {
+    id: "history",
+    label: "History",
+    open: () => showHistory(),
   },
 ];
 

@@ -41,10 +41,14 @@ export async function selectRom(id) {
     r.classList.toggle("sel", Number(r.dataset.id) === id)
   );
 
-  const [d, cores] = await Promise.all([
+  const [d, cores, states] = await Promise.all([
     invoke("rom_detail", { id }),
     // Never fatal: a missing core list should not blank the whole pane.
     invoke("game_cores", { id }).catch(() => []),
+    // Nor a missing shelf. Reading it means walking the state folders, which
+    // is fine per game and would not be fine if it blanked the pane on a
+    // machine with no RetroArch.
+    invoke("game_states", { id }).catch(() => []),
   ]);
   // A later click may have superseded this one; do not paint a stale game.
   if (state.selected !== id) return;
@@ -103,6 +107,7 @@ export async function selectRom(id) {
         <dt>Core</dt><dd>${corePicker(cores, d)}</dd>
         <dt>Local</dt><dd>${d.downloaded ? "yes" : "no"}</dd>
       </dl>
+      ${stateShelf(states)}
       ${artStrip(d)}
       ${
         d.manual || d.youtube_id
@@ -125,10 +130,58 @@ export async function selectRom(id) {
   });
 
   wireArtwork(d);
+  wireShelf(d);
 
   document.getElementById("play").addEventListener("click", () => play(d));
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
   wireCorePicker(d.id);
+}
+
+/// The save states this game has, as pictures you can start from.
+///
+/// A state is the only record of where you actually are in a game — it cannot
+/// be downloaded again and nothing else in the app knows what is in one. They
+/// were being synced with the server already, which meant the app knew about
+/// them and never showed one: the only way back into a state was to launch the
+/// game, open RetroArch's menu, and guess at a slot number.
+///
+/// The picture is the point. RetroArch saves the frame beside the state, and
+/// "the cave with the two doors" is a thing you recognise instantly where
+/// "slot 3" is a thing you have to remember.
+function stateShelf(states) {
+  if (!states.length) return "";
+  return `
+    <div class="shelf">
+      <div class="shelf-head">Save states</div>
+      <div class="shelf-strip">
+        ${states
+          .map(
+            (s) => `
+          <button class="state" data-slot="${escapeHtml(s.slot)}"
+            ${s.resumable ? "" : "disabled"}
+            title="${s.resumable ? `Start from ${escapeHtml(s.label)}` : "RetroArch loads this one itself when you next play"}">
+            ${
+              s.thumb
+                ? `<img src="${convertFileSrc(s.thumb)}" alt="" loading="lazy" />`
+                : `<span class="state-blank">${escapeHtml(s.slot === "auto" ? "auto" : s.slot)}</span>`
+            }
+            <span class="state-label">${escapeHtml(s.label)}</span>
+            <span class="state-when">${escapeHtml(s.when ?? "")}</span>
+          </button>`
+          )
+          .join("")}
+      </div>
+    </div>`;
+}
+
+function wireShelf(d) {
+  for (const btn of document.querySelectorAll(".state:not([disabled])")) {
+    btn.addEventListener("click", () => {
+      // Same launch path as the Play button, so a state that needs a core
+      // fetched, a BIOS file, or a save sync gets all of it.
+      launch(d.id, { entrySlot: Number(btn.dataset.slot) });
+    });
+  }
 }
 
 /// A dropdown of the cores this game can run under.

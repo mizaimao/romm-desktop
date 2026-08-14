@@ -58,6 +58,20 @@ CREATE TABLE IF NOT EXISTS collection_roms (
     PRIMARY KEY (collection_id, rom_id)
 );
 CREATE INDEX IF NOT EXISTS collection_roms_rom ON collection_roms(rom_id);
+-- Every session, one row.
+--
+-- Kept here rather than on the game because the interesting questions are about
+-- the shape of the sessions, not their sum: a game opened eleven times for four
+-- minutes each is a different thing from one played twice for an afternoon, and
+-- a single "hours played" column cannot tell them apart. The server has no
+-- equivalent, so this is the only record there is.
+CREATE TABLE IF NOT EXISTS plays (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    rom_id     INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    seconds    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plays_rom ON plays(rom_id);
 CREATE INDEX IF NOT EXISTS collections_grp ON collections(grp);
 "#;
 
@@ -557,6 +571,89 @@ impl Cache {
         Ok(rows)
     }
 
+    /// Record one finished session, and mark the game played.
+    ///
+    /// `last_played` is also set locally. It used to come only from the server,
+    /// which meant playing a game on this machine changed nothing on the
+    /// "continue playing" row until a sync happened to bring back a timestamp
+    /// the server had no reason to have — so the row was often a list of what
+    /// somebody else's machine had been doing.
+    ///
+    /// Sessions under a minute are dropped. Starting a game and quitting
+    /// straight back out is a thing people do constantly — wrong game, wrong
+    /// controller, checking it runs — and counting those makes "eleven
+    /// sessions" mean nothing.
+    pub fn record_play(&self, rom_id: i64, started_at: &str, seconds: i64) -> Result<bool> {
+        if seconds < 60 {
+            return Ok(false);
+        }
+        self.conn.execute(
+            "INSERT INTO plays(rom_id, started_at, seconds) VALUES (?1, ?2, ?3)",
+            rusqlite::params![rom_id, started_at, seconds],
+        )?;
+        self.conn.execute(
+            "UPDATE roms SET last_played = ?1 WHERE id = ?2",
+            rusqlite::params![started_at, rom_id],
+        )?;
+        Ok(true)
+    }
+
+    /// Time played per console, longest first.
+    pub fn play_by_platform(&self) -> Result<Vec<(String, i64, i64, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.platform_slug, SUM(p.seconds), COUNT(*), COUNT(DISTINCT p.rom_id)              FROM plays p JOIN roms r ON r.id = p.rom_id              GROUP BY r.platform_slug ORDER BY 2 DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Time played per game, longest first: `(rom, seconds, sessions, last)`.
+    pub fn play_by_game(&self, limit: usize) -> Result<Vec<(RomRow, i64, i64, String)>> {
+        let sql = format!(
+            "SELECT {ROM_COLUMNS}, t.secs, t.runs, t.last FROM roms              JOIN (SELECT rom_id, SUM(seconds) secs, COUNT(*) runs, MAX(started_at) last                    FROM plays GROUP BY rom_id) t ON t.rom_id = roms.id              ORDER BY t.secs DESC LIMIT ?1"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        // By name, not by position. ROM_COLUMNS holds a COALESCE with commas
+        // inside it, so counting separators to find where the extra columns
+        // start gives a number several too high.
+        let rows = stmt
+            .query_map([limit as i64], |r| {
+                Ok((rom_from_row(r)?, r.get("secs")?, r.get("runs")?, r.get("last")?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Games picked up more than once and never really played.
+    ///
+    /// The definition is deliberately narrow: opened on at least `runs`
+    /// separate occasions, and under `under` seconds in total. Something you
+    /// came back to and still bounced off — which is a more interesting list
+    /// than "games you started once", because that one is just your library.
+    pub fn abandoned(&self, runs: i64, under: i64, limit: usize) -> Result<Vec<(RomRow, i64, i64)>> {
+        let sql = format!(
+            "SELECT {ROM_COLUMNS}, t.secs, t.runs FROM roms              JOIN (SELECT rom_id, SUM(seconds) secs, COUNT(*) runs FROM plays                    GROUP BY rom_id) t ON t.rom_id = roms.id              WHERE t.runs >= ?1 AND t.secs < ?2 ORDER BY t.runs DESC, t.secs ASC LIMIT ?3"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params![runs, under, limit as i64], |r| {
+                Ok((rom_from_row(r)?, r.get("secs")?, r.get("runs")?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Total seconds and session count across everything.
+    pub fn play_totals(&self) -> Result<(i64, i64, i64)> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(SUM(seconds), 0), COUNT(*), COUNT(DISTINCT rom_id) FROM plays",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?)
+    }
+
     /// Every game, ordered as the platform pages order them.
     pub fn all_roms(&self) -> Result<Vec<RomRow>> {
         let sql = format!("SELECT {ROM_COLUMNS} FROM roms ORDER BY 2, 3 COLLATE NOCASE");
@@ -808,6 +905,100 @@ mod tests {
                 params![id, slug, display],
             )
             .unwrap();
+    }
+
+    /// Sessions, and what they add up to.
+    ///
+    /// The SQL here is the whole feature: a mistake in a JOIN or a GROUP BY
+    /// does not fail, it produces a plausible number, and a plausible wrong
+    /// number about how you spent a year is worse than no number.
+    #[test]
+    fn play_time_adds_up_per_game_and_per_console() {
+        let c = cache("plays");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        add_platform(&c, 2, "psx", "PlayStation");
+        add_rom(&c, 10, "snes", "Chrono Trigger", "ct.sfc");
+        add_rom(&c, 11, "snes", "Super Metroid", "sm.sfc");
+        add_rom(&c, 20, "psx", "Vagrant Story", "vs.bin");
+
+        c.record_play(10, "2026-01-01T10:00:00", 3600).unwrap();
+        c.record_play(10, "2026-01-02T10:00:00", 1800).unwrap();
+        c.record_play(11, "2026-01-03T10:00:00", 600).unwrap();
+        c.record_play(20, "2026-01-04T10:00:00", 7200).unwrap();
+
+        let by_platform = c.play_by_platform().unwrap();
+        // PlayStation first: two hours beats one and a half, and the ordering
+        // is what the page is for.
+        assert_eq!(by_platform[0].0, "psx");
+        assert_eq!(by_platform[0].1, 7200);
+        assert_eq!(by_platform[1], ("snes".to_owned(), 6000, 3, 2));
+
+        let by_game = c.play_by_game(10).unwrap();
+        assert_eq!(by_game[0].0.id, 20);
+        assert_eq!(by_game[1].0.name, "Chrono Trigger");
+        assert_eq!(by_game[1].1, 5400, "two sessions on one game must sum");
+        assert_eq!(by_game[1].2, 2, "and count as two");
+        assert_eq!(by_game[1].3, "2026-01-02T10:00:00", "the later of the two");
+
+        assert_eq!(c.play_totals().unwrap(), (13_200, 4, 3));
+    }
+
+    /// Starting a game and quitting straight back out is something people do
+    /// constantly — wrong game, wrong controller, checking it runs. Counting
+    /// those makes a session count mean nothing.
+    #[test]
+    fn a_glance_at_a_game_is_not_a_session() {
+        let c = cache("plays-short");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        add_rom(&c, 10, "snes", "Chrono Trigger", "ct.sfc");
+
+        assert!(!c.record_play(10, "2026-01-01T10:00:00", 12).unwrap());
+        assert!(!c.record_play(10, "2026-01-01T10:01:00", 59).unwrap());
+        assert!(c.record_play(10, "2026-01-01T10:02:00", 60).unwrap());
+        assert_eq!(c.play_totals().unwrap(), (60, 1, 1));
+    }
+
+    /// Playing something here has to show up on the "continue playing" row
+    /// here. It used to wait on the server sending back a timestamp it had no
+    /// reason to have, so the row showed what other machines had been doing.
+    #[test]
+    fn playing_a_game_marks_it_played_without_asking_the_server() {
+        let c = cache("plays-recent");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        add_rom(&c, 10, "snes", "Chrono Trigger", "ct.sfc");
+        assert!(c.recently_played(5).unwrap().is_empty());
+
+        c.record_play(10, "2026-01-01T10:00:00", 900).unwrap();
+        let recent = c.recently_played(5).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, 10);
+    }
+
+    /// "Started twice and bounced off" is a narrower question than "started
+    /// once", which is just the library. A game played for an afternoon is not
+    /// abandoned however many times it was opened, and one opened once is not
+    /// yet a pattern.
+    #[test]
+    fn abandoned_means_came_back_to_and_still_bounced_off() {
+        let c = cache("plays-abandoned");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        add_rom(&c, 10, "snes", "Bounced Off", "a.sfc");
+        add_rom(&c, 11, "snes", "Played Properly", "b.sfc");
+        add_rom(&c, 12, "snes", "Opened Once", "c.sfc");
+
+        for i in 0..3 {
+            c.record_play(10, &format!("2026-01-0{}T10:00:00", i + 1), 300).unwrap();
+        }
+        for i in 0..3 {
+            c.record_play(11, &format!("2026-02-0{}T10:00:00", i + 1), 5000).unwrap();
+        }
+        c.record_play(12, "2026-03-01T10:00:00", 200).unwrap();
+
+        let got = c.abandoned(2, 1800, 10).unwrap();
+        let names: Vec<&str> = got.iter().map(|(r, _, _)| r.name.as_str()).collect();
+        assert_eq!(names, ["Bounced Off"]);
+        assert_eq!(got[0].1, 900);
+        assert_eq!(got[0].2, 3);
     }
 
     fn add_rom(c: &Cache, id: i64, slug: &str, name: &str, fs_name: &str) {
