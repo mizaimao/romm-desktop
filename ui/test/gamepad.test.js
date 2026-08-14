@@ -37,6 +37,12 @@ function reply(cmd, args) {
   if (cmd === "status") return { configured: true };
   if (cmd === "recent_games") return recentGames;
   if (cmd === "download_estimate") return [estimateSummary, estimateFits, "note"];
+  if (cmd === "platforms")
+    return [
+      { slug: "snes", name: "Super Nintendo", rom_count: 12 },
+      { slug: "psx", name: "PlayStation", rom_count: 40 },
+      { slug: "megadrive", name: "Mega Drive", rom_count: 9 },
+    ];
   return [];
 }
 
@@ -503,9 +509,66 @@ describe("take offline", () => {
     await settle();
     const asked = invoked.filter((c) => c.cmd === "download_estimate");
     assert.equal(asked.length, 1);
-    assert.equal(asked[0].args.platform, "snes");
+    assert.deepEqual(asked[0].args.platforms, ["snes"], "the console on screen starts ticked");
     assert.equal(asked[0].args.art, "minimal");
     assert.equal(asked[0].args.videos, false, "videos must never be on by default");
+    assert.equal(asked[0].args.bios, false, "300 MB must never arrive unasked");
+  });
+
+  /// Nobody travels with one console, and choosing them one at a time meant
+  /// running the whole dialog once per system — each size check against a disk
+  /// the previous run had already eaten into, so the last always claimed to
+  /// fit and did not.
+  test("several systems go in one download", async () => {
+    ui.askDownload({ platform: "snes" });
+    await settle();
+    const psx = [...document.querySelectorAll(".bulk-plat")].find((c) => c.value === "psx");
+    psx.checked = true;
+    document.querySelector(".bulk-size").click();
+    await settle();
+    const asked = invoked.filter((c) => c.cmd === "download_estimate").at(-1);
+    assert.deepEqual(asked.args.platforms.sort(), ["psx", "snes"]);
+  });
+
+  test("All and None move every tick at once", async () => {
+    ui.askDownload({ platform: "snes" });
+    await settle();
+    document.querySelector(".bulk-all").click();
+    assert.equal([...document.querySelectorAll(".bulk-plat:checked")].length, 3);
+    document.querySelector(".bulk-none").click();
+    assert.equal([...document.querySelectorAll(".bulk-plat:checked")].length, 0);
+  });
+
+  /// Somewhere with no server is exactly where a missing BIOS becomes a console
+  /// that will not boot and cannot be fixed. It belongs in the pane people open
+  /// before going there, not three tabs deep in settings.
+  test("BIOS can be taken along with the games", async () => {
+    ui.askDownload({ platform: "psx" });
+    await settle();
+    const bios = document.querySelector(".bulk-bios");
+    assert.ok(bios, "no way to take BIOS files from the offline pane");
+    bios.checked = true;
+    document.querySelector(".bulk-size").click();
+    await settle();
+    assert.equal(
+      invoked.filter((c) => c.cmd === "download_estimate").at(-1).args.bios,
+      true
+    );
+  });
+
+  /// With nothing ticked the backend cannot tell "everything" from "nothing",
+  /// so the dialog refuses rather than guessing.
+  test("downloading nothing is refused before it is sent", async () => {
+    ui.askDownload({});
+    await settle();
+    document.querySelector(".bulk-none").click();
+    document.querySelector(".bulk-go").click();
+    await settle();
+    assert.equal(
+      invoked.filter((c) => c.cmd === "download_set").length,
+      0,
+      "an empty download reached the backend"
+    );
   });
 
   /// A figure computed before a checkbox moved is a wrong figure. It is cleared
@@ -519,7 +582,9 @@ describe("take offline", () => {
 
     const box = document.querySelector(".bulk-videos");
     box.checked = true;
-    box.dispatchEvent(new window.Event("change"));
+    // Bubbling, as a real change event does: the dialog listens once on the
+    // panel rather than on each control.
+    box.dispatchEvent(new window.Event("change", { bubbles: true }));
     await settle();
 
     assert.equal(

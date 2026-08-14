@@ -31,6 +31,15 @@ const USER_CONFIG_TEMPLATE: &str = r#"# Your RetroArch settings, applied every t
 # video_smooth = "false"
 # video_scale_integer = "true"
 
+# ---- Windows: window blacks out while being resized ----
+# These three used to be forced on Windows and made it worse on an Nvidia card
+# with G-Sync: d3d11 with "sync to exact content framerate" settles on a
+# different refresh rate every launch. Try them one at a time if resizing still
+# flashes, starting with the driver.
+# video_driver = "d3d11"
+# vrr_runloop_enable = "true"
+# video_max_swapchain_images = "2"
+
 # ---- Controls ----
 # Player 1, RetroPad button -> your device's button index.
 # input_player1_a_btn = "1"
@@ -405,30 +414,25 @@ input_player2_gun_start_mbtn = \"3\"
 ";
 
     /// Windows-only additions, appended to `OVERRIDES` there.
+    ///
+    /// Empty of video settings, and that is the fix rather than an omission.
+    ///
+    /// This block used to force `video_driver = "d3d11"`, `vrr_runloop_enable`
+    /// and a two-image swapchain, to stop a window blacking out while being
+    /// resized on a 144 Hz display. It did not stop it. What it did do was
+    /// take a machine already set to d3d12 and move it to d3d11, which is the
+    /// one driver with a known VRR problem: on an Nvidia card with G-Sync,
+    /// d3d11 plus "sync to exact content framerate" -- which is what
+    /// `vrr_runloop_enable` is -- negotiates a refresh rate several Hz below
+    /// the display's, differently on each launch (libretro/RetroArch#14513).
+    /// A timing figure that changes per launch is a driver reinitialisation
+    /// waiting to happen, and a reinitialisation is a black screen.
+    ///
+    /// So the whole block is gone. RetroArch's own config decides the video
+    /// driver, as it did before, and `retroarch-user.cfg` carries the old
+    /// settings commented out for anyone whose display did want them.
     #[cfg(target_os = "windows")]
-    const OVERRIDES_OS: &str = "
-# ---- Windows ----
-# The GL driver flickers while a window is being resized, badly enough to look
-# broken. D3D11 does not, and is the driver the Windows build is tuned for.
-# Override this in your own settings file if your GPU prefers something else.
-video_driver = \"d3d11\"
-
-# Resizing tears without this once the driver is switched.
-video_vsync = \"true\"
-
-# Sync to the content's own framerate rather than the display's.
-#
-# A 144 Hz monitor showing 60 Hz content has to reconcile the two, and d3d11
-# does it by rebuilding the swapchain on every window resize -- which is seconds
-# of black screen each time the window is dragged. Letting the refresh follow
-# the content removes the reconciliation, and on a variable-refresh display it
-# is what you want anyway.
-vrr_runloop_enable = \"true\"
-
-# Fewer buffered frames to throw away when the swapchain is rebuilt, which is
-# the other half of how long that black screen lasts.
-video_max_swapchain_images = \"2\"
-";
+    const OVERRIDES_OS: &str = "";
 
     #[cfg(not(target_os = "windows"))]
     const OVERRIDES_OS: &str = "";

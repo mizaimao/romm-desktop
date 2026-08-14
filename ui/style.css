@@ -1687,7 +1687,12 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   z-index: 60;
 }
 .bulk-panel {
-  width: min(560px, 92vw);
+  /* Wide enough for the system list to sit two columns across, and capped
+     against the viewport so the list scrolls rather than the dialog growing
+     off the bottom of a laptop screen. */
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  overflow-y: auto;
   padding: 22px 24px;
   border-radius: 14px;
   background: var(--panel);
@@ -1720,6 +1725,53 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
    hour of transfer and a full disk. */
 .bulk-space.bad { color: #e0736a; font-weight: 600; }
 .bulk-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* The system list. Fixed height rather than fitting its contents: with thirty
+   consoles it would otherwise push the size estimate and the buttons off the
+   screen, which is where the decision actually gets made. */
+.bulk-systems { margin: 0 0 14px; }
+.bulk-systems-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.bulk-pick { display: flex; gap: 12px; }
+.bulk-pick .link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.bulk-pick .link:hover { text-decoration: underline; }
+.bulk-list {
+  max-height: 30vh;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 2px 14px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--glass) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
+}
+.bulk-sys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.bulk-sys:hover { background: color-mix(in srgb, var(--glass) 20%, transparent); }
+.bulk-sys input { accent-color: var(--accent); }
+.bulk-sys span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulk-sys em { color: var(--dim); font-style: normal; font-size: 11.5px; }
 
 /* How much of a collection is already here — the question a card could not
    answer before, and the one that matters before travelling. */

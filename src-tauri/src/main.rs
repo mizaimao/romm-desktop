@@ -468,6 +468,35 @@ fn recent_games(state: State<'_, AppState>, limit: Option<usize>) -> CmdResult<V
     Ok(to_views(&state, rows))
 }
 
+/// Every game in the chosen systems and collection, in one list.
+///
+/// Systems are plural because the reason for taking a library offline is a
+/// journey, and nobody travels with one console. Picking them one at a time
+/// meant running the whole dialog once per system, each with its own size
+/// check against a disk the previous run had already eaten into.
+fn rows_for_choice(
+    state: &State<'_, AppState>,
+    platforms: &[String],
+    collection: &Option<String>,
+) -> Result<Vec<cache::RomRow>, String> {
+    let cache = state.cache.lock().map_err(err)?;
+    let mut rows = Vec::new();
+    if let Some(id) = collection {
+        rows.extend(cache.roms_in_collection(id).map_err(err)?);
+    }
+    for p in platforms {
+        rows.extend(cache.roms_for(p).map_err(err)?);
+    }
+    if rows.is_empty() {
+        return Err("nothing chosen".into());
+    }
+    // A game can be in a collection and in its system's list both, and paying
+    // for it twice would overstate the download by however much they overlap.
+    rows.sort_by_key(|r| r.id);
+    rows.dedup_by_key(|r| r.id);
+    Ok(rows)
+}
+
 /// What a bulk download would cost, before starting one.
 ///
 /// Async, though it awaits nothing. A synchronous Tauri command runs on the
@@ -478,22 +507,16 @@ fn recent_games(state: State<'_, AppState>, limit: Option<usize>) -> CmdResult<V
 #[tauri::command]
 async fn download_estimate(
     state: State<'_, AppState>,
-    platform: Option<String>,
+    platforms: Vec<String>,
     collection: Option<String>,
     art: String,
     videos: bool,
     manuals: bool,
+    bios: bool,
 ) -> CmdResult<(String, bool, String)> {
     use romm_desktop::{bulk, diskspace};
 
-    let rows = {
-        let cache = state.cache.lock().map_err(err)?;
-        match (&platform, &collection) {
-            (_, Some(id)) => cache.roms_in_collection(id).map_err(err)?,
-            (Some(p), _) => cache.roms_for(p).map_err(err)?,
-            _ => return Err("nothing chosen".into()),
-        }
-    };
+    let rows = rows_for_choice(&state, &platforms, &collection)?;
     let want = bulk::Want {
         roms: true,
         art: match art.as_str() {
@@ -504,7 +527,24 @@ async fn download_estimate(
         videos,
         manuals,
     };
-    let est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
+    let mut est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
+    // Asked of the server rather than averaged, because unlike artwork there is
+    // a fixed set of these and it already knows which are here.
+    let mut summary = est.describe();
+    if bios {
+        let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+        if let Some(client) = state.client.clone()
+            && let Ok((total, here, bytes)) = romm_desktop::bios::status(&client, &library_root).await
+        {
+            est.media_bytes += bytes;
+            summary = format!(
+                "{}; plus {} BIOS file(s), {} already here",
+                est.describe(),
+                total - here,
+                here
+            );
+        }
+    }
     let (fits, note) = match diskspace::fits(&state.roms_dir, est.total()) {
         diskspace::Fit::Yes { available } => {
             (true, format!("{:.0} GB free", available as f64 / 1e9))
@@ -522,7 +562,7 @@ async fn download_estimate(
         // would be a worse bug than the one the check exists to prevent.
         diskspace::Fit::Unknown => (true, "could not read free space".to_owned()),
     };
-    Ok((est.describe(), fits, note))
+    Ok((summary, fits, note))
 }
 
 /// Download a whole platform or collection, with the media that was asked for.
@@ -534,23 +574,17 @@ async fn download_estimate(
 async fn download_set(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-    platform: Option<String>,
+    platforms: Vec<String>,
     collection: Option<String>,
     art: String,
     videos: bool,
     manuals: bool,
+    bios: bool,
 ) -> CmdResult<String> {
     use romm_desktop::{bulk, diskspace};
 
     let client = state.client.clone().ok_or("no server configured")?;
-    let rows = {
-        let cache = state.cache.lock().map_err(err)?;
-        match (&platform, &collection) {
-            (_, Some(id)) => cache.roms_in_collection(id).map_err(err)?,
-            (Some(p), _) => cache.roms_for(p).map_err(err)?,
-            _ => return Err("nothing chosen".into()),
-        }
-    };
+    let rows = rows_for_choice(&state, &platforms, &collection)?;
     let want = bulk::Want {
         roms: true,
         art: match art.as_str() {
@@ -640,7 +674,23 @@ async fn download_set(
             let _ = app.emit("bulk-progress", format!("{}/{} — {games} downloaded", i + 1, total));
         }
     }
-    Ok(format!("{games} game(s) downloaded, {total} checked"))
+    // BIOS last, because it is the one part that is not per-game and the one
+    // whose absence you only discover when a console refuses to boot somewhere
+    // with no server to fetch from.
+    let mut bios_note = String::new();
+    if bios {
+        let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let _ = app.emit("bulk-progress", "BIOS files…".to_owned());
+        match romm_desktop::bios::sync(&client, &library_root, |done, got, name| {
+            let _ = app.emit("bulk-progress", format!("BIOS {done}/{got} — {name}"));
+        })
+        .await
+        {
+            Ok(summary) => bios_note = format!("\n{}", summary.headline()),
+            Err(e) => bios_note = format!("\nBIOS did not sync: {e}"),
+        }
+    }
+    Ok(format!("{games} game(s) downloaded, {total} checked{bios_note}"))
 }
 
 #[tauri::command]
