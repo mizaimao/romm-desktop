@@ -273,3 +273,53 @@ describe("the history page", () => {
     assert.match(text, /3 goes/);
   });
 });
+
+describe("browsing a game's media", () => {
+  /// Each thing used to open on its own. Clicking the cart art gave you the
+  /// cart art and nothing else; pressing Y gave you the video and nothing else.
+  /// So the arrow keys had a set of one to walk through and looked broken —
+  /// where ES-DE treats a game's media as one reel.
+  test("opening one picture opens the whole reel, positioned on it", async () => {
+    Object.assign(DETAIL, {
+      art: { miximages: "/a/mix.png", "3dboxes": "/a/box.png", physicalmedia: "/a/cart.png" },
+      cover: "/a/cover.png",
+      screenshots: ["/a/s1.png"],
+      has_video: true,
+    });
+    await detail.selectRom(7);
+    await settle();
+
+    const cart = document.querySelector('.artstrip figure[data-art="physicalmedia"]');
+    assert.ok(cart, "the cart art is not in the strip");
+    cart.click();
+    await settle();
+
+    const caption = document.querySelector("#lightbox figcaption").textContent;
+    // "n of m" only appears when there is more than one thing to walk to.
+    assert.match(caption, /Cart\/disc/);
+    assert.match(caption, /of \d+/, `a set of one: ${caption}`);
+  });
+
+  /// The order is the strip's order, so stepping right lands on the picture to
+  /// the right rather than somewhere the layout does not explain.
+  test("the arrows walk the reel in the order it is drawn", async () => {
+    await detail.selectRom(7);
+    await settle();
+    document.querySelector('.artstrip figure[data-art="miximages"]').click();
+    await settle();
+
+    const captionNow = () =>
+      document.querySelector("#lightbox figcaption").textContent.split(" — ")[0];
+    assert.equal(captionNow(), "Mix");
+
+    const lb = await import("../js/lightbox.js");
+    lb.stepLightbox(1);
+    assert.equal(captionNow(), "3D box", "stepping right left the strip's order");
+    lb.stepLightbox(-1);
+    assert.equal(captionNow(), "Mix");
+    // And it wraps, so holding a direction never dead-ends.
+    lb.stepLightbox(-1);
+    assert.notEqual(captionNow(), "Mix");
+    lb.closeLightbox();
+  });
+});

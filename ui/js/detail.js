@@ -3,7 +3,7 @@
 import { el, state, invoke, convertFileSrc, rememberRom } from "./state.js";
 import { tintFor } from "./tint.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
-import { openLightbox, detailMedia, setOpenHook } from "./lightbox.js";
+import { openLightbox, setOpenHook } from "./lightbox.js";
 import { launch, download } from "./actions.js";
 
 let slideTimer;
@@ -23,6 +23,12 @@ export function setSidebar(on) {
     state.view === "roms" || state.view === "search" || state.view === "collection-roms";
   el.detail.hidden = !(on && allowed && state.selected !== null);
 }
+
+/// The game the pane is showing, kept so the video button can build the same
+/// set of media the artwork clicks do. `playVideo` is reachable from a key and
+/// a pad as well as the button, so it cannot be handed the detail as an
+/// argument.
+let currentDetail = null;
 
 export async function selectRom(id) {
   // The card the cursor is moving to, tagged so the browser can carry it into
@@ -52,6 +58,7 @@ export async function selectRom(id) {
   ]);
   // A later click may have superseded this one; do not paint a stale game.
   if (state.selected !== id) return;
+  currentDetail = d;
   const shots = d.screenshots || [];
 
   // No slideshow and no player at the top any more: the miximage below already
@@ -330,7 +337,11 @@ export async function playVideo() {
     // Still the same game? A slow fetch must not open a video over whatever
     // was scrolled to in the meantime.
     if (state.selected !== id) return;
-    openLightbox([{ src: convertFileSrc(path), kind: "video", caption: "Gameplay" }], 0);
+    // The whole reel, not just the video: the arrows are meant to walk from a
+    // video into the artwork and back, which they cannot do in a set of one.
+    const media = mediaSet(currentDetail ?? {}, path);
+    const at = media.findIndex((m) => m.id === "video");
+    openLightbox(media, at < 0 ? 0 : at);
   } catch (e) {
     toast(String(e), 6000);
   } finally {
@@ -339,9 +350,49 @@ export async function playVideo() {
   }
 }
 
+/// Everything this game has, as one set the arrows can walk through.
+///
+/// Built here rather than in the lightbox because this is where the list of
+/// artwork kinds lives, and it has to stay in the order the strip draws them —
+/// stepping right should land on the picture to the right.
+///
+/// Each thing used to open on its own. Clicking the cart art gave you the cart
+/// art and nothing else, and pressing Y gave you the video and nothing else, so
+/// the arrow keys had a set of one to walk through and appeared not to work.
+/// ES-DE treats a game's media as one reel and so does this now.
+///
+/// `videoSrc` arrives separately: the video is fetched on demand, so its path
+/// is not known until someone asks for it.
+function mediaSet(d, videoSrc = null) {
+  const items = [];
+  for (const [kind, label] of ART_ORDER) {
+    if (d.art?.[kind]) {
+      items.push({ src: convertFileSrc(d.art[kind]), kind: "image", caption: label, id: kind });
+    }
+  }
+  (d.screenshots || []).forEach((sh, i) =>
+    items.push({
+      src: convertFileSrc(sh),
+      kind: "image",
+      caption: `Screenshot ${i + 1}`,
+      id: `screenshot-${i}`,
+    })
+  );
+  if (d.cover) {
+    items.push({ src: convertFileSrc(d.cover), kind: "image", caption: "Cover", id: "cover" });
+  }
+  // Last, so a game with a dozen pictures does not open on the video when the
+  // cover was clicked — and so "one more right" from the end of the artwork is
+  // the video, which is where ES-DE puts it too.
+  if (videoSrc) {
+    items.push({ src: convertFileSrc(videoSrc), kind: "video", caption: "Gameplay", id: "video" });
+  }
+  return items;
+}
+
 /// Clicking artwork opens it full size, starting at what was clicked.
 function wireArtwork(d) {
-  const media = detailMedia(d);
+  const media = mediaSet(d);
   const openAt = (pred) => () => {
     const i = media.findIndex(pred);
     openLightbox(media, i < 0 ? 0 : i);
@@ -352,16 +403,12 @@ function wireArtwork(d) {
     if (ev.target.closest(".nav, .dots")) return;
     const shown = el.detail.querySelector(".shots img.on");
     const idx = [...el.detail.querySelectorAll(".shots img")].indexOf(shown);
-    openLightbox(media, Math.max(idx, 0));
+    openLightbox(media, Math.max(media.findIndex((m) => m.id === `screenshot-${idx}`), 0));
   });
-  el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.caption === "Cover"));
+  el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.id === "cover"));
   document.getElementById("playvid")?.addEventListener("click", playVideo);
   el.detail.querySelectorAll(".artstrip figure").forEach((fig) =>
-    fig.addEventListener("click", () => {
-      const kind = fig.dataset.art;
-      const label = ART_ORDER.find(([k]) => k === kind)?.[1] ?? kind;
-      openLightbox([{ src: convertFileSrc(d.art[kind]), kind: "image", caption: label }], 0);
-    })
+    fig.addEventListener("click", openAt((m) => m.id === fig.dataset.art))
   );
   document.getElementById("manual")?.addEventListener("click", () =>
     openLightbox([{ src: convertFileSrc(d.manual), kind: "pdf", caption: "Manual" }], 0)

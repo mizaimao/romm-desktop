@@ -80,16 +80,10 @@ function render() {
   el.lb.querySelector(".lb-next").disabled = !multi;
 }
 
-/// Everything in the detail pane, as one navigable set.
-export function detailMedia(d) {
-  const items = (d.screenshots || []).map((s, i) => ({
-    src: convertFileSrc(s),
-    kind: "image",
-    caption: `Screenshot ${i + 1}`,
-  }));
-  if (d.cover) items.push({ src: convertFileSrc(d.cover), kind: "image", caption: "Cover" });
-  if (d.video) items.push({ src: convertFileSrc(d.video), kind: "video", caption: "Video" });
-  return items;
+/// Step to the next or previous item. Exported so the pad and the keyboard go
+/// through the same path the on-screen arrows do.
+export function stepLightbox(delta) {
+  step(delta);
 }
 
 el.lb.querySelector(".lb-close").addEventListener("click", closeLightbox);
@@ -101,7 +95,8 @@ el.lb.addEventListener("click", (ev) => {
 });
 window.addEventListener("keydown", (ev) => {
   if (!lb.open) return;
+  // Escape only. Left and right are bindable actions, so keys.js owns them —
+  // handling them here as well would step twice per press for anyone who left
+  // them on the arrow keys, and not at all for anyone who moved them.
   if (ev.key === "Escape") closeLightbox();
-  else if (ev.key === "ArrowLeft") step(-1);
-  else if (ev.key === "ArrowRight") step(1);
 });

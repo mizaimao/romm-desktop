@@ -8,7 +8,7 @@ import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
 import { escapeHtml } from "./util.js";
-import { closeLightbox, zoomLightbox, isLightboxOpen } from "./lightbox.js";
+import { closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen } from "./lightbox.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
@@ -283,6 +283,13 @@ export function installKeys() {
       } else if (action === "zoomIn" || action === "zoomOut") {
         ev.preventDefault();
         zoomLightbox(action === "zoomIn" ? 1 : -1);
+      } else if (action === "left" || action === "right") {
+        // Walk the reel: artwork, screenshots, cover, video. Owned here rather
+        // than in the lightbox because these are bindable, and a second handler
+        // reading the raw arrow keys would step twice for anyone who left them
+        // as they are and not at all for anyone who moved them.
+        ev.preventDefault();
+        stepLightbox(action === "right" ? 1 : -1);
       }
       return;
     }

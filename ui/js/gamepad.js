@@ -15,7 +15,7 @@ import { runAction } from "./keys.js";
 import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
 import { scrollDetail } from "./detail.js";
-import { closeLightbox } from "./lightbox.js";
+import { closeLightbox, stepLightbox } from "./lightbox.js";
 
 // Rebindable in Settings; padMap() layers the user's choices over the
 // position-based defaults in bindings.js.
@@ -195,6 +195,17 @@ function step() {
         }
       } else if (action === "zoomIn" || action === "zoomOut") {
         fire(action, now);
+      } else if (action === "left" || action === "right") {
+        // Through `fire` so holding a direction repeats, the same as it does
+        // in the grid. Walking a dozen pictures one press at a time is the
+        // kind of thing that makes people reach for the mouse again.
+        if (!held.has(action)) {
+          held.set(action, now + FIRST_REPEAT_MS);
+          stepLightbox(action === "right" ? 1 : -1);
+        } else if (now >= held.get(action)) {
+          held.set(action, now + REPEAT_MS);
+          stepLightbox(action === "right" ? 1 : -1);
+        }
       }
     }
     for (const action of [...held.keys()]) {
