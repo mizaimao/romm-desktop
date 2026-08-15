@@ -21,8 +21,6 @@ export async function showPlatforms() {
   // it is only found by someone who already knows it exists.
   el.grabBtn.hidden = false;
   el.zoomWrap.hidden = state.layout !== "grid";
-  el.themesBtn.classList.remove("active");
-  el.systemsBtn.classList.remove("active");
   coverObserver?.disconnect();
   el.title.textContent = "Platforms";
 

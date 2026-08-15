@@ -46,8 +46,6 @@ export const el = {
   search: document.getElementById("search"),
   status: document.getElementById("status"),
   toast: document.getElementById("toast"),
-  themesBtn: document.getElementById("themes-btn"),
-  systemsBtn: document.getElementById("systems-btn"),
   layoutBtn: document.getElementById("layout-btn"),
   grabBtn: document.getElementById("grab-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),

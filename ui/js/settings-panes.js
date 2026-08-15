@@ -42,6 +42,11 @@ export const TABS = [
   // at the bottom of General under six unrelated headings the BIOS control was
   // simply not found.
   { id: "library", label: "Library" },
+  // Per-system emulator, shader and light gun. This was a button in the top
+  // bar labelled "Systems", beside Grid and Take offline, which are things you
+  // do to what is on screen — so it read as another view of the library rather
+  // than as configuration, and nobody could tell what it would do.
+  { id: "systems", label: "Systems" },
 ];
 
 /// Markup for one tab. Unknown ids return nothing rather than throwing, so a
@@ -114,6 +119,15 @@ export function paneHtml(id) {
 
 `;
 
+  if (id === "systems") return `      <h4>Systems</h4>
+      <p class="hint">Which emulator runs each console, which shader it gets,
+        and whether a light gun takes the second controller port. Changes are
+        written to config.toml and apply to the next game you launch.</p>
+      <div class="sys-motion"></div>
+      <div class="sys-table">Loading…</div>
+
+`;
+
   if (id === "library") return `      <h4>Library</h4>
       <div class="srow">
         <label>Folder</label>
@@ -166,6 +180,21 @@ export function paneHtml(id) {
         console they are all the same shape, so the grid stays even. Anything a
         console has no version of falls back to the miximage. The info pane
         always shows the miximage.</p>
+
+      <h4>Console pictures</h4>
+      <div class="srow">
+        <label>Show</label>
+        <div class="ctl"><div class="icon-styles"></div></div>
+      </div>
+      <p class="hint">What the console grid draws for each system. Styles with
+        no pictures yet are greyed out — fetching gets them from four ES-DE
+        themes at once, keeps the artwork, and throws the themes away. A few
+        hundred kilobytes; after that, switching is instant and needs nothing.</p>
+      <div class="srow">
+        <label></label>
+        <div class="ctl"><button class="set-icons">Get console pictures</button>
+          <span class="set-icons-note"></span></div>
+      </div>
 
       <h4>Glass</h4>
       <div class="srow">
@@ -252,6 +281,144 @@ export function wirePane(id, box) {
   if (id === "library") return wireLibrary(box);
   if (id === "appearance") return wireAppearance(box);
   if (id === "control") return wireControl(box);
+  if (id === "systems") return wireSystems(box);
+}
+
+/// The per-system table: emulator, shader and light gun for each console.
+///
+/// Rendered after the pane is on screen rather than as part of its markup,
+/// because it needs two round trips — the systems themselves and the list of
+/// motion shaders — and a tab that waited on those before drawing anything
+/// would look like a tab that does not open.
+async function wireSystems(box) {
+  const table = box.querySelector(".sys-table");
+  let rows, motion;
+  try {
+    [rows, motion] = await Promise.all([invoke("systems"), invoke("motion_options")]);
+  } catch (e) {
+    table.textContent = String(e);
+    return;
+  }
+  // A slow answer that arrives after the tab was left has nowhere to go, and
+  // writing to a detached node would leave the next tab looking fine while its
+  // controls belong to a pane that is gone.
+  if (!box.isConnected) return;
+
+  box.querySelector(".sys-motion").innerHTML = motionMarkup(motion);
+  table.innerHTML = `
+    <table class="systbl">
+      <thead>
+        <tr><th>System</th><th>Games</th><th>Display</th><th>Emulator</th><th>Shader</th>
+            <th title="Aim with the mouse in light gun games">Light gun</th></tr>
+      </thead>
+      <tbody>${rows.map(systemRow).join("")}</tbody>
+    </table>`;
+
+  for (const gun of box.querySelectorAll('input[data-field="lightgun"]')) {
+    gun.addEventListener("change", async () => {
+      const { slug, field } = gun.dataset;
+      try {
+        toast(await invoke("set_system_choice", {
+          slug,
+          field,
+          value: gun.checked ? "on" : "off",
+        }));
+      } catch (e) {
+        toast(String(e), 8000);
+      }
+    });
+  }
+
+  for (const sel of box.querySelectorAll(".sys-table select, .sys-motion select")) {
+    sel.addEventListener("change", async () => {
+      const { slug, field } = sel.dataset;
+      try {
+        // The motion layer is global, so it has its own command rather than a
+        // per-system one. Everything else is keyed by platform slug.
+        toast(
+          field === "motion"
+            ? await invoke("set_motion_shader", { value: sel.value })
+            : await invoke("set_system_choice", { slug, field, value: sel.value })
+        );
+      } catch (e) {
+        toast(String(e), 8000);
+      }
+    });
+  }
+}
+
+/// The strobe/BFI layer. Above the table and separate from it: it chains onto
+/// whatever shader each system already uses rather than replacing one, so it
+/// is not a per-system choice and should not look like a column.
+function motionMarkup(motion) {
+  if (!motion?.options?.length) return "";
+  const options = motion.options
+    .map(
+      (o) =>
+        `<option value="${o.path}" ${o.path === motion.current ? "selected" : ""}>${escapeHtml(
+          o.label
+        )} — ${escapeHtml(o.note)}</option>`
+    )
+    .join("");
+  return `
+    <div class="srow">
+      <label>Motion layer</label>
+      <div class="ctl">
+        <select data-field="motion">
+          <option value="none" ${!motion.current ? "selected" : ""}>Off</option>
+          ${options}
+        </select>
+      </div>
+    </div>
+    <p class="hint">Reduces the smearing an LCD gives 60fps content, by strobing
+      across sub-frames. Chained on top of each system's own shader — it does
+      not replace it. Best on a 120Hz+ display; CRT systems only.</p>`;
+}
+
+function systemRow(s) {
+  const cores = s.emulators.length
+    ? `<select data-slug="${s.slug}" data-field="core">${s.emulators
+        .map(
+          (e) =>
+            `<option value="${e.core}" ${e.core === s.core ? "selected" : ""}>${escapeHtml(
+              e.label
+            )}${e.installed ? "" : " — not installed"}${e.is_default ? " (default)" : ""}</option>`
+        )
+        .join("")}</select>`
+    : `<span class="dim">none known</span>`;
+
+  const shaders = s.shaders.length
+    ? `<select data-slug="${s.slug}" data-field="shader">
+         <option value="none" ${!s.shader ? "selected" : ""}>None</option>
+         ${s.shaders
+           .map(
+             (o) =>
+               `<option value="${o.path}" ${o.path === s.shader ? "selected" : ""}>${escapeHtml(
+                 o.label
+               )}</option>`
+           )
+           .join("")}
+       </select>`
+    : `<span class="dim">no RetroArch</span>`;
+
+  // Only for consoles that had a gun, and off by default: on most of them the
+  // gun goes in the port a second pad would use, so leaving it on everywhere
+  // would quietly break two-player games.
+  const gun = s.gun
+    ? `<label class="gun" title="${escapeHtml(s.gun)} in place of a pad — aim with the mouse, left button fires">
+         <input type="checkbox" data-slug="${s.slug}" data-field="lightgun" ${s.gun_on ? "checked" : ""} />
+         <span>${escapeHtml(s.gun)}</span>
+       </label>`
+    : `<span class="dim">—</span>`;
+
+  return `<tr>
+    <td class="sysname">${escapeHtml(s.name)}<div class="dim">${escapeHtml(s.slug)}</div></td>
+    <td class="num">${s.rom_count}</td>
+    <td><span class="badge ${s.display === "Handheld" ? "hh" : "crt"}">${escapeHtml(s.display)}</span></td>
+    <td>${cores}</td>
+    <td>${shaders}</td>
+    <td>${gun}</td>
+  </tr>`;
 }
 
 function wireGeneral(box) {
@@ -445,7 +612,78 @@ function wireLibrary(box) {
 }
 
 
+/// Which pictures the console grid uses, and how to get more.
+///
+/// This was a whole top-level panel with a gallery of ES-DE themes,
+/// screenshots, and a full-download button. The app never rendered a theme —
+/// it only ever read the per-system artwork out of one — so all that offered
+/// was a choice that changed nothing and a download measured in hundreds of
+/// megabytes. What is left is the part that does change the screen.
+async function wireIconStyles(box) {
+  const holder = box.querySelector(".icon-styles");
+  const note = box.querySelector(".set-icons-note");
+  if (!holder) return;
+
+  const draw = async () => {
+    let styles = [];
+    try {
+      styles = await invoke("icon_styles");
+    } catch {
+      holder.textContent = "Could not read the installed pictures";
+      return;
+    }
+    if (!box.isConnected) return;
+    holder.innerHTML = styles
+      .map(
+        (s) =>
+          `<button class="icon-style ${s.selected ? "on" : ""}" data-style="${escapeHtml(s.key)}"
+             ${s.available ? "" : "disabled"}>${escapeHtml(s.label)}
+             <em>${s.available}</em></button>`
+      )
+      .join("");
+    for (const b of holder.querySelectorAll(".icon-style:not([disabled])")) {
+      b.addEventListener("click", async () => {
+        try {
+          const label = await invoke("set_icon_style", { key: b.dataset.style });
+          holder
+            .querySelectorAll(".icon-style")
+            .forEach((x) => x.classList.toggle("on", x === b));
+          toast(`Console pictures: ${label}`);
+        } catch (e) {
+          toast(String(e), 6000);
+        }
+      });
+    }
+  };
+  await draw();
+
+  box.querySelector(".set-icons")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    // Four themes cloned one after another is a minute or so of nothing. It
+    // says which one it is on, because a button that goes quiet for a minute
+    // is a button people press again.
+    const stop = await listen("icons-progress", ({ payload }) => {
+      note.textContent = String(payload);
+    });
+    try {
+      const summary = await invoke("fetch_icons");
+      note.textContent = summary.split("\n")[0];
+      toast(summary, 9000);
+      await draw();
+    } catch (err) {
+      note.textContent = "";
+      toast(`Could not fetch pictures — ${err}`, 9000);
+    } finally {
+      stop?.();
+      btn.disabled = false;
+    }
+  });
+}
+
 function wireAppearance(box) {
+  wireIconStyles(box);
+
   // What the game lists draw. Populated from the backend rather than listed
   // here, so the names cannot drift from the directories they map to.
   const artSel = box.querySelector(".list-art");

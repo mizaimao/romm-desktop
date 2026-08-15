@@ -5,8 +5,6 @@ import { askDownload } from "./bulk.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
-import { showThemes } from "./themes.js";
-import { showSystems } from "./systems.js";
 import { installTabs, showSection, resetSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
@@ -22,8 +20,6 @@ el.back.addEventListener("click", () => {
   // dropping straight to the platform grid.
   const up = trail.pop();
   if (up) return up();
-  el.themesBtn.classList.remove("active");
-  el.systemsBtn.classList.remove("active");
   // Back at the top of a section returns to that section, not always to the
   // library — the tab bar says where you are and it should stay true.
   resetSection();
@@ -53,14 +49,6 @@ el.grabBtn.addEventListener("click", () =>
       ? { collection: state.collection, name: state.collectionName }
       : { platform: state.platform }
   )
-);
-
-el.systemsBtn.addEventListener("click", () =>
-  state.view === "systems" ? showPlatforms() : showSystems()
-);
-
-el.themesBtn.addEventListener("click", () =>
-  state.view === "themes" ? showPlatforms() : showThemes()
 );
 
 let searchTimer;

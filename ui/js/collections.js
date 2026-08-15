@@ -26,8 +26,6 @@ function chrome(title) {
   el.zoomWrap.hidden = false;
   el.search.value = "";
   el.title.textContent = title;
-  el.themesBtn.classList.remove("active");
-  el.systemsBtn.classList.remove("active");
 }
 
 export async function showCollectionGroups({ exclude = [] } = {}) {

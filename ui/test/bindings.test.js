@@ -89,4 +89,38 @@ describe("the settings tabs", () => {
     const gen = new JSDOM(`<body>${paneHtml("general")}</body>`).window.document;
     assert.equal(gen.querySelector(".set-bios"), null, "still duplicated in General");
   });
+
+  /// "Systems" was a button in the top bar between Grid and Take offline —
+  /// things you do to what is on screen — so it read as another view of the
+  /// library rather than as configuration, and gave no clue what pressing it
+  /// would do.
+  test("per-system emulator and shader settings are a settings tab", async () => {
+    const { TABS, paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    assert.ok(TABS.some((t) => t.id === "systems"), "no systems tab");
+    const pane = new JSDOM(`<body>${paneHtml("systems")}</body>`).window.document;
+    assert.ok(pane.querySelector(".sys-table"), "nowhere for the table to go");
+  });
+
+  /// The themes panel is gone: the app never rendered a theme, it only read
+  /// the per-system pictures out of one. What is left is the picker for those
+  /// pictures, which is the only part that changed what you see.
+  test("console pictures are chosen in Appearance, with no theme gallery", async () => {
+    const { paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    const pane = new JSDOM(`<body>${paneHtml("appearance")}</body>`).window.document;
+    assert.ok(pane.querySelector(".icon-styles"), "no way to pick a picture style");
+    assert.ok(pane.querySelector(".set-icons"), "no way to fetch any");
+  });
+
+  /// Every tab the window offers has to render something. A tab whose id has
+  /// no markup opens onto a blank pane, which is indistinguishable from a
+  /// window that has broken.
+  test("every tab renders a pane", async () => {
+    const { TABS, paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    for (const t of TABS) {
+      assert.ok(
+        (paneHtml(t.id) ?? "").trim().length > 0,
+        `the ${t.id} tab renders nothing`
+      );
+    }
+  });
 });

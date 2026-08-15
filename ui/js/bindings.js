@@ -24,7 +24,6 @@ export const ACTIONS = [
   { id: "download",label: "Download without playing", fallback: null },
   { id: "layout",  label: "Toggle grid / list",   fallback: null },
   { id: "sidebar", label: "Toggle info pane",     fallback: null },
-  { id: "themes",  label: "Open themes",          fallback: null },
   { id: "settings",label: "Open settings",        fallback: null },
   { id: "prevSection", label: "Previous section",  fallback: "q" },
   { id: "nextSection", label: "Next section",      fallback: "e" },

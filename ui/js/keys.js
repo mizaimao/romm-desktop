@@ -7,7 +7,6 @@
 import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
-import { showThemes } from "./themes.js";
 import { escapeHtml } from "./util.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
@@ -150,7 +149,6 @@ function goBack() {
   // behaves identically inside collections.
   const up = trail.pop();
   if (up) return up();
-  el.themesBtn.classList.remove("active");
   // The section you are in, not always the platform grid — Back from inside a
   // collection belongs in My collections, not the library.
   resetSection();
@@ -240,7 +238,6 @@ export const HANDLERS = {
   sidebar: () => {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
   },
-  themes: () => (state.view === "themes" ? showPlatforms() : showThemes()),
   video: playVideo,
   zoomIn: () => nudgeZoom(1),
   zoomOut: () => nudgeZoom(-1),

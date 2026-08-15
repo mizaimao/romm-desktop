@@ -1666,95 +1666,72 @@ async fn resolve_save_conflict(
     Ok(outcome)
 }
 
-#[derive(Serialize)]
-struct ThemeView {
-    name: String,
-    reponame: String,
-    author: String,
-    url: String,
-    variants: Vec<String>,
-    screenshot: Option<String>,
-    installed: bool,
-    /// Bytes on disk, 0 when not installed.
-    size_bytes: u64,
-}
+/// Themes worth taking console pictures from, in the order they are tried.
+///
+/// Not a browsable gallery any more. The app never rendered a theme — it only
+/// ever read the per-system artwork out of one — so a panel of screenshots and
+/// full downloads offered a choice that changed nothing on screen, and the
+/// hundreds of megabytes it fetched were then deleted or wasted.
+///
+/// Several of them rather than one because they carry different art. No single
+/// theme has all five kinds, and the picker in Appearance can only offer what
+/// has been fetched: taking pictures from four fills styles that any one of
+/// them leaves empty.
+const ICON_THEMES: &[&str] = &["slate-es-de", "modern-es-de", "canvas-es-de", "linear-es-de"];
 
-/// The official ES-DE themes list, annotated with what is already installed.
+/// Fetch console pictures from every theme in [`ICON_THEMES`].
+///
+/// Each is cloned, stripped of its per-system art, and deleted again. What is
+/// kept is a few hundred kilobytes of SVG per style, under `_platforms/`, which
+/// is what the console grid actually reads — and once it is there, switching
+/// between styles is instant and needs neither a network nor ES-DE.
 #[tauri::command]
-async fn themes_available(state: State<'_, AppState>) -> CmdResult<Vec<ThemeView>> {
-    let list = theme_remote::list_default().await.map_err(err)?;
+async fn fetch_icons(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+    let available = theme_remote::list_default().await.map_err(err)?;
     let dir = state.themes_dir.clone();
-    Ok(list
-        .into_iter()
-        .map(|t| {
-            let path = dir.join(t.dir_name());
-            let installed = path.is_dir();
-            ThemeView {
-                screenshot: t.screenshot_url(),
-                size_bytes: if installed { theme_remote::size_of(&path) } else { 0 },
-                installed,
-                reponame: t.dir_name(),
-                name: t.name,
-                author: t.author,
-                url: t.url,
-                variants: t.variants,
-            }
-        })
-        .collect())
-}
-
-/// Download a theme. With `logos_only`, keep just the platform icons and
-/// delete the checkout — themes run to hundreds of MB and we render ~240 KB.
-#[tauri::command]
-async fn theme_download(
-    state: State<'_, AppState>,
-    reponame: String,
-    logos_only: bool,
-) -> CmdResult<String> {
-    let list = theme_remote::list_default().await.map_err(err)?;
-    let entry = list
-        .into_iter()
-        .find(|t| t.dir_name() == reponame)
-        .ok_or_else(|| format!("{reponame} is not in the themes list"))?;
-
-    let dir = state.themes_dir.clone();
-    // Reuses the API client's HTTP stack when there is one; a theme is a
-    // public download, so an unconfigured server does not prevent it.
     let http = state
         .client
         .as_ref()
         .map(|c| c.http().clone())
         .unwrap_or(util::http_client(None).map_err(err)?);
-    let (path, fresh) = theme_remote::install(&http, &entry, &dir).await.map_err(err)?;
-    let size = theme_remote::size_of(&path);
-
     let slugs: Vec<String> = {
         let cache = state.cache.lock().map_err(err)?;
         cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
     };
-    let one = vec![theme::Theme { name: entry.dir_name(), path: path.clone() }];
-    let n = theme::install(&one, &state.map, &slugs, &state.media_dir).map_err(err)?;
 
-    if logos_only {
-        theme_remote::remove(&entry.dir_name(), &dir).map_err(err)?;
-        return Ok(format!(
-            "{}: kept {n} icons, freed {:.0} MB",
-            entry.name,
-            size as f64 / 1_048_576.0
-        ));
+    let mut notes = Vec::new();
+    for (i, wanted) in ICON_THEMES.iter().enumerate() {
+        let _ = app.emit(
+            "icons-progress",
+            format!("{} of {} — {wanted}…", i + 1, ICON_THEMES.len()),
+        );
+        let Some(entry) = available.iter().find(|t| t.dir_name().eq_ignore_ascii_case(wanted))
+        else {
+            // A theme that has been renamed or withdrawn is not a failure of
+            // the run: the others still carry art, and abandoning the lot
+            // because one moved would leave a smaller set for no reason.
+            notes.push(format!("{wanted}: no longer in the themes list"));
+            continue;
+        };
+        match theme_remote::install(&http, entry, &dir).await {
+            Ok((path, _)) => {
+                let one = vec![theme::Theme { name: entry.dir_name(), path }];
+                let n = theme::install(&one, &state.map, &slugs, &state.media_dir).unwrap_or(0);
+                // The checkout goes straight back out: a theme is hundreds of
+                // megabytes and the part worth keeping is the SVGs.
+                let _ = theme_remote::remove(&entry.dir_name(), &dir);
+                notes.push(format!("{}: {n} pictures", entry.name));
+            }
+            Err(e) => notes.push(format!("{}: {e}", entry.name)),
+        }
     }
-    Ok(format!(
-        "{} {} ({:.0} MB), {n} icons applied",
-        entry.name,
-        if fresh { "downloaded" } else { "updated" },
-        size as f64 / 1_048_576.0
-    ))
-}
 
-#[tauri::command]
-fn theme_remove(state: State<'_, AppState>, reponame: String) -> CmdResult<String> {
-    theme_remote::remove(&reponame, &state.themes_dir).map_err(err)?;
-    Ok(format!("removed {reponame}"))
+    let have: Vec<String> = theme::installed_counts(&state.media_dir, &slugs)
+        .into_iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|(style, n)| format!("{n} {}", style.label().to_lowercase()))
+        .collect();
+    Ok(format!("{}\n{}", have.join(", "), notes.join("\n")))
 }
 
 #[derive(Serialize)]
@@ -2509,9 +2486,7 @@ fn main() {
             rom_covers,
             launch_rom,
             install_theme_logos,
-            themes_available,
-            theme_download,
-            theme_remove,
+            fetch_icons,
             icon_styles,
             set_icon_style,
             set_retroarch_root,
