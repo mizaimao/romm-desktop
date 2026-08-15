@@ -5,7 +5,27 @@
 
 import { el, convertFileSrc } from "./state.js";
 
-const lb = { items: [], index: 0, open: false };
+const lb = { items: [], index: 0, open: false, zoom: 1 };
+
+/// How far in and out the zoom goes, and by how much per press.
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 0.15;
+
+export function isLightboxOpen() {
+  return lb.open;
+}
+
+/// Scale what is on the stage.
+///
+/// A transform rather than a width, because it applies identically to a video,
+/// a still and a manual, and because scaling a video's width makes the browser
+/// re-lay-out every frame it draws.
+export function zoomLightbox(direction) {
+  if (!lb.open) return;
+  lb.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, lb.zoom + direction * ZOOM_STEP));
+  el.lb.style.setProperty("--lb-zoom", String(lb.zoom));
+}
 
 /// Called before opening so a running slideshow cannot swap the image out.
 let onOpen = () => {};
@@ -15,7 +35,11 @@ export function setOpenHook(fn) {
 
 export function openLightbox(items, index = 0) {
   if (!items.length) return;
-  Object.assign(lb, { items, index, open: true });
+  // Zoom resets per opening: coming back to a picture at whatever scale the
+  // last one was left at is disorienting, and there is nothing on screen to
+  // explain it.
+  Object.assign(lb, { items, index, open: true, zoom: 1 });
+  el.lb.style.setProperty("--lb-zoom", "1");
   el.lb.hidden = false;
   onOpen();
   render();
@@ -39,6 +63,9 @@ function render() {
   const stage = el.lb.querySelector(".lb-stage");
   stage.innerHTML =
     it.kind === "video"
+      // Width, not just a maximum. These are 320x240 files more often than
+      // not, and `max-width` never scales anything up — so the player opened
+      // at the video's own size, a postage stamp in the middle of a 5K screen.
       ? `<video src="${it.src}" controls autoplay loop></video>`
       : it.kind === "pdf"
         // WKWebView renders PDFs natively, so an iframe is the whole viewer.

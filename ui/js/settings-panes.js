@@ -106,6 +106,16 @@ export function paneHtml(id) {
       <p class="hint">Hardcore disables save states, fast-forward and rewind —
         four of the hotkeys this app binds.</p>
 
+      <h4>Save states</h4>
+      <div class="srow">
+        <label>Ask before deleting</label>
+        <div class="ctl"><button data-field="confirm_delete_state">…</button></div>
+      </div>
+      <p class="hint">Off by default. Clearing out old states is done several at
+        a time, and a dialog for each turns a tidy-up into a chore. Either way a
+        copy goes to the backups folder beside the library — a save state cannot
+        be downloaded again, so deleting one is always undoable by hand.</p>
+
       <h4>ScreenScraper</h4>
       <div class="srow">
         <label>Account</label>

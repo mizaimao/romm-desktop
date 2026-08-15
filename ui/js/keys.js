@@ -8,6 +8,7 @@ import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
 import { escapeHtml } from "./util.js";
+import { closeLightbox, zoomLightbox, isLightboxOpen } from "./lightbox.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
@@ -239,8 +240,10 @@ export const HANDLERS = {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
   },
   video: playVideo,
-  zoomIn: () => nudgeZoom(1),
-  zoomOut: () => nudgeZoom(-1),
+  // The triggers zoom whatever is in front of you: the picture on the stage
+  // when the lightbox is open, the covers in the grid when it is not.
+  zoomIn: () => (isLightboxOpen() ? zoomLightbox(1) : nudgeZoom(1)),
+  zoomOut: () => (isLightboxOpen() ? zoomLightbox(-1) : nudgeZoom(-1)),
 };
 
 /// Step the cover size, staying inside the slider's own range.
@@ -268,8 +271,21 @@ export function installKeys() {
     // Rebinding swallows everything, so any key can be assigned.
     if (isCapturing() && captureKey(ev)) return;
 
-    // The lightbox owns the keyboard while it is open.
-    if (!el.lb.hidden) return;
+    // The lightbox owns the keyboard while it is open — but not entirely. The
+    // button that opened it has to close it again: pressing Y to start a video
+    // and then having to reach for the mouse to stop it is the worst kind of
+    // half-finished. Zoom works in there too, on the same keys.
+    if (!el.lb.hidden) {
+      const action = actionFor(ev.key);
+      if (action === "video" || action === "back") {
+        ev.preventDefault();
+        closeLightbox();
+      } else if (action === "zoomIn" || action === "zoomOut") {
+        ev.preventDefault();
+        zoomLightbox(action === "zoomIn" ? 1 : -1);
+      }
+      return;
+    }
 
     if (settingsOpen()) {
       if (ev.key === "Escape") {

@@ -106,6 +106,7 @@ before(async () => {
     ...(await load("tabs.js")),
     ...(await load("library.js")),
     ...(await load("bulk.js")),
+    ...(await load("lightbox.js")),
   };
 });
 
@@ -115,6 +116,7 @@ beforeEach(async () => {
   recentGames = [];
   estimateFits = true;
   document.getElementById("bulk-overlay")?.remove();
+  ui.closeLightbox();
   document.getElementById("list").innerHTML = "";
   ui.state.view = "platforms";
   ui.state.platform = null;
@@ -611,3 +613,58 @@ describe("take offline", () => {
   });
 });
 
+describe("the lightbox and the controller", () => {
+  /// The player used to swallow the pad completely. So the button that started
+  /// a video could not stop it, and the only way out of a full-screen video was
+  /// to find the mouse — on a machine being used from a sofa with a controller.
+  test("the button that opened a video closes it again", () => {
+    const y = Number(
+      Object.entries(ui.padMap()).find(([, a]) => a === "video")?.[0]
+    );
+    assert.ok(Number.isInteger(y), "nothing is bound to the video action");
+
+    ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
+    assert.equal(ui.isLightboxOpen(), true);
+
+    pads = [pad([y])];
+    ui.stepForTest();
+    assert.equal(ui.isLightboxOpen(), false, "the pad cannot close the player");
+  });
+
+  test("back closes it too", () => {
+    const b = Number(Object.entries(ui.padMap()).find(([, a]) => a === "back")?.[0]);
+    ui.openLightbox([{ src: "x.png", kind: "image", caption: "Box" }], 0);
+    pads = [pad([b])];
+    ui.stepForTest();
+    assert.equal(ui.isLightboxOpen(), false);
+  });
+
+  /// The triggers zoom whatever is in front of you. With the player open that
+  /// is the video, not the covers behind it — which is what they used to
+  /// resize, invisibly, while a video played over the top.
+  test("the triggers zoom the video, not the grid behind it", () => {
+    const zin = Number(Object.entries(ui.padMap()).find(([, a]) => a === "zoomIn")?.[0]);
+    assert.ok(Number.isInteger(zin), "nothing is bound to zoom in");
+
+    const before = ui.state.zoom;
+    ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
+    pads = [pad([zin])];
+    ui.stepForTest();
+
+    assert.equal(ui.isLightboxOpen(), true, "zooming must not close it");
+    assert.equal(ui.state.zoom, before, "the grid behind was resized instead");
+    const scale = Number(document.getElementById("lightbox").style.getPropertyValue("--lb-zoom"));
+    assert.ok(scale > 1, `the stage did not zoom (--lb-zoom = ${scale})`);
+  });
+
+  /// Coming back to a picture at whatever scale the last one was left at is
+  /// disorienting, and nothing on screen explains it.
+  test("zoom resets each time it opens", () => {
+    ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
+    ui.zoomLightbox(1);
+    ui.zoomLightbox(1);
+    ui.closeLightbox();
+    ui.openLightbox([{ src: "y.png", kind: "image", caption: "Box" }], 0);
+    assert.equal(document.getElementById("lightbox").style.getPropertyValue("--lb-zoom"), "1");
+  });
+});

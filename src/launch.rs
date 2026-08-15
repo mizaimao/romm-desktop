@@ -54,7 +54,7 @@ pub struct Request<'a> {
     pub lightgun: &'a BTreeMap<String, String>,
     /// The usable area of the display, in the units RetroArch's own window
     /// sizing uses on this platform. `None` leaves the window alone.
-    pub screen: Option<(u32, u32)>,
+    pub screen: Option<crate::retroarch::Screen>,
 }
 
 /// A resolved, ready-to-spawn launch.

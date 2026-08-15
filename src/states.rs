@@ -11,13 +11,16 @@
 //! between a list of slot numbers and a shelf you can read at a glance, so the
 //! launcher turns the setting on and this module goes looking for them.
 //!
-//! Nothing here writes. Deleting or renaming a state is the emulator's business
-//! and getting it wrong destroys the one thing that cannot be downloaded again.
+//! Deleting one is the single destructive thing in this file, and it copies the
+//! state aside first. A save state cannot be downloaded again, so "delete"
+//! here means the same as it does for an overwritten save: the file leaves the
+//! folder the emulator reads and lands in the backup folder beside the library,
+//! where it can be fetched back by hand.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::cache::Cache;
 use crate::coremap::CoreMap;
@@ -100,6 +103,32 @@ pub fn shelf(ra_root: &Path, cache: &Cache, map: &CoreMap, fs_name: &str) -> Res
 
     out.sort_by_key(|s| s.order());
     Ok(out)
+}
+
+/// Remove one save state, keeping a copy.
+///
+/// The picture goes with it. Leaving a thumbnail behind would put a state on
+/// the shelf that has no state in it, and clicking it would start the game from
+/// the beginning with no hint of why.
+///
+/// The copy is not optional and is not the confirmation setting in disguise:
+/// asking first and keeping a copy answer different questions. The dialog is
+/// about whether you meant to press the thing; the copy is about the file being
+/// the only record of an afternoon.
+pub fn remove(library_root: &Path, rom_id: i64, slot: &Slot) -> Result<()> {
+    if !slot.path.is_file() {
+        anyhow::bail!("{} is not there any more", slot.path.display());
+    }
+    crate::savebackup::keep(library_root, rom_id, &format!("state{}", slot.slot), &slot.path)?;
+    std::fs::remove_file(&slot.path)
+        .with_context(|| format!("deleting {}", slot.path.display()))?;
+    if let Some(thumb) = &slot.thumb {
+        // Best effort: a state that is gone with its picture left behind is a
+        // cosmetic problem, and failing the whole delete over it would leave
+        // the state deleted anyway.
+        let _ = std::fs::remove_file(thumb);
+    }
+    Ok(())
 }
 
 /// RetroArch names the picture after the whole state file, extension included:
@@ -226,6 +255,83 @@ mod tests {
     #[test]
     fn a_timestamp_from_the_future_does_not_wrap_around() {
         assert_eq!(ago(2_000_000_000, at(1_000_000_000)), "just now");
+    }
+
+    /// Deleting takes the picture with it. A thumbnail left behind is a state
+    /// on the shelf with no state in it, and clicking that starts the game from
+    /// the beginning with nothing to explain why.
+    #[test]
+    fn deleting_a_state_takes_its_picture_and_leaves_a_copy() {
+        let dir = std::env::temp_dir().join("romm-states-delete-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let lib = dir.join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+
+        let state = dir.join("Zelda.state2");
+        let png = dir.join("Zelda.state2.png");
+        std::fs::write(&state, b"a save state").unwrap();
+        std::fs::write(&png, b"a picture").unwrap();
+
+        let slot = Slot {
+            slot: "2".into(),
+            label: "Slot 2".into(),
+            path: state.clone(),
+            thumb: Some(png.clone()),
+            modified: None,
+            size: 12,
+            core: "snes9x".into(),
+        };
+        remove(&lib, 42, &slot).unwrap();
+
+        assert!(!state.exists(), "the state is still there");
+        assert!(!png.exists(), "the picture outlived the state");
+
+        // Somewhere under the library, holding the same bytes: a state cannot
+        // be downloaded again, so deleting one has to be undoable by hand.
+        let mut found = None;
+        for entry in walkdir(&lib) {
+            if entry.file_name().unwrap().to_string_lossy().ends_with("Zelda.state2") {
+                found = Some(entry);
+            }
+        }
+        let kept = found.expect("no copy was kept anywhere under the library");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"a save state");
+    }
+
+    /// A shelf built a moment ago can name a file that has since gone — the
+    /// same state deleted in another window, or the folder cleared out by hand.
+    #[test]
+    fn deleting_something_already_gone_says_so_rather_than_pretending() {
+        let dir = std::env::temp_dir().join("romm-states-delete-missing");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let slot = Slot {
+            slot: "1".into(),
+            label: "Slot 1".into(),
+            path: dir.join("nothing.state1"),
+            thumb: None,
+            modified: None,
+            size: 0,
+            core: "snes9x".into(),
+        };
+        assert!(remove(&dir, 1, &slot).is_err());
+    }
+
+    fn walkdir(root: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push(p);
+                }
+            }
+        }
+        out
     }
 
     #[test]

@@ -141,11 +141,22 @@ pub struct SavesCfg {
     /// as they are and reported.
     #[serde(default = "yes")]
     pub auto_sync: bool,
+
+    /// Ask before deleting a save state from the shelf.
+    ///
+    /// Off by default, which is the unusual choice for a destructive action and
+    /// is deliberate. Deleting states is housekeeping done several at a time —
+    /// a shelf collects a dozen of them — and a dialog for each turns a tidy-up
+    /// into a chore, which is how people end up not tidying up at all. The file
+    /// is not gone either way: it goes to the same backup folder an overwritten
+    /// save does, so the undo exists whether or not the question was asked.
+    #[serde(default)]
+    pub confirm_delete_state: bool,
 }
 
 impl Default for SavesCfg {
     fn default() -> Self {
-        Self { root: default_saves_root(), auto_sync: true }
+        Self { root: default_saves_root(), auto_sync: true, confirm_delete_state: false }
     }
 }
 

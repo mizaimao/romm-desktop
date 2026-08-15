@@ -261,6 +261,7 @@ struct ConfigFields {
     achievements_token_set: bool,
     achievements_hardcore: bool,
     shaders_enabled: bool,
+    confirm_delete_state: bool,
     /// Present so the UI can say where it is writing, and warn when there is
     /// nothing to write to.
     config_path: String,
@@ -284,6 +285,7 @@ fn config_fields() -> CmdResult<ConfigFields> {
             .is_some_and(|t| !t.trim().is_empty()),
         achievements_hardcore: cfg.achievements.hardcore,
         shaders_enabled: cfg.shaders.enabled,
+        confirm_delete_state: cfg.saves.confirm_delete_state,
         config_path: abs(Path::new("config.toml")),
         config_exists: Config::exists("config.toml"),
     })
@@ -314,6 +316,7 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "achievements_token" => ("achievements", "token"),
         "achievements_hardcore" => ("achievements", "hardcore"),
         "shaders_enabled" => ("shaders", "enabled"),
+        "confirm_delete_state" => ("saves", "confirm_delete_state"),
         other => return Err(format!("unknown setting {other}")),
     };
 
@@ -321,7 +324,10 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
     // quoted-string writer.
     let boolean = matches!(
         field.as_str(),
-        "achievements_enabled" | "achievements_hardcore" | "shaders_enabled"
+        "achievements_enabled"
+            | "achievements_hardcore"
+            | "shaders_enabled"
+            | "confirm_delete_state"
     );
 
     if value.trim().is_empty() && !boolean {
@@ -494,6 +500,34 @@ fn game_states(state: State<'_, AppState>, id: i64) -> CmdResult<Vec<StateView>>
             core: s.core,
         })
         .collect())
+}
+
+/// Delete one save state, keeping a copy in the backup folder.
+///
+/// Takes the slot rather than a path: a webview handing the backend a filename
+/// to delete is a larger door than this needs, and the shelf already knows the
+/// slot it drew.
+#[tauri::command]
+fn delete_state(state: State<'_, AppState>, id: i64, slot: String) -> CmdResult<String> {
+    let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
+    let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let cache = state.cache.lock().map_err(err)?;
+    let row = cache.rom_by_id(id).map_err(err)?.ok_or("no such game")?;
+    let shelf = romm_desktop::states::shelf(&ra.root, &cache, &state.map, &row.fs_name)
+        .map_err(err)?;
+    let found = shelf
+        .into_iter()
+        .find(|s| s.slot == slot)
+        .ok_or_else(|| format!("no {slot} state for {}", row.name))?;
+    let label = found.label.clone();
+    romm_desktop::states::remove(&library_root, id, &found).map_err(err)?;
+    Ok(format!("deleted {label} — a copy is in the backups folder"))
+}
+
+/// Whether deleting a save state should ask first.
+#[tauri::command]
+fn confirm_delete_state() -> CmdResult<bool> {
+    Ok(Config::load().unwrap_or_default().saves.confirm_delete_state)
 }
 
 /// Time played, by console and by game.
@@ -1354,7 +1388,7 @@ async fn game_video(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
 /// Asked of the monitor rather than of the webview: `window.screen` reports CSS
 /// pixels, which is the logical figure on both, so it is wrong on exactly one
 /// of them and looks right while being tested on the other.
-fn work_area(app: &tauri::AppHandle) -> Option<(u32, u32)> {
+fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> {
     use tauri::Manager as _;
 
     // The monitor the library window is on, so launching from a laptop screen
@@ -1364,12 +1398,30 @@ fn work_area(app: &tauri::AppHandle) -> Option<(u32, u32)> {
         .and_then(|w| w.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten())?;
 
+    // Position as well as size: the window is centred by writing coordinates
+    // now, and on a laptop with an external display the two monitors do not
+    // both start at zero. Centring within a monitor while writing coordinates
+    // relative to the primary one lands the window on the wrong screen.
     let size = monitor.size();
+    let at = monitor.position();
     if cfg!(target_os = "macos") {
+        // macOS reports pixels and lays out in points. Everything RetroArch is
+        // told here is in the desktop's own units, so both are divided.
         let scale = monitor.scale_factor().max(1.0);
-        Some(((size.width as f64 / scale) as u32, (size.height as f64 / scale) as u32))
+        let by = |v: f64| (v / scale) as i32;
+        Some(romm_desktop::retroarch::Screen {
+            x: by(at.x as f64),
+            y: by(at.y as f64),
+            width: (size.width as f64 / scale) as u32,
+            height: (size.height as f64 / scale) as u32,
+        })
     } else {
-        Some((size.width, size.height))
+        Some(romm_desktop::retroarch::Screen {
+            x: at.x,
+            y: at.y,
+            width: size.width,
+            height: size.height,
+        })
     }
 }
 
@@ -2468,6 +2520,8 @@ fn main() {
             download_set,
             recent_games,
             game_states,
+            delete_state,
+            confirm_delete_state,
             play_history,
             download_estimate,
             scrape_missing,

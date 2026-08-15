@@ -808,6 +808,11 @@ footer#toast {
   justify-content: center;
   min-height: 0;
   max-height: calc(100vh - 130px);
+  /* Zoom, driven by the triggers on a pad and +/- on the keyboard. A transform
+     rather than a width so it applies the same way to a video, a still and a
+     manual, and so a playing video is not re-laid-out on every frame. */
+  transform: scale(var(--lb-zoom, 1));
+  transition: transform .12s ease-out;
 }
 #lightbox img,
 #lightbox video,
@@ -825,6 +830,15 @@ footer#toast {
   font-size: 12px;
   text-align: center;
   flex-shrink: 0;
+}
+
+/* Gameplay videos are 320x240 far more often than not, and `max-width` never
+   scales anything up — so the player opened at the file's own size, which on a
+   5K display is a postage stamp in the middle of a black screen. A width makes
+   it fill the space; the height cap keeps the aspect ratio honest. */
+#lightbox video {
+  width: min(1500px, 88vw);
+  height: auto;
 }
 
 #lightbox iframe {

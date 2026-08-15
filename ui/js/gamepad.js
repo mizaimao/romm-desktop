@@ -15,6 +15,7 @@ import { runAction } from "./keys.js";
 import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
 import { scrollDetail } from "./detail.js";
+import { closeLightbox } from "./lightbox.js";
 
 // Rebindable in Settings; padMap() layers the user's choices over the
 // position-based defaults in bindings.js.
@@ -172,10 +173,35 @@ function poll() {
 
 function step() {
 
-  // The lightbox owns input entirely while open, as with the keyboard.
-  if (!el.lb.hidden) return;
-
   const map = padMap();
+
+  // The lightbox used to swallow the pad completely, which meant the button
+  // that opened a video could not close it — the only way out was the mouse.
+  // Four actions get through: the one that opened it, Back, and the triggers,
+  // which zoom what is on the stage rather than the covers behind it.
+  if (!el.lb.hidden) {
+    const now = performance.now();
+    const pressed = pressedActions(navigator.getGamepads?.() ?? [], map);
+    for (const action of pressed) {
+      if (action === "video" || action === "back") {
+        // Edge-triggered through the same `held` map as everything else, or a
+        // held button would close the lightbox and then act on the library
+        // underneath it in the same press.
+        if (!held.has(action)) {
+          held.set(action, now);
+          closeLightbox();
+          // Settle, so lifting the button does not register anywhere else.
+          settling = true;
+        }
+      } else if (action === "zoomIn" || action === "zoomOut") {
+        fire(action, now);
+      }
+    }
+    for (const action of [...held.keys()]) {
+      if (!pressed.has(action)) held.delete(action);
+    }
+    return;
+  }
 
   // Settings is different: the pad must still be able to close it, or a
   // controller-only user is trapped the moment they open it. Everything else

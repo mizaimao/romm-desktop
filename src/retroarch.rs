@@ -166,36 +166,69 @@ fn binary_candidates(root: &Path) -> Vec<(PathBuf, PathBuf)> {
 /// behind it.
 const SCREEN_FILL: f32 = 0.94;
 
+/// Where the game window should go: the monitor's own origin and size, in the
+/// units the desktop uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Screen {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Open the game window as large as it sensibly goes, in the middle of the
-/// screen.
+/// screen the library is on.
 ///
-/// RetroArch's default is a small window wherever the window manager decides to
-/// put it, which on a second launch is usually not where the first one was.
+/// The settings that do this are not the ones with the obvious names, which
+/// cost an afternoon to discover. `video_window_width` and
+/// `video_window_height` are what the documentation and every forum answer
+/// name, and RetroArch 1.20 does not have them: they are absent from a config
+/// it wrote itself, which writes every setting it knows. Asking for a 2406-wide
+/// window through those keys produced a 720-wide one, because the size actually
+/// came from `video_scale` -- three times the core's own resolution -- and
+/// nothing had been overridden at all.
 ///
-/// `video_window_custom_size_enable` is the switch that makes RetroArch use an
-/// explicit size rather than a multiple of the core's own resolution — without
-/// it the width and height below are read and ignored, which looks exactly like
-/// the setting not working. Position is deliberately *not* set:
-/// `video_window_save_positions` stays off, and with it off RetroArch centres
-/// the window itself, which is both what was wanted and one less thing to get
-/// wrong on a multi-monitor desk.
-pub fn window_lines(screen: Option<(u32, u32)>) -> String {
-    let Some((w, h)) = screen else {
+/// The real keys are `video_windowed_position_width` and `_height`, and they
+/// are only read when `video_window_save_positions` is on. That is also why the
+/// position has to be written now: with saved positions on, RetroArch no longer
+/// centres a window it has no coordinates for, so leaving them out puts the
+/// window wherever it was last dragged.
+///
+/// The coordinates are absolute desktop ones, taken from the monitor the
+/// library window is on. On a laptop with an external display those two
+/// monitors do not both start at zero, and centring within a monitor while
+/// writing coordinates relative to the primary one lands the window on the
+/// wrong screen -- or half off the edge of it.
+///
+/// The old keys are still written. They are harmless where they are not
+/// understood, and this is a family of builds across three operating systems
+/// where the setting names have moved at least once.
+pub fn window_lines(screen: Option<Screen>) -> String {
+    let Some(s) = screen else {
         return String::new();
     };
-    if w == 0 || h == 0 {
+    if s.width == 0 || s.height == 0 {
         return String::new();
     }
     let (w, h) = (
-        (w as f32 * SCREEN_FILL) as u32,
-        (h as f32 * SCREEN_FILL) as u32,
+        (s.width as f32 * SCREEN_FILL) as u32,
+        (s.height as f32 * SCREEN_FILL) as u32,
     );
+    // Centred on that monitor, in desktop coordinates.
+    let x = s.x + ((s.width - w) / 2) as i32;
+    let y = s.y + ((s.height - h) / 2) as i32;
     format!(
-        "\n# As large as the display sensibly allows, centred. Centring is\n\
-         # RetroArch's own behaviour when it has no saved position, so no\n\
-         # coordinates are written -- it picks the right monitor by itself.\n\
+        "\n# As large as the display sensibly allows, centred on the screen the\n\
+         # library is on.\n\
          video_fullscreen = \"false\"\n\
-         video_window_save_positions = \"false\"\n\
+         # On: this is what makes the size below be read at all.\n\
+         video_window_save_positions = \"true\"\n\
+         video_windowed_position_width = \"{w}\"\n\
+         video_windowed_position_height = \"{h}\"\n\
+         video_windowed_position_x = \"{x}\"\n\
+         video_windowed_position_y = \"{y}\"\n\
+         # The names the documentation gives, which RetroArch 1.20 does not\n\
+         # have. Kept for builds that do.\n\
          video_window_custom_size_enable = \"true\"\n\
          video_window_width = \"{w}\"\n\
          video_window_height = \"{h}\"\n\
@@ -836,23 +869,53 @@ input_r2_axis = "+5"
     /// The user's own file is appended last, because `--appendconfig` gives the
     /// final assignment of a key. This is the promise the README makes: we never
     /// modify their retroarch.cfg and never win an argument with it.
-    /// The switch that makes the size read at all. Writing a width and height
-    /// without it is the failure that looks like RetroArch ignoring settings.
-    #[test]
-    fn a_custom_size_is_useless_without_the_switch_that_enables_it() {
-        let out = window_lines(Some((2560, 1440)));
-        assert!(out.contains("video_window_custom_size_enable = \"true\""), "{out}");
-        assert!(out.contains("video_window_width"), "{out}");
+    /// One monitor, at the desktop origin.
+    fn screen(width: u32, height: u32) -> Screen {
+        Screen { x: 0, y: 0, width, height }
     }
 
-    /// No position is written. RetroArch centres a window it has no saved
-    /// position for, and coordinates would have to name a monitor correctly.
+    fn val(out: &str, key: &str) -> String {
+        out.lines()
+            .find(|l| l.starts_with(&format!("{key} = ")))
+            .and_then(|l| l.split('"').nth(1))
+            .unwrap_or_else(|| panic!("{key} is not written:\n{out}"))
+            .to_owned()
+    }
+
+    /// The keys the documentation names do not exist in RetroArch 1.20, and a
+    /// window asked for through them came out at 720 pixels wide because the
+    /// size fell back to `video_scale`. These are the ones that work, and they
+    /// are only read when saved positions are on.
     #[test]
-    fn the_window_is_centred_by_leaving_the_position_alone() {
-        let out = window_lines(Some((2560, 1440)));
-        assert!(!out.contains("video_window_offset"), "{out}");
-        assert!(!out.contains("video_windowed_position"), "{out}");
-        assert!(out.contains("video_window_save_positions = \"false\""), "{out}");
+    fn the_size_is_written_under_the_names_retroarch_actually_reads() {
+        let out = window_lines(Some(screen(2560, 1440)));
+        assert_eq!(val(&out, "video_window_save_positions"), "true");
+        assert_eq!(val(&out, "video_windowed_position_width"), "2406");
+        assert_eq!(val(&out, "video_windowed_position_height"), "1353");
+        // And the documented names too, for builds that have them.
+        assert_eq!(val(&out, "video_window_custom_size_enable"), "true");
+        assert_eq!(val(&out, "video_window_width"), "2406");
+    }
+
+    /// Centring is now ours to do: with saved positions on, RetroArch stops
+    /// centring a window it has no coordinates for and uses wherever the last
+    /// one was dragged to.
+    #[test]
+    fn the_window_is_centred_on_its_monitor() {
+        let out = window_lines(Some(screen(2560, 1440)));
+        assert_eq!(val(&out, "video_windowed_position_x"), "77");
+        assert_eq!(val(&out, "video_windowed_position_y"), "43");
+    }
+
+    /// A second monitor does not start at zero. Centring within it while
+    /// writing coordinates relative to the primary screen puts the window on
+    /// the wrong display — or half off the edge of it.
+    #[test]
+    fn a_window_on_the_second_monitor_is_centred_on_that_monitor() {
+        let out = window_lines(Some(Screen { x: 2560, y: -200, width: 1920, height: 1080 }));
+        assert_eq!(val(&out, "video_windowed_position_width"), "1804");
+        assert_eq!(val(&out, "video_windowed_position_x"), "2618");
+        assert_eq!(val(&out, "video_windowed_position_y"), "-168");
     }
 
     /// The ceiling is a separate setting that silently wins. RetroArch keeps
@@ -862,30 +925,25 @@ input_r2_axis = "+5"
     /// being ignored rather than capped.
     #[test]
     fn the_size_is_written_alongside_the_ceiling_that_would_cap_it() {
-        let out = window_lines(Some((3840, 2160)));
-        let w = out.lines().find(|l| l.starts_with("video_window_width")).unwrap();
-        let cap = out.lines().find(|l| l.starts_with("video_window_auto_width_max")).unwrap();
-        let val = |l: &str| l.split('"').nth(1).unwrap().to_owned();
-        assert_eq!(val(w), val(cap), "a ceiling below the requested size caps it");
-        let h = out.lines().find(|l| l.starts_with("video_window_height")).unwrap();
-        let hcap = out.lines().find(|l| l.starts_with("video_window_auto_height_max")).unwrap();
-        assert_eq!(val(h), val(hcap));
+        let out = window_lines(Some(screen(3840, 2160)));
+        assert_eq!(
+            val(&out, "video_windowed_position_width"),
+            val(&out, "video_window_auto_width_max"),
+            "a ceiling below the requested size caps it"
+        );
+        assert_eq!(
+            val(&out, "video_windowed_position_height"),
+            val(&out, "video_window_auto_height_max")
+        );
     }
 
     /// A window the exact size of the display is a maximised one with no title
     /// bar left to grab. It has to come in from the edges.
     #[test]
     fn the_window_is_a_little_smaller_than_the_display() {
-        let out = window_lines(Some((1000, 1000)));
-        let read = |key: &str| -> u32 {
-            out.lines()
-                .find(|l| l.starts_with(key))
-                .and_then(|l| l.split('"').nth(1))
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0)
-        };
-        for key in ["video_window_width", "video_window_height"] {
-            let v = read(key);
+        let out = window_lines(Some(screen(1000, 1000)));
+        for key in ["video_windowed_position_width", "video_windowed_position_height"] {
+            let v: u32 = val(&out, key).parse().unwrap();
             assert!(v < 1000, "{key} = {v}, which fills the whole display");
             assert!(v > 850, "{key} = {v}, which wastes the screen");
         }
@@ -896,8 +954,8 @@ input_r2_axis = "+5"
     #[test]
     fn an_unknown_display_leaves_the_window_settings_alone() {
         assert_eq!(window_lines(None), "");
-        assert_eq!(window_lines(Some((0, 1080))), "");
-        assert_eq!(window_lines(Some((1920, 0))), "");
+        assert_eq!(window_lines(Some(screen(0, 1080))), "");
+        assert_eq!(window_lines(Some(screen(1920, 0))), "");
     }
 
     #[test]
