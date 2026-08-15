@@ -33,6 +33,13 @@ listen("art-changed", () => {
   if (state.rows.length) renderRows(state.rows, state.view === "search");
 });
 
+// The console pictures, which are the other half: `art-changed` deliberately
+// skips the console grid because game artwork is not what changed there. This
+// is the one that redraws it.
+listen("icons-changed", () => {
+  if (state.view === "platforms") showPlatforms();
+});
+
 el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));
 
 el.layoutBtn.addEventListener("click", () =>
@@ -43,6 +50,17 @@ el.sidebarBtn.addEventListener("click", () => setSidebar(!state.sidebar));
 
 // Whatever is on screen is what gets taken: a console page downloads that
 // console, a collection page that collection.
+// This is an application, not a page. The native menu offers "Open Image in
+// New Window", "Copy Image" and "Share" for a console icon, none of which mean
+// anything here, and it comes up over anything the app puts in its place.
+//
+// Text fields keep theirs: cut, copy, paste and the spelling menu are the
+// system's job and there is no reason to reimplement them.
+window.addEventListener("contextmenu", (ev) => {
+  if (ev.target.closest("input, textarea, [contenteditable]")) return;
+  ev.preventDefault();
+});
+
 el.grabBtn.addEventListener("click", () =>
   askDownload(
     state.view === "collection-roms" && state.collection

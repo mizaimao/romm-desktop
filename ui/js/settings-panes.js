@@ -42,11 +42,10 @@ export const TABS = [
   // at the bottom of General under six unrelated headings the BIOS control was
   // simply not found.
   { id: "library", label: "Library" },
-  // Per-system emulator, shader and light gun. This was a button in the top
-  // bar labelled "Systems", beside Grid and Take offline, which are things you
-  // do to what is on screen — so it read as another view of the library rather
-  // than as configuration, and nobody could tell what it would do.
-  { id: "systems", label: "Systems" },
+  // "Systems" said nothing: every tab in here is about systems of one kind or
+  // another, and the word gave no clue that this is where you choose which
+  // emulator runs a console. Named for the thing you come here to change.
+  { id: "systems", label: "Emulators" },
 ];
 
 /// Markup for one tab. Unknown ids return nothing rather than throwing, so a
@@ -129,7 +128,7 @@ export function paneHtml(id) {
 
 `;
 
-  if (id === "systems") return `      <h4>Systems</h4>
+  if (id === "systems") return `      <h4>Emulators</h4>
       <p class="hint">Which emulator runs each console, which shader it gets,
         and whether a light gun takes the second controller port. Changes are
         written to config.toml and apply to the next game you launch.</p>
@@ -256,7 +255,23 @@ export function paneHtml(id) {
         window. Motion at 0 holds it still. Colours left on "theme" follow
         whatever palette is in force.</p>
       <p class="hint set-backdrop-status"></p>`;
-  if (id === "control") return `      <h4>Bindings</h4>
+  if (id === "control") return `      <h4>Players</h4>
+      <p class="hint">Four ports, one per controller, assigned in the order they
+        are connected. Only the first drives this app's menus — with four pads
+        plugged in for a four-player game, all four used to move the cursor
+        while somebody was trying to pick one.</p>
+      <div class="pad-list">Looking for controllers…</div>
+      <div class="srow">
+        <label>Match player 1</label>
+        <div class="ctl"><button data-field="mirror_player_one">…</button></div>
+      </div>
+      <p class="hint">Binds players 2–4 the same way as player 1. RetroArch
+        binds each pad from its own profile and gives a controller it has never
+        seen nothing at all, which looks like a dead port rather than a missing
+        file. Right whenever the other pads are the same model; turn it off if
+        yours are genuinely different and RetroArch already knows them.</p>
+
+      <h4>Bindings</h4>
       <p class="hint">Every action with its key and its controller button side
         by side. Click either to rebind — press the new key or button, or Esc to
         leave it unset.</p>
@@ -658,6 +673,11 @@ async function wireIconStyles(box) {
           holder
             .querySelectorAll(".icon-style")
             .forEach((x) => x.classList.toggle("on", x === b));
+          // The console grid is in the other window and cannot be reached from
+          // here. Without this the choice only appeared after leaving the
+          // console page and coming back, which reads as the setting not
+          // having taken.
+          window.__TAURI__?.event?.emit?.("icons-changed");
           toast(`Console pictures: ${label}`);
         } catch (e) {
           toast(String(e), 6000);
@@ -679,6 +699,7 @@ async function wireIconStyles(box) {
     try {
       const summary = await invoke("fetch_icons");
       note.textContent = summary.split("\n")[0];
+      window.__TAURI__?.event?.emit?.("icons-changed");
       toast(summary, 9000);
       await draw();
     } catch (err) {
@@ -859,6 +880,37 @@ function wireControl(box) {
   // W3C "standard" layout, but a pad that reports a different mapping puts the
   // face buttons at other indices — in which case the bindings look right and
   // nothing responds. This makes that visible instead of a guessing game.
+  // Which pad is which player. The Gamepad API hands them back in connection
+  // order and so does RetroArch, so the order here is the order in the game —
+  // which is the only way to find out which controller is player three
+  // without starting something four-player and pressing buttons.
+  const list = box.querySelector(".pad-list");
+  const drawList = () => {
+    const pads = (navigator.getGamepads?.() ?? []).filter(Boolean);
+    if (!pads.length) {
+      list.innerHTML = `<p class="hint">Nothing connected — press a button on a
+        controller to wake it.</p>`;
+      return;
+    }
+    list.innerHTML = pads
+      .slice(0, 4)
+      .map(
+        (p, i) => `
+        <div class="pad-row">
+          <span class="pad-num">P${i + 1}</span>
+          <span class="pad-name">${escapeHtml(p.id.replace(/\s*\(.*\)\s*$/, "").trim() || "controller")}</span>
+          ${i === 0 ? `<em>drives the menus</em>` : ""}
+        </div>`
+      )
+      .join("") +
+      (pads.length > 4
+        ? `<p class="hint">${pads.length - 4} more connected than there are ports.</p>`
+        : "");
+  };
+  drawList();
+  window.addEventListener("gamepadconnected", drawList);
+  window.addEventListener("gamepaddisconnected", drawList);
+
   const live = box.querySelector(".pad-live");
   const tick = () => {
     if (!document.getElementById("settings")) return;
@@ -887,6 +939,10 @@ function wireControl(box) {
       startPadCapture(row.dataset.id, btn);
     });
   });
+
+
+  // The mirror toggle is a config.toml field like the ones in General.
+  wireConfigFields(box);
 
 }
 

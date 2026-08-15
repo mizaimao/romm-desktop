@@ -414,24 +414,13 @@ video_aspect_ratio_auto = \"true\"
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
 
-# Left stick doubles as the d-pad.
-#
-# Every console here predates the analog stick, so the stick is otherwise dead
-# in every game -- and it is where a thumb naturally sits on a modern pad. Mode
-# 1 is \"Left Analog\": the d-pad keeps working, the stick simply also reports
-# it, so nothing is taken away.
-input_player1_analog_dpad_mode = \"1\"
-input_player2_analog_dpad_mode = \"1\"
-input_player3_analog_dpad_mode = \"1\"
-input_player4_analog_dpad_mode = \"1\"
-
 # Mouse wired to the light gun controls.
 #
 # RetroArch keeps gun binds apart from pad binds and ships them unbound, so a
 # gun game aims with the pointer -- that part is read directly -- and then the
 # trigger does nothing. These cost nothing when no gun is in use: they only
 # apply to a port a core has been told holds a gun, which is off unless it is
-# switched on for that system in Settings -> Systems.
+# switched on for that system in Settings -> Emulators.
 #
 # Left button fires, right button shoots off-screen (how most gun games
 # reload), middle is Start.
@@ -485,7 +474,7 @@ input_player2_gun_start_mbtn = \"3\"
         dir: &Path,
         user_config: Option<&Path>,
     ) -> Result<PathBuf> {
-        self.write_overrides_full(dir, user_config, "", None)
+        self.write_overrides_full(dir, user_config, "", None, true)
     }
 
     /// As above, with `extra` (per-platform shader settings) inserted before
@@ -496,12 +485,14 @@ input_player2_gun_start_mbtn = \"3\"
         user_config: Option<&Path>,
         extra: &str,
         pad: Option<&str>,
+        mirror_players: bool,
     ) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
         body.push_str(Self::OVERRIDES_OS);
         body.push_str(&self.hotkeys(pad));
+        body.push_str(&self.players(pad, mirror_players));
         body.push_str(extra);
 
         if let Some(user) = user_config {
@@ -562,6 +553,23 @@ input_player2_gun_start_mbtn = \"3\"
             Some(profile) => padprofile::hotkey_block(&profile),
             None => padprofile::no_profile_note(&roots, device),
         }
+    }
+
+    /// The player-port block: how many ports, the stick standing in for the
+    /// d-pad on each, and optionally players 2-4 bound like player 1.
+    ///
+    /// Resolved from the same profile as [`Self::hotkeys`] and by the same
+    /// route, because mirroring is only meaningful against the pad the
+    /// frontend can actually see.
+    pub fn players(&self, device: Option<&str>, mirror: bool) -> String {
+        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
+        let driver = padprofile::configured_driver(&[
+            self.data_dir().join("retroarch.cfg"),
+            self.root.join("retroarch.cfg"),
+        ]);
+        let profile = padprofile::find_with_driver(&roots, device, driver.as_deref())
+            .or_else(|| padprofile::known(device));
+        crate::players::config_lines(profile.as_ref(), mirror)
     }
 
     /// Write a starter user-settings file if none exists yet.

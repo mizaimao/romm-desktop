@@ -20,6 +20,7 @@ pub mod lightgun;
 pub mod media;
 pub mod padprofile;
 pub mod platformicon;
+pub mod players;
 pub mod parity;
 pub mod probe;
 pub mod retroarch;

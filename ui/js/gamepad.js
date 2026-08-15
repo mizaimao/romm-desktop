@@ -113,39 +113,51 @@ function fire(action, now) {
 /// "the A button does nothing" would live, and a bug here is otherwise
 /// invisible, since poll runs inside requestAnimationFrame where a throw is
 /// swallowed and the next frame is already queued.
+/// The pad that drives the interface: the first one connected, and only that
+/// one.
+///
+/// With four controllers plugged in for a four-player game, every one of them
+/// used to move the cursor in the library — so three other people fidgeting
+/// with sticks while player one tries to pick a game made the menu unusable.
+/// In the emulator all four are players; out here, player one is in charge.
+export function primaryPad(pads) {
+  for (const pad of pads) {
+    if (pad?.connected !== false && pad) return pad;
+  }
+  return null;
+}
+
 export function pressedActions(pads, map) {
   const pressed = new Set();
+  const pad = primaryPad(pads);
+  if (!pad) return pressed;
 
-  for (const pad of pads) {
-    if (!pad) continue;
+  for (const [index, action] of Object.entries(map)) {
+    // A rebind clears the old slot by writing null, so skip those rather
+    // than dispatching an action of null.
+    if (action && pad.buttons[index]?.pressed) pressed.add(action);
+  }
+  // Right stick scrolls the detail pane. Axes 2 and 3 in the W3C standard
+  // layout. Done here rather than as an action because it is continuous
+  // rather than a repeat-fire keypress: how far you push decides how fast it
+  // moves, which a discrete action cannot express.
+  const ry = pad.axes[3] ?? 0;
+  if (Math.abs(ry) > STICK_DEADZONE) {
+    // Squared so a small push creeps and a full push moves properly.
+    const speed = Math.sign(ry) * (Math.abs(ry) ** 2) * 26;
+    scrollDetail(speed);
+  }
 
-    for (const [index, action] of Object.entries(map)) {
-      // A rebind clears the old slot by writing null, so skip those rather
-      // than dispatching an action of null.
-      if (action && pad.buttons[index]?.pressed) pressed.add(action);
-    }
-    // Right stick scrolls the detail pane. Axes 2 and 3 in the W3C standard
-    // layout. Done here rather than as an action because it is continuous
-    // rather than a repeat-fire keypress: how far you push decides how fast it
-    // moves, which a discrete action cannot express.
-    const ry = pad.axes[3] ?? 0;
-    if (Math.abs(ry) > STICK_DEADZONE) {
-      // Squared so a small push creeps and a full push moves properly.
-      const speed = Math.sign(ry) * (Math.abs(ry) ** 2) * 26;
-      scrollDetail(speed);
-    }
-
-    // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
-    // diagonally it would otherwise report left+up in the same frame and move
-    // twice, which reads as the cursor jumping around on its own.
-    const [x = 0, y = 0] = pad.axes;
-    if (Math.abs(x) > Math.abs(y)) {
-      if (x < -STICK_DEADZONE) pressed.add("left");
-      if (x > STICK_DEADZONE) pressed.add("right");
-    } else {
-      if (y < -STICK_DEADZONE) pressed.add("up");
-      if (y > STICK_DEADZONE) pressed.add("down");
-    }
+  // Left stick doubles as a d-pad, but only along its dominant axis. Pushed
+  // diagonally it would otherwise report left+up in the same frame and move
+  // twice, which reads as the cursor jumping around on its own.
+  const [x = 0, y = 0] = pad.axes;
+  if (Math.abs(x) > Math.abs(y)) {
+    if (x < -STICK_DEADZONE) pressed.add("left");
+    if (x > STICK_DEADZONE) pressed.add("right");
+  } else {
+    if (y < -STICK_DEADZONE) pressed.add("up");
+    if (y > STICK_DEADZONE) pressed.add("down");
   }
 
   return pressed;

@@ -668,3 +668,38 @@ describe("the lightbox and the controller", () => {
     assert.equal(document.getElementById("lightbox").style.getPropertyValue("--lb-zoom"), "1");
   });
 });
+
+describe("four controllers", () => {
+  /// With four pads plugged in for a four-player game, every one of them moved
+  /// the cursor in the library — so three people fidgeting with sticks made the
+  /// menu unusable while player one tried to pick a game. In the emulator all
+  /// four are players; out here, player one is in charge.
+  test("only the first controller drives the menus", () => {
+    const map = ui.padMap();
+    const right = Number(Object.entries(map).find(([, a]) => a === "right")?.[0]);
+    const down = Number(Object.entries(map).find(([, a]) => a === "down")?.[0]);
+
+    // Player two pressing right, player one pressing nothing.
+    const acts = ui.pressedActions([pad([]), pad([right]), pad([down])], map);
+    assert.equal(acts.size, 0, `player two moved the cursor: ${[...acts]}`);
+
+    // And player one still works with the others connected.
+    assert.ok(ui.pressedActions([pad([right]), pad([down])], map).has("right"));
+  });
+
+  /// A disconnected pad leaves a null hole in the list rather than shrinking
+  /// it, so "the first one" is not always index zero.
+  test("a gap where a controller was does not stop the next one", () => {
+    const map = ui.padMap();
+    const right = Number(Object.entries(map).find(([, a]) => a === "right")?.[0]);
+    assert.ok(ui.pressedActions([null, pad([right])], map).has("right"));
+  });
+
+  /// The stick is read from the same pad as the buttons. Reading it from all
+  /// of them put the second player's resting drift into player one's cursor.
+  test("the stick is only read from the first controller", () => {
+    const map = ui.padMap();
+    const acts = ui.pressedActions([pad([]), pad([], { axes: [1, 0] })], map);
+    assert.equal(acts.has("right"), false, "another pad's stick moved the cursor");
+  });
+});

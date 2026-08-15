@@ -111,6 +111,28 @@ describe("the settings tabs", () => {
     assert.ok(pane.querySelector(".set-icons"), "no way to fetch any");
   });
 
+  /// The tab was called "Systems", which said nothing: every tab in there is
+  /// about systems of one kind or another, and the word gave no clue that this
+  /// is where you choose which emulator runs a console.
+  test("the emulator tab is named for what you change in it", async () => {
+    const { TABS } = await import(join(uiDir, "js", "settings-panes.js"));
+    const tab = TABS.find((t) => t.id === "systems");
+    assert.ok(tab, "the tab is gone entirely");
+    assert.notEqual(tab.label, "Systems", "still named after nothing in particular");
+    assert.match(tab.label, /Emulator/i);
+  });
+
+  /// Four ports, and a way to say the other three pads are like the first.
+  test("the control tab covers players beyond the first", async () => {
+    const { paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    const pane = new JSDOM(`<body>${paneHtml("control")}</body>`).window.document;
+    assert.ok(pane.querySelector(".pad-list"), "no list of connected controllers");
+    assert.ok(
+      pane.querySelector('[data-field="mirror_player_one"]'),
+      "no way to bind players 2-4 like player 1"
+    );
+  });
+
   /// Every tab the window offers has to render something. A tab whose id has
   /// no markup opens onto a blank pane, which is indistinguishable from a
   /// window that has broken.

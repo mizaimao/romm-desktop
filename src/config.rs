@@ -17,6 +17,8 @@ pub struct Config {
     #[serde(default)]
     pub saves: SavesCfg,
     #[serde(default)]
+    pub controllers: ControllersCfg,
+    #[serde(default)]
     pub theme: ThemeCfg,
     #[serde(default)]
     pub cores: CoresCfg,
@@ -121,6 +123,26 @@ impl Default for Library {
 
 fn default_local_root() -> String {
     "./library".to_owned()
+}
+
+/// Controllers beyond the first.
+#[derive(Debug, Deserialize)]
+pub struct ControllersCfg {
+    /// Bind players 2-4 the same way as player 1.
+    ///
+    /// On by default. RetroArch binds each pad from its own autoconfig profile
+    /// and gives a controller it has no profile for nothing at all, which looks
+    /// like a dead port rather than a missing file. Copying player one is right
+    /// whenever the other pads are the same model — the usual case — and wrong
+    /// for a genuinely different device, which is why it can be turned off.
+    #[serde(default = "yes")]
+    pub mirror_player_one: bool,
+}
+
+impl Default for ControllersCfg {
+    fn default() -> Self {
+        Self { mirror_player_one: true }
+    }
 }
 
 #[derive(Debug, Deserialize)]

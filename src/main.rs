@@ -137,6 +137,7 @@ async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscree
     let user_cfg = cfg.user_retroarch_config();
     let achievements = cfg.achievements.settings();
     let req = launch::Request {
+        mirror_players: true,
         entry_slot: None,
         rom,
         platform: &platform,

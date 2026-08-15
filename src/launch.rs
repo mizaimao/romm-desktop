@@ -43,6 +43,10 @@ pub struct Request<'a> {
     pub refresh_hz: Option<f32>,
     /// Start in this save-state slot instead of at the title screen.
     pub entry_slot: Option<u32>,
+    /// Bind players 2-4 like player 1. On by default: the second pad on a desk
+    /// is usually the same model as the first, and a pad RetroArch has no
+    /// profile for is otherwise a port that does nothing.
+    pub mirror_players: bool,
     /// Name the connected controller reports, used to pick the RetroArch
     /// autoconfig profile the gamepad hotkeys are derived from. None means
     /// "whatever this OS's input driver would use".
@@ -234,7 +238,13 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         crate::retroarch::window_lines(req.screen),
     );
     let overrides = ra
-        .write_overrides_full(req.library_root, Some(req.user_cfg), &extra, req.pad)
+        .write_overrides_full(
+            req.library_root,
+            Some(req.user_cfg),
+            &extra,
+            req.pad,
+            req.mirror_players,
+        )
         .ok();
 
     Ok(Plan {

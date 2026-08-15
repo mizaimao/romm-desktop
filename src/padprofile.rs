@@ -54,7 +54,8 @@ impl Physical {
     /// names them after a SNES pad, so they are crossed over relative to an
     /// Xbox one. Getting this backwards is what bound "quit" to a button
     /// people press during normal play.
-    fn retropad(self) -> &'static str {
+    /// RetroPad's own name for this button, which is what a config key uses.
+    pub fn retropad(self) -> &'static str {
         match self {
             Self::A => "b",     // bottom face button
             Self::B => "a",     // right face button
