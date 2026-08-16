@@ -67,3 +67,17 @@ export function toast(msg, ms = 4000) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.toast.hidden = true), ms);
 }
+
+/// A colour from a CSS custom property, for the places that need a value
+/// rather than a stylesheet — a `<input type="color">` cannot be given
+/// `var(--bg)`, it needs six hex digits.
+///
+/// This was called in the Appearance pane and defined nowhere, so wiring that
+/// tab threw a ReferenceError partway through and everything after it — the
+/// backdrop's own controls — was never connected.
+export function cssColour(name, fallback) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  // Only the form a colour input accepts. A token holding `color-mix(...)` or
+  // a name is perfectly valid CSS and useless here.
+  return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback;
+}
