@@ -119,10 +119,13 @@ struct RomDetail {
     /// games from several consoles, so anything acting on "this game's
     /// console" cannot read it off the page it is on.
     platform_slug: String,
-    /// Which button repeats in this game, if any: "a", "y", or absent. Shown
-    /// in the info pane, because a game whose fire button behaves differently
-    /// from every other game should say so before it is started rather than
-    /// after.
+    /// Auto-fire for this game: "off", "a" or "y" when the game is one that
+    /// can have it, and absent when it is not.
+    ///
+    /// Absent and "off" are different answers and the pane needs both: absent
+    /// means there is nothing to offer, "off" means there is and you have
+    /// turned it down — which is the difference between showing no control and
+    /// showing one with nothing selected.
     autofire: Option<String>,
     size_bytes: i64,
     downloaded: bool,
@@ -1183,10 +1186,8 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
         art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
-        autofire: match autofire_for(&state, &row) {
-            romm_desktop::tweaks::AutoFire::Off => None,
-            other => Some(other.key().to_owned()),
-        },
+        autofire: autofire_possible(&row)
+            .then(|| romm_desktop::tweaks::AutoFire::parse(&state.autofire).key().to_owned()),
         platform_slug: row.platform_slug.clone(),
         id: row.id,
         name: row.name,
@@ -1518,14 +1519,23 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
 /// than no cue.
 fn autofire_for(state: &State<'_, AppState>, row: &cache::RomRow) -> romm_desktop::tweaks::AutoFire {
     use romm_desktop::tweaks::AutoFire;
-    if !matches!(row.platform_slug.as_str(), "arcade" | "neogeoaes" | "neogeocd") {
-        return AutoFire::Off;
-    }
-    let meta = row.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok());
-    if !meta_strings(&meta, "genres").iter().any(|g| g.to_lowercase().contains("shoot")) {
+    if !autofire_possible(row) {
         return AutoFire::Off;
     }
     AutoFire::parse(&state.autofire)
+}
+
+/// Whether this game is one auto-fire applies to at all.
+///
+/// The cabinets that were built around a hammered button, and only those: a
+/// "shooter" on a home console is as likely to be a light-gun game or a shmup
+/// that already has auto-fire of its own.
+fn autofire_possible(row: &cache::RomRow) -> bool {
+    if !matches!(row.platform_slug.as_str(), "arcade" | "neogeoaes" | "neogeocd") {
+        return false;
+    }
+    let meta = row.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok());
+    meta_strings(&meta, "genres").iter().any(|g| g.to_lowercase().contains("shoot"))
 }
 
 /// The stored screen preference, read fresh so unplugging a monitor and

@@ -65,6 +65,7 @@ before(async () => {
         if (cmd === "game_video") return "/v/clip.mp4";
         if (cmd === "confirm_delete_state") return false;
         if (cmd === "delete_state") return "deleted Slot 3";
+        if (cmd === "set_config_field") return "saved";
         return [];
       },
       convertFileSrc: (p) => `asset://${p}`,
@@ -454,5 +455,61 @@ describe("the right-click menu", () => {
     assert.ok(call, "nothing was deleted");
     assert.equal(call.args.slot, "3");
     assert.equal(call.args.id, 7);
+  });
+});
+
+describe("rapid fire, above the Play button", () => {
+  /// It is a thing you change about the run you are about to start — try Y,
+  /// play a level, decide it should have been A — so it sits with Play rather
+  /// than three windows away in Settings, and does not scroll off with the
+  /// artwork.
+  test("games that can have it get the control, pinned with Play", async () => {
+    Object.assign(DETAIL, { autofire: "y" });
+    await detail.selectRom(7);
+    await settle();
+
+    const row = document.querySelector(".autofire-row");
+    assert.ok(row, "no rapid-fire control");
+    assert.ok(
+      row.closest(".pinned"),
+      "it is in the scrolling part, so it disappears as you read the game"
+    );
+    assert.ok(
+      row.compareDocumentPosition(document.getElementById("play")) &
+        dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+      "it should sit above Play, not below it"
+    );
+    assert.equal(row.querySelectorAll(".af").length, 3, "three choices");
+    assert.equal(row.querySelector(".af.on").dataset.af, "y");
+  });
+
+  test("games it does not apply to get nothing at all", async () => {
+    Object.assign(DETAIL, { autofire: null });
+    await detail.selectRom(7);
+    await settle();
+    assert.equal(document.querySelector(".autofire-row"), null);
+  });
+
+  /// "Off" and "not applicable" are different answers: one shows a control
+  /// with Off selected, the other shows no control.
+  test("off still shows the control, with off selected", async () => {
+    Object.assign(DETAIL, { autofire: "off" });
+    await detail.selectRom(7);
+    await settle();
+    assert.ok(document.querySelector(".autofire-row"), "the control vanished when turned off");
+    assert.equal(document.querySelector(".af.on").dataset.af, "off");
+  });
+
+  test("choosing one saves it", async () => {
+    Object.assign(DETAIL, { autofire: "off" });
+    await detail.selectRom(7);
+    await settle();
+    document.querySelector('.af[data-af="a"]').click();
+    await settle();
+    const saved = invoked.find((c) => c.cmd === "set_config_field");
+    assert.ok(saved, "nothing was saved");
+    assert.equal(saved.args.field, "autofire");
+    assert.equal(saved.args.value, "a");
+    Object.assign(DETAIL, { autofire: null });
   });
 });

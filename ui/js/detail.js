@@ -100,14 +100,6 @@ export async function selectRom(id) {
       ${top}
       ${cover}
       ${video}
-      ${
-        d.autofire
-          ? `<div class="autofire-cue" title="Change this in Settings · Emulators">
-               <span class="icon icon-gamepad"></span>
-               <span>Rapid fire on ${d.autofire === "a" ? "A" : "Y"}</span>
-             </div>`
-          : ""
-      }
       ${d.rating ? starBar(d.rating) : ""}
       ${d.summary ? `<p class="summary">${escapeHtml(d.summary)}</p>` : ""}
       <dl>
@@ -137,6 +129,7 @@ export async function selectRom(id) {
       }
     </div>
     <div class="pinned">
+      ${autofireRow(d)}
       <div class="actions">
         <button class="primary" id="play">${d.downloaded ? "Play" : "Download & Play"}</button>
         <button class="ghost" id="dl" ${d.downloaded ? "disabled" : ""}>Download</button>
@@ -148,6 +141,7 @@ export async function selectRom(id) {
 
   wireArtwork(d);
   wireShelf(d);
+  wireAutofire(d);
 
   document.getElementById("play").addEventListener("click", () => play(d));
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
@@ -210,6 +204,49 @@ function wireShelf(d) {
     btn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       stateMenu(d, btn, e.clientX, e.clientY);
+    });
+  }
+}
+
+/// Where the rapid fire lives, for games that can have it.
+///
+/// In the pinned strip directly above Play, rather than in Settings: this is a
+/// thing you change *about the run you are about to start* — try Y, play a
+/// level, decide it should have been A — and a control three windows away
+/// turns that into a trip. It does not scroll with the artwork for the same
+/// reason.
+///
+/// Absent entirely for games it does not apply to, which is most of them.
+function autofireRow(d) {
+  if (!d.autofire) return "";
+  const opt = (key, label, title) =>
+    `<button class="af ${d.autofire === key ? "on" : ""}" data-af="${key}"
+       title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  return `
+    <div class="autofire-row" title="Applies to every arcade shooter, not only this game">
+      <span class="af-label">Rapid fire</span>
+      ${opt("off", "Off", "The buttons behave as the cabinet did")}
+      ${opt("a", "A", "The bottom button repeats; single shots move to Y")}
+      ${opt("y", "Y", "The top button repeats; A is untouched")}
+    </div>`;
+}
+
+function wireAutofire(d) {
+  for (const btn of document.querySelectorAll(".autofire-row .af")) {
+    btn.addEventListener("click", async () => {
+      try {
+        await invoke("set_config_field", { field: "autofire", value: btn.dataset.af });
+      } catch (e) {
+        return toast(`Could not save — ${e}`, 8000);
+      }
+      // Redrawn rather than just repainted: the setting is global, so the pane
+      // has to come back from the backend to be sure it agrees with it.
+      await selectRom(d.id);
+      toast(
+        btn.dataset.af === "off"
+          ? "Rapid fire off"
+          : `Rapid fire on ${btn.dataset.af.toUpperCase()}`
+      );
     });
   }
 }
