@@ -32,10 +32,18 @@ export function showMenu(items, x, y) {
     const b = document.createElement("button");
     b.textContent = item.label;
     if (item.danger) b.className = "danger";
-    b.addEventListener("click", () => {
-      closeMenu();
-      item.run();
-    });
+    // A line that says why there is nothing to do. Leaving it out instead
+    // makes an empty answer look like a broken menu — which is exactly how
+    // "no save states" read.
+    if (item.disabled) {
+      b.disabled = true;
+      b.className = "dim";
+    } else {
+      b.addEventListener("click", () => {
+        closeMenu();
+        item.run();
+      });
+    }
     menu.appendChild(b);
   }
 

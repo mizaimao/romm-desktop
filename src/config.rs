@@ -374,8 +374,9 @@ pub struct RetroArchCfg {
     /// them here. These were built around a cabinet button you hammered, and
     /// a run of Metal Slug is a few thousand presses. Off for anything where
     /// single shots matter more than volume.
-    #[serde(default = "yes")]
-    pub autofire: bool,
+    /// `off`, `a` (bottom face repeats), or `y` (top face repeats).
+    #[serde(default = "default_autofire")]
+    pub autofire: String,
 
     /// Keep the game window's title bar.
     ///
@@ -395,6 +396,10 @@ pub struct RetroArchCfg {
 /// original hardware. A window of the right shape has nothing left to put a bar
 /// in. Turn it off to have the window fill the screen and let the emulator
 /// letterbox inside it.
+fn default_autofire() -> String {
+    "y".to_owned()
+}
+
 fn default_game_display() -> String {
     "auto".to_owned()
 }

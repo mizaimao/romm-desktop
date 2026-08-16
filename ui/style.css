@@ -1152,6 +1152,7 @@ button:has(> .icon + span) {
 .icon-play      { --icon: url("icons/play.svg"); }
 .icon-download  { --icon: url("icons/download.svg"); }
 .icon-search    { --icon: url("icons/search.svg"); }
+.icon-gamepad   { --icon: url("icons/gamepad-2.svg"); }
 /* Lucide "arrow-down-narrow-wide" — the ordering glyph, vendored like the rest. */
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
 
@@ -1891,6 +1892,8 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   cursor: pointer;
 }
 .ctx-menu button:hover { background: color-mix(in srgb, var(--glass) 24%, transparent); }
+.ctx-menu button.dim { color: var(--dim); cursor: default; }
+.ctx-menu button.dim:hover { background: none; }
 .ctx-menu button.danger { color: #e0736a; }
 .ctx-menu button.danger:hover { background: color-mix(in srgb, #e0736a 22%, transparent); }
 .ctx-menu hr {
@@ -2010,3 +2013,18 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+/* A game whose fire button behaves differently from every other game should
+   say so before it is started, not after. */
+.autofire-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+}
+.autofire-cue .icon { width: 13px; height: 13px; }

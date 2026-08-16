@@ -42,8 +42,8 @@ struct AppState {
     fit_window: bool,
     /// Keep the game window's title bar.
     window_decorations: bool,
-    /// Auto-fire in arcade shooters. See config::RetroArchCfg.
-    autofire: bool,
+    /// Auto-fire in arcade shooters: "off", "a" or "y".
+    autofire: String,
     /// Behind mutexes so a choice made in the UI takes effect on the next
     /// launch rather than the next restart. `config.toml` stays the source of
     /// truth; these are the live copy.
@@ -119,6 +119,11 @@ struct RomDetail {
     /// games from several consoles, so anything acting on "this game's
     /// console" cannot read it off the page it is on.
     platform_slug: String,
+    /// Which button repeats in this game, if any: "a", "y", or absent. Shown
+    /// in the info pane, because a game whose fire button behaves differently
+    /// from every other game should say so before it is started rather than
+    /// after.
+    autofire: Option<String>,
     size_bytes: i64,
     downloaded: bool,
     core: Option<String>,
@@ -284,7 +289,7 @@ struct ConfigFields {
     mirror_player_one: bool,
     fit_window: bool,
     window_decorations: bool,
-    autofire: bool,
+    autofire: String,
     /// Present so the UI can say where it is writing, and warn when there is
     /// nothing to write to.
     config_path: String,
@@ -312,7 +317,7 @@ fn config_fields() -> CmdResult<ConfigFields> {
         mirror_player_one: cfg.controllers.mirror_player_one,
         fit_window: cfg.retroarch.fit_window,
         window_decorations: cfg.retroarch.window_decorations,
-        autofire: cfg.retroarch.autofire,
+        autofire: cfg.retroarch.autofire.clone(),
         config_path: abs(Path::new("config.toml")),
         config_exists: Config::exists("config.toml"),
     })
@@ -1178,6 +1183,10 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
         art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
+        autofire: match autofire_for(&state, &row) {
+            romm_desktop::tweaks::AutoFire::Off => None,
+            other => Some(other.key().to_owned()),
+        },
         platform_slug: row.platform_slug.clone(),
         id: row.id,
         name: row.name,
@@ -1502,6 +1511,23 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
     })
 }
 
+/// Whether this game gets auto-fire, and where.
+///
+/// One function so the badge in the info pane and the config written at launch
+/// cannot drift: a cue that says a game has auto-fire when it does not is worse
+/// than no cue.
+fn autofire_for(state: &State<'_, AppState>, row: &cache::RomRow) -> romm_desktop::tweaks::AutoFire {
+    use romm_desktop::tweaks::AutoFire;
+    if !matches!(row.platform_slug.as_str(), "arcade" | "neogeoaes" | "neogeocd") {
+        return AutoFire::Off;
+    }
+    let meta = row.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok());
+    if !meta_strings(&meta, "genres").iter().any(|g| g.to_lowercase().contains("shoot")) {
+        return AutoFire::Off;
+    }
+    AutoFire::parse(&state.autofire)
+}
+
 /// The stored screen preference, read fresh so unplugging a monitor and
 /// changing the setting both take effect on the next launch rather than the
 /// next restart.
@@ -1584,14 +1610,7 @@ async fn launch_rom(
         // Only where the metadata says shooter, and only on the platforms
         // whose cabinets had a fire button: a "shooter" on the Mega Drive is
         // as likely to be a light-gun game or a shmup with its own auto-fire.
-        autofire: state.autofire
-            && matches!(row.platform_slug.as_str(), "arcade" | "neogeoaes" | "neogeocd")
-            && meta_strings(
-                &row.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok()),
-                "genres",
-            )
-            .iter()
-            .any(|g| g.to_lowercase().contains("shoot")),
+        autofire: autofire_for(&state, &row),
         mirror_players: state.mirror_players,
         entry_slot,
         rom: &path,
@@ -2633,7 +2652,7 @@ fn main() {
             mirror_players: cfg.controllers.mirror_player_one,
             fit_window: cfg.retroarch.fit_window,
             window_decorations: cfg.retroarch.window_decorations,
-            autofire: cfg.retroarch.autofire,
+            autofire: cfg.retroarch.autofire.clone(),
             core_overrides: Mutex::new(cfg.cores.overrides.clone()),
             core_per_game: Mutex::new(cfg.cores.per_game.clone()),
             user_retroarch_cfg: cfg.user_retroarch_config(),

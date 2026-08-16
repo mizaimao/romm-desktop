@@ -100,6 +100,14 @@ export async function selectRom(id) {
       ${top}
       ${cover}
       ${video}
+      ${
+        d.autofire
+          ? `<div class="autofire-cue" title="Change this in Settings · Emulators">
+               <span class="icon icon-gamepad"></span>
+               <span>Rapid fire on ${d.autofire === "a" ? "A" : "Y"}</span>
+             </div>`
+          : ""
+      }
       ${d.rating ? starBar(d.rating) : ""}
       ${d.summary ? `<p class="summary">${escapeHtml(d.summary)}</p>` : ""}
       <dl>

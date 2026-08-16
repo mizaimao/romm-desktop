@@ -27,6 +27,42 @@
 /// A core option, as `key = "value"`.
 pub type Opt = (&'static str, &'static str);
 
+/// Where auto-fire lives, if anywhere.
+///
+/// Three states rather than a switch because the two useful arrangements are
+/// genuinely different preferences and neither is obviously right: repeating on
+/// the button already under the thumb, or keeping that one accurate and putting
+/// the repeat somewhere deliberate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AutoFire {
+    #[default]
+    Off,
+    /// The bottom face button repeats; single shots move to the top one.
+    BottomFace,
+    /// The top face button repeats; the bottom one keeps firing single shots
+    /// exactly as it always did. Nothing is remapped, which makes this the one
+    /// to try first.
+    TopFace,
+}
+
+impl AutoFire {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "a" | "bottom" => Self::BottomFace,
+            "y" | "top" => Self::TopFace,
+            _ => Self::Off,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::BottomFace => "a",
+            Self::TopFace => "y",
+        }
+    }
+}
+
 /// Core options to force for a platform, if any.
 ///
 /// NES rapid fire: FCEUmm exposes real turbo buttons as core options, which is
@@ -78,6 +114,8 @@ pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
 /// RetroPad button ids, as used in a `.rmp`.
 const PAD_Y: &str = "1";
 const PAD_X: &str = "9";
+/// RetroPad B — the primary fire in every arcade core.
+const PAD_B: &str = "0";
 
 /// Cores whose emulated pad has rapid-fire copies of its face buttons.
 ///
@@ -116,7 +154,31 @@ const TURBO_CORES: &[&str] =
 /// ambiguous about whether the key is the physical button or the one the core
 /// sees. Exchanging a pair gives the same result under either reading, so this
 /// needs no assumption about the direction.
-pub fn remap(_platform: &str, core: &str) -> Vec<String> {
+pub fn remap(platform: &str, core: &str) -> Vec<String> {
+    remap_with(platform, core, AutoFire::Off)
+}
+
+/// As [`remap`], plus the button move auto-fire needs.
+///
+/// Only `BottomFace` needs one: the repeat goes on the button that already
+/// fires, so single shots have to move somewhere, and the top face button is
+/// RetroPad X — Neo Geo button D, which Metal Slug and most of the run-and-gun
+/// games do not use.
+///
+/// A remap rather than a config line because RetroArch applies a pad's
+/// autoconfig profile when the pad connects, *after* reading the config, and
+/// that overwrites player bindings. Remaps are applied after both.
+pub fn remap_with(platform: &str, core: &str, autofire: AutoFire) -> Vec<String> {
+    let mut out = Vec::new();
+    if autofire == AutoFire::BottomFace {
+        // RetroPad X (top face) sends RetroPad B (fire).
+        out.push(format!("input_player1_btn_x = \"{PAD_B}\""));
+    }
+    out.extend(turbo_remap(platform, core));
+    out
+}
+
+fn turbo_remap(_platform: &str, core: &str) -> Vec<String> {
     if !TURBO_CORES.contains(&core) {
         return Vec::new();
     }

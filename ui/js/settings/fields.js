@@ -91,6 +91,15 @@ export async function wireConfigFields(box) {
       continue;
     }
 
+    // A dropdown: a setting with more than two states. Its options are in the
+    // markup rather than fetched, because they are a fixed set the backend
+    // parses by name.
+    if (node.classList.contains("cf-select")) {
+      node.value = String(value ?? node.options[0]?.value ?? "");
+      node.addEventListener("change", () => save(field, node.value));
+      continue;
+    }
+
     // Everything else is a toggle rendered as a button, so it works under a
     // controller the same way every other control here does.
     let on = !!value;

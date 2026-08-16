@@ -297,12 +297,14 @@ export function wireGame(node, id) {
         { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
         d.downloaded ? null : { label: "Download", run: () => download(id, false) },
         // A rule between starting the game and destroying part of it.
-        states.length ? null : undefined,
-        ...states.map((st) => ({
-          label: `Delete ${st.label}${st.when ? ` — ${st.when}` : ""}`,
-          danger: true,
-          run: () => deleteState(id, st),
-        })),
+        null,
+        ...(states.length
+          ? states.map((st) => ({
+              label: `Delete ${st.label}${st.when ? ` — ${st.when}` : ""}`,
+              danger: true,
+              run: () => deleteState(id, st),
+            }))
+          : [{ label: "No save states", disabled: true }]),
       ],
       ev.clientX,
       ev.clientY

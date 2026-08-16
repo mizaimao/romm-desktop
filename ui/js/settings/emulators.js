@@ -28,14 +28,23 @@ export const html = `      <h4>Emulators</h4>
 
       <div class="srow">
         <label>Auto-fire</label>
-        <div class="ctl"><button data-field="autofire">…</button></div>
+        <div class="ctl">
+          <select class="cf-select" data-field="autofire">
+            <option value="off">Off</option>
+            <option value="a">Rapid fire on A — the bottom button</option>
+            <option value="y">Rapid fire on Y — the top button</option>
+          </select>
+        </div>
       </div>
       <p class="hint">In arcade shooters only, and only where the metadata says
-        so. The bottom face button repeats while held; single shots move to the
-        top one, which these games do not use. Arcade cabinets were built
-        around a button you hammered — a run of Metal Slug is a few thousand
-        presses — and every home port since has offered this. Off for games
-        where a single accurate shot matters more than volume.</p>
+        so — 879 of the games here. Cabinets were built around a button you
+        hammered and a run of Metal Slug is a few thousand presses; every home
+        port since has offered this and the original cannot.</p>
+      <p class="hint"><strong>Y</strong> is the one to try first: the top face
+        button is unused by these games, so it becomes the repeating one and
+        nothing else moves. <strong>A</strong> puts the repeat on the button
+        already under your thumb and moves single shots up to Y, which needs a
+        remap and is the arrangement more likely to need adjusting.</p>
 
       <div class="srow sys-screen" hidden>
         <label>Open games on</label>

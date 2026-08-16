@@ -58,8 +58,7 @@ function reply(cmd, args) {
   if (cmd === "status") return { configured: true };
   if (cmd === "recent_games") return recentGames;
   if (cmd === "download_estimate") return [estimateSummary, estimateFits, "note"];
-  if (cmd === "game_states")
-    return [{ slot: "1", label: "Slot 1", when: "yesterday", resumable: true }];
+  if (cmd === "game_states") return stateList;
   if (cmd === "platforms")
     return [
       { slug: "snes", name: "Super Nintendo", rom_count: 12 },
@@ -68,6 +67,9 @@ function reply(cmd, args) {
     ];
   return [];
 }
+
+/// What `game_states` should answer with, per test.
+let stateList = [{ slot: "1", label: "Slot 1", when: "yesterday", resumable: true }];
 
 /// What `recent_games` should answer with, per test.
 let recentGames = [];
@@ -920,6 +922,26 @@ describe("the menu on a game", () => {
     assert.doesNotMatch(text, /offline/i, "still offering to download the console");
     assert.match(text, /play/i, "no way to start the game");
     assert.match(text, /Delete Slot 1/, "the game's own states are not offered");
+    document.querySelector(".ctx-menu")?.remove();
+  });
+
+  /// Most games have no states, and leaving the entry out entirely made the
+  /// menu look like it had lost the feature rather than had nothing to offer.
+  test("a game with no states says so instead of showing nothing", async () => {
+    stateList = [];
+    document.getElementById("list").innerHTML =
+      `<div class="gcards"><div class="gcard" data-id="9"></div></div>`;
+    const card = document.querySelector(".gcard");
+    ui.wireGame(card, 9);
+    card.dispatchEvent(
+      new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+    );
+    await settle();
+    await settle();
+    const menu = document.querySelector(".ctx-menu");
+    assert.match(menu.textContent, /No save states/);
+    assert.equal(menu.querySelector("button.dim").disabled, true);
+    stateList = [{ slot: "1", label: "Slot 1", when: "yesterday", resumable: true }];
     document.querySelector(".ctx-menu")?.remove();
   });
 });

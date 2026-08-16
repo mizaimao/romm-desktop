@@ -47,8 +47,8 @@ pub struct Request<'a> {
     pub fit_window: bool,
     /// Keep the game window's title bar.
     pub window_decorations: bool,
-    /// Make the shot button repeat while held. See RetroArch::autofire.
-    pub autofire: bool,
+    /// Where auto-fire lives, if anywhere. See RetroArch::autofire.
+    pub autofire: crate::tweaks::AutoFire,
     /// Bind players 2-4 like player 1. On by default: the second pad on a desk
     /// is usually the same model as the first, and a pad RetroArch has no
     /// profile for is otherwise a port that does nothing.
@@ -238,7 +238,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
             None => shaders::config_lines(ra, preset.as_deref()),
         },
         ra.system_dir_line(),
-        ra.prepare_tweaks(req.library_root, req.platform, &core),
+        ra.prepare_tweaks(req.library_root, req.platform, &core, req.autofire),
         req.achievements.map(crate::achievements::config_lines).unwrap_or_default(),
         crate::lightgun::config_lines(req.platform, gun),
         crate::retroarch::window_lines(
