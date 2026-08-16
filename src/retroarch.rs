@@ -750,10 +750,24 @@ input_player2_gun_start_mbtn = \"3\"
 
         format!(
             "\n# ---- Rapid fire ----\n\
-             # Mode 0 is RetroArch's original turbo: hold the button below and\n\
-             # any face button pressed while it is down repeats, at the rate\n\
-             # set here, for as long as both are held. Let go of the modifier\n\
-             # and every button is exactly what the game expects again.\n\
+             # Mode 3 is \"single button (hold)\": while the button below is\n\
+             # held, RetroPad B — the fire button in every arcade core —\n\
+             # repeats at the rate set here. Let go and it stops.\n\
+             #\n\
+             # Not mode 0. RetroArch calls that one \"classic\" and its own\n\
+             # documentation describes holding the modifier and a face button\n\
+             # together, but what it actually does is *latch*: the face button\n\
+             # is flagged as turbo and stays flagged after everything is\n\
+             # released. That is a toggle, and a toggle is dangerous in the\n\
+             # games this exists for — an end-of-game countdown that takes one\n\
+             # press per second empties in a second when something is holding\n\
+             # the button down for you and you have forgotten it is on.\n\
+             #\n\
+             # This mode was unusable when the modifier *was* the fire button:\n\
+             # that button still sent its own shot, so holding it was one\n\
+             # continuous press with the repeat on top. On a shoulder there is\n\
+             # nothing underneath — LB and RB are unbound in these cores — so\n\
+             # the pulse is the only thing the game sees.\n\
              #\n\
              # A modifier rather than a mode, because the arrangements that put\n\
              # the repeat *on* a face button cannot work: that button still\n\
@@ -766,7 +780,8 @@ input_player2_gun_start_mbtn = \"3\"
              # The rate is a period in frames — how long one press-release\n\
              # cycle lasts — so it runs backwards from shots per second and\n\
              # the conversion happens here rather than in anyone's head.\n\
-             input_turbo_mode = \"0\"\n\
+             input_turbo_mode = \"3\"\n\
+             input_turbo_default_button = \"0\"\n\
              input_turbo_period = \"{period}\"\n\
              input_turbo_duty_cycle = \"{duty}\"\n\
              {}\n",
@@ -1383,10 +1398,13 @@ input_r2_axis = "+5"
         }
     }
 
-    /// Mode 0 is RetroArch's original turbo: hold the modifier, and any face
-    /// button held with it repeats. No default button is involved — that is
-    /// the single-button modes, which is what the last arrangement used and
-    /// why the fire button had to be moved out from under it.
+    /// Held, not latched.
+    ///
+    /// Mode 0 — "classic" — reads like the right one and is not: it flags the
+    /// face button as turbo and leaves it flagged after everything is
+    /// released, which is a toggle. In a game whose end-of-round countdown
+    /// takes one press per second, a toggle nobody remembers leaving on
+    /// empties the clock in a second.
     #[test]
     fn rapid_fire_is_a_shoulder_modifier_and_binds_only_that() {
         let dir = scratch("autofire");
@@ -1397,12 +1415,11 @@ input_r2_axis = "+5"
             5,
         );
 
-        assert!(out.contains("input_turbo_mode = \"0\""), "{out}");
+        assert!(out.contains("input_turbo_mode = \"3\""), "held, not latched: {out}");
         assert!(out.contains("input_player1_turbo_btn"), "{out}");
-        assert!(
-            !out.contains("input_turbo_default_button"),
-            "a default button belongs to the single-button modes: {out}"
-        );
+        // Mode 3 pulses one button: RetroPad B, the fire button in every
+        // arcade core.
+        assert!(out.contains("input_turbo_default_button = \"0\""), "{out}");
         // Nothing else is bound. A line moving a face button here would be the
         // old arrangement coming back in through the config file.
         assert!(!out.contains("input_player1_b_btn"), "{out}");

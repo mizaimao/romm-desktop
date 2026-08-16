@@ -96,10 +96,10 @@ games you played most, and the ones you kept opening and putting down — from
 sessions this app started, since nothing else can be known.
 
 Arcade games where a single shot needs the button pressed repeatedly (Metal
-Slug and its relatives) can hold the fire down for you: hold **LB** — or RB —
-and any face button held with it repeats, at the rate in Hz set beside the
-control on the game's page. Let go of the shoulder and every button is exactly
-what the game expects; nothing is remapped. The choice applies across the whole
+Slug and its relatives) can hold the fire down for you: hold **LB** — or RB — and fire
+repeats at the rate in Hz set beside the control on the game's page. Held, not
+toggled: it stops the moment the shoulder is released, and nothing is
+remapped. The choice applies across the whole
 arcade system, and the control is absent for games where it would mean
 nothing.
 

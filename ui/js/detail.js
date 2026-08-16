@@ -262,8 +262,8 @@ function autofireRow(d) {
     <div class="autofire-row" title="Applies to every arcade shooter, not only this game">
       <span class="af-label">Rapid fire</span>
       ${opt("off", "Off", "The buttons behave as the cabinet did")}
-      ${opt("lb", "Hold LB", "Hold LB, then hold a face button, and it repeats")}
-      ${opt("rb", "Hold RB", "The same on RB, for when your left hand is busy")}
+      ${opt("lb", "Hold LB", "While LB is held, fire repeats at this rate. Let go and it stops.")}
+      ${opt("rb", "Hold RB", "The same on the other shoulder, for when your left hand is busy")}
       ${rate}
     </div>`;
 }

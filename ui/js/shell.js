@@ -141,15 +141,17 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
     // Back makes no sense once nothing is ever replaced: there is nowhere to
     // go back to.
     const suppressed = mode === "columns" && name === "back";
-    // The preview is a column here rather than something that slides over the
-    // list — but it can be closed, and once it is, this button is the only way
-    // back to it. So it is always offered in columns, whatever the view asked
-    // for, rather than only on the screens that have something to preview.
     // Sorting, filtering and picking at random are the same question — is
     // there a list of games here — so a view asks once rather than three
     // times and cannot end up offering two of the three.
     const asked = name === "filter" || name === "random" ? wants.sort : wants[name];
-    const wanted = asked || (mode === "columns" && name === "sidebar");
+    // The preview toggle is a fixture of the tab row rather than a decision
+    // each view makes. It moved down there to sit with what it acts on, and a
+    // control that comes and goes from a row that never does is a control
+    // nobody finds — reported missing twice. Once the preview has been closed
+    // this is also the only way back to it, on every screen, so hiding it
+    // anywhere is how someone ends up with no preview and no button.
+    const wanted = asked || name === "sidebar";
     node.hidden = suppressed || !wanted;
   }
   if (el.zoomWrap) {

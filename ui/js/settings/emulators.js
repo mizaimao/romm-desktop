@@ -33,7 +33,7 @@ export const html = `      <h4>Game window</h4>
         <div class="ctl">
           <select class="cf-select" data-field="autofire">
             <option value="off">Off</option>
-            <option value="lb">Hold LB — face buttons repeat while it is down</option>
+            <option value="lb">Hold LB — fire repeats while it is held</option>
             <option value="rb">Hold RB — the same on the other shoulder</option>
           </select>
         </div>
@@ -41,9 +41,12 @@ export const html = `      <h4>Game window</h4>
       <p class="hint">Arcade shooters only — 879 games here. A run of Metal Slug
         is a few thousand presses of a button the cabinet expected you to
         hammer.</p>
-      <p class="hint">A modifier, not a mode: hold the shoulder, then hold
-        A, and A repeats. Let go and every button is exactly what the game
-        expects — nothing is remapped and nothing has to be undone.</p>
+      <p class="hint">Held, not toggled: fire repeats for as long as the
+        shoulder is down and stops the moment it is released. Nothing is
+        remapped — let go and every button is what the game expects. A toggle
+        would be worse than useless here: an end-of-round countdown that takes
+        one press per second empties in a second if something is still holding
+        the button for you.</p>
 
       <h4>Emulators</h4>
       <p class="hint">Which emulator runs each console, its shader, and whether

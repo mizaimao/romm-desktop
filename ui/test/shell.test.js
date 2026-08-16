@@ -124,8 +124,10 @@ describe("what a view asks for", () => {
     assert.equal(el.layoutBtn.hidden, false, "asked for and missing");
     assert.equal(el.grabBtn.hidden, false, "asked for and missing");
     assert.equal(el.back.hidden, true, "not asked for and still there");
-    assert.equal(el.sidebarBtn.hidden, true);
     assert.equal(el.sortBtn.hidden, true);
+    // Except the preview toggle, which is a fixture of the tab row it lives in
+    // rather than a per-view button — see the test below.
+    assert.equal(el.sidebarBtn.hidden, false);
     assert.equal(el.title.textContent, "Platforms");
   });
 
@@ -312,27 +314,31 @@ describe("three columns, in the real page", () => {
 
   /// Nothing is ever replaced, so there is nothing to go back to and the
   /// preview is a column rather than something to slide over the list.
-  test("Back is not offered, and the preview button always is", () => {
+  /// Reported missing twice. It moved to the tab row to sit with what it acts
+  /// on, and a control that comes and goes from a row that never does is a
+  /// control nobody finds. Once the preview has been closed it is also the
+  /// only way back to it, so hiding it on any screen is how someone ends up
+  /// with no preview and no button.
+  test("Back is not offered, and the preview toggle never disappears", () => {
+    for (const mode of ["columns", "single"]) {
+      shell.setMode(mode);
+      for (const view of [
+        { title: "Arcade", back: true, sidebar: true, layout: true },
+        { title: "Platforms", layout: true },
+        { title: "History" },
+      ]) {
+        shell.enter(view);
+        assert.equal(el.sidebarBtn.hidden, false, `${mode}: gone on ${view.title}`);
+      }
+    }
+
     shell.setMode("columns");
     shell.enter({ title: "Arcade", back: true, sidebar: true, layout: true });
     assert.equal(el.back.hidden, true, "a Back button with nowhere to go");
     assert.equal(el.layoutBtn.hidden, false, "grid/list still applies to the games");
-
-    // The preview is a column here, and it can be closed — at which point this
-    // button is the only way back to it. So it is offered on every screen,
-    // including the ones that never asked for it.
-    assert.equal(el.sidebarBtn.hidden, false, "no way to reopen a closed preview");
-    shell.enter({ title: "Platforms", layout: true });
-    assert.equal(el.sidebarBtn.hidden, false, "the way back disappeared with the view");
-
-    // Back comes back in one pane, and the preview button goes back to being
-    // the view's decision.
     shell.setMode("single");
     shell.enter({ title: "Arcade", back: true, sidebar: true, layout: true });
     assert.equal(el.back.hidden, false);
-    assert.equal(el.sidebarBtn.hidden, false);
-    shell.enter({ title: "Platforms", layout: true });
-    assert.equal(el.sidebarBtn.hidden, true, "a preview toggle with nothing to preview");
   });
 
   test("the choice is remembered", () => {
