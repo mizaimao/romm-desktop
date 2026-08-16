@@ -2668,6 +2668,61 @@ fn install_panic_log() {
     }));
 }
 
+/// The macOS menu bar, replaced only so the About panel says something.
+///
+/// The standard panel is what people press first — it is one item under the
+/// app's own name — and it showed a version twice and nothing else. Who wrote
+/// this and where the source is belong there rather than three clicks into a
+/// settings window.
+///
+/// Rebuilding the app menu means rebuilding the standard items around it, so
+/// they are all listed: without them, Cmd-Q, Cmd-C and Hide simply stop
+/// existing, which is a far worse trade than a plain About panel.
+#[cfg(target_os = "macos")]
+fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
+
+    let about = AboutMetadataBuilder::new()
+        .name(Some("RomM Desktop"))
+        .version(Some(env!("CARGO_PKG_VERSION")))
+        .credits(Some(
+            "by mizaimao\n\ngithub.com/mizaimao/romm-desktop\n\nIcons by Lucide (ISC)",
+        ))
+        .build();
+
+    let app_menu = SubmenuBuilder::new(app, "RomM Desktop")
+        .about(Some(about))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+    // Without an Edit menu the text fields in Settings lose cut, copy, paste
+    // and select-all — on macOS those are menu items first and shortcuts
+    // second.
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let window = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .separator()
+        .close_window()
+        .build()?;
+
+    app.set_menu(MenuBuilder::new(app).items(&[&app_menu, &edit, &window]).build()?)?;
+    Ok(())
+}
+
 fn main() {
     install_panic_log();
     anchor_to_data_root();
@@ -2782,6 +2837,12 @@ fn main() {
             set_config_field,
             verify_server
         ])
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            install_menu(app.handle())?;
+            let _ = app;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("running tauri application");
 }

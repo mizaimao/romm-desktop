@@ -642,3 +642,46 @@ describe("the order of the tabs", () => {
     );
   });
 });
+
+describe("the layout switch in the header", () => {
+  /// It was a dropdown in Settings, two windows away from the thing it
+  /// changes — and it is a thing you flip back and forth to decide, not a
+  /// setting. One pane is the default again: three columns was the default
+  /// while it was being built, which is not a reason for anyone else to open
+  /// the app in it.
+  let shell, el;
+
+  before(async () => {
+    shell = await import("../js/shell.js");
+    ({ el } = await import("../js/state.js"));
+  });
+
+  beforeEach(() => localStorage.removeItem("romm.shell"));
+
+  test("one pane unless something says otherwise", () => {
+    assert.equal(shell.storedMode(), "single");
+    localStorage.setItem("romm.shell", "columns");
+    assert.equal(shell.storedMode(), "columns", "a stored choice is ignored");
+  });
+
+  test("there are two buttons, one per arrangement", () => {
+    const modes = [...(el.viewSwitch?.querySelectorAll("[data-mode]") ?? [])].map(
+      (b) => b.dataset.mode
+    );
+    assert.deepEqual(modes, ["single", "columns"]);
+  });
+
+  /// A pair rather than a toggle, so the lit one has to be the arrangement you
+  /// are actually in — whichever way the change arrived: this button, the
+  /// dropdown in Settings, or the stored value at startup.
+  test("the current arrangement is the lit one", () => {
+    shell.setMode("columns");
+    const lit = () =>
+      [...el.viewSwitch.querySelectorAll("[data-mode]")]
+        .filter((b) => b.classList.contains("on"))
+        .map((b) => b.dataset.mode);
+    assert.deepEqual(lit(), ["columns"]);
+    shell.setMode("single");
+    assert.deepEqual(lit(), ["single"]);
+  });
+});

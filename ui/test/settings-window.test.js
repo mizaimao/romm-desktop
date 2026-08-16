@@ -164,3 +164,75 @@ describe("the About tab", () => {
     assert.ok(asked.includes("open_link"), "the link was not opened anywhere");
   });
 });
+
+describe("the settings panes read as settings", () => {
+  /// The headings were 13px, uppercase and dimmed to 0.75 while the paragraphs
+  /// under them were full size and near-white, so the section names were the
+  /// quietest thing on the page and the explanations shouted.
+  test("a heading is louder than the text under it", () => {
+    const css = readFileSync(join(uiDir, "settings.css"), "utf8");
+    const block = (sel) => {
+      const at = css.indexOf(sel + " {");
+      assert.ok(at >= 0, `no rule for ${sel}`);
+      return css.slice(at, css.indexOf("}", at));
+    };
+    const head = block("#pane h4");
+    const hint = block("#pane .hint");
+    const size = (b) => Number(/font-size:\s*([\d.]+)px/.exec(b)?.[1]);
+    assert.ok(
+      size(head) > size(hint),
+      `headings are ${size(head)}px against ${size(hint)}px of explanation`
+    );
+    assert.match(head, /opacity:\s*1/, "the heading is still dimmed");
+    assert.ok(Number(/opacity:\s*([\d.]+)/.exec(hint)?.[1]) < 0.7, "the hint is not dimmed");
+  });
+
+  /// Stretched across the pane, a 0–60 range put its steps nine pixels apart
+  /// and the number beside it out at the far edge.
+  test("a slider is not as wide as the window", () => {
+    const css = readFileSync(join(uiDir, "settings.css"), "utf8");
+    const at = css.lastIndexOf('#pane .srow .ctl input[type="range"] {');
+    assert.ok(at >= 0, "the slider has no width of its own");
+    assert.match(css.slice(at, css.indexOf("}", at)), /width:\s*\d+px/);
+  });
+
+  /// At 100% the action column absorbed everything left over, so "Move left"
+  /// sat half a window from the key that does it.
+  test("the bindings table is as wide as its contents", () => {
+    const css = readFileSync(join(uiDir, "settings.css"), "utf8");
+    const at = css.indexOf(".bindtbl {");
+    assert.match(css.slice(at, css.indexOf("}", at)), /width:\s*auto/);
+  });
+
+  /// Cycling the artwork from the sofa is the reason several of these exist,
+  /// and nothing on the page said so — the button is bound two tabs away under
+  /// a name that does not obviously mean this row.
+  test("settings the pad can change say so", async () => {
+    const box = dom.window.document.createElement("div");
+    box.innerHTML = panes.paneHtml("appearance");
+    dom.window.document.body.appendChild(box);
+    await panes.wirePane("appearance", box);
+    const marks = [...box.querySelectorAll(".padmark")];
+    assert.ok(marks.length, "nothing is marked as pad-changeable");
+    for (const m of marks) {
+      assert.ok(m.textContent.trim(), `the ${m.dataset.action} badge is empty`);
+      assert.match(m.title, /Control tab/, "the badge does not say where to rebind it");
+    }
+    box.remove();
+  });
+
+  /// The Emulators tab opened with a heading and a paragraph about a table
+  /// that is at the very bottom, so the first thing on the tab explained the
+  /// last thing on it.
+  test("the Emulators heading sits with its table", () => {
+    const html = panes.paneHtml("systems");
+    assert.ok(
+      html.indexOf("<h4>Emulators</h4>") > html.indexOf("<h4>Game window</h4>"),
+      "the table's heading is still at the top"
+    );
+    assert.ok(
+      html.indexOf("<h4>Emulators</h4>") < html.indexOf('class="sys-table"'),
+      "the heading is not above its own table"
+    );
+  });
+});

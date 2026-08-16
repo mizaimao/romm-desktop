@@ -59,12 +59,12 @@ first launch of a game that needs them.
 
 ## Using it
 
-The window is three columns — what you are picking from, the games, and a
-preview of the one selected — with four tabs across the top: **Library**, **My
-collections**, **History** and **RomM browse**. The left and right columns can
-be dragged and remember their widths. A single-pane layout, where choosing a
-console replaces the screen and Back undoes it, is still there and switchable
-in Settings.
+One pane at a time by default: a console replaces the screen with its games and
+Back undoes it. The pair of buttons left of the search box switches to three
+columns — what you are picking from, the games, and a preview of the one
+selected — where nothing is ever replaced and both outer columns can be dragged
+and remember their widths. Four tabs across the top either way: **Library**,
+**My collections**, **History** and **RomM browse**.
 
 Consoles are listed alphabetically; collections have an order button above them
 (name, most games, fewest, most downloaded) because the server returns them by
@@ -91,8 +91,10 @@ off, rapid fire on the bottom face button, or on the top one, with the rate in
 Hz beside it. The choice applies across the whole arcade system, and the row is
 greyed out for games where it would mean nothing.
 
-**Settings → About** has the version this build is, the version of the server it
-has spoken to, and links to the source.
+The top-right tag says which server it is talking to, with a coloured dot for
+whether it is reachable; hovering gives the game count, the cores, the disk
+usage and the folders everything lives in. **Settings → About**, and the macOS
+About panel, carry the version and the source.
 
 Launching writes a temporary config that RetroArch layers on top of its own, so
 **your `retroarch.cfg` is never modified**. That layer carries a consistent

@@ -19,25 +19,20 @@ let capturing = null;
 let padCapture = null;
 
 export const html = `      <h4>Players</h4>
-      <p class="hint">Four ports, one per controller, assigned in the order they
-        are connected. Only the first drives this app's menus — with four pads
-        plugged in for a four-player game, all four used to move the cursor
-        while somebody was trying to pick one.</p>
+      <p class="hint">Four ports, filled in the order pads connect. Only the
+        first drives this app's menus.</p>
       <div class="pad-list">Looking for controllers…</div>
       <div class="srow">
         <label>Match player 1</label>
         <div class="ctl"><button data-field="mirror_player_one">…</button></div>
       </div>
-      <p class="hint">Binds players 2–4 the same way as player 1. RetroArch
-        binds each pad from its own profile and gives a controller it has never
-        seen nothing at all, which looks like a dead port rather than a missing
-        file. Right whenever the other pads are the same model; turn it off if
-        yours are genuinely different and RetroArch already knows them.</p>
+      <p class="hint">Binds players 2–4 like player 1. RetroArch gives a pad it
+        has never seen no bindings at all, which reads as a dead port. Turn it
+        off only if your pads are genuinely different models.</p>
 
       <h4>Bindings</h4>
-      <p class="hint">Every action with its key and its controller button side
-        by side. Click either to rebind — press the new key or button, or Esc to
-        leave it unset.</p>
+      <p class="hint">Click a key or a button to rebind it. Esc leaves it
+        unset.</p>
       <p class="hint pad-live">No controller detected.</p>
       <table class="bindtbl">
         <thead><tr><th>Action</th><th>Keyboard</th><th>Controller</th></tr></thead>

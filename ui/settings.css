@@ -103,12 +103,21 @@ body.settings-window {
    already says which section this is. */
 #pane h4:first-child { margin-top: 0; }
 
+/* A heading has to look like one.
+   These were 13px, uppercase and dimmed to 0.75 while the paragraphs under
+   them were full-size and near-white, so the section names read as the
+   quietest thing on the page and the explanations shouted. Backwards. The
+   heading is now bigger and brighter than anything it introduces, with a rule
+   under it to mark where a section starts. */
 #pane h4 {
-  margin: 26px 0 6px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.75;
+  margin: 30px 0 10px;
+  padding-bottom: 6px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  opacity: 1;
+  border-bottom: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
 }
 
 /* One setting per row: name on the left, control on the right, aligned down
@@ -138,8 +147,42 @@ body.settings-window {
 #pane .srow .set-key,
 #pane .srow .set-pad { min-width: 150px; }
 
-/* A hint belongs to the row above it, not to the next one. */
-#pane .hint { margin: 4px 0 14px; opacity: 0.6; }
+/* A hint belongs to the row above it, not to the next one. Smaller as well as
+   dimmer: at the same size as the label it explains, a two-sentence note is
+   the largest thing in the row. */
+#pane .hint {
+  margin: 4px 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.55;
+  max-width: 68ch;
+}
+
+/* A slider is not a text field and does not want the width of one.
+   Stretched across the pane, a 0–60 range put a 2-unit step about nine pixels
+   apart and the number beside it out at the far edge, where it reads as
+   belonging to nothing. */
+#pane .srow .ctl input[type="range"] { flex: 0 0 220px; width: 220px; }
+
+/* Which settings the controller can change on its own.
+   Cycling the artwork from the sofa is the reason several of these exist, and
+   nothing on the page said so — the button is bound in Control, two tabs
+   away. */
+.padmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  cursor: help;
+  vertical-align: middle;
+}
 
 #settings-toast {
   position: fixed;
@@ -228,11 +271,16 @@ body.settings-window {
    the same set of actions, so listing them separately meant scrolling past
    twenty rows to compare a key with its button — and reading each action's name
    twice to do it. Side by side, the comparison is the layout. */
+/* Wide enough for its contents and no wider.
+   At 100% the action column absorbed everything left over, so "Move left" sat
+   half a window away from the key that does it and the eye had to cross an
+   empty stripe to pair them. */
 .bindtbl {
-  width: 100%;
+  width: auto;
   border-collapse: collapse;
   margin: 4px 0 8px;
 }
+.bindtbl .bindname { padding-right: 18px; white-space: nowrap; }
 .bindtbl th {
   text-align: left;
   padding: 6px 10px;
@@ -296,3 +344,13 @@ body.settings-window {
 /* The one paragraph on the tab that is prose rather than a note about the row
    above it. */
 #pane .about-what { margin-bottom: 18px; opacity: 0.75; }
+
+/* The pad glyph inside that badge. The settings window has no icon sheet of
+   its own, so it is masked here the same way the library's are. */
+.padmark .icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/gamepad-2.svg") center / contain no-repeat;
+  mask: url("icons/gamepad-2.svg") center / contain no-repeat;
+}

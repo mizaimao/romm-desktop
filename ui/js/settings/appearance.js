@@ -2,6 +2,7 @@
 // glass, and the shader backdrop.
 import { invoke, listen } from "../state.js";
 import { toast, escapeHtml, cssColour } from "../util.js";
+import { padFor, padLabel, keyFor, keyLabel, ACTIONS } from "../bindings.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, SCHEMES,
@@ -10,7 +11,7 @@ import {
 
 export const html = `      <h4>Layout</h4>
       <div class="srow">
-        <label>Window</label>
+        <label>Window<span class="padmark" data-action="layout"></span></label>
         <div class="ctl">
           <select class="shell-mode">
             <option value="single">One pane — a screen at a time</option>
@@ -25,7 +26,7 @@ export const html = `      <h4>Layout</h4>
 
       <h4>Artwork</h4>
       <div class="srow">
-        <label>Game list shows</label>
+        <label>Game list shows<span class="padmark" data-action="pictures"></span></label>
         <div class="ctl"><select class="list-art"></select></div>
       </div>
       <p class="hint">What each game shows in the list and grid. Cartridge or
@@ -36,7 +37,7 @@ export const html = `      <h4>Layout</h4>
 
       <h4>Console pictures</h4>
       <div class="srow">
-        <label>Show</label>
+        <label>Show<span class="padmark" data-action="pictures"></span></label>
         <div class="ctl"><div class="icon-styles"></div></div>
       </div>
       <p class="hint">What the console grid draws for each system. Styles with
@@ -99,7 +100,37 @@ export const html = `      <h4>Layout</h4>
         window. Motion at 0 holds it still.</p>
       <p class="hint set-backdrop-status"></p>`;
 
+/// Say which settings the controller can change without opening this window.
+///
+/// Cycling the artwork from the sofa is the reason several of these exist and
+/// nothing here said so — the button is bound on the Control tab, two tabs
+/// away, under a name ("Change the pictures") that does not obviously mean this
+/// row. Read live rather than baked into the markup, so rebinding one is
+/// reflected the next time this tab is opened.
+function markPadControls(box) {
+  for (const mark of box.querySelectorAll(".padmark")) {
+    const id = mark.dataset.action;
+    const action = ACTIONS.find((a) => a.id === id);
+    const pad = padFor(id);
+    const key = keyFor(id);
+    if (pad === null && !key) {
+      // Nothing bound to it: a badge pointing at a button that does not exist
+      // is worse than no badge.
+      mark.remove();
+      continue;
+    }
+    mark.innerHTML = `<span class="icon icon-pad"></span>${escapeHtml(
+      pad === null ? keyLabel(key) : padLabel(pad).split(" / ")[0]
+    )}`;
+    mark.title =
+      `"${action?.label ?? id}" — changeable without opening this window.\n` +
+      `Controller: ${padLabel(pad)}\nKeyboard: ${key ? keyLabel(key) : "unset"}\n` +
+      `Both are rebindable on the Control tab.`;
+  }
+}
+
 export function wire(box) {
+  markPadControls(box);
   wireShellMode(box);
   wireIconStyles(box);
 

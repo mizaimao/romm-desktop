@@ -55,6 +55,7 @@ export const el = {
   settingsBtn: document.getElementById("settings-btn"),
   zoom: document.getElementById("zoom"),
   zoomWrap: document.getElementById("zoom-wrap"),
+  viewSwitch: document.getElementById("view-switch"),
 };
 
 // Tauri globals, exposed once so modules do not each reach into window.

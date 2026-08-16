@@ -13,22 +13,16 @@ import { toast } from "../util.js";
 const REPO = "https://github.com/mizaimao/romm-desktop";
 
 export const html = `      <h4>RomM Desktop</h4>
-      <p class="hint about-what">A desktop client for a self-hosted
-        <a class="link" data-href="https://romm.app">RomM</a> server: browse the
-        library, download what you want to keep, and launch it in RetroArch with
-        the right core, shader and controller layout already set.</p>
-
       <div class="srow">
         <label>Version</label>
         <div class="ctl"><span class="about-version">…</span></div>
       </div>
-      <p class="hint">The server's own version is beside it when this machine
-        has spoken to one. Both, because "which version am I on" is usually
-        asked when two machines behave differently, and the answer is as often
-        the server as the client.</p>
+      <p class="hint">This build, and the server it has spoken to. Both,
+        because "which version am I on" is usually asked when two machines
+        behave differently.</p>
 
       <div class="srow">
-        <label>Written by</label>
+        <label>By</label>
         <div class="ctl">
           <a class="link" data-href="https://github.com/mizaimao">mizaimao</a>
         </div>
@@ -41,18 +35,9 @@ export const html = `      <h4>RomM Desktop</h4>
         </div>
       </div>
       <p class="hint">Bugs and requests go in
-        <a class="link" data-href="${REPO}/issues">the issues</a>. The parked
-        list — the things known to be missing and deliberately not built yet —
-        is in <code>docs/parked.md</code> in the repository.</p>
-
-      <div class="srow">
-        <label>Built with</label>
-        <div class="ctl"><span class="hint">Rust, Tauri and RetroArch</span></div>
-      </div>
-      <p class="hint">Cover art and metadata come from your own RomM server.
-        Icons are <a class="link" data-href="https://lucide.dev">Lucide</a>
-        (ISC), bundled rather than fetched — this window works with no network
-        at all.</p>`;
+        <a class="link" data-href="${REPO}/issues">the issues</a>. Icons are
+        <a class="link" data-href="https://lucide.dev">Lucide</a>, ISC, bundled
+        rather than fetched — this window works with no network at all.</p>`;
 
 export async function wire(box) {
   // Every link goes out to the browser. A webview that follows one in place
@@ -75,10 +60,19 @@ export async function wire(box) {
   if (!where) return;
   try {
     const [client, server] = await invoke("versions");
-    where.textContent = server ? `${client} · server ${server}` : client;
-  } catch {
+    // Guarded rather than trusted: an older backend that does not know this
+    // command answers with something that is not a pair, and destructuring it
+    // silently produced "undefined" on the one line whose entire job is to be
+    // exact.
+    where.textContent = client
+      ? server
+        ? `${client} · server ${server}`
+        : String(client)
+      : "unknown";
+  } catch (e) {
     // A wrong version number is worse than none, since the only reason to read
     // it is to compare two machines.
     where.textContent = "unknown";
+    where.title = String(e);
   }
 }

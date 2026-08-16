@@ -173,7 +173,70 @@ header h1 {
   cursor: pointer;
 }
 
-#status { color: var(--dim); font-size: 12px; white-space: nowrap; }
+/* One tag, and what is behind it.
+   Four facts across the corner — server, roms, cores, disk — were three that
+   never change and one that matters. The rest is a hover away. */
+#status {
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+  padding: 3px 9px 3px 20px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
+  position: relative;
+}
+#status:hover { border-color: color-mix(in srgb, var(--glass) 55%, transparent); }
+/* A dot for the state, because "offline" and a server name are the same shape
+   of word and the difference between them is the whole point of the tag. */
+#status::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+#status[data-state="on"]::before { background: #43c76a; }
+#status[data-state="off"]::before { background: #d8823c; }
+#status[data-state="unset"]::before { background: #d84c4c; }
+
+#status-card {
+  position: fixed;
+  z-index: 60;
+  width: 320px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  pointer-events: none;
+}
+#status-card[hidden] { display: none; }
+#status-card .sc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+#status-card .sc-row span { color: var(--dim); }
+#status-card hr {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
+  margin: 8px 0;
+}
+#status-card .sc-path { display: grid; grid-template-columns: 58px 1fr; gap: 8px; padding: 1px 0; }
+#status-card .sc-path span { color: var(--dim); }
+#status-card .sc-path code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
+}
+#status-card p { margin: 8px 0 0; color: var(--dim); }
 
 /* Header plus tab bar. One value, used by every element that has to clear
    them, so moving a bar does not mean hunting for the three places that
@@ -1155,6 +1218,8 @@ button:has(> .icon + span) {
 .icon-gamepad   { --icon: url("icons/gamepad-2.svg"); }
 /* Lucide "arrow-down-narrow-wide" — the ordering glyph, vendored like the rest. */
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
+.icon-pane      { --icon: url("icons/square.svg"); }
+.icon-columns   { --icon: url("icons/columns-3.svg"); }
 
 /* Glyph-only buttons were sized for a text character; a mask needs a box. */
 #back, #settings-btn, .lb-close, .lb-nav {
@@ -2318,3 +2383,30 @@ code {
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* One pane or three columns, in the header.
+   A pair rather than a toggle: a toggle shows the state you are not in half
+   the time, and there is no label short enough to say which half. Two buttons
+   with the lit one being the current arrangement has no such riddle. */
+#view-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--glass) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
+}
+#view-switch button {
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
+}
+#view-switch button:hover { color: var(--text); }
+#view-switch button.on {
+  background: color-mix(in srgb, var(--glass) 45%, transparent);
+  color: var(--text);
+}
+#view-switch .icon { width: 16px; height: 16px; }

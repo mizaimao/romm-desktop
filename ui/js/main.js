@@ -3,8 +3,8 @@
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { openSortMenu } from "./sort.js";
-import { chooseMode, storedMode, installColumnResizer } from "./shell.js";
-import { human, toast } from "./util.js";
+import { chooseMode, storedMode, shellMode, installColumnResizer } from "./shell.js";
+import { human, toast, escapeHtml } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
@@ -48,6 +48,16 @@ listen("shell-mode", async ({ payload }) => {
 
 listen("icons-changed", () => {
   if (state.view === "platforms") showPlatforms();
+});
+
+// The layout pair in the header. Redrawn from scratch, as the settings
+// dropdown's own change is: the console list moves to a different element and
+// everything on screen was laid out for the arrangement being left.
+el.viewSwitch?.addEventListener("click", async (ev) => {
+  const want = ev.target.closest("[data-mode]")?.dataset.mode;
+  if (!want || want === shellMode()) return;
+  chooseMode(want);
+  await showSection(activeSection(), { force: true });
 });
 
 el.sortBtn.addEventListener("click", () => openSortMenu(el.sortBtn));
@@ -160,19 +170,81 @@ function formatEta(seconds) {
   return m < 60 ? `${m}m ${Math.round(seconds % 60)}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/// The server without the parts nobody reads. `https://` in front of a LAN
+/// address is six characters saying nothing, and the trailing slash is noise.
+function bareUrl(url) {
+  return String(url ?? "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+}
+
+/// What the tag says when you point at it.
+///
+/// Our own panel rather than a `title` attribute: the tooltip took a second to
+/// appear, went away on its own, and could not be styled or read from a sofa —
+/// which is why the details in it were effectively invisible.
+function statusCard(s) {
+  const card = document.createElement("div");
+  card.id = "status-card";
+  card.hidden = true;
+  card.innerHTML = `
+    <div class="sc-row"><span>Server</span><strong>${escapeHtml(
+      s.configured ? bareUrl(s.server) : "not configured"
+    )}</strong></div>
+    <div class="sc-row"><span>Games</span><strong>${s.roms_cached}</strong></div>
+    <div class="sc-row"><span>Emulator</span><strong>${
+      s.retroarch ? `RetroArch · ${s.cores_installed} cores` : "not found"
+    }</strong></div>
+    <div class="sc-row"><span>On disk</span><strong>${escapeHtml(human(s.disk_bytes))}</strong></div>
+    <hr>
+    <div class="sc-path"><span>Config</span><code>${escapeHtml(s.config_path)}</code></div>
+    <div class="sc-path"><span>Games</span><code>${escapeHtml(s.roms_dir)}</code></div>
+    <div class="sc-path"><span>Artwork</span><code>${escapeHtml(s.media_dir)}</code></div>
+    <div class="sc-path"><span>Data</span><code>${escapeHtml(s.data_dir)}</code></div>
+    <p>Everything downloaded lives there. Deleting that folder reclaims all of
+      it.</p>`;
+  document.body.appendChild(card);
+
+  const place = () => {
+    const at = el.status.getBoundingClientRect();
+    card.hidden = false;
+    const box = card.getBoundingClientRect();
+    card.style.top = `${at.bottom + 6}px`;
+    // Pinned to the tag's right edge, which is the window's: opened leftward
+    // it would otherwise hang off the side it is nearest to.
+    card.style.left = `${Math.max(8, at.right - box.width)}px`;
+  };
+  el.status.addEventListener("pointerenter", place);
+  el.status.addEventListener("focus", place);
+  for (const ev of ["pointerleave", "blur"]) {
+    el.status.addEventListener(ev, () => (card.hidden = true));
+  }
+  // It follows the tag, so it cannot stay behind when the window moves under
+  // it — a panel left on screen over the library reads as something broken.
+  window.addEventListener("scroll", () => (card.hidden = true), true);
+  el.status.tabIndex = 0;
+}
+
 (async function init() {
   try {
     const s = await invoke("status");
     // "not set up" and "server unreachable" look identical otherwise — both
     // give an empty library — so say which it is rather than leaving the user
     // to guess whether the app is broken.
-    const server = !s.configured ? "no config.toml" : s.connected ? s.server : "offline";
-    el.status.textContent = [
-      server,
-      `${s.roms_cached} roms`,
-      s.retroarch ? `${s.cores_installed} cores` : "no RetroArch",
-      `${human(s.disk_bytes)} on disk`,
-    ].join(" · ");
+    // One tag, not four.
+    //
+    // "server · 2506 roms · 41 cores · 210 GB on disk" is four facts across the
+    // whole top-right corner, three of which do not change and none of which is
+    // read more than once a week. The one that matters — which server this is
+    // talking to, or that it is not — is a word or two, and the rest is a
+    // pointer away.
+    const server = !s.configured
+      ? "no config.toml"
+      : s.connected
+        ? bareUrl(s.server)
+        : "offline";
+    el.status.textContent = server;
+    el.status.dataset.state = !s.configured ? "unset" : s.connected ? "on" : "off";
     // Both of these are only otherwise discovered by pressing play and having
     // it fail, which is a poor way to learn the app was never configured.
     if (s.crowded_folder) {
@@ -188,10 +260,7 @@ function formatEta(seconds) {
     } else if (!s.retroarch) {
       toast("RetroArch not found — set its location in Settings");
     }
-    el.status.title =
-      `Config:     ${s.config_path}\nData dir:   ${s.data_dir}\n` +
-      `Downloads:  ${s.roms_dir}\nArtwork:    ${s.media_dir}\n\n` +
-      `Everything this app downloads lives there. Delete that folder to reclaim the space.`;
+    statusCard(s);
   } catch (e) {
     el.status.textContent = "backend error";
   }

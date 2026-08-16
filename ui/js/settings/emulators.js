@@ -4,28 +4,30 @@ import { invoke } from "../state.js";
 import { toast, escapeHtml } from "../util.js";
 import { wireConfigFields } from "./fields.js";
 
-export const html = `      <h4>Emulators</h4>
-      <p class="hint">Which emulator runs each console, which shader it gets,
-        and whether a light gun takes the second controller port. Changes are
-        written to config.toml and apply to the next game you launch.</p>
-      <h4>Game window</h4>
+export const html = `      <h4>Game window</h4>
       <div class="srow">
         <label>Fit to the game</label>
         <div class="ctl"><button data-field="fit_window">…</button></div>
       </div>
-      <p class="hint">RetroArch keeps a game's proportions inside whatever
-        window it is given, so a window of the wrong shape is a window with
-        black bars in it — and on a full-screen one those bars are wide. A
-        window shaped like the game has nothing left over to put one in. Off
-        fills the screen and lets the emulator letterbox inside it.</p>
+      <p class="hint">A window shaped like the game has no room for black bars.
+        Off fills the screen and lets RetroArch letterbox inside it.</p>
       <div class="srow">
         <label>Title bar</label>
         <div class="ctl"><button data-field="window_decorations">…</button></div>
       </div>
-      <p class="hint">Off gives a clean edge with no title bar at all. There is
-        then nothing to drag and nothing to click to close, so the way out is
-        the controller combination or Escape.</p>
+      <p class="hint">Off gives a clean edge, and leaves nothing to drag or
+        click — the way out is then the pad combination or Escape.</p>
 
+      <div class="srow sys-screen" hidden>
+        <label>Open games on</label>
+        <div class="ctl"><select class="game-display"></select></div>
+      </div>
+      <p class="hint sys-screen-hint" hidden>Automatic prefers an external
+        screen: plugging a monitor in is a deliberate act, rarely done wanting
+        the game on the laptop panel.</p>
+      <div class="sys-motion"></div>
+
+      <h4>Arcade rapid fire</h4>
       <div class="srow">
         <label>Auto-fire</label>
         <div class="ctl">
@@ -36,24 +38,17 @@ export const html = `      <h4>Emulators</h4>
           </select>
         </div>
       </div>
-      <p class="hint">In arcade shooters only, and only where the metadata says
-        so — 879 of the games here. Cabinets were built around a button you
-        hammered and a run of Metal Slug is a few thousand presses; every home
-        port since has offered this and the original cannot.</p>
-      <p class="hint"><strong>Y</strong> is the one to try first: the top face
-        button is unused by these games, so it becomes the repeating one and
-        nothing else moves. <strong>A</strong> puts the repeat on the button
-        already under your thumb and moves single shots up to Y, which needs a
-        remap and is the arrangement more likely to need adjusting.</p>
+      <p class="hint">Arcade shooters only — 879 games here. A run of Metal Slug
+        is a few thousand presses of a button the cabinet expected you to
+        hammer.</p>
+      <p class="hint"><strong>Y</strong> first: these games leave the top face
+        button unused, so it repeats and nothing else moves. <strong>A</strong>
+        repeats under your thumb but pushes single shots to Y, which needs a
+        remap.</p>
 
-      <div class="srow sys-screen" hidden>
-        <label>Open games on</label>
-        <div class="ctl"><select class="game-display"></select></div>
-      </div>
-      <p class="hint sys-screen-hint" hidden>Which screen a game opens on.
-        Automatic prefers an external one: plugging a monitor into a laptop is a
-        deliberate act, and rarely done wanting the game on the laptop panel.</p>
-      <div class="sys-motion"></div>
+      <h4>Emulators</h4>
+      <p class="hint">Which emulator runs each console, its shader, and whether
+        a light gun takes port two. Applies to the next game you launch.</p>
       <div class="sys-table">Loading…</div>
 
 `;

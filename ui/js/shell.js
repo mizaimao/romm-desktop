@@ -32,12 +32,17 @@ import { el } from "./state.js";
 /// brings it back. In three columns the consoles stay on the left, choosing
 /// one fills the middle, and there is nothing to go back to — so no Back
 /// button, and the preview is always there rather than something to toggle.
-let mode = "columns";
+let mode = "single";
 
 export function setMode(next) {
   mode = next === "single" ? "single" : "columns";
   if (el.consoles) el.consoles.hidden = mode !== "columns";
   document.body.classList.toggle("columns", mode === "columns");
+  // The pair in the header, wherever the change came from — the button, the
+  // dropdown in Settings, or the stored value at startup.
+  for (const b of el.viewSwitch?.querySelectorAll("[data-mode]") ?? []) {
+    b.classList.toggle("on", b.dataset.mode === mode);
+  }
   return mode;
 }
 
@@ -51,9 +56,10 @@ const MODE_KEY = "romm.shell";
 /// config.toml because it is about this window rather than about the library,
 /// and because the settings window has to be able to read it too.
 export function storedMode() {
-  // Three columns while it is being worked on. Anything explicitly stored
-  // wins, so choosing one pane sticks.
-  return localStorage.getItem(MODE_KEY) === "single" ? "single" : "columns";
+  // One pane unless asked otherwise. Three columns was the default while it
+  // was being built, which is not a reason for anyone else to open the app in
+  // it.
+  return localStorage.getItem(MODE_KEY) === "columns" ? "columns" : "single";
 }
 
 /// Choose an arrangement and remember it. The other window is told, because

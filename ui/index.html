@@ -3,13 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RomM</title>
+    <title>RomM Desktop</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <header>
       <button id="back" hidden title="Go back" aria-label="Go back"><span class="icon icon-back"></span><span>Back</span></button>
       <h1 id="title">Platforms</h1>
+      <!-- One pane or three columns, side by side. It was a dropdown in
+           Settings, two windows away from the thing it changes — and it is a
+           thing you flip back and forth to decide, not set once. -->
+      <div id="view-switch" role="group" aria-label="Window layout">
+        <button data-mode="single" title="One pane — a screen at a time" aria-label="One pane"><span class="icon icon-pane"></span></button>
+        <button data-mode="columns" title="Three columns — consoles, games, preview" aria-label="Three columns"><span class="icon icon-columns"></span></button>
+      </div>
       <input id="search" type="search" placeholder="Search all games…" />
       <button id="sidebar-btn" hidden title="Show or hide the detail pane"><span class="icon icon-info-on"></span><span>Hide info</span></button>
       <label id="zoom-wrap" hidden title="Icon size">
