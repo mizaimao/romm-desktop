@@ -10,6 +10,11 @@
 // icon, which are not things this app does.
 
 let open = null;
+/// Unhooks the listeners that watch for the menu being dismissed. Held here
+/// rather than fired at the menu as an event: `closeMenu` runs *before* the
+/// chosen item's action, so anything that can throw in it takes the action
+/// with it.
+let unwatch = null;
 
 /// Show a menu of `items` at `(x, y)`.
 ///
@@ -58,9 +63,27 @@ export function showMenu(items, x, y) {
   if (box.right > window.innerWidth) menu.style.left = `${Math.max(0, x - box.width)}px`;
 
   open = menu;
+  // Anywhere but the menu itself.
+  //
+  // This closed on the next pointerdown wherever it landed — and pressing a
+  // menu item *is* a pointerdown. The menu came off the page between the press
+  // and the release, so the click never reached the button that was pressed
+  // and every item in every menu in the app did nothing at all: the orders
+  // here, and the delete on a save state. It looked like a menu that opens
+  // fine and ignores you.
+  const away = (ev) => {
+    if (menu.contains(ev.target)) return;
+    closeMenu();
+  };
+  unwatch = () => {
+    window.removeEventListener("pointerdown", away);
+    window.removeEventListener("keydown", closeMenu);
+    window.removeEventListener("wheel", closeMenu);
+    unwatch = null;
+  };
   // Next frame, or the same click that opened this closes it again.
   setTimeout(() => {
-    window.addEventListener("pointerdown", closeMenu, { once: true });
+    window.addEventListener("pointerdown", away);
     window.addEventListener("keydown", closeMenu, { once: true });
     window.addEventListener("wheel", closeMenu, { once: true, passive: true });
   }, 0);
@@ -68,6 +91,10 @@ export function showMenu(items, x, y) {
 }
 
 export function closeMenu() {
+  // Unhooked here as well as on dismissal: a menu chosen from rather than
+  // clicked away would otherwise leave a listener on the window for every menu
+  // ever opened.
+  unwatch?.();
   open?.remove();
   open = null;
 }

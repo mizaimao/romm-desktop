@@ -40,46 +40,59 @@ const consoles = [
   { name: "Game Boy", rom_count: 90, playable: true },
 ];
 
+const cols = [
+  { name: "Arcade Fighting", rom_count: 500, local_count: 4 },
+  { name: "Best of nes", rom_count: 12, local_count: 12 },
+  { name: "Beta", rom_count: 90, local_count: 900 },
+];
+
 describe("the column is ordered by something someone chose", () => {
-  /// By name, not by size. The size order is the server's, and it is the reason
-  /// the same three arcade lists sat at the top of every screen.
-  test("name is the order until told otherwise", () => {
-    assert.equal(order.pickerOrder("platforms").id, "name");
+  /// Consoles are alphabetical and stay that way: thirty-five of them that
+  /// never change is a column you learn the shape of, and a button that
+  /// reshuffles it works against that. The server's own order is by size,
+  /// which is why the list used to open on whichever console had the most
+  /// ROMs in it.
+  test("consoles are alphabetical, with no order to choose", () => {
     assert.deepEqual(
-      order.sortPicker("platforms", consoles).map((p) => p.name),
+      order.byName(consoles).map((p) => p.name),
       ["Arcade", "Game Boy", "Nintendo 64"]
     );
+    assert.equal(order.PICKER_ORDERS.platforms, undefined, "the consoles kept a menu");
+  });
+
+  test("collections start under name, not size", () => {
+    assert.equal(order.pickerOrder("collections").id, "name");
   });
 
   test("the chosen order is remembered", () => {
-    order.setPickerOrder("platforms", "count");
-    assert.equal(order.pickerOrder("platforms").id, "count");
+    order.setPickerOrder("collections", "count");
+    assert.equal(order.pickerOrder("collections").id, "count");
     assert.deepEqual(
-      order.sortPicker("platforms", consoles).map((p) => p.rom_count),
-      [322, 90, 12]
+      order.sortPicker("collections", cols).map((c) => c.rom_count),
+      [500, 90, 12]
     );
-    // Unlike the game sort, which is deliberately forgotten: the order of the
-    // column is the shape of the app rather than a question about one console.
-    assert.equal(dom.window.localStorage.getItem("romm.order.platforms"), "count");
+    // Unlike the game sort, which is deliberately forgotten: the order of a
+    // game list is a question about one console, the order of the column is
+    // the shape of the app.
+    assert.equal(dom.window.localStorage.getItem("romm.order.collections"), "count");
   });
 
-  test("consoles you can actually play can come first", () => {
-    order.setPickerOrder("platforms", "playable");
-    const names = order.sortPicker("platforms", consoles).map((p) => p.name);
-    assert.equal(names.at(-1), "Arcade", "the console with no emulator is not last");
+  test("what is downloaded can come first", () => {
+    order.setPickerOrder("collections", "here");
+    assert.equal(order.sortPicker("collections", cols)[0].name, "Beta");
   });
 
   /// A starred collection is one you said you wanted at hand, so it stays at
   /// the top whatever else is chosen.
   test("favourites stay on top of any order", () => {
-    const cols = [
+    const starred = [
       { name: "Zebra", rom_count: 1, is_favorite: true },
       { name: "Alpha", rom_count: 500 },
     ];
     for (const id of ["name", "count", "here"]) {
       order.setPickerOrder("collections", id);
       assert.equal(
-        order.sortPicker("collections", cols)[0].name,
+        order.sortPicker("collections", starred)[0].name,
         "Zebra",
         `the favourite is not first under ${id}`
       );
@@ -87,10 +100,10 @@ describe("the column is ordered by something someone chose", () => {
   });
 
   test("sorting does not disturb what it was given", () => {
-    const original = [...consoles];
-    order.setPickerOrder("platforms", "count");
-    order.sortPicker("platforms", consoles);
-    assert.deepEqual(consoles, original, "the caller's array was reordered under it");
+    const original = [...cols];
+    order.setPickerOrder("collections", "count");
+    order.sortPicker("collections", cols);
+    assert.deepEqual(cols, original, "the caller's array was reordered under it");
   });
 });
 
@@ -118,17 +131,17 @@ describe("the bar above the column", () => {
   });
 
   test("the order button says which order it is in", () => {
-    order.setPickerOrder("platforms", "count");
+    order.setPickerOrder("collections", "count");
     const doc = dom.window.document;
-    doc.body.innerHTML = order.pickerBar({ kind: "platforms" });
+    doc.body.innerHTML = order.pickerBar({ kind: "collections" });
     assert.match(doc.querySelector(".pick-sort").textContent, /Most games/);
   });
 
-  test("choosing an order redraws the list", () => {
+  test("choosing an order redraws the list and relabels the button", () => {
     const doc = dom.window.document;
-    doc.body.innerHTML = order.pickerBar({ kind: "platforms" });
+    doc.body.innerHTML = order.pickerBar({ kind: "collections" });
     let redrawn = 0;
-    order.wirePickerBar(doc.body, "platforms", () => redrawn++);
+    order.wirePickerBar(doc.body, "collections", () => redrawn++);
     doc.querySelector(".pick-sort").dispatchEvent(
       new dom.window.MouseEvent("click", { bubbles: true })
     );
@@ -137,7 +150,10 @@ describe("the bar above the column", () => {
     );
     assert.ok(item, "the menu does not offer the orders");
     item.click();
-    assert.equal(order.pickerOrder("platforms").id, "fewest");
+    assert.equal(order.pickerOrder("collections").id, "fewest");
     assert.equal(redrawn, 1, "the list was not drawn again");
+    // The bar is not part of the redraw, so without this the button went on
+    // saying "Name" over a list sorted by something else.
+    assert.match(doc.querySelector(".pick-sort").textContent, /Fewest games/);
   });
 });

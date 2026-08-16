@@ -7,7 +7,7 @@ import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
-import { pickerBar, wirePickerBar, sortPicker } from "./picker-order.js";
+import { byName } from "./picker-order.js";
 import { selectRom, play, withTransition } from "./detail.js";
 import { download } from "./actions.js";
 
@@ -168,14 +168,13 @@ function renderPlatforms(items) {
   // of two-across cards in a 260px column is neither a grid nor readable.
   const asList = state.layout !== "grid" || shellMode() === "columns";
   // The server hands these back by size, so the list opened on whichever
-  // console has the most ROMs and there was no way to say otherwise.
-  const ordered = sortPicker("platforms", items);
-  into.innerHTML =
-    pickerBar({ kind: "platforms" }) +
-    (asList
-      ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
-      : `<div class="grid">${ordered.map(platformCard).join("")}</div>`);
-  wirePickerBar(into, "platforms", () => renderPlatforms(items));
+  // console has the most ROMs in it. Alphabetical, and left alone: thirty-five
+  // consoles that never change are something you learn the shape of, and a
+  // button that reshuffles them works against that.
+  const ordered = byName(items);
+  into.innerHTML = asList
+    ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
+    : `<div class="grid">${ordered.map(platformCard).join("")}</div>`;
 
   into.querySelectorAll(".card, .prow").forEach((c) =>
     c.addEventListener("click", () => {
