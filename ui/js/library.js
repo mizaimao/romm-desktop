@@ -348,15 +348,50 @@ export function renderRows(unsorted, showPlatform) {
 }
 
 /// Search results, split into one section per console, biggest group first.
+/// Consoles that are the same machine under two names, in the order they
+/// should appear.
+///
+/// A search for "Zelda" turns up the NES release and the Famicom one, and they
+/// belong beside each other — they are the same game on the same hardware,
+/// sold in two places. Still separate headings, because the cartridges, the
+/// regions and the dumps genuinely differ, but never with eight other consoles
+/// between them.
+const FAMILIES = [
+  ["nes", "famicom"],
+  ["snes", "sfc"],
+];
+
+/// The family a console belongs to, and where it sits within it. A console in
+/// no family is a family of one.
+function family(slug) {
+  const at = FAMILIES.findIndex((f) => f.includes(slug));
+  return at < 0 ? [slug, 0] : [FAMILIES[at][0], FAMILIES[at].indexOf(slug)];
+}
+
 function groupedMarkup(rows) {
   const groups = new Map();
   for (const r of rows) {
     if (!groups.has(r.platform)) groups.set(r.platform, []);
     groups.get(r.platform).push(r);
   }
-  const ordered = [...groups.entries()].sort(
-    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])
-  );
+
+  // Families are ordered by their combined weight, so a console with three
+  // hits and its twin with two outrank one with four — they are one machine as
+  // far as "how much of this search is about it" goes.
+  const weight = new Map();
+  for (const [slug, items] of groups) {
+    const [key] = family(slug);
+    weight.set(key, (weight.get(key) ?? 0) + items.length);
+  }
+
+  const ordered = [...groups.entries()].sort((a, b) => {
+    const [ka, ia] = family(a[0]);
+    const [kb, ib] = family(b[0]);
+    if (ka !== kb) return weight.get(kb) - weight.get(ka) || ka.localeCompare(kb);
+    // Inside a family, the order the family declares — the home-market name
+    // first, which is the one most people search for.
+    return ia - ib;
+  });
 
   // One group is not a grouping. A collection that happens to hold games from a
   // single console got a heading repeating what the title already said, sitting

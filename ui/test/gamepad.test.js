@@ -998,3 +998,73 @@ describe("dialogs answer the controller", () => {
     d.remove();
   });
 });
+
+describe("search results group the twins together", () => {
+  const heads = () =>
+    [...document.querySelectorAll("#list .pgroup .gslug")].map((n) => n.textContent);
+
+  const search = (rows) => {
+    ui.state.view = "search";
+    ui.state.rows = rows;
+    ui.renderRows(rows, true);
+  };
+
+  const game = (id, platform, name) => ({
+    id,
+    name,
+    fs_name: `${name}.rom`,
+    platform,
+    size_bytes: 1,
+    downloaded: true,
+    favourite: false,
+  });
+
+  /// The NES release and the Famicom one are the same game on the same
+  /// hardware sold in two places. Ordering purely by hit count put eight other
+  /// consoles between them.
+  test("nes and famicom sit next to each other", () => {
+    search([
+      game(1, "psx", "Zelda-ish"),
+      game(2, "psx", "Another"),
+      game(3, "psx", "Third"),
+      game(4, "nes", "Zelda"),
+      game(5, "nes", "Zelda 2"),
+      game(6, "famicom", "Zelda J"),
+      game(7, "gba", "Zelda GBA"),
+    ]);
+    const order = heads();
+    const nes = order.indexOf("nes");
+    const fc = order.indexOf("famicom");
+    assert.notEqual(nes, -1, `no nes group: ${order}`);
+    assert.equal(fc, nes + 1, `famicom is not behind nes: ${order}`);
+  });
+
+  test("snes and sfc too, and the home-market name leads", () => {
+    search([
+      game(1, "sfc", "Mario J"),
+      game(2, "snes", "Mario"),
+      game(3, "snes", "Mario 2"),
+      game(4, "megadrive", "Sonic"),
+    ]);
+    const order = heads();
+    assert.equal(order.indexOf("sfc"), order.indexOf("snes") + 1, `${order}`);
+  });
+
+  /// A family's place in the list is decided by both halves together: three
+  /// hits plus two beats a console with four, because it is one machine.
+  test("a family is weighed as one console", () => {
+    search([
+      game(1, "psx", "A"),
+      game(2, "psx", "B"),
+      game(3, "psx", "C"),
+      game(4, "psx", "D"),
+      game(5, "nes", "E"),
+      game(6, "nes", "F"),
+      game(7, "nes", "G"),
+      game(8, "famicom", "H"),
+      game(9, "famicom", "I"),
+    ]);
+    const order = heads();
+    assert.deepEqual(order.slice(0, 3), ["nes", "famicom", "psx"], `${order}`);
+  });
+});
