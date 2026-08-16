@@ -378,3 +378,119 @@ pub fn installed_counts(media_root: &Path, slugs: &[String]) -> Vec<(IconStyle, 
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch theme tree. `files` are paths relative to the theme root.
+    fn theme_with(name: &str, files: &[&str]) -> (PathBuf, Theme) {
+        let root = std::env::temp_dir().join(format!("romm-theme-test-{name}"));
+        let _ = std::fs::remove_dir_all(&root);
+        for f in files {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"<svg/>").unwrap();
+        }
+        std::fs::create_dir_all(&root).unwrap();
+        (root.clone(), Theme { name: name.to_owned(), path: root })
+    }
+
+    /// Themes disagree about where per-system art lives, and the three
+    /// conventions below are all in use by themes people actually have
+    /// installed. Reading only the first is how a theme ends up looking as
+    /// though it has no icons at all.
+    #[test]
+    fn art_is_found_under_each_layout_themes_actually_use() {
+        // slate-es-de and most community themes.
+        let (_, slate) = theme_with("slate", &["snes/images/logo.svg"]);
+        assert!(art_for(&slate, "snes", IconStyle::Logo).is_some());
+
+        // linear-es-de.
+        let (_, linear) = theme_with("linear", &["system/logos/snes.svg"]);
+        assert!(art_for(&linear, "snes", IconStyle::Logo).is_some());
+
+        // canvas-es-de and relatives.
+        let (_, canvas) = theme_with("canvas", &["_inc/system-logo/snes.svg"]);
+        assert!(art_for(&canvas, "snes", IconStyle::Logo).is_some());
+    }
+
+    /// Hardware renders are not kept per system: modern-es-de puts them in
+    /// art/ and art_legacy/, and the two are different pictures of different
+    /// machines, so one must never answer for the other.
+    #[test]
+    fn the_two_hardware_styles_do_not_stand_in_for_each_other() {
+        let (_, t) = theme_with("hardware", &["art/snes.png"]);
+        assert!(art_for(&t, "snes", IconStyle::SystemArt).is_some());
+        assert!(
+            art_for(&t, "snes", IconStyle::SystemArtLegacy).is_none(),
+            "the current render was offered as the classic one"
+        );
+    }
+
+    /// A style with no picture for a system falls back to the logo, which
+    /// every theme has most of. Without that a console grid switched to
+    /// "controllers" would be full of holes rather than mixed.
+    #[test]
+    fn a_missing_style_falls_back_to_the_logo() {
+        let media = std::env::temp_dir().join("romm-theme-installed");
+        let _ = std::fs::remove_dir_all(&media);
+        let base = media.join("_platforms");
+        std::fs::create_dir_all(base.join("logo")).unwrap();
+        std::fs::write(base.join("logo/snes.svg"), b"<svg/>").unwrap();
+
+        assert!(installed_logo(&media, "snes", IconStyle::Controller).is_some());
+        // And a system with nothing at all is still nothing — the fallback is
+        // to the logo, not to another system's picture.
+        assert!(installed_logo(&media, "dreamcast", IconStyle::Controller).is_none());
+    }
+
+    /// The count beside each style in Settings is what tells you a style is
+    /// worth switching to. Counting a system that has no file, or missing one
+    /// that does, makes that number a lie.
+    #[test]
+    fn the_installed_count_matches_what_is_on_disk() {
+        let media = std::env::temp_dir().join("romm-theme-counts");
+        let _ = std::fs::remove_dir_all(&media);
+        let base = media.join("_platforms");
+        std::fs::create_dir_all(base.join("logo")).unwrap();
+        std::fs::create_dir_all(base.join("controller")).unwrap();
+        for slug in ["snes", "nes", "gba"] {
+            std::fs::write(base.join(format!("logo/{slug}.svg")), b"<svg/>").unwrap();
+        }
+        std::fs::write(base.join("controller/snes.png"), b"x").unwrap();
+
+        let slugs: Vec<String> =
+            ["snes", "nes", "gba", "psx"].iter().map(|s| s.to_string()).collect();
+        let counts = installed_counts(&media, &slugs);
+        let of = |style: IconStyle| {
+            counts.iter().find(|(s, _)| *s == style).map(|(_, n)| *n).unwrap()
+        };
+        assert_eq!(of(IconStyle::Logo), 3, "three logos were written");
+        assert_eq!(of(IconStyle::Controller), 1);
+        assert_eq!(of(IconStyle::SystemArt), 0);
+    }
+
+    /// Any extension the themes use, not only SVG. Several ship webp, and a
+    /// theme whose art is all webp would otherwise read as empty.
+    #[test]
+    fn art_is_found_whatever_image_format_the_theme_ships() {
+        for ext in ICON_EXTENSIONS {
+            let (_, t) = theme_with(&format!("fmt-{ext}"), &[&format!("snes/images/logo.{ext}")]);
+            assert!(art_for(&t, "snes", IconStyle::Logo).is_some(), "{ext} was not found");
+        }
+    }
+
+    /// The style keys are written into config.toml and read back, so they have
+    /// to survive the round trip — and each has to be distinct, or two styles
+    /// would share a directory under `_platforms/`.
+    #[test]
+    fn every_style_has_a_distinct_key_that_parses_back() {
+        let mut seen = std::collections::BTreeSet::new();
+        for style in IconStyle::ALL {
+            assert!(seen.insert(style.key()), "{} is used twice", style.key());
+            assert_eq!(IconStyle::parse(style.key()), Some(style));
+        }
+        assert_eq!(IconStyle::parse("nonsense"), None);
+    }
+}

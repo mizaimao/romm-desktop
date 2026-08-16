@@ -287,4 +287,26 @@ mod tests {
             );
         }
     }
+
+    /// SwanStation asks RetroArch for a Vulkan context, which on macOS is
+    /// MoltenVK, and the GPU device is lost a second or two into the game:
+    /// 2,397 VK_ERROR_DEVICE_LOST in one run. The boot logo draws, the device
+    /// dies, and the picture never advances — which reads as a game that will
+    /// not load, with nothing on screen to say otherwise.
+    ///
+    /// OpenGL is still a hardware renderer, so nothing is given up.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn playstation_games_are_kept_off_the_vulkan_path_on_macos() {
+        let opts = core_options("psx", "swanstation");
+        assert!(
+            opts.iter().any(|(k, v)| *k == "swanstation_GPU_Renderer" && *v == "OpenGL"),
+            "{opts:?}"
+        );
+        // And the option has somewhere to be written: RetroArch keeps a core's
+        // settings under its *display* name, and a core missing from that map
+        // has its options silently dropped.
+        assert_eq!(core_dir_name("swanstation"), Some("SwanStation"));
+    }
+
 }

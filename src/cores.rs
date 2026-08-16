@@ -130,3 +130,60 @@ pub async fn ensure(
     install(client, core, &dir, platform_segment()?).await?;
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The name on disk and the name in the download URL are the same string,
+    /// and both are built from the host's library extension. Getting it wrong
+    /// does not fail at build time or at startup: the download 404s, or the
+    /// core installs under a name `has_core` will never look for, and the app
+    /// reports "core not installed" for a core sitting right there.
+    #[test]
+    fn a_core_is_named_for_the_host_it_will_run_on() {
+        let name = core_filename("mgba");
+        assert!(name.starts_with("mgba_libretro."), "{name}");
+        let expected = if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
+        assert_eq!(name, format!("mgba_libretro.{expected}"));
+    }
+
+    /// The URL is the filename hung off the buildbot's per-host tree. Both
+    /// halves have to be right, and a wrong one is a 404 at the moment someone
+    /// is trying to play something.
+    #[test]
+    fn the_download_url_carries_the_host_tree_and_the_host_extension() {
+        let url = core_url("apple/osx/arm64", "mgba");
+        assert_eq!(
+            url,
+            format!("{BUILDBOT}/apple/osx/arm64/latest/{}.zip", core_filename("mgba"))
+        );
+        // No doubled or missing separators, which is the usual way a hand-built
+        // URL goes wrong.
+        assert!(!url.contains("//latest"), "{url}");
+        assert!(url.starts_with("https://"), "{url}");
+    }
+
+    /// This machine has to have a mapping, or nothing can be installed on it.
+    #[test]
+    fn the_host_this_is_running_on_has_a_buildbot_tree() {
+        let seg = platform_segment().expect("no buildbot mapping for this host");
+        assert!(!seg.is_empty());
+        assert!(!seg.starts_with('/') && !seg.ends_with('/'), "{seg}");
+        // The three we build for, each with the shape their tree really has.
+        let expected_prefix = if cfg!(target_os = "macos") {
+            "apple/osx/"
+        } else if cfg!(target_os = "windows") {
+            "windows/"
+        } else {
+            "linux/"
+        };
+        assert!(seg.starts_with(expected_prefix), "{seg} is not under {expected_prefix}");
+    }
+}

@@ -978,6 +978,53 @@ mod tests {
         let recent = c.recently_played(5).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].id, 10);
+        // The timestamp comes back on the row, not only into the ordering.
+        // These columns are read by position, so adding one to the list
+        // without adding it to the reader shifts every field after it —
+        // quietly, into a field of the same type.
+        assert_eq!(recent[0].last_played.as_deref(), Some("2026-01-01T10:00:00"));
+    }
+
+    /// Every column read by position, checked in one place.
+    ///
+    /// `ROM_COLUMNS` and `rom_from_row` are two lists that have to stay in the
+    /// same order, and nothing enforces it: an insertion in the middle shifts
+    /// every field after it by one, and where the types happen to line up the
+    /// result is a row full of plausible values in the wrong places. That is
+    /// not a failure anything reports.
+    #[test]
+    fn every_column_lands_in_the_field_it_belongs_to() {
+        let c = cache("columns");
+        add_platform(&c, 1, "snes", "Super Nintendo");
+        c.conn
+            .execute(
+                "INSERT INTO roms(id, platform_slug, name, fs_name, fs_size_bytes, md5_hash, \
+                 sha1_hash, cover_path, screenshot_path, summary, manual_path, youtube_id, \
+                 multi_file, esde_system, local_path, last_played) \
+                 VALUES(7,'snes','Chrono Trigger','ct.sfc',4194304,'themd5','thesha1', \
+                 '/c.png','/s.png','A summary.','/m.pdf','vid123',1,'snes','/here/ct.sfc', \
+                 '2026-02-03T04:05:06')",
+                [],
+            )
+            .unwrap();
+
+        let r = c.rom_by_id(7).unwrap().expect("the row that was just inserted");
+        assert_eq!(r.id, 7);
+        assert_eq!(r.platform_slug, "snes");
+        assert_eq!(r.name, "Chrono Trigger");
+        assert_eq!(r.fs_name, "ct.sfc");
+        assert_eq!(r.fs_size_bytes, 4_194_304);
+        assert_eq!(r.md5_hash.as_deref(), Some("themd5"));
+        assert_eq!(r.sha1_hash.as_deref(), Some("thesha1"));
+        assert_eq!(r.cover_path.as_deref(), Some("/c.png"));
+        assert_eq!(r.screenshot_path.as_deref(), Some("/s.png"));
+        assert_eq!(r.summary.as_deref(), Some("A summary."));
+        assert_eq!(r.manual_path.as_deref(), Some("/m.pdf"));
+        assert_eq!(r.youtube_id.as_deref(), Some("vid123"));
+        assert!(r.multi_file);
+        assert_eq!(r.esde_system.as_deref(), Some("snes"));
+        assert_eq!(r.local_path.as_deref(), Some("/here/ct.sfc"));
+        assert_eq!(r.last_played.as_deref(), Some("2026-02-03T04:05:06"));
     }
 
     /// "Started twice and bounced off" is a narrower question than "started

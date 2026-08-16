@@ -1130,6 +1130,22 @@ input_r2_axis = "+5"
         assert_eq!(a, b);
     }
 
+    /// RetroArch loads a preset of its own from `config/<Core>/<Core>.slangp`
+    /// and that one wins over `video_shader` without saying so anywhere. One
+    /// left behind by a handheld, or by pressing "save core preset" once,
+    /// meant every NES game came up in crt-royale whatever this app asked for
+    /// — and every attempt to change it in Settings appeared to do nothing.
+    #[test]
+    fn the_shader_we_choose_is_not_overruled_by_one_retroarch_finds_itself() {
+        let dir = scratch("auto-shaders");
+        let body =
+            std::fs::read_to_string(fake(&dir).write_overrides_with(&dir, None).unwrap()).unwrap();
+        assert!(
+            body.contains("auto_shaders_enable = \"false\""),
+            "a preset beside the core will quietly replace ours:\n{body}"
+        );
+    }
+
     /// Nothing known about the display means nothing written: the emulator's
     /// own window settings are the user's, and a guess would overwrite them.
     #[test]

@@ -271,6 +271,56 @@ pub async fn ensure_pack(client: &reqwest::Client, ra: &RetroArch) -> anyhow::Re
 mod tests {
     use super::*;
 
+    /// The path written into `video_shader` has to be absolute.
+    ///
+    /// It was not, and the consequence was every CRT platform silently losing
+    /// its shader: the library folder is configured as "./library", that went
+    /// through as `./library/romm-motion.slangp`, and RetroArch resolved it
+    /// against its own shaders directory —
+    ///
+    ///   <RetroArch>/shaders/./library/romm-motion.slangp
+    ///
+    /// — found nothing, and fell back to no shader at all. Nothing failed and
+    /// nothing was logged at the app's end. Only the chained path took this
+    /// route, and the motion pass is CRT-only, which is why the handhelds went
+    /// on looking correct throughout.
+    #[test]
+    fn the_chained_preset_is_written_as_an_absolute_path() {
+        // Relative on purpose, and relative to the working directory the test
+        // runs in — which is what `library.local_root = "./library"` gives the
+        // launcher in real use. A path under the system temp directory is
+        // already absolute and would make this pass without proving anything.
+        let dir = std::path::PathBuf::from("target/romm-shader-chain-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("shaders/shaders_slang/subframe-bfi")).unwrap();
+        std::fs::write(
+            dir.join("shaders/shaders_slang/subframe-bfi/plain.slangp"),
+            "shaders = 1\nshader0 = \"a.slang\"\n",
+        )
+        .unwrap();
+        assert!(dir.is_relative(), "the test itself has to hand over a relative path");
+
+        let ra = crate::retroarch::RetroArch {
+            root: dir.clone(),
+            binary: dir.join("retroarch"),
+            portable: false,
+            system_override: None,
+        };
+
+        let out = write_chained(&ra, &dir, None, "subframe-bfi/plain")
+            .expect("a chain should be written");
+        assert!(
+            out.is_absolute(),
+            "video_shader would be written as {} — RetroArch resolves a relative \
+             preset against its own shaders directory, not ours, so the shader \
+             silently does not load",
+            out.display()
+        );
+        assert!(out.is_file(), "{} was not actually written", out.display());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
     /// The GBA default must be the *lit* panel. AGB-001 is the original Game
     /// Boy Advance, which had no screen lighting at all, so a faithful shader
     /// for it is close to unreadable on a desktop monitor. AGS-001 is the

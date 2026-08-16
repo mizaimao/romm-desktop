@@ -38,6 +38,10 @@ async function cycleIconStyle() {
   } catch (e) {
     return toast(String(e), 6000);
   }
+  // An answer that is not a list is as unusable as no answer. Guarding the
+  // shape as well as the call, because this runs from a controller button and
+  // a throw here escapes into the poll loop rather than anywhere visible.
+  if (!Array.isArray(styles)) return toast("Could not read the console pictures");
   // Only styles that have pictures. Cycling onto an empty one shows a grid of
   // nothing, which reads as the button having broken the page.
   const usable = styles.filter((s) => s.available > 0);
@@ -61,10 +65,11 @@ async function cycleIconStyle() {
 async function cycleListArt() {
   let options, current;
   try {
-    [options, current] = await invoke("list_art_options");
+    [options, current] = (await invoke("list_art_options")) ?? [];
   } catch (e) {
     return toast(String(e), 6000);
   }
+  if (!Array.isArray(options)) return toast("Could not read the picture options");
   const keys = options.map(([k]) => k);
   const want = next(keys, current);
   if (!want) return;
