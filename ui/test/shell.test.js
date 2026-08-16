@@ -739,13 +739,19 @@ describe("where the preview toggle lives", () => {
     ({ el } = await import("../js/state.js"));
   });
 
-  test("it is in the tab row, at the end", () => {
+  test("both are in the tab row, at the end, in that order", () => {
     tabs.installTabs();
     assert.equal(el.sidebarBtn.parentElement?.id, "tabbar", "it is still up in the header");
+    assert.equal(el.grabBtn.parentElement?.id, "tabbar", "take offline is still up in the header");
     assert.equal(
       el.tabbar.lastElementChild,
       el.sidebarBtn,
-      "something else is after it in the row"
+      "something else is after the preview toggle"
+    );
+    assert.equal(
+      el.sidebarBtn.previousElementSibling,
+      el.grabBtn,
+      "take offline is not immediately before it"
     );
   });
 
@@ -753,11 +759,8 @@ describe("where the preview toggle lives", () => {
   /// relabels it or reads its state goes on working.
   test("there is only one of it", () => {
     tabs.installTabs();
-    assert.equal(
-      document.querySelectorAll("#sidebar-btn").length,
-      1,
-      "the header kept a copy"
-    );
+    assert.equal(document.querySelectorAll("#sidebar-btn").length, 1, "the header kept a copy");
+    assert.equal(document.querySelectorAll("#grab-btn").length, 1, "the header kept a copy");
   });
 
   /// Rebuilding the row must not throw it away — the tabs are redrawn whenever
@@ -766,7 +769,9 @@ describe("where the preview toggle lives", () => {
   test("rebuilding the row keeps it", () => {
     tabs.installTabs();
     tabs.installTabs();
-    assert.equal(el.sidebarBtn.parentElement?.id, "tabbar");
-    assert.equal(document.querySelectorAll("#sidebar-btn").length, 1);
+    for (const btn of [el.sidebarBtn, el.grabBtn]) {
+      assert.equal(btn.parentElement?.id, "tabbar");
+      assert.equal(document.querySelectorAll(`#${btn.id}`).length, 1);
+    }
   });
 });

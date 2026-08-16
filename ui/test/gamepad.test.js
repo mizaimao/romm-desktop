@@ -365,10 +365,11 @@ describe("the triggers scroll the list", () => {
     // and the sticks already do a screen at a time, so pressing them looked
     // like nothing happening.
     assert.equal(map[10], "sortCycle");
-    // Nothing on the right stick click. It opened the sort menu, which a pad
-    // cannot navigate — so the button opened something you could then only
-    // close again.
-    assert.equal(map[11], undefined, "the right stick click should be unbound");
+    // The right stick click picks a game at random. It used to open the sort
+    // menu, which a pad cannot navigate — a button that opens something you
+    // can then only close again — and was left doing nothing at all. Random
+    // is the one thing on this screen worth a button and needing no menu.
+    assert.equal(map[11], "random", "the right stick click does nothing again");
     // The menu is still reachable by mouse and by key.
     assert.equal(ui.keyFor("sortMenu"), "s");
     // Paging is not gone, it is on the keyboard, where it has a key that says

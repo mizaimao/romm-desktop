@@ -83,6 +83,17 @@ pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
             ("mame2003_skip_disclaimer", "enabled"),
             ("mame2003_skip_warnings", "enabled"),
         ],
+        // FBNeo audits every romset against its own CRC list and refuses
+        // anything that does not match exactly. Half a library assembled from
+        // real dumps over twenty years fails that: a byte-patched region file,
+        // a rebuilt parent, a set merged the other way round. The audit does
+        // not make the game run — it decides whether FBNeo will *try* — and
+        // the same reasoning already applies to the MAME cores above, where
+        // the warning screen was skipped rather than read.
+        //
+        // Both arcade platforms run this core, so this is per-core rather than
+        // per-platform.
+        (_, "fbneo") => &[("fbneo-allow-patched-romsets", "enabled")],
         ("nes" | "famicom", "fceumm") => &[
             ("fceumm_turbo_enable", "Both"),
             // Frames between repeats. 3 is roughly 10 presses/second, fast
@@ -208,6 +219,7 @@ pub fn core_dir_name(core: &str) -> Option<&'static str> {
         "mame2003_plus" => Some("MAME 2003-Plus"),
         "mame2003" => Some("MAME 2003"),
         "swanstation" => Some("SwanStation"),
+        "fbneo" => Some("FinalBurn Neo"),
         _ => None,
     }
 }
@@ -222,6 +234,9 @@ pub fn describe(platform: &str, core: &str) -> Option<String> {
     }
     if core.starts_with("mame2003") {
         return Some("skipping the MAME disclaimer and warning screens".to_owned());
+    }
+    if core == "fbneo" {
+        return Some("not refusing romsets that fail FBNeo's own audit".to_owned());
     }
     Some(format!("{} core options applied", core_options(platform, core).len()))
 }
@@ -274,9 +289,7 @@ mod tests {
         // snes9x and genesis_plus_gx are the deliberate omissions from
         // TURBO_CORES — see the note there — so they are the honest check that
         // the redirect stays off rather than a core nobody has looked at.
-        for (platform, core) in
-            [("snes", "snes9x"), ("genesis", "genesis_plus_gx"), ("arcade", "fbneo")]
-        {
+        for (platform, core) in [("snes", "snes9x"), ("genesis", "genesis_plus_gx")] {
             assert!(core_options(platform, core).is_empty(), "{platform}/{core}");
             assert!(remap(platform, core).is_empty(), "{platform}/{core}");
             assert!(describe(platform, core).is_none(), "{platform}/{core}");
@@ -314,6 +327,28 @@ mod tests {
         }
         assert_eq!(core_dir_name("fceumm"), Some("FCEUmm"), "display name, not the stem");
         assert_eq!(core_dir_name("snes9x"), None);
+    }
+
+    /// FBNeo refuses any romset that does not match its own CRC list exactly,
+    /// and half a library assembled from real dumps over twenty years does
+    /// not. The audit decides whether it will *try*, not whether the game
+    /// runs, which is the same reasoning that skips the MAME warning screen.
+    #[test]
+    fn fbneo_is_told_not_to_refuse_imperfect_sets() {
+        for platform in ["arcade", "mame", "neogeoaes"] {
+            assert_eq!(
+                core_options(platform, "fbneo"),
+                &[("fbneo-allow-patched-romsets", "enabled")],
+                "{platform} still gets the strict audit"
+            );
+        }
+        // Written nowhere without this, and silently: prepare_tweaks gives up
+        // when a core has no directory name.
+        assert_eq!(core_dir_name("fbneo"), Some("FinalBurn Neo"));
+        assert!(describe("arcade", "fbneo").is_some(), "the launch says nothing about it");
+        // And it is the core's setting, not the platform's: both arcade
+        // platforms run this core, and no other core is touched by it.
+        assert!(core_options("arcade", "mame2003_plus").iter().all(|(k, _)| !k.starts_with("fbneo")));
     }
 
     /// The remap is a swap, and that is what makes it correct under either

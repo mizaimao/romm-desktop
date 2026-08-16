@@ -1247,7 +1247,7 @@ button:has(> .icon + span) {
 /* Lucide "arrow-down-narrow-wide" — the ordering glyph, vendored like the rest. */
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
 .icon-filter    { --icon: url("icons/funnel.svg"); }
-.icon-dice      { --icon: url("icons/dices.svg"); }
+.icon-dice      { --icon: url("icons/dice-5.svg"); }
 .icon-pane      { --icon: url("icons/square.svg"); }
 .icon-book      { --icon: url("icons/book-open.svg"); }
 .icon-columns   { --icon: url("icons/columns-2.svg"); }
@@ -2504,12 +2504,12 @@ code {
   background: color-mix(in srgb, var(--glass) 40%, transparent);
 }
 
-/* The preview toggle lives at the end of the tab row now, with the thing it
-   acts on rather than among the header's unrelated buttons. */
-#tabbar #sidebar-btn {
-  margin-left: auto;
-  font-size: 12px;
-}
+/* The two buttons that act on the whole list live at the end of the tab row,
+   with what they act on rather than among the header's unrelated controls.
+   Take offline first, then the preview toggle. */
+#tabbar #grab-btn { margin-left: auto; }
+#tabbar #grab-btn,
+#tabbar #sidebar-btn { font-size: 12px; }
 
 /* A filtered list looks exactly like a short one, so the button that did it
    stays lit while anything is on. */

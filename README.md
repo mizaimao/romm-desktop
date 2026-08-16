@@ -68,9 +68,9 @@ and remember their widths. Four tabs across the top either way: **Library**,
 
 **Filter** narrows a list to what is on this machine, what is not, what is
 starred, what you have never played, or what is rated 8 or better; several at
-once, and they all have to pass. **Surprise me** picks at random out of
-whatever the filters left — the only realistic way into an arcade set nobody
-knows by heart. Both are per-list and forgotten when the app closes, like the
+once, and they all have to pass. **Random** picks out of whatever the filters left —
+the only realistic way into an arcade set nobody knows by heart, and on the
+right stick click as well. Both are per-list and forgotten when the app closes, like the
 sort. Consoles are listed alphabetically; collections have an order button above them
 (name, most games, fewest, most downloaded) because the server returns them by
 size. Within a console, games sort by name, rating, year, size or recently

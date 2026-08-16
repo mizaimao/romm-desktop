@@ -219,6 +219,9 @@ export function installTabs() {
   // thing it opens and closes is a third of the window. Moved rather than
   // copied: it is the same element, so everything that hides or relabels it
   // goes on working.
+  // Take offline first, then the preview toggle. Both act on the list this row
+  // chooses, which is what they have in common and what the header did not.
+  if (el.grabBtn) el.tabbar.appendChild(el.grabBtn);
   if (el.sidebarBtn) el.tabbar.appendChild(el.sidebarBtn);
 
   paint();

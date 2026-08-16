@@ -24,9 +24,13 @@
       </label>
       <button id="layout-btn" hidden title="Grid or list"><span class="icon icon-grid"></span><span>Grid</span></button>
       <button id="filter-btn" hidden title="Narrow this list down"><span class="icon icon-filter"></span><span>Filter</span></button>
-      <button id="random-btn" hidden title="Pick something at random from this list (R)"><span class="icon icon-dice"></span><span>Surprise me</span></button>
-      <button id="sort-btn" hidden title="How this list is ordered (right stick click)"><span class="icon icon-sort"></span><span>Name</span></button>
+      <button id="random-btn" hidden title="Pick something at random from this list (R, or the right stick click)"><span class="icon icon-dice"></span><span>Random</span></button>
+      <!-- Take offline and the preview toggle both act on the list the tab row
+           chooses, so `installTabs` moves them down there. They are declared
+           here because the tab row is rebuilt from scratch whenever the
+           sections change, and anything declared inside it would be wiped. -->
       <button id="grab-btn" hidden title="Download this platform or collection for offline use"><span class="icon icon-download"></span><span>Take offline</span></button>
+      <button id="sort-btn" hidden title="How this list is ordered (right stick click)"><span class="icon icon-sort"></span><span>Name</span></button>
       <button id="settings-btn" title="Settings"><span class="icon icon-settings"></span><span>Settings</span></button>
       <span id="status"></span>
     </header>

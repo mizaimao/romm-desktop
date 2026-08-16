@@ -217,3 +217,20 @@ describe("surprise me", () => {
     assert.equal(library.randomGame(), null);
   });
 });
+
+describe("random comes from this list and no other", () => {
+  /// The point of it is "something from what I am looking at". Reaching across
+  /// consoles, or past the filters, would make it a lucky dip through the
+  /// whole library — which is not what a button on a console's page can mean.
+  test("only rows from the list on screen", () => {
+    const arcade = [
+      { id: 90, name: "Metal Slug", downloaded: true, favourite: false, last_played: null },
+      { id: 91, name: "Pang", downloaded: true, favourite: false, last_played: null },
+    ];
+    state.rows = arcade;
+    library.renderRows(arcade, false);
+    const ids = new Set();
+    for (let i = 0; i < 30; i++) ids.add(library.randomGame().id);
+    assert.deepEqual([...ids].sort(), [90, 91], "it picked something not in this list");
+  });
+});

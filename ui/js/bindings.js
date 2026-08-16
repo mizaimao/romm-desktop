@@ -96,9 +96,12 @@ const PAD_FALLBACK = {
   // The left stick click steps through the sort orders, with the new one
   // named in a toast. The right one used to open the sort menu, which is a
   // list of items with no keyboard or pad navigation — so a controller could
-  // open it and then only close it again. A button that opens something
-  // unusable is worse than a button that does nothing, so it does nothing.
+  // open it and then only close it again, and it was left doing nothing at
+  // all. It picks a game at random now: the one thing on this screen that is
+  // worth a button, needs no menu, and answers the question a 2,506-game
+  // arcade list actually poses.
   10: "sortCycle",
+  11: "random",
   12: "up",
   13: "down",
   14: "left",
