@@ -2502,32 +2502,9 @@ code {
   background: color-mix(in srgb, var(--glass) 40%, transparent);
 }
 
-/* Closing the preview from the preview.
-   The header button that does the same thing is one of nine up there, and what
-   it closes is a third of the window — so the pane carries its own, in the
-   corner every pane in every application puts one. */
-#detail .pane-close {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  z-index: 2;
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--glass) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
-  color: color-mix(in srgb, var(--text) 65%, transparent);
-  cursor: pointer;
+/* The preview toggle lives at the end of the tab row now, with the thing it
+   acts on rather than among the header's unrelated buttons. */
+#tabbar #sidebar-btn {
+  margin-left: auto;
+  font-size: 12px;
 }
-#detail .pane-close:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--glass) 45%, transparent);
-}
-#detail .pane-close .icon { width: 13px; height: 13px; }
-/* The close button is positioned against the pane, so the pane has to be the
-   thing it is positioned against. */
-#detail { position: relative; }

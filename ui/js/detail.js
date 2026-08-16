@@ -112,9 +112,6 @@ export async function selectRom(id) {
   // and move one into the other, instead of replacing the pane wholesale.
   await withTransition(() => {
     el.detail.innerHTML = `
-    <button class="pane-close" title="Close the preview" aria-label="Close the preview">
-      <span class="icon icon-close"></span>
-    </button>
     <div class="scroll">
       <h2>${escapeHtml(d.name)}</h2>
       <div class="sub">${escapeHtml(d.fs_name)}</div>
@@ -500,9 +497,6 @@ function wireArtwork(d) {
     const idx = [...el.detail.querySelectorAll(".shots img")].indexOf(shown);
     openLightbox(media, Math.max(media.findIndex((m) => m.id === `screenshot-${idx}`), 0));
   });
-  // On the pane rather than only in the header: the button up there is one of
-  // nine, and the thing it closes is a third of the window.
-  el.detail.querySelector(".pane-close")?.addEventListener("click", () => setSidebar(false));
   el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.id === "cover"));
   document.getElementById("playvid")?.addEventListener("click", playVideo);
   el.detail.querySelectorAll(".artstrip figure").forEach((fig) =>

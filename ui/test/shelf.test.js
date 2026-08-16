@@ -718,19 +718,24 @@ describe("changing rapid fire keeps your place", () => {
 });
 
 describe("closing the preview", () => {
-  /// It is a third of the window in three columns, and the only control for it
-  /// was one of nine buttons in the header. A pane you can see should be
-  /// closable from the pane.
-  test("the pane carries its own close button", async () => {
+  /// It is a third of the window when everything is side by side, and its
+  /// toggle used to sit in the header among eight unrelated buttons. It is at
+  /// the end of the tab row now — with what it acts on — which is also why the
+  /// pane no longer carries a cross of its own: one control, in one place.
+  test("the pane has no close button of its own", async () => {
     Object.assign(DETAIL, { has_video: false });
     await detail.selectRom(7);
     await settle();
-
-    const close = document.querySelector("#detail .pane-close");
-    assert.ok(close, "no way to close it from the pane itself");
+    assert.equal(
+      document.querySelector("#detail .pane-close"),
+      null,
+      "two controls for one thing"
+    );
     assert.equal(document.getElementById("detail").hidden, false);
+  });
 
-    close.click();
+  test("the toggle closes it", async () => {
+    detail.setSidebar(false);
     await settle();
     assert.equal(document.getElementById("detail").hidden, true, "it did not close");
   });
@@ -738,8 +743,7 @@ describe("closing the preview", () => {
   /// And the choice sticks. A preview that reopens itself on the next game is
   /// a button that appears not to have worked.
   test("it stays closed until asked back", async () => {
-    document.querySelector("#detail .pane-close")?.click();
-    await settle();
+    detail.setSidebar(false);
     await detail.selectRom(7);
     await settle();
     assert.equal(document.getElementById("detail").hidden, true, "it came back on its own");

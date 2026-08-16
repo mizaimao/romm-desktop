@@ -142,7 +142,7 @@ describe("the layout switch keeps its place", () => {
     const labels = [...dom.window.document.querySelectorAll("#view-switch button")].map((b) =>
       b.textContent.trim()
     );
-    assert.deepEqual(labels, ["Single pane", "Duo columns"]);
+    assert.deepEqual(labels, ["One at a time", "Side by side"]);
   });
 
   test("it comes before the search box", () => {

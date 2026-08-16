@@ -212,5 +212,14 @@ export function installTabs() {
   rb.textContent = "RB";
   el.tabbar.appendChild(rb);
 
+  // The preview toggle, at the far right of this row rather than in the header.
+  //
+  // It belongs with what it acts on. Up there it was one of nine buttons in a
+  // bar of unrelated things — settings, search, sort, take offline — and the
+  // thing it opens and closes is a third of the window. Moved rather than
+  // copied: it is the same element, so everything that hides or relabels it
+  // goes on working.
+  if (el.sidebarBtn) el.tabbar.appendChild(el.sidebarBtn);
+
   paint();
 }

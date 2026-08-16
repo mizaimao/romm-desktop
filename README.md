@@ -60,7 +60,8 @@ first launch of a game that needs them.
 ## Using it
 
 One pane at a time by default: a console replaces the screen with its games and
-Back undoes it. The pair of buttons left of the search box switches to columns — what you are picking from, the games, and a preview of the one
+Back undoes it. The pair of buttons left of the search box switches between "one at a time"
+and "side by side" — what you are picking from, the games, and a preview of the one
 selected — where nothing is ever replaced and both outer columns can be dragged
 and remember their widths. Four tabs across the top either way: **Library**,
 **My collections**, **History** and **RomM browse**.

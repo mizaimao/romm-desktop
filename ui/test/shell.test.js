@@ -726,3 +726,47 @@ describe("collections show their artwork", () => {
     });
   }
 });
+
+describe("where the preview toggle lives", () => {
+  /// In the header it was one of nine buttons among settings, search, sort and
+  /// take-offline — none of which have anything to do with it — while the
+  /// thing it opens and closes is a third of the window. It sits at the end of
+  /// the tab row instead, beside what it acts on.
+  let tabs, el;
+
+  before(async () => {
+    tabs = await import("../js/tabs.js");
+    ({ el } = await import("../js/state.js"));
+  });
+
+  test("it is in the tab row, at the end", () => {
+    tabs.installTabs();
+    assert.equal(el.sidebarBtn.parentElement?.id, "tabbar", "it is still up in the header");
+    assert.equal(
+      el.tabbar.lastElementChild,
+      el.sidebarBtn,
+      "something else is after it in the row"
+    );
+  });
+
+  /// Moved rather than copied: the same element, so everything that hides it,
+  /// relabels it or reads its state goes on working.
+  test("there is only one of it", () => {
+    tabs.installTabs();
+    assert.equal(
+      document.querySelectorAll("#sidebar-btn").length,
+      1,
+      "the header kept a copy"
+    );
+  });
+
+  /// Rebuilding the row must not throw it away — the tabs are redrawn whenever
+  /// the sections change, and a control that vanishes on a redraw is worse
+  /// than one in the wrong place.
+  test("rebuilding the row keeps it", () => {
+    tabs.installTabs();
+    tabs.installTabs();
+    assert.equal(el.sidebarBtn.parentElement?.id, "tabbar");
+    assert.equal(document.querySelectorAll("#sidebar-btn").length, 1);
+  });
+});

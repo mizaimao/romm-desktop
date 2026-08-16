@@ -2840,7 +2840,13 @@ fn main() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             install_menu(app.handle())?;
-            let _ = app;
+            // The version in the title bar, so "which build is this" is
+            // answerable from a screenshot. Set here rather than in
+            // tauri.conf.json because the number lives in Cargo.toml and a
+            // second copy of it in a config file is a copy that goes stale.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_title(&format!("RomM Desktop {}", env!("CARGO_PKG_VERSION")));
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
