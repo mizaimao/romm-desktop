@@ -250,6 +250,23 @@ function autofireRow(d) {
     </div>`;
 }
 
+/// Redraw just this row, in place.
+///
+/// Rebuilding the whole pane instead sent the reader back to the top of it,
+/// which for a control that lives at the bottom means every press throws away
+/// where you were. Nothing else on the pane depends on these two values, so
+/// nothing else needs to be touched.
+function repaintAutofire(d) {
+  const row = document.querySelector(".autofire-row");
+  if (!row) return;
+  const fresh = document.createElement("div");
+  fresh.innerHTML = autofireRow(d);
+  const next = fresh.firstElementChild;
+  if (!next) return;
+  row.replaceWith(next);
+  wireAutofire(d);
+}
+
 function wireAutofire(d) {
   for (const step of document.querySelectorAll(".autofire-row .af-step")) {
     step.addEventListener("click", async () => {
@@ -262,25 +279,22 @@ function wireAutofire(d) {
       } catch (e) {
         return toast(`Could not save — ${e}`, 8000);
       }
-      await selectRom(d.id);
+      d.autofire_hz = want;
+      repaintAutofire(d);
     });
   }
 
   for (const btn of document.querySelectorAll(".autofire-row .af")) {
     btn.addEventListener("click", async () => {
+      const want = btn.dataset.af;
       try {
-        await invoke("set_config_field", { field: "autofire", value: btn.dataset.af });
+        await invoke("set_config_field", { field: "autofire", value: want });
       } catch (e) {
         return toast(`Could not save — ${e}`, 8000);
       }
-      // Redrawn rather than just repainted: the setting is global, so the pane
-      // has to come back from the backend to be sure it agrees with it.
-      await selectRom(d.id);
-      toast(
-        btn.dataset.af === "off"
-          ? "Rapid fire off"
-          : `Rapid fire on ${btn.dataset.af.toUpperCase()}`
-      );
+      d.autofire = want;
+      repaintAutofire(d);
+      toast(want === "off" ? "Rapid fire off" : `Rapid fire on ${want.toUpperCase()}`);
     });
   }
 }

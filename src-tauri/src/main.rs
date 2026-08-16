@@ -381,7 +381,6 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
             | "mirror_player_one"
             | "fit_window"
             | "window_decorations"
-            | "autofire"
     );
 
     if value.trim().is_empty() && !boolean {

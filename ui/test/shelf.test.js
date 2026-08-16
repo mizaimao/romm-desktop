@@ -564,3 +564,55 @@ describe("how fast the rapid fire goes", () => {
     Object.assign(DETAIL, { autofire: null, autofire_hz: 5 });
   });
 });
+
+describe("changing rapid fire keeps your place", () => {
+  /// The control is at the bottom of the pane, and rebuilding the whole pane
+  /// to show the new value sent the reader back to the top of it — so every
+  /// press of + threw away where they were.
+  test("stepping the rate does not redraw the pane", async () => {
+    Object.assign(DETAIL, { autofire: "y", autofire_hz: 5 });
+    await detail.selectRom(7);
+    await settle();
+
+    const before = invoked.filter((c) => c.cmd === "rom_detail").length;
+    const scroll = document.querySelector("#detail .scroll");
+    scroll.scrollTop = 120;
+
+    document.querySelector('.af-step[data-hz="1"]').click();
+    await settle();
+
+    assert.equal(
+      invoked.filter((c) => c.cmd === "rom_detail").length,
+      before,
+      "the whole pane was rebuilt, which is what loses the scroll position"
+    );
+    assert.match(document.querySelector(".af-hz").textContent, /6 Hz/, "the rate did not update");
+  });
+
+  /// Turning it off wrote a boolean, because the field was still on the list
+  /// of settings that are booleans from when it was a toggle. "a" is not
+  /// "true", so it stored false — off. You could turn it off and never on.
+  test("off and back on again", async () => {
+    Object.assign(DETAIL, { autofire: "y", autofire_hz: 5 });
+    await detail.selectRom(7);
+    await settle();
+
+    document.querySelector('.af[data-af="off"]').click();
+    await settle();
+    assert.equal(document.querySelector(".af.on").dataset.af, "off");
+    assert.equal(document.querySelector(".af-rate"), null, "no rate while off");
+
+    document.querySelector('.af[data-af="a"]').click();
+    await settle();
+    assert.equal(
+      document.querySelector(".af.on").dataset.af,
+      "a",
+      "it could be turned off but not back on"
+    );
+    assert.ok(document.querySelector(".af-rate"), "the rate should come back");
+
+    const saved = invoked.filter((c) => c.cmd === "set_config_field").map((c) => c.args.value);
+    assert.deepEqual(saved.slice(-2), ["off", "a"], `sent: ${saved}`);
+    Object.assign(DETAIL, { autofire: null, autofire_hz: 5 });
+  });
+});
