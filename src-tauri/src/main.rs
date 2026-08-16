@@ -38,6 +38,10 @@ struct AppState {
     themes_dir: PathBuf,
     /// Bind players 2-4 like player 1. See config::ControllersCfg.
     mirror_players: bool,
+    /// Shape the game window like the game, so it has no black bars.
+    fit_window: bool,
+    /// Keep the game window's title bar.
+    window_decorations: bool,
     /// Behind mutexes so a choice made in the UI takes effect on the next
     /// launch rather than the next restart. `config.toml` stays the source of
     /// truth; these are the live copy.
@@ -272,6 +276,8 @@ struct ConfigFields {
     shaders_enabled: bool,
     confirm_delete_state: bool,
     mirror_player_one: bool,
+    fit_window: bool,
+    window_decorations: bool,
     /// Present so the UI can say where it is writing, and warn when there is
     /// nothing to write to.
     config_path: String,
@@ -297,6 +303,8 @@ fn config_fields() -> CmdResult<ConfigFields> {
         shaders_enabled: cfg.shaders.enabled,
         confirm_delete_state: cfg.saves.confirm_delete_state,
         mirror_player_one: cfg.controllers.mirror_player_one,
+        fit_window: cfg.retroarch.fit_window,
+        window_decorations: cfg.retroarch.window_decorations,
         config_path: abs(Path::new("config.toml")),
         config_exists: Config::exists("config.toml"),
     })
@@ -330,6 +338,8 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "confirm_delete_state" => ("saves", "confirm_delete_state"),
         "mirror_player_one" => ("controllers", "mirror_player_one"),
         "game_display" => ("retroarch", "game_display"),
+        "fit_window" => ("retroarch", "fit_window"),
+        "window_decorations" => ("retroarch", "window_decorations"),
         other => return Err(format!("unknown setting {other}")),
     };
 
@@ -342,6 +352,8 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
             | "shaders_enabled"
             | "confirm_delete_state"
             | "mirror_player_one"
+            | "fit_window"
+            | "window_decorations"
     );
 
     if value.trim().is_empty() && !boolean {
@@ -1556,6 +1568,8 @@ async fn launch_rom(
     let lightgun = state.lightgun.lock().map_err(err)?.clone();
     let lib = state.roms_dir.parent().unwrap_or(Path::new("."));
     let req = romm_desktop::launch::Request {
+        fit_window: state.fit_window,
+        window_decorations: state.window_decorations,
         mirror_players: state.mirror_players,
         entry_slot,
         rom: &path,
@@ -2595,6 +2609,8 @@ fn main() {
             theme_root: cfg.theme.root.clone(),
             themes_dir: cfg.themes_dir(),
             mirror_players: cfg.controllers.mirror_player_one,
+            fit_window: cfg.retroarch.fit_window,
+            window_decorations: cfg.retroarch.window_decorations,
             core_overrides: Mutex::new(cfg.cores.overrides.clone()),
             core_per_game: Mutex::new(cfg.cores.per_game.clone()),
             user_retroarch_cfg: cfg.user_retroarch_config(),

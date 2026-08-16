@@ -132,6 +132,24 @@ export function paneHtml(id) {
       <p class="hint">Which emulator runs each console, which shader it gets,
         and whether a light gun takes the second controller port. Changes are
         written to config.toml and apply to the next game you launch.</p>
+      <h4>Game window</h4>
+      <div class="srow">
+        <label>Fit to the game</label>
+        <div class="ctl"><button data-field="fit_window">…</button></div>
+      </div>
+      <p class="hint">RetroArch keeps a game's proportions inside whatever
+        window it is given, so a window of the wrong shape is a window with
+        black bars in it — and on a full-screen one those bars are wide. A
+        window shaped like the game has nothing left over to put one in. Off
+        fills the screen and lets the emulator letterbox inside it.</p>
+      <div class="srow">
+        <label>Title bar</label>
+        <div class="ctl"><button data-field="window_decorations">…</button></div>
+      </div>
+      <p class="hint">Off gives a clean edge with no chrome at all. There is
+        then nothing to drag and nothing to click to close, so the way out is
+        the controller combination or Escape.</p>
+
       <div class="srow sys-screen" hidden>
         <label>Open games on</label>
         <div class="ctl"><select class="game-display"></select></div>
@@ -336,6 +354,8 @@ async function wireSystems(box) {
   if (!box.isConnected) return;
 
   await wireGameDisplay(box);
+  // The two window toggles are config.toml fields, like the ones in General.
+  wireConfigFields(box);
   box.querySelector(".sys-motion").innerHTML = motionMarkup(motion);
   table.innerHTML = `
     <table class="systbl">

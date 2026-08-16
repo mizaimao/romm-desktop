@@ -195,14 +195,23 @@ function step() {
   const map = padMap();
 
   // Opening or closing the lightbox is a change of context, and anything the
-  // pad was holding belonged to the old one. Without this, a direction held
-  // while the lightbox opens is still counted as held inside it, so its repeat
-  // timer is already running and the first real press does nothing — which
-  // looks exactly like the stick not being wired up.
+  // pad was holding belonged to the old one: a direction held while the
+  // lightbox opens would otherwise arrive inside it with its repeat timer
+  // already running, so the first real press does nothing.
+  //
+  // But the button that caused the change is usually still down — Y opens the
+  // player and Y also closes it — so the held set is rebuilt from what is
+  // pressed rather than emptied. Emptying it made the poll immediately after
+  // opening treat that same held Y as a new press, and the player opened and
+  // shut in the same breath.
   const lightboxOpen = !el.lb.hidden;
   if (lightboxOpen !== wasLightboxOpen) {
     wasLightboxOpen = lightboxOpen;
+    const now = performance.now();
     held.clear();
+    for (const action of pressedActions(navigator.getGamepads?.() ?? [], map)) {
+      held.set(action, now + FIRST_REPEAT_MS);
+    }
   }
 
   // The lightbox used to swallow the pad completely, which meant the button

@@ -363,8 +363,29 @@ pub struct RetroArchCfg {
     /// actually uses.
     #[serde(default = "default_game_display")]
     pub game_display: String,
+
+    /// See [`default_game_display`] above for why this is on.
+    #[serde(default = "yes")]
+    pub fit_window: bool,
+
+    /// Keep the game window's title bar.
+    ///
+    /// On by default, because without it there is nothing to drag and nothing
+    /// to click to close — the way out is a controller combination or a
+    /// keyboard hotkey, and someone who has just turned this off is exactly
+    /// the person who may not know that yet.
+    #[serde(default = "yes")]
+    pub window_decorations: bool,
 }
 
+/// Shape the game window like the game.
+///
+/// On by default. RetroArch keeps a picture's proportions inside the window it
+/// is given, so a maximised window on a 16:10 laptop showing a 3:2 handheld
+/// game is a black column down each side — wider than the game was tall on the
+/// original hardware. A window of the right shape has nothing left to put a bar
+/// in. Turn it off to have the window fill the screen and let the emulator
+/// letterbox inside it.
 fn default_game_display() -> String {
     "auto".to_owned()
 }

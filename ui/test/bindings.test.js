@@ -173,6 +173,16 @@ describe("the settings tabs", () => {
     assert.equal(row.hidden, true, "it should stay hidden until there are two screens");
   });
 
+  /// The black bars around a game are the window being the wrong shape, and
+  /// the title bar is the other thing people mean by "border". Both are
+  /// toggles rather than one, because they are different complaints.
+  test("the game window has both of its borders as settings", async () => {
+    const { paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    const pane = new JSDOM(`<body>${paneHtml("systems")}</body>`).window.document;
+    assert.ok(pane.querySelector('[data-field="fit_window"]'), "no fit-to-game toggle");
+    assert.ok(pane.querySelector('[data-field="window_decorations"]'), "no title-bar toggle");
+  });
+
   /// Every tab the window offers has to render something. A tab whose id has
   /// no markup opens onto a blank pane, which is indistinguishable from a
   /// window that has broken.

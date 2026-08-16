@@ -210,7 +210,7 @@ const MENU_BAR: u32 = 38;
 /// is not 0, and on a second monitor it is not even a positive number in the
 /// obvious direction. The arithmetic below is that conversion, and it is why
 /// the primary monitor's height has to travel with the rest.
-pub fn window_lines(screen: Option<Screen>) -> String {
+pub fn window_lines(screen: Option<Screen>, aspect: Option<f32>, decorations: bool) -> String {
     let Some(s) = screen else {
         return String::new();
     };
@@ -253,8 +253,19 @@ pub fn window_lines(screen: Option<Screen>) -> String {
     let lost_y = (bottom - want_y).max(0) as u32;
     let usable_h = s.height.saturating_sub(lost_y);
 
-    let h = usable_h.saturating_sub(top_gap + bottom_gap);
-    let w = (usable_w as f32 * SCREEN_FILL) as u32;
+    let mut h = usable_h.saturating_sub(top_gap + bottom_gap);
+    let mut w = (usable_w as f32 * SCREEN_FILL) as u32;
+
+    // Shaped like the game, when the platform has one shape. RetroArch keeps
+    // the picture's proportions inside whatever window it is given, so a
+    // window of the wrong shape is a window with black bars in it — and on a
+    // maximised one those bars are large. Giving it a window of the right shape
+    // leaves nothing over to put a bar in.
+    if let Some(a) = aspect {
+        let (fw, fh) = crate::aspect::fit(w, h, a);
+        w = fw;
+        h = fh;
+    }
 
     // A screen so far off to the left that clamping leaves nothing worth
     // opening. Better to write no geometry at all and let RetroArch use its own
@@ -266,8 +277,14 @@ pub fn window_lines(screen: Option<Screen>) -> String {
     let x = left;
     let y = bottom;
 
+    let chrome = if decorations {
+        ""
+    } else {
+        "# No title bar. The way out is the controller combination or Escape.\n\
+         video_window_show_decorations = \"false\"\n"
+    };
     format!(
-        "\n# Top-left of the screen the library is on, as tall as it goes.\n\
+        "{chrome}\n# Top-left of the screen the library is on, as tall as it goes.\n\
          video_fullscreen = \"false\"\n\
          # On: this is what makes the size below be read at all.\n\
          video_window_save_positions = \"true\"\n\
@@ -954,7 +971,7 @@ input_r2_axis = "+5"
     /// are only read when saved positions are on.
     #[test]
     fn the_size_is_written_under_the_names_retroarch_actually_reads() {
-        let out = window_lines(Some(screen(2560, 1440)));
+        let out = window_lines(Some(screen(2560, 1440)), None, true);
         assert_eq!(val(&out, "video_window_save_positions"), "true");
         assert_eq!(val(&out, "video_windowed_position_width"), "2406");
         // The full height of the screen less the menu bar, not a fraction of
@@ -979,7 +996,7 @@ input_r2_axis = "+5"
     #[test]
     #[cfg(target_os = "macos")]
     fn the_window_sits_under_the_menu_bar_at_the_top_left() {
-        let out = window_lines(Some(screen(1800, 1169)));
+        let out = window_lines(Some(screen(1800, 1169)), None, true);
         assert_eq!(val(&out, "video_windowed_position_x"), "0");
         assert_eq!(val(&out, "video_windowed_position_height"), "1131");
         // 1169 - 0 - (1131 + 38) = 0: the window's bottom edge on the bottom
@@ -1005,7 +1022,7 @@ input_r2_axis = "+5"
             width: 2560,
             height: 1440,
             primary_height: 1169,
-        }));
+        }), None, true);
         assert_eq!(val(&out, "video_windowed_position_x"), "0");
         // 2560 wide starting 380 to the left of the origin leaves 2180 usable.
         assert_eq!(val(&out, "video_windowed_position_width"), "2049");
@@ -1026,7 +1043,7 @@ input_r2_axis = "+5"
             width: 1920,
             height: 1080,
             primary_height: 1169,
-        }));
+        }), None, true);
         assert_eq!(out, "", "a window nobody could play in is not worth asking for");
     }
 
@@ -1041,7 +1058,7 @@ input_r2_axis = "+5"
             width: 2560,
             height: 1440,
             primary_height: 1080,
-        }));
+        }), None, true);
         assert_eq!(val(&out, "video_windowed_position_x"), "1920");
         assert_eq!(val(&out, "video_windowed_position_y"), "0");
         assert_eq!(val(&out, "video_windowed_position_height"), "1440");
@@ -1054,7 +1071,7 @@ input_r2_axis = "+5"
     /// being ignored rather than capped.
     #[test]
     fn the_size_is_written_alongside_the_ceiling_that_would_cap_it() {
-        let out = window_lines(Some(screen(3840, 2160)));
+        let out = window_lines(Some(screen(3840, 2160)), None, true);
         assert_eq!(
             val(&out, "video_windowed_position_width"),
             val(&out, "video_window_auto_width_max"),
@@ -1070,7 +1087,7 @@ input_r2_axis = "+5"
     /// bar left to grab. It has to come in from the edges.
     #[test]
     fn the_window_is_a_little_smaller_than_the_display() {
-        let out = window_lines(Some(screen(1000, 1000)));
+        let out = window_lines(Some(screen(1000, 1000)), None, true);
         let w: u32 = val(&out, "video_windowed_position_width").parse().unwrap();
         assert!(w < 1000, "width {w} fills the display, leaving no edge to grab");
         assert!(w > 850, "width {w} wastes the screen");
@@ -1080,13 +1097,46 @@ input_r2_axis = "+5"
         assert!(h >= 1000 - super::MENU_BAR, "height {h} is not the full screen");
     }
 
+    /// The black bars are the window being the wrong shape, and on a maximised
+    /// window they are large: a 3:2 handheld game on a 16:10 laptop screen
+    /// leaves a column down each side wider than the game was tall on the
+    /// original hardware. A window shaped like the game has nothing over.
+    #[test]
+    fn a_window_shaped_like_the_game_leaves_no_room_for_a_bar() {
+        // A wide screen, where a maximised window and a 3:2 game plainly
+        // disagree. On a 16:10 laptop the two happen to land within a few
+        // percent of each other, which would make this pass on a coincidence.
+        let bare = window_lines(Some(screen(2560, 1440)), None, true);
+        let fitted = window_lines(Some(screen(2560, 1440)), crate::aspect::of("gba"), true);
+
+        let read = |out: &str, k: &str| -> f32 { val(out, k).parse().unwrap() };
+        let shape = |out: &str| {
+            read(out, "video_windowed_position_width") / read(out, "video_windowed_position_height")
+        };
+        assert!((shape(&fitted) - 1.5).abs() < 0.01, "{fitted}");
+        // And it is genuinely different from the unshaped one, or the test is
+        // passing on a coincidence of this particular screen.
+        assert!((shape(&bare) - 1.5).abs() > 0.05, "{bare}");
+        // Still inside the screen.
+        assert!(read(&fitted, "video_windowed_position_width") <= 2560.0);
+        assert!(read(&fitted, "video_windowed_position_height") <= 1440.0);
+    }
+
+    /// Arcade has no single shape, so nothing is imposed on it.
+    #[test]
+    fn a_platform_with_no_one_shape_is_left_alone() {
+        let a = window_lines(Some(screen(1800, 1169)), crate::aspect::of("arcade"), true);
+        let b = window_lines(Some(screen(1800, 1169)), None, true);
+        assert_eq!(a, b);
+    }
+
     /// Nothing known about the display means nothing written: the emulator's
     /// own window settings are the user's, and a guess would overwrite them.
     #[test]
     fn an_unknown_display_leaves_the_window_settings_alone() {
-        assert_eq!(window_lines(None), "");
-        assert_eq!(window_lines(Some(screen(0, 1080))), "");
-        assert_eq!(window_lines(Some(screen(1920, 0))), "");
+        assert_eq!(window_lines(None, None, true), "");
+        assert_eq!(window_lines(Some(screen(0, 1080)), None, true), "");
+        assert_eq!(window_lines(Some(screen(1920, 0)), None, true), "");
     }
 
     #[test]

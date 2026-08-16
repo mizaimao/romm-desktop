@@ -638,6 +638,11 @@ describe("the lightbox and the controller", () => {
     ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
     assert.equal(ui.isLightboxOpen(), true);
 
+    // One poll with nothing held, as happens between letting go of whatever
+    // opened the player and reaching for the next button.
+    pads = [pad([])];
+    ui.stepForTest();
+
     pads = [pad([y])];
     ui.stepForTest();
     assert.equal(ui.isLightboxOpen(), false, "the pad cannot close the player");
@@ -646,6 +651,8 @@ describe("the lightbox and the controller", () => {
   test("back closes it too", () => {
     const b = Number(Object.entries(ui.padMap()).find(([, a]) => a === "back")?.[0]);
     ui.openLightbox([{ src: "x.png", kind: "image", caption: "Box" }], 0);
+    pads = [pad([])];
+    ui.stepForTest();
     pads = [pad([b])];
     ui.stepForTest();
     assert.equal(ui.isLightboxOpen(), false);
@@ -660,6 +667,8 @@ describe("the lightbox and the controller", () => {
 
     const before = ui.state.zoom;
     ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
+    pads = [pad([])];
+    ui.stepForTest();
     pads = [pad([zin])];
     ui.stepForTest();
 
@@ -730,6 +739,8 @@ describe("walking the reel with a pad", () => {
     const shown = () =>
       document.querySelector("#lightbox figcaption").textContent.split(" — ")[0];
     assert.equal(shown(), "Gameplay");
+    pads = [pad([])];
+    ui.stepForTest();
     pads = [pad([right])];
     ui.stepForTest();
     assert.equal(shown(), "Mix", "the d-pad did not change the picture");
@@ -744,6 +755,8 @@ describe("walking the reel with a pad", () => {
       ],
       1
     );
+    pads = [pad([])];
+    ui.stepForTest();
     pads = [pad([], { axes: [1, 0] })];
     ui.stepForTest();
     assert.equal(
@@ -824,5 +837,28 @@ describe("sorting a list", () => {
     sort.sorted(games);
     assert.deepEqual(names(games), before, "state.rows was sorted in place");
     sort.setOrder("name");
+  });
+});
+
+describe("opening the player with a held button", () => {
+  /// Y opens the player and Y closes it, and a button is held down across
+  /// several polls. So the poll that first sees the player open must not treat
+  /// the button that opened it as a fresh press — or the player opens and shuts
+  /// in the same breath and the button looks dead.
+  test("the button that opened the player does not immediately close it", () => {
+    const y = Number(Object.entries(ui.padMap()).find(([, a]) => a === "video")?.[0]);
+    pads = [pad([y])];
+    // The press that opens it. The real path goes through playVideo, which is
+    // async; the poll below is what would happen while the button is still down.
+    ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
+    ui.stepForTest();
+    assert.equal(ui.isLightboxOpen(), true, "the player shut as soon as it opened");
+
+    // Released, then pressed again: now it should close.
+    pads = [pad([])];
+    ui.stepForTest();
+    pads = [pad([y])];
+    ui.stepForTest();
+    assert.equal(ui.isLightboxOpen(), false, "a second press should close it");
   });
 });

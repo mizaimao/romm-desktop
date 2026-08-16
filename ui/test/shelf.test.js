@@ -62,6 +62,7 @@ before(async () => {
         if (cmd === "game_states") return states;
         if (cmd === "play_history") return historyData;
         if (cmd === "launch_rom") return "played for 3 minutes";
+        if (cmd === "game_video") return "/v/clip.mp4";
         return [];
       },
       convertFileSrc: (p) => `asset://${p}`,
@@ -320,6 +321,28 @@ describe("browsing a game's media", () => {
     // And it wraps, so holding a direction never dead-ends.
     lb.stepLightbox(-1);
     assert.notEqual(captionNow(), "Mix");
+    lb.closeLightbox();
+  });
+});
+
+describe("the video button", () => {
+  test("pressing it opens the player", async () => {
+    Object.assign(DETAIL, { has_video: true, art: { miximages: "/a/mix.png" } });
+    await detail.selectRom(7);
+    await settle();
+
+    const btn = document.getElementById("playvid");
+    assert.ok(btn, "no video button for a game that has one");
+
+    await detail.playVideo();
+    await settle();
+
+    const lb = await import("../js/lightbox.js");
+    assert.equal(lb.isLightboxOpen(), true, "the player did not open");
+    assert.ok(
+      document.querySelector("#lightbox video"),
+      "the player opened on something that is not the video"
+    );
     lb.closeLightbox();
   });
 });

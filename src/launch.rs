@@ -43,6 +43,10 @@ pub struct Request<'a> {
     pub refresh_hz: Option<f32>,
     /// Start in this save-state slot instead of at the title screen.
     pub entry_slot: Option<u32>,
+    /// Shape the game window like the game rather than filling the screen.
+    pub fit_window: bool,
+    /// Keep the game window's title bar.
+    pub window_decorations: bool,
     /// Bind players 2-4 like player 1. On by default: the second pad on a desk
     /// is usually the same model as the first, and a pad RetroArch has no
     /// profile for is otherwise a port that does nothing.
@@ -235,7 +239,14 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         ra.prepare_tweaks(req.library_root, req.platform, &core),
         req.achievements.map(crate::achievements::config_lines).unwrap_or_default(),
         crate::lightgun::config_lines(req.platform, gun),
-        crate::retroarch::window_lines(req.screen),
+        crate::retroarch::window_lines(
+            req.screen,
+            // Only when asked for. Someone who wants the window filling the
+            // screen and the emulator putting bars in it can have that; the
+            // default is a window with no bars in it at all.
+            req.fit_window.then(|| crate::aspect::of(req.platform)).flatten(),
+            req.window_decorations,
+        ),
     );
     let overrides = ra
         .write_overrides_full(
