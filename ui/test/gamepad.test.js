@@ -523,10 +523,10 @@ describe("take offline", () => {
     await settle();
     const asked = invoked.filter((c) => c.cmd === "download_estimate");
     assert.equal(asked.length, 1);
-    assert.deepEqual(asked[0].args.platforms, ["snes"], "the console on screen starts ticked");
-    assert.equal(asked[0].args.art, "minimal");
-    assert.equal(asked[0].args.videos, false, "videos must never be on by default");
-    assert.equal(asked[0].args.bios, false, "300 MB must never arrive unasked");
+    assert.deepEqual(asked[0].args.choice.platforms, ["snes"], "the console on screen starts ticked");
+    assert.equal(asked[0].args.choice.art, "minimal");
+    assert.equal(asked[0].args.choice.videos, false, "videos must never be on by default");
+    assert.equal(asked[0].args.choice.bios, false, "300 MB must never arrive unasked");
   });
 
   /// Nobody travels with one console, and choosing them one at a time meant
@@ -541,7 +541,7 @@ describe("take offline", () => {
     document.querySelector(".bulk-size").click();
     await settle();
     const asked = invoked.filter((c) => c.cmd === "download_estimate").at(-1);
-    assert.deepEqual(asked.args.platforms.sort(), ["psx", "snes"]);
+    assert.deepEqual(asked.args.choice.platforms.sort(), ["psx", "snes"]);
   });
 
   test("All and None move every tick at once", async () => {
@@ -565,7 +565,7 @@ describe("take offline", () => {
     document.querySelector(".bulk-size").click();
     await settle();
     assert.equal(
-      invoked.filter((c) => c.cmd === "download_estimate").at(-1).args.bios,
+      invoked.filter((c) => c.cmd === "download_estimate").at(-1).args.choice.bios,
       true
     );
   });

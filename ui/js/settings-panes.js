@@ -394,9 +394,12 @@ function motionMarkup(motion) {
         </select>
       </div>
     </div>
-    <p class="hint">Reduces the smearing an LCD gives 60fps content, by strobing
-      across sub-frames. Chained on top of each system's own shader — it does
-      not replace it. Best on a 120Hz+ display; CRT systems only.</p>`;
+    <p class="hint">Reduces the smearing an LCD gives 60fps content by blanking
+      the screen between frames. That is flicker by construction, and it only
+      reads as sharper motion on a display locked to a fixed refresh at an exact
+      multiple of 60 — on a variable-refresh panel such as ProMotion the black
+      frames land unevenly and it simply flickers. Chained on top of each
+      system's own shader rather than replacing it. CRT systems only.</p>`;
 }
 
 function systemRow(s) {

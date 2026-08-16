@@ -141,7 +141,7 @@ export async function askDownload(what = {}) {
     btn.disabled = true;
     est.textContent = "Counting…";
     try {
-      const [summary, fits, note] = await invoke("download_estimate", choice());
+      const [summary, fits, note] = await invoke("download_estimate", { choice: choice() });
       est.textContent = summary;
       q(".bulk-space").textContent = note;
       q(".bulk-space").classList.toggle("bad", !fits);
@@ -186,7 +186,7 @@ export async function askDownload(what = {}) {
       est.textContent = String(payload);
     });
     try {
-      toast(await invoke("download_set", picked), 8000);
+      toast(await invoke("download_set", { choice: picked }), 8000);
       close();
     } catch (e) {
       est.textContent = String(e);

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
 use romm_desktop::{
@@ -653,6 +653,40 @@ fn recent_games(state: State<'_, AppState>, limit: Option<usize>) -> CmdResult<V
     Ok(to_views(&state, rows))
 }
 
+/// What a bulk download should cover: what to take, and how much of it.
+///
+/// One struct rather than six parameters. The estimate and the download need
+/// exactly the same set, so passing them separately meant two signatures that
+/// had to be kept in step by hand — and the second of them had grown past what
+/// the linter will accept.
+#[derive(Debug, Clone, Deserialize)]
+struct DownloadChoice {
+    #[serde(default)]
+    platforms: Vec<String>,
+    #[serde(default)]
+    collection: Option<String>,
+    art: String,
+    videos: bool,
+    manuals: bool,
+    bios: bool,
+}
+
+impl DownloadChoice {
+    fn want(&self) -> romm_desktop::bulk::Want {
+        use romm_desktop::bulk;
+        bulk::Want {
+            roms: true,
+            art: match self.art.as_str() {
+                "none" => bulk::Art::None,
+                "full" => bulk::Art::Full,
+                _ => bulk::Art::Minimal,
+            },
+            videos: self.videos,
+            manuals: self.manuals,
+        }
+    }
+}
+
 /// Every game in the chosen systems and collection, in one list.
 ///
 /// Systems are plural because the reason for taking a library offline is a
@@ -692,31 +726,17 @@ fn rows_for_choice(
 #[tauri::command]
 async fn download_estimate(
     state: State<'_, AppState>,
-    platforms: Vec<String>,
-    collection: Option<String>,
-    art: String,
-    videos: bool,
-    manuals: bool,
-    bios: bool,
+    choice: DownloadChoice,
 ) -> CmdResult<(String, bool, String)> {
     use romm_desktop::{bulk, diskspace};
 
-    let rows = rows_for_choice(&state, &platforms, &collection)?;
-    let want = bulk::Want {
-        roms: true,
-        art: match art.as_str() {
-            "none" => bulk::Art::None,
-            "full" => bulk::Art::Full,
-            _ => bulk::Art::Minimal,
-        },
-        videos,
-        manuals,
-    };
+    let rows = rows_for_choice(&state, &choice.platforms, &choice.collection)?;
+    let want = choice.want();
     let mut est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
     // Asked of the server rather than averaged, because unlike artwork there is
     // a fixed set of these and it already knows which are here.
     let mut summary = est.describe();
-    if bios {
+    if choice.bios {
         let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
         if let Some(client) = state.client.clone()
             && let Ok((total, here, bytes)) = romm_desktop::bios::status(&client, &library_root).await
@@ -759,27 +779,13 @@ async fn download_estimate(
 async fn download_set(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-    platforms: Vec<String>,
-    collection: Option<String>,
-    art: String,
-    videos: bool,
-    manuals: bool,
-    bios: bool,
+    choice: DownloadChoice,
 ) -> CmdResult<String> {
     use romm_desktop::{bulk, diskspace};
 
     let client = state.client.clone().ok_or("no server configured")?;
-    let rows = rows_for_choice(&state, &platforms, &collection)?;
-    let want = bulk::Want {
-        roms: true,
-        art: match art.as_str() {
-            "none" => bulk::Art::None,
-            "full" => bulk::Art::Full,
-            _ => bulk::Art::Minimal,
-        },
-        videos,
-        manuals,
-    };
+    let rows = rows_for_choice(&state, &choice.platforms, &choice.collection)?;
+    let want = choice.want();
     let est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
     if let diskspace::Fit::No { short, .. } = diskspace::fits(&state.roms_dir, est.total()) {
         return Err(format!(
@@ -863,7 +869,7 @@ async fn download_set(
     // whose absence you only discover when a console refuses to boot somewhere
     // with no server to fetch from.
     let mut bios_note = String::new();
-    if bios {
+    if choice.bios {
         let library_root = state.roms_dir.parent().unwrap_or(Path::new(".")).to_path_buf();
         let _ = app.emit("bulk-progress", "BIOS files…".to_owned());
         match romm_desktop::bios::sync(&client, &library_root, |done, got, name| {
@@ -1419,6 +1425,25 @@ async fn game_video(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
 fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> {
     use tauri::Manager as _;
 
+    // macOS first, and without the toolkit. A monitor arrives from Tauri as a
+    // pixel size plus a scale factor, and dividing one by the other is only
+    // correct when the display runs at its native resolution. This machine is
+    // a 3024x1964 panel with a backing scale of 2 showing an 1800x1169
+    // desktop, so that arithmetic gives 1512x982 — wrong by a third, and wrong
+    // in a way that puts the game window somewhere nobody asked for.
+    //
+    // CoreGraphics reports points directly, in the space the window server and
+    // therefore RetroArch use.
+    if let Some(b) = romm_desktop::macdisplay::main_display() {
+        return Some(romm_desktop::retroarch::Screen {
+            x: b.x as i32,
+            y: b.y as i32,
+            width: b.width as u32,
+            height: b.height as u32,
+            primary_height: b.height as u32,
+        });
+    }
+
     // The monitor the library window is on, so launching from a laptop screen
     // with an external display attached sizes for the one being looked at.
     let monitor = app
@@ -1426,48 +1451,21 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
         .and_then(|w| w.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten())?;
 
-    // Position as well as size: the window is centred by writing coordinates
-    // now, and on a laptop with an external display the two monitors do not
-    // both start at zero. Centring within a monitor while writing coordinates
-    // relative to the primary one lands the window on the wrong screen.
     let size = monitor.size();
     let at = monitor.position();
-    // The primary monitor's height, because macOS window coordinates are
-    // measured from the bottom of *that* screen — see retroarch::window_lines.
     let primary_height = app
         .primary_monitor()
         .ok()
         .flatten()
-        .map(|m| {
-            let s = m.size();
-            if cfg!(target_os = "macos") {
-                (s.height as f64 / m.scale_factor().max(1.0)) as u32
-            } else {
-                s.height
-            }
-        })
-        .unwrap_or(0);
-    if cfg!(target_os = "macos") {
-        // macOS reports pixels and lays out in points. Everything RetroArch is
-        // told here is in the desktop's own units, so both are divided.
-        let scale = monitor.scale_factor().max(1.0);
-        let by = |v: f64| (v / scale) as i32;
-        Some(romm_desktop::retroarch::Screen {
-            x: by(at.x as f64),
-            y: by(at.y as f64),
-            width: (size.width as f64 / scale) as u32,
-            height: (size.height as f64 / scale) as u32,
-            primary_height,
-        })
-    } else {
-        Some(romm_desktop::retroarch::Screen {
-            x: at.x,
-            y: at.y,
-            width: size.width,
-            height: size.height,
-            primary_height,
-        })
-    }
+        .map(|m| m.size().height)
+        .unwrap_or(size.height);
+    Some(romm_desktop::retroarch::Screen {
+        x: at.x,
+        y: at.y,
+        width: size.width,
+        height: size.height,
+        primary_height,
+    })
 }
 
 /// `pad` is the name the frontend's Gamepad API reports for the connected

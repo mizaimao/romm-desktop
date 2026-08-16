@@ -17,6 +17,7 @@ pub mod download;
 pub mod esde;
 pub mod launch;
 pub mod lightgun;
+pub mod macdisplay;
 pub mod media;
 pub mod padprofile;
 pub mod platformicon;
