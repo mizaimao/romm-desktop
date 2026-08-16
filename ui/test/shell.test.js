@@ -42,6 +42,9 @@ before(async () => {
   global.window = dom.window;
   global.document = dom.window.document;
   global.localStorage = dom.window.localStorage;
+  // The views build selectors with CSS.escape. jsdom provides it on the
+  // window; the modules reach for the bare global, as they do in a browser.
+  global.CSS = dom.window.CSS;
   dom.window.__TAURI__ = {
     core: {
       // Selecting a row draws the info pane, which joins several of these
@@ -421,5 +424,61 @@ describe("three columns opens with all three filled", () => {
     const lit = el.consoles.querySelectorAll(".open");
     assert.equal(lit.length, 1, `${lit.length} consoles look open`);
     assert.equal(lit[0].dataset.slug, state.platform);
+  });
+});
+
+describe("switching tabs in three columns", () => {
+  /// Both reported together, and both the same cause: parking restores the
+  /// screen a section was left on, which is right when a section *is* the
+  /// screen. In three columns a tab owns two columns, so restoring only the
+  /// screen left the other tab's list on the left — Library selected with
+  /// collections beside it — and the previous tab's page still in the middle.
+  let tabs, state, library;
+
+  before(async () => {
+    tabs = await import("../js/tabs.js");
+    library = await import("../js/library.js");
+    ({ state } = await import("../js/state.js"));
+  });
+
+  beforeEach(async () => {
+    for (const role of ["primary", "aside", "nav", "games", "picker"]) {
+      shell.setRegion(role, null);
+    }
+    shell.setMode("columns");
+    el.consoles.innerHTML = "";
+    el.list.innerHTML = "";
+    state.platform = null;
+    state.lastPlatform = null;
+  });
+
+  test("Library shows consoles again after a visit to My collections", async () => {
+    await tabs.showSection("library", { force: true });
+    assert.ok(
+      el.consoles.querySelector("[data-slug]"),
+      "the consoles are not in the column to begin with"
+    );
+
+    await tabs.showSection("mine");
+    assert.ok(el.consoles.querySelector(".filter"), "the collections did not take the column");
+
+    await tabs.showSection("library");
+    assert.ok(
+      el.consoles.querySelector("[data-slug]"),
+      "Library was selected and the collections were still on the left"
+    );
+    assert.equal(el.consoles.querySelector(".filter"), null);
+  });
+
+  /// A page in the middle with a list of collections beside it is two tabs at
+  /// once.
+  test("the middle does not keep the last tab's contents", async () => {
+    await tabs.showSection("history", { force: true });
+    const wasHistory = el.list.innerHTML;
+    assert.ok(wasHistory.length > 0, "History drew nothing to begin with");
+
+    await tabs.showSection("browse");
+    assert.notEqual(el.list.innerHTML, wasHistory, "the History page is still in the middle");
+    assert.match(el.list.innerHTML, /Pick a group/);
   });
 });

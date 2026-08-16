@@ -13,6 +13,7 @@ import { el, state, trail } from "./state.js";
 import { showPlatforms, backToPlatforms } from "./library.js";
 import { showCollectionGroups, showCollectionsIn } from "./collections.js";
 import { showHistory } from "./history.js";
+import { shellMode } from "./shell.js";
 
 /// `user` and `smart` are collections someone made — by hand or as a saved
 /// filter. Everything else RomM generates from metadata: genre, franchise,
@@ -137,8 +138,14 @@ export async function showSection(id, { force = false } = {}) {
   current = id;
   paint();
 
-  if (!(await unpark(id))) {
-    // Nothing parked — first visit this session.
+  // Parking restores the screen a section was left on, which is exactly right
+  // when a section *is* the screen. In three columns it is not: a tab owns the
+  // left column and the middle, and restoring only the screen left the other
+  // tab's list on the left — Library selected with collections beside it —
+  // or the previous tab's page still in the middle. Opening the tab fills both,
+  // and where you were is remembered by the tab itself.
+  const restored = shellMode() === "columns" ? false : await unpark(id);
+  if (!restored) {
     state.collection = null;
     trail.length = 0;
     await section.open();

@@ -151,3 +151,15 @@ export function enter({ title = "", zoom = false, gridLayout = true, ...wants } 
 export function showZoom(on) {
   if (el.zoomWrap) el.zoomWrap.hidden = !on;
 }
+
+/// Empty the middle column, with a line saying what to do about it.
+///
+/// A tab that fills the left column has to clear the middle as well, or the
+/// previous tab's contents sit there — History's page under a list of
+/// collections, a console's games under another console's list. In one pane
+/// there is only one place for content, so this is a no-op there.
+export function resetGames(message) {
+  if (mode !== "columns") return;
+  const games = region("games");
+  if (games) games.innerHTML = `<div class="empty">${message}</div>`;
+}

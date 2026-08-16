@@ -6,7 +6,7 @@
 // so this sits next to the platform grid rather than inside it.
 
 import { el, state, trail, invoke, convertFileSrc } from "./state.js";
-import { enter as enterView , region } from "./shell.js";
+import { enter as enterView, region, resetGames } from "./shell.js";
 import { escapeHtml } from "./util.js";
 import { renderRows } from "./library.js";
 
@@ -29,6 +29,7 @@ function topBar(title) {
 export async function showCollectionGroups({ exclude = [] } = {}) {
   trail.length = 0;
   topBar("Browse");
+  resetGames("Pick a group on the left.");
 
   // `user` lives in its own tab now, so showing it here too would be the same
   // collections in two places with different names.
@@ -63,6 +64,7 @@ export async function showCollectionGroups({ exclude = [] } = {}) {
 
 export async function showCollectionsIn(group, label) {
   topBar(label || group);
+  resetGames("Pick a collection on the left.");
   const items = await invoke("collections_in", { group });
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate
