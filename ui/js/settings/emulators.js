@@ -26,6 +26,17 @@ export const html = `      <h4>Emulators</h4>
         then nothing to drag and nothing to click to close, so the way out is
         the controller combination or Escape.</p>
 
+      <div class="srow">
+        <label>Auto-fire</label>
+        <div class="ctl"><button data-field="autofire">…</button></div>
+      </div>
+      <p class="hint">In arcade shooters only, and only where the metadata says
+        so. The bottom face button repeats while held; single shots move to the
+        top one, which these games do not use. Arcade cabinets were built
+        around a button you hammered — a run of Metal Slug is a few thousand
+        presses — and every home port since has offered this. Off for games
+        where a single accurate shot matters more than volume.</p>
+
       <div class="srow sys-screen" hidden>
         <label>Open games on</label>
         <div class="ctl"><select class="game-display"></select></div>

@@ -139,6 +139,10 @@ beforeEach(async () => {
   recentGames = [];
   estimateFits = true;
   document.getElementById("bulk-overlay")?.remove();
+  // A test that fails before its cleanup leaves its dialog in the document,
+  // and the next test would then drive that one instead of its own.
+  document.getElementById("conflict-overlay")?.remove();
+  document.querySelector(".ctx-menu")?.remove();
   ui.closeLightbox();
   document.getElementById("list").innerHTML = "";
   ui.state.view = "platforms";
@@ -917,5 +921,80 @@ describe("the menu on a game", () => {
     assert.match(text, /play/i, "no way to start the game");
     assert.match(text, /Delete Slot 1/, "the game's own states are not offered");
     document.querySelector(".ctx-menu")?.remove();
+  });
+});
+
+describe("dialogs answer the controller", () => {
+  /// A launch can stop dead on "your saves could not be checked — play
+  /// anyway?", and that question was mouse-only. On a machine being used from
+  /// a sofa that is a dead end, not a dialog.
+  const openDialog = () => {
+    const d = document.createElement("div");
+    d.id = "conflict-overlay";
+    d.innerHTML = `<button class="a" data-name="a">Play anyway</button>
+                   <button class="b" data-name="b">Keep the server's</button>
+                   <button data-go="no" class="cancel" data-name="cancel">Cancel</button>`;
+    document.body.appendChild(d);
+    return d;
+  };
+
+  test("the d-pad moves through the buttons and A presses one", () => {
+    const map = ui.padMap();
+    const down = Number(Object.entries(map).find(([, a]) => a === "down")?.[0]);
+    const go = Number(Object.entries(map).find(([, a]) => a === "activate")?.[0]);
+    const d = openDialog();
+    let clicked = null;
+    for (const b of d.querySelectorAll("button")) {
+      b.addEventListener("click", () => (clicked = b.dataset.name));
+    }
+
+    pads = [pad([down])];
+    ui.stepForTest();
+    assert.ok(
+      document.activeElement.classList.contains("pad-focus"),
+      "nothing shows where the controller is"
+    );
+    pads = [pad([])];
+    ui.stepForTest();
+    pads = [pad([down])];
+    ui.stepForTest();
+
+    pads = [pad([])];
+    ui.stepForTest();
+    pads = [pad([go])];
+    ui.stepForTest();
+    assert.equal(clicked, "b", `pressed ${clicked} instead of the second button`);
+    d.remove();
+  });
+
+  test("B backs out through whatever the dialog calls cancelling", () => {
+    const map = ui.padMap();
+    const back = Number(Object.entries(map).find(([, a]) => a === "back")?.[0]);
+    const d = openDialog();
+    let cancelled = false;
+    d.querySelector(".cancel").addEventListener("click", () => (cancelled = true));
+
+    pads = [pad([back])];
+    ui.stepForTest();
+    assert.equal(cancelled, true, "the pad could not back out of the dialog");
+    d.remove();
+  });
+
+  /// While a dialog is up it owns the pad: moving the cursor in the library
+  /// behind it is how someone answers a question about a game they are no
+  /// longer looking at.
+  test("the library behind it does not move", () => {
+    const map = ui.padMap();
+    const down = Number(Object.entries(map).find(([, a]) => a === "down")?.[0]);
+    document.getElementById("list").innerHTML =
+      `<div class="gcards"><div class="gcard sel" data-id="1"></div><div class="gcard" data-id="2"></div></div>`;
+    const d = openDialog();
+    pads = [pad([down])];
+    ui.stepForTest();
+    assert.ok(
+      document.querySelector('.gcard[data-id="1"]').classList.contains("sel"),
+      "the selection moved in the library while a dialog was open"
+    );
+    d.remove();
   });
 });

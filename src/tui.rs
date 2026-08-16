@@ -265,6 +265,7 @@ impl App {
         // bezel overlays) without touching the user's retroarch.cfg.
         let cfg_core_overrides = self.core_overrides.clone();
         let req = crate::launch::Request {
+            autofire: false,
             window_decorations: true,
             fit_window: true,
             mirror_players: true,

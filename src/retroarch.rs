@@ -580,7 +580,7 @@ input_player2_gun_start_mbtn = \"3\"
         dir: &Path,
         user_config: Option<&Path>,
     ) -> Result<PathBuf> {
-        self.write_overrides_full(dir, user_config, "", None, true)
+        self.write_overrides_full(dir, user_config, "", None, true, false)
     }
 
     /// As above, with `extra` (per-platform shader settings) inserted before
@@ -592,6 +592,7 @@ input_player2_gun_start_mbtn = \"3\"
         extra: &str,
         pad: Option<&str>,
         mirror_players: bool,
+        autofire: bool,
     ) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
@@ -599,6 +600,9 @@ input_player2_gun_start_mbtn = \"3\"
         body.push_str(Self::OVERRIDES_OS);
         body.push_str(&self.hotkeys(pad));
         body.push_str(&self.players(pad, mirror_players));
+        if autofire {
+            body.push_str(&self.autofire(pad));
+        }
         body.push_str(extra);
 
         if let Some(user) = user_config {
@@ -659,6 +663,60 @@ input_player2_gun_start_mbtn = \"3\"
             Some(profile) => padprofile::hotkey_block(&profile),
             None => padprofile::no_profile_note(&roots, device),
         }
+    }
+
+    /// Auto-fire: the shot button repeats while held.
+    ///
+    /// Arcade shooters were built around a cabinet button you hammered, and a
+    /// run of Metal Slug is a few thousand presses. Every home port of these
+    /// games since has offered auto-fire; the arcade originals cannot, because
+    /// the hardware had no such thing.
+    ///
+    /// The arrangement, and why it is this way round: the bottom face button
+    /// becomes the repeating one, because that is the one already under the
+    /// thumb and the one that hurts. Single shots move to the top face button,
+    /// which on a Neo Geo four-button layout is button D — unused by Metal
+    /// Slug and by most of the run-and-gun games, so nothing is displaced. A
+    /// game that does use all four still works: the top button keeps sending
+    /// the shot, it simply no longer sends D.
+    ///
+    /// RetroArch's "single button (hold)" turbo mode is what does the
+    /// repeating: it pulses `input_turbo_default_button` — RetroPad B, which
+    /// every arcade core maps to the primary fire — while the turbo button is
+    /// held.
+    pub fn autofire(&self, device: Option<&str>) -> String {
+        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
+        let driver = padprofile::configured_driver(&[
+            self.data_dir().join("retroarch.cfg"),
+            self.root.join("retroarch.cfg"),
+        ]);
+        let Some(profile) = padprofile::find_with_driver(&roots, device, driver.as_deref())
+            .or_else(|| padprofile::known(device))
+        else {
+            return String::new();
+        };
+        // Both buttons have to be known. Half of this arrangement is worse
+        // than none of it: a shot button that repeats with nowhere to fire a
+        // single shot from is a game you cannot aim carefully in.
+        let (Some(hold), Some(single)) = (
+            profile.get(padprofile::Physical::A),
+            profile.get(padprofile::Physical::Y),
+        ) else {
+            return String::new();
+        };
+        format!(
+            "\n# ---- Auto-fire ----\n\
+             # The bottom face button repeats while held; single shots move to\n\
+             # the top one, which these games do not use. Turned off per game\n\
+             # in Settings, or for everything with autofire = false.\n\
+             input_turbo_mode = \"3\"\n\
+             input_turbo_default_button = \"0\"\n\
+             input_turbo_period = \"8\"\n\
+             input_turbo_duty_cycle = \"4\"\n\
+             {}\n{}\n",
+            hold.line("player1_turbo"),
+            single.line("player1_b"),
+        )
     }
 
     /// The player-port block: how many ports, the stick standing in for the
@@ -1214,6 +1272,43 @@ input_r2_axis = "+5"
         );
     }
 
+    /// Auto-fire moves two buttons and nothing else. Getting only half of it
+    /// written would be worse than none: a shot button that repeats, with
+    /// nowhere left to fire a single shot from, is a game you cannot aim in.
+    #[test]
+    fn autofire_moves_the_shot_to_the_top_button_and_repeats_the_bottom_one() {
+        let dir = scratch("autofire");
+        with_autoconfig(&dir);
+        let out = fake(&dir).autofire(Some("Xbox Wireless Controller"));
+
+        // RetroPad B is the primary fire in every arcade core, and mode 3 is
+        // "single button (hold)" — pulse it while the turbo button is down.
+        assert!(out.contains("input_turbo_mode = \"3\""), "{out}");
+        assert!(out.contains("input_turbo_default_button = \"0\""), "{out}");
+        assert!(out.contains("input_player1_turbo_btn"), "{out}");
+        // And the single shot has somewhere to live.
+        assert!(out.contains("input_player1_b_btn"), "{out}");
+
+        // The two are different buttons, or holding one would do both.
+        let val = |k: &str| {
+            out.lines()
+                .find(|l| l.starts_with(k))
+                .and_then(|l| l.split('"').nth(1))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        assert_ne!(val("input_player1_turbo_btn"), val("input_player1_b_btn"));
+    }
+
+    /// A pad nothing is known about gets nothing. Guessing a button index here
+    /// does not fail quietly — it binds fire to whatever that index happens to
+    /// be on the pad in someone's hands.
+    #[test]
+    fn autofire_writes_nothing_for_a_pad_with_no_profile() {
+        let dir = scratch("autofire-unknown");
+        assert_eq!(fake(&dir).autofire(Some("Some Unheard-of Pad")), "");
+    }
+
     /// Nothing known about the display means nothing written: the emulator's
     /// own window settings are the user's, and a guess would overwrite them.
     #[test]
@@ -1231,7 +1326,7 @@ input_r2_axis = "+5"
         std::fs::write(&user, "video_driver = \"vulkan\"\n").unwrap();
 
         let path = fake(&dir)
-            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", None, true)
+            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", None, true, false)
             .unwrap();
         let body = std::fs::read_to_string(path).unwrap();
 
@@ -1249,7 +1344,7 @@ input_r2_axis = "+5"
         let dir = scratch("missing-user");
         with_autoconfig(&dir);
         let path = fake(&dir)
-            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None, true)
+            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None, true, false)
             .unwrap();
         assert!(std::fs::read_to_string(path).unwrap().contains("input_enable_hotkey_btn"));
     }
@@ -1268,7 +1363,7 @@ input_r2_axis = "+5"
         let dir = scratch("hotkeys");
         with_autoconfig(&dir);
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", None, true, false).unwrap(),
         )
         .unwrap();
 
@@ -1305,7 +1400,7 @@ input_r2_axis = "+5"
         let dir = scratch("quit-safety");
         with_autoconfig(&dir);
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", None, true, false).unwrap(),
         )
         .unwrap();
 
@@ -1330,7 +1425,7 @@ input_r2_axis = "+5"
     #[test]
     fn every_emitted_line_parses_as_a_setting() {
         let dir = scratch("well-formed");
-        let path = fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap();
+        let path = fake(&dir).write_overrides_full(&dir, None, "", None, true, false).unwrap();
         for line in std::fs::read_to_string(path).unwrap().lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -1379,7 +1474,7 @@ input_r2_axis = "+5"
     fn no_profile_means_no_hotkeys_rather_than_a_guess() {
         let dir = scratch("no-profile");
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", Some("Some Unusual Pad"), true).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", Some("Some Unusual Pad"), true, false).unwrap(),
         )
         .unwrap();
 
@@ -1402,7 +1497,7 @@ input_r2_axis = "+5"
     fn the_no_profile_note_binds_nothing() {
         let dir = scratch("no-profile-lines");
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", None, true, false).unwrap(),
         )
         .unwrap();
         // Only the hotkey keys: `input_overlay_enable` and friends are ordinary

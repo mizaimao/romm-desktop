@@ -42,6 +42,8 @@ struct AppState {
     fit_window: bool,
     /// Keep the game window's title bar.
     window_decorations: bool,
+    /// Auto-fire in arcade shooters. See config::RetroArchCfg.
+    autofire: bool,
     /// Behind mutexes so a choice made in the UI takes effect on the next
     /// launch rather than the next restart. `config.toml` stays the source of
     /// truth; these are the live copy.
@@ -282,6 +284,7 @@ struct ConfigFields {
     mirror_player_one: bool,
     fit_window: bool,
     window_decorations: bool,
+    autofire: bool,
     /// Present so the UI can say where it is writing, and warn when there is
     /// nothing to write to.
     config_path: String,
@@ -309,6 +312,7 @@ fn config_fields() -> CmdResult<ConfigFields> {
         mirror_player_one: cfg.controllers.mirror_player_one,
         fit_window: cfg.retroarch.fit_window,
         window_decorations: cfg.retroarch.window_decorations,
+        autofire: cfg.retroarch.autofire,
         config_path: abs(Path::new("config.toml")),
         config_exists: Config::exists("config.toml"),
     })
@@ -344,6 +348,7 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "game_display" => ("retroarch", "game_display"),
         "fit_window" => ("retroarch", "fit_window"),
         "window_decorations" => ("retroarch", "window_decorations"),
+        "autofire" => ("retroarch", "autofire"),
         other => return Err(format!("unknown setting {other}")),
     };
 
@@ -358,6 +363,7 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
             | "mirror_player_one"
             | "fit_window"
             | "window_decorations"
+            | "autofire"
     );
 
     if value.trim().is_empty() && !boolean {
@@ -1575,6 +1581,17 @@ async fn launch_rom(
     let req = romm_desktop::launch::Request {
         fit_window: state.fit_window,
         window_decorations: state.window_decorations,
+        // Only where the metadata says shooter, and only on the platforms
+        // whose cabinets had a fire button: a "shooter" on the Mega Drive is
+        // as likely to be a light-gun game or a shmup with its own auto-fire.
+        autofire: state.autofire
+            && matches!(row.platform_slug.as_str(), "arcade" | "neogeoaes" | "neogeocd")
+            && meta_strings(
+                &row.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok()),
+                "genres",
+            )
+            .iter()
+            .any(|g| g.to_lowercase().contains("shoot")),
         mirror_players: state.mirror_players,
         entry_slot,
         rom: &path,
@@ -2616,6 +2633,7 @@ fn main() {
             mirror_players: cfg.controllers.mirror_player_one,
             fit_window: cfg.retroarch.fit_window,
             window_decorations: cfg.retroarch.window_decorations,
+            autofire: cfg.retroarch.autofire,
             core_overrides: Mutex::new(cfg.cores.overrides.clone()),
             core_per_game: Mutex::new(cfg.cores.per_game.clone()),
             user_retroarch_cfg: cfg.user_retroarch_config(),

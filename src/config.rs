@@ -368,6 +368,15 @@ pub struct RetroArchCfg {
     #[serde(default = "yes")]
     pub fit_window: bool,
 
+    /// Make the shot button repeat while held, in arcade shooters.
+    ///
+    /// On by default and only for games the metadata calls shooters — 767 of
+    /// them here. These were built around a cabinet button you hammered, and
+    /// a run of Metal Slug is a few thousand presses. Off for anything where
+    /// single shots matter more than volume.
+    #[serde(default = "yes")]
+    pub autofire: bool,
+
     /// Keep the game window's title bar.
     ///
     /// On by default, because without it there is nothing to drag and nothing

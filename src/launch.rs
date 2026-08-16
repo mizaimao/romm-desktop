@@ -47,6 +47,8 @@ pub struct Request<'a> {
     pub fit_window: bool,
     /// Keep the game window's title bar.
     pub window_decorations: bool,
+    /// Make the shot button repeat while held. See RetroArch::autofire.
+    pub autofire: bool,
     /// Bind players 2-4 like player 1. On by default: the second pad on a desk
     /// is usually the same model as the first, and a pad RetroArch has no
     /// profile for is otherwise a port that does nothing.
@@ -255,6 +257,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
             &extra,
             req.pad,
             req.mirror_players,
+            req.autofire,
         )
         .ok();
 

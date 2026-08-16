@@ -253,6 +253,48 @@ function step() {
     return;
   }
 
+  // A dialog has taken over the window: the save-conflict question, the
+  // "saves are not syncing" warning, the take-offline pane, a right-click
+  // menu. All of them were mouse-only, which on a machine being used from a
+  // sofa means a launch can stop dead on a question that cannot be answered.
+  //
+  // The same four actions serve every one of them, because a dialog is a list
+  // of buttons: move through them, press one, or back out.
+  const dialog = openDialog();
+  if (dialog) {
+    const now = performance.now();
+    const pressed = pressedActions(navigator.getGamepads?.() ?? [], map);
+    const items = focusables(dialog);
+    for (const action of pressed) {
+      if (action === "activate") {
+        if (!held.has(action)) {
+          held.set(action, now);
+          (focused(items) ?? items[0])?.click();
+          settling = true;
+        }
+      } else if (action === "back" || action === "back2") {
+        if (!held.has(action)) {
+          held.set(action, now);
+          dismiss(dialog, items);
+          settling = true;
+        }
+      } else if (["up", "left", "down", "right"].includes(action)) {
+        const step = action === "up" || action === "left" ? -1 : 1;
+        if (!held.has(action)) {
+          held.set(action, now + FIRST_REPEAT_MS);
+          move(items, step);
+        } else if (now >= held.get(action)) {
+          held.set(action, now + REPEAT_MS);
+          move(items, step);
+        }
+      }
+    }
+    for (const action of [...held.keys()]) {
+      if (!pressed.has(action)) held.delete(action);
+    }
+    return;
+  }
+
   // Settings is different: the pad must still be able to close it, or a
   // controller-only user is trapped the moment they open it. Everything else
   // in there is bound by pressing buttons, which reads the pad directly.
@@ -288,6 +330,52 @@ function step() {
   for (const action of [...held.keys()]) {
     if (!pressed.has(action)) held.delete(action);
   }
+}
+
+/// The modal currently over the window, if any.
+///
+/// Listed rather than detected, because "is this element a dialog" has no
+/// answer a page can give: a right-click menu and a save-conflict question are
+/// both just divs.
+function openDialog() {
+  return document.querySelector("#conflict-overlay, #bulk-overlay, .ctx-menu");
+}
+
+/// The things inside it a person could press, in the order they are drawn.
+function focusables(dialog) {
+  return [
+    ...dialog.querySelectorAll(
+      "button:not([disabled]), select:not([disabled]), input:not([disabled]):not([type=hidden])"
+    ),
+  ];
+}
+
+function focused(items) {
+  return items.find((n) => n === document.activeElement);
+}
+
+/// Move the highlight, wrapping. A dialog is a short list and running off the
+/// end of it is more annoying than coming round again.
+function move(items, delta) {
+  if (!items.length) return;
+  const at = items.indexOf(document.activeElement);
+  const next = items[(at + delta + items.length) % items.length] ?? items[0];
+  next.focus();
+  for (const n of items) n.classList.toggle("pad-focus", n === next);
+}
+
+/// Back out: whatever the dialog calls cancelling, or simply closing it.
+function dismiss(dialog, items) {
+  const cancel =
+    dialog.querySelector(".bulk-cancel, [data-go=\"no\"], .cancel") ??
+    // A right-click menu has no cancel; going back means it goes away.
+    null;
+  if (cancel) {
+    cancel.click();
+    return;
+  }
+  dialog.remove();
+  void items;
 }
 
 /// Run one poll, for tests. The loop itself is driven by rAF, which a test
