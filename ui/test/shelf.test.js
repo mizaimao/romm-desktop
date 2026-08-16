@@ -619,9 +619,16 @@ describe("how fast the rapid fire goes", () => {
     document.querySelector('.af-step[data-hz="1"]').click();
     await settle();
 
-    const saved = invoked.filter((c) => c.cmd === "set_config_field").at(-1);
-    assert.equal(saved.args.field, "autofire_hz");
-    assert.equal(saved.args.value, "6");
+    // For this run of the app, not for the file: five taps to go from six to
+    // eleven would be five rewrites of config.toml.
+    const saved = invoked.filter((c) => c.cmd === "set_autofire_hz").at(-1);
+    assert.ok(saved, "the rate went nowhere");
+    assert.equal(saved.args.hz, 6);
+    assert.equal(
+      invoked.filter((c) => c.cmd === "set_config_field" && c.args.field === "autofire_hz").length,
+      0,
+      "the rate wrote itself to disk"
+    );
   });
 
   /// Shown next to "Off" as well. The rate is something you may want to set
@@ -642,9 +649,8 @@ describe("how fast the rapid fire goes", () => {
     await settle();
     document.querySelector('.af-step[data-hz="1"]').click();
     await settle();
-    const saved = invoked.filter((c) => c.cmd === "set_config_field").at(-1);
-    assert.equal(saved.args.field, "autofire_hz");
-    assert.equal(saved.args.value, "6");
+    const saved = invoked.filter((c) => c.cmd === "set_autofire_hz").at(-1);
+    assert.equal(saved.args.hz, 6);
     assert.match(document.querySelector(".af-hz").textContent, /6 Hz/);
   });
 
@@ -658,11 +664,11 @@ describe("how fast the rapid fire goes", () => {
     document.querySelector('.af-step[data-hz="-1"]').click();
     await settle();
     assert.equal(
-      invoked.some((c) => c.cmd === "set_config_field"),
+      invoked.some((c) => c.cmd === "set_autofire_hz"),
       false,
-      "it saved a rate below one"
+      "it set a rate below one"
     );
-    Object.assign(DETAIL, { autofire: null, autofire_hz: 5 });
+    Object.assign(DETAIL, { autofire: null, autofire_hz: 6 });
   });
 });
 

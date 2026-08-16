@@ -763,20 +763,25 @@ describe("where the preview toggle lives", () => {
     ({ el } = await import("../js/state.js"));
   });
 
-  test("both are in the tab row, at the end, in that order", () => {
+  /// In a holder, which is what keeps them at the end of the row. The push
+  /// right used to be a margin on Take offline — and that button is hidden on
+  /// every screen with nothing to take offline, so the margin went with it and
+  /// the preview toggle slid back up against the tabs.
+  test("both are in a holder at the end, in that order", () => {
     tabs.installTabs();
-    assert.equal(el.sidebarBtn.parentElement?.id, "tabbar", "it is still up in the header");
-    assert.equal(el.grabBtn.parentElement?.id, "tabbar", "take offline is still up in the header");
-    assert.equal(
-      el.tabbar.lastElementChild,
-      el.sidebarBtn,
-      "something else is after the preview toggle"
+    const end = el.tabbar.querySelector(".tabbar-end");
+    assert.ok(end, "nothing holds them at the end");
+    assert.equal(el.tabbar.lastElementChild, end, "something else is after them");
+    assert.deepEqual(
+      [...end.children].map((c) => c.id),
+      ["grab-btn", "sidebar-btn"]
     );
-    assert.equal(
-      el.sidebarBtn.previousElementSibling,
-      el.grabBtn,
-      "take offline is not immediately before it"
-    );
+
+    // And the holder stays put when the first button is not on screen.
+    el.grabBtn.hidden = true;
+    assert.equal(el.tabbar.lastElementChild, end);
+    assert.equal(el.sidebarBtn.parentElement, end, "the toggle left the holder");
+    el.grabBtn.hidden = false;
   });
 
   /// Moved rather than copied: the same element, so everything that hides it,
@@ -793,8 +798,9 @@ describe("where the preview toggle lives", () => {
   test("rebuilding the row keeps it", () => {
     tabs.installTabs();
     tabs.installTabs();
+    assert.equal(el.tabbar.querySelectorAll(".tabbar-end").length, 1, "two holders");
     for (const btn of [el.sidebarBtn, el.grabBtn]) {
-      assert.equal(btn.parentElement?.id, "tabbar");
+      assert.ok(btn.parentElement?.classList.contains("tabbar-end"));
       assert.equal(document.querySelectorAll(`#${btn.id}`).length, 1);
     }
   });

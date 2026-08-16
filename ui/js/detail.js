@@ -335,7 +335,7 @@ function autofireRow(d) {
   // it too fast, then turning it off to slow it down, is a loop with no exit.
   const rate = `<span class="af-rate">
       <button class="af-step" data-hz="-1" title="Slower">−</button>
-      <span class="af-hz">${d.autofire_hz ?? 5} Hz</span>
+      <span class="af-hz">${d.autofire_hz ?? 6} Hz</span>
       <button class="af-step" data-hz="1" title="Faster">+</button>
     </span>`;
   return `
@@ -370,10 +370,14 @@ function wireAutofire(d) {
     step.addEventListener("click", async () => {
       // Clamped here as well as in the backend, so the number on screen never
       // shows something that was not stored.
-      const want = Math.min(30, Math.max(1, (d.autofire_hz ?? 5) + Number(step.dataset.hz)));
+      const want = Math.min(30, Math.max(1, (d.autofire_hz ?? 6) + Number(step.dataset.hz)));
       if (want === d.autofire_hz) return;
       try {
-        await invoke("set_config_field", { field: "autofire_hz", value: String(want) });
+        // For this run of the app, not for the file. Five taps to go from six
+        // to eleven would be five rewrites of config.toml, and a file
+        // rewritten that often is one that eventually gets caught half
+        // written. The number in Settings is the one you start with.
+        await invoke("set_autofire_hz", { hz: want });
       } catch (e) {
         return toast(`Could not save — ${e}`, 8000);
       }

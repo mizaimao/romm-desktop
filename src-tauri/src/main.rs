@@ -68,6 +68,14 @@ struct AppState {
     /// Conflicts awaiting the user's answer, so the resolve command can act on
     /// one by name rather than the UI having to hand the whole record back.
     pending_conflicts: Mutex<Vec<romm_desktop::savesync::SaveConflict>>,
+    /// The rapid-fire rate for this run of the app, when it has been nudged.
+    ///
+    /// The +/- beside the control wrote config.toml on every press: five taps
+    /// to go from six to eleven is five rewrites of the file, and a file
+    /// rewritten that often is one that eventually gets caught half-written.
+    /// The number in config.toml is the one you start with; moving it here is
+    /// for the run you are about to have.
+    autofire_hz: Mutex<Option<u32>>,
 }
 
 #[derive(Serialize)]
@@ -1240,7 +1248,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
         autofire: autofire_possible(&row)
             .then(|| romm_desktop::tweaks::AutoFire::parse(&stored_autofire()).key().to_owned()),
-        autofire_hz: Config::load().map(|c| c.retroarch.autofire_hz).unwrap_or(5),
+        autofire_hz: autofire_hz(&state),
         platform_slug: row.platform_slug.clone(),
         id: row.id,
         name: row.name,
@@ -1578,6 +1586,28 @@ fn autofire_for(row: &cache::RomRow) -> romm_desktop::tweaks::AutoFire {
     AutoFire::parse(&stored_autofire())
 }
 
+/// The rate for the next launch: whatever the pane was nudged to, or the one
+/// in config.toml.
+fn autofire_hz(state: &State<'_, AppState>) -> u32 {
+    state
+        .autofire_hz
+        .lock()
+        .ok()
+        .and_then(|v| *v)
+        .unwrap_or_else(|| Config::load().map(|c| c.retroarch.autofire_hz).unwrap_or(6))
+}
+
+/// Nudge the rate for this run of the app only.
+///
+/// Deliberately not written to disk: this is a control you press five times in
+/// a row while looking at a game, and config.toml is not a scratchpad.
+#[tauri::command]
+fn set_autofire_hz(state: State<'_, AppState>, hz: u32) -> CmdResult<u32> {
+    let hz = hz.clamp(1, 30);
+    *state.autofire_hz.lock().map_err(err)? = Some(hz);
+    Ok(hz)
+}
+
 /// The setting as it is on disk, not as it was when the window opened.
 ///
 /// It was read once at startup and kept in AppState. Changing it from the info
@@ -1684,7 +1714,7 @@ async fn launch_rom(
         // whose cabinets had a fire button: a "shooter" on the Mega Drive is
         // as likely to be a light-gun game or a shmup with its own auto-fire.
         autofire: autofire_for(&row),
-        autofire_hz: Config::load().map(|c| c.retroarch.autofire_hz).unwrap_or(5),
+        autofire_hz: autofire_hz(&state),
         mirror_players: state.mirror_players,
         entry_slot,
         rom: &path,
@@ -2801,6 +2831,7 @@ fn main() {
             achievements: cfg.achievements.settings(),
             auto_sync: cfg.saves.auto_sync,
             pending_conflicts: Mutex::new(Vec::new()),
+            autofire_hz: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             bios_status,
@@ -2818,6 +2849,7 @@ fn main() {
             game_video,
             versions,
             open_link,
+            set_autofire_hz,
             platforms,
             roms,
             search,

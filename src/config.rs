@@ -414,7 +414,10 @@ pub struct RetroArchCfg {
 /// in. Turn it off to have the window fill the screen and let the emulator
 /// letterbox inside it.
 fn default_autofire_hz() -> u32 {
-    5
+    // Six a second: a shade under what a good player sustains by hand, and one
+    // of the rates that divides 60 exactly, so it is delivered as asked rather
+    // than quantised to the nearest frame.
+    6
 }
 
 fn default_autofire() -> String {

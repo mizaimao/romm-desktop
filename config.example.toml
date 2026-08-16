@@ -44,6 +44,16 @@ password = ""
 local_root = "./library"
 
 [retroarch]
+# Rapid fire for arcade shooters: "off", "lb" or "rb". Hold that shoulder on
+# its own and the game fires by itself; let go and it stops. Nothing is
+# remapped either way.
+#autofire = "lb"
+# Shots a second. Six is a shade under what a good player sustains by hand, and
+# divides 60 exactly so it is delivered as asked. Ten is the rate most shmup
+# players use. The +/- beside the control on a game's page moves it for the
+# session only — this line is where it starts.
+#autofire_hz = 6
+
 # Where your own RetroArch settings live — button maps, video filters, hotkeys.
 # Appended at launch AFTER our defaults, so anything in it wins. Your real
 # retroarch.cfg is never touched. Created with commented examples on first run.

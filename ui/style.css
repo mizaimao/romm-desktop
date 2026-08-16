@@ -2511,8 +2511,17 @@ code {
 
 /* The two buttons that act on the whole list live at the end of the tab row,
    with what they act on rather than among the header's unrelated controls.
-   Take offline first, then the preview toggle. */
-#tabbar #grab-btn { margin-left: auto; }
+   Take offline first, then the preview toggle.
+
+   The holder is what keeps them at the end: a margin on the first button
+   disappears along with the button whenever there is nothing to take offline,
+   which left the preview toggle stranded in the middle of the row. */
+#tabbar .tabbar-end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 #tabbar #grab-btn,
 #tabbar #sidebar-btn { font-size: 12px; }
 

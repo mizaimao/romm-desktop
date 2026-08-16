@@ -219,10 +219,19 @@ export function installTabs() {
   // thing it opens and closes is a third of the window. Moved rather than
   // copied: it is the same element, so everything that hides or relabels it
   // goes on working.
-  // Take offline first, then the preview toggle. Both act on the list this row
-  // chooses, which is what they have in common and what the header did not.
-  if (el.grabBtn) el.tabbar.appendChild(el.grabBtn);
-  if (el.sidebarBtn) el.tabbar.appendChild(el.sidebarBtn);
+  // Take offline first, then the preview toggle, both in a holder pinned to
+  // the right-hand end.
+  //
+  // The push right used to be a margin on Take offline, which vanishes with
+  // it: on any screen where there is nothing to take offline that button is
+  // `hidden`, hidden means out of the layout, and the preview toggle slid back
+  // up against RB in the middle of the row. A holder is always there whatever
+  // is inside it.
+  const end = document.createElement("span");
+  end.className = "tabbar-end";
+  if (el.grabBtn) end.appendChild(el.grabBtn);
+  if (el.sidebarBtn) end.appendChild(el.sidebarBtn);
+  el.tabbar.appendChild(end);
 
   paint();
 }
