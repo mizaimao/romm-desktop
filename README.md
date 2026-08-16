@@ -72,7 +72,7 @@ size. Within a console, games sort by name, rating, year, size or recently
 played — that one is per-console and deliberately forgotten when the app closes.
 
 Arrows or the left stick move, Enter or the bottom face button opens and plays,
-Esc or the right face button goes back, `/` searches, `?` lists every binding,
+Esc or the right face button goes back, `/` searches, `?` lists every binding, Space plays and pauses a video,
 `Cmd+,` opens Settings. The shoulder buttons move between tabs and the triggers
 scroll the game list — how hard you pull decides how fast. Keyboard and
 controller are rebound separately in Settings; both persist. Dialogs are

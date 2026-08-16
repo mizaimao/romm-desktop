@@ -100,3 +100,15 @@ window.addEventListener("keydown", (ev) => {
   // them on the arrow keys, and not at all for anyone who moved them.
   if (ev.key === "Escape") closeLightbox();
 });
+
+/// Play or pause whatever video is on the stage.
+///
+/// Returns false when there is nothing playing, so the caller can let the key
+/// mean whatever it means elsewhere rather than swallowing it.
+export function togglePlayback() {
+  const video = document.querySelector("#lightbox video");
+  if (!video) return false;
+  if (video.paused) video.play().catch(() => {});
+  else video.pause();
+  return true;
+}

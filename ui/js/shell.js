@@ -147,7 +147,11 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
     // nothing in a list.
     el.zoomWrap.hidden = zoom === "grid" ? !gridLayout : !zoom;
   }
-  if (el.title) el.title.textContent = title;
+  if (el.title) {
+    el.title.textContent = title;
+    // It has a fixed share of the bar now, so a long console name ellipsises.
+    el.title.title = title;
+  }
 }
 
 /// Show or hide the zoom slider on its own.

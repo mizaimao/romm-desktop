@@ -8,7 +8,9 @@ import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform, scrollList } from "./library.js";
 import { escapeHtml, toast } from "./util.js";
-import { closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen } from "./lightbox.js";
+import {
+  closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen, togglePlayback,
+} from "./lightbox.js";
 import { cyclePictures } from "./pictures.js";
 import { openSortMenu, cycleOrder } from "./sort.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap, padLabel } from "./bindings.js";
@@ -329,6 +331,14 @@ export function installKeys() {
     // and then having to reach for the mouse to stop it is the worst kind of
     // half-finished. Zoom works in there too, on the same keys.
     if (!el.lb.hidden) {
+      // Space, on anything with a video on it. It is the one key every video
+      // player on every platform agrees about, and the alternative was aiming
+      // at a control bar that fades out. Not bindable, for the same reason:
+      // this is muscle memory rather than a preference.
+      if (ev.key === " " && togglePlayback()) {
+        ev.preventDefault();
+        return;
+      }
       const action = actionFor(ev.key);
       if (action === "video" || action === "back") {
         ev.preventDefault();

@@ -82,6 +82,15 @@ header h1 {
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
+  /* A share of the bar rather than however wide the words happen to be.
+     "Platforms" and "Arcade Fighting — 322 games" differ by 200px, and with
+     the title sized to its text everything after it moved by that much between
+     one screen and the next. Overflowing names ellipsis; the full one is in
+     the tooltip. */
+  flex: 0 1 clamp(180px, 24vw, 380px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #back {
@@ -109,7 +118,10 @@ header h1 {
    it keeps a faint recess — a text box with no boundary at all reads as a
    label and nobody clicks it. Just enough to say "type here". */
 #search {
-  margin-left: auto;
+  /* The switch's auto margins take the slack now, which is what centres it
+     between the title and this box. Taking it here as well would split the gap
+     three ways and put the switch a third of the way along. */
+  margin-left: 0;
   width: 260px;
   padding: 6px 10px;
   border-radius: 8px;
@@ -861,7 +873,9 @@ footer#toast {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 40px 56px;
+  /* Room down the sides for the arrows, which are now over the picture rather
+     than beside it. */
+  padding: 40px 72px;
   /* Dim + blur so the library behind reads as context, not clutter. */
   background: rgba(10, 12, 15, .82);
   backdrop-filter: blur(14px);
@@ -947,7 +961,21 @@ footer#toast {
   font-size: 20px;
   line-height: 1;
 }
-#lightbox .lb-nav { width: 40px; height: 72px; font-size: 26px; }
+/* Pinned to the window, not to the picture.
+   As flex siblings of the figure the arrows sat against whatever was on the
+   stage, so they slid inwards for a cartridge and outwards for a wide
+   screenshot — and stepping through a reel of mixed artwork meant chasing a
+   button that moved every time you pressed it. */
+#lightbox .lb-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 72px;
+  font-size: 26px;
+}
+#lightbox .lb-prev { left: 14px; }
+#lightbox .lb-next { right: 14px; }
 #lightbox .lb-close:hover,
 #lightbox .lb-nav:hover { background: rgba(255, 255, 255, .2); }
 #lightbox .lb-nav[disabled] { opacity: 0; pointer-events: none; }
@@ -2389,6 +2417,11 @@ code {
    the time, and there is no label short enough to say which half. Two buttons
    with the lit one being the current arrangement has no such riddle. */
 #view-switch {
+  /* Halfway between the title and the search box, and staying there. Equal
+     auto margins on both sides split the free space evenly, so the pair sits
+     in the middle of the gap and moves with the window rather than with
+     whatever the title happens to say. */
+  margin: 0 auto;
   display: flex;
   gap: 2px;
   padding: 2px;
