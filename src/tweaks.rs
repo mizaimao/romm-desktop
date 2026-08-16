@@ -27,29 +27,35 @@
 /// A core option, as `key = "value"`.
 pub type Opt = (&'static str, &'static str);
 
-/// Where auto-fire lives, if anywhere.
+/// Which shoulder button turns the face buttons into rapid fire.
 ///
-/// Three states rather than a switch because the two useful arrangements are
-/// genuinely different preferences and neither is obviously right: repeating on
-/// the button already under the thumb, or keeping that one accurate and putting
-/// the repeat somewhere deliberate.
+/// A modifier rather than a mode. The previous arrangement put the repeat *on*
+/// a face button, which meant either living with a held shot underneath the
+/// repeat or remapping the fire button somewhere else — and a game where
+/// holding fire means something, like Pulstar's charge shot, cannot survive
+/// either. Holding a shoulder is RetroArch's own oldest turbo behaviour and
+/// changes nothing about the pad until you ask: hold LB and *then* hold A, and
+/// A repeats for as long as both are down. Let go of LB and A is one press,
+/// one shot, with nothing remapped and nothing to undo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AutoFire {
     #[default]
     Off,
-    /// The bottom face button repeats; single shots move to the top one.
-    BottomFace,
-    /// The top face button repeats; the bottom one keeps firing single shots
-    /// exactly as it always did. Nothing is remapped, which makes this the one
-    /// to try first.
-    TopFace,
+    /// Hold LB, then hold a face button, and it repeats.
+    LeftBumper,
+    /// The same on RB, for anyone whose left hand is busy.
+    RightBumper,
 }
 
 impl AutoFire {
     pub fn parse(s: &str) -> Self {
         match s {
-            "a" | "bottom" => Self::BottomFace,
-            "y" | "top" => Self::TopFace,
+            "lb" | "l" => Self::LeftBumper,
+            "rb" | "r" => Self::RightBumper,
+            // The old face-button arrangement. Anyone who had it on wanted
+            // rapid fire, so they keep it — on the modifier, which is the one
+            // that works.
+            "a" | "y" | "bottom" | "top" => Self::LeftBumper,
             _ => Self::Off,
         }
     }
@@ -57,8 +63,8 @@ impl AutoFire {
     pub fn key(self) -> &'static str {
         match self {
             Self::Off => "off",
-            Self::BottomFace => "a",
-            Self::TopFace => "y",
+            Self::LeftBumper => "lb",
+            Self::RightBumper => "rb",
         }
     }
 }
@@ -126,9 +132,8 @@ pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
 const PAD_Y: &str = "1";
 const PAD_X: &str = "9";
 /// RetroPad B — the primary fire in every arcade core.
+#[allow(dead_code)]
 const PAD_B: &str = "0";
-/// "Nothing", in a remap. RetroArch writes -1 for a binding cleared to `---`.
-const UNMAPPED: &str = "-1";
 
 /// Cores whose emulated pad has rapid-fire copies of its face buttons.
 ///
@@ -173,7 +178,7 @@ pub fn remap(platform: &str, core: &str) -> Vec<String> {
 
 /// As [`remap`], plus the button move auto-fire needs.
 ///
-/// Only `BottomFace` needs one: the repeat goes on the button that already
+/// Rapid fire needs none: the repeat goes on a modifier rather than on the
 /// fires, so single shots have to move somewhere, and the top face button is
 /// RetroPad X — Neo Geo button D, which Metal Slug and most of the run-and-gun
 /// games do not use.
@@ -182,26 +187,11 @@ pub fn remap(platform: &str, core: &str) -> Vec<String> {
 /// autoconfig profile when the pad connects, *after* reading the config, and
 /// that overwrites player bindings. Remaps are applied after both.
 pub fn remap_with(platform: &str, core: &str, autofire: AutoFire) -> Vec<String> {
-    let mut out = Vec::new();
-    if autofire == AutoFire::BottomFace {
-        for p in 1..=2 {
-            // RetroPad X (top face) sends RetroPad B (fire): the single shot,
-            // moved off the button that is now the repeat.
-            out.push(format!("input_player{p}_btn_x = \"{PAD_B}\""));
-            // And the bottom face stops sending a shot of its own.
-            //
-            // This is what made rapid fire on A unplayable. That button is the
-            // turbo *modifier*, but the pad's own profile still binds it to
-            // RetroPad B — so holding it sent one continuous shot with the
-            // repeat pulsing on top of it. In a game where holding fire means
-            // something (Pulstar charges a shot) that is not rapid fire at
-            // all, and the rate looked wrong because the held shot never let
-            // go. A modifier has to be silent on its own.
-            out.push(format!("input_player{p}_btn_b = \"{UNMAPPED}\""));
-        }
-    }
-    out.extend(turbo_remap(platform, core));
-    out
+    // Rapid fire moves nothing now. Holding a shoulder makes whatever face
+    // button you press repeat, so the fire button stays where the game put it
+    // and there is nothing to put back when the mode is off.
+    let _ = autofire;
+    turbo_remap(platform, core)
 }
 
 fn turbo_remap(_platform: &str, core: &str) -> Vec<String> {

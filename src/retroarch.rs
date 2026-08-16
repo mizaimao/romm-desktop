@@ -723,14 +723,11 @@ input_player2_gun_start_mbtn = \"3\"
         else {
             return String::new();
         };
-        // Both buttons have to be known. Half of this arrangement is worse
-        // than none of it: a shot button that repeats with nowhere to fire a
-        // single shot from is a game you cannot aim carefully in.
-        // Which physical button repeats. The other keeps sending single shots,
-        // and neither is moved by a config line — see below.
+        // The modifier, and only the modifier. Nothing else is bound, moved
+        // or cleared: that is the whole point of this arrangement.
         let which = match on {
-            AutoFire::BottomFace => padprofile::Physical::A,
-            AutoFire::TopFace => padprofile::Physical::Y,
+            AutoFire::LeftBumper => padprofile::Physical::LB,
+            AutoFire::RightBumper => padprofile::Physical::RB,
             AutoFire::Off => unreachable!("returned above"),
         };
         let Some(hold) = profile.get(which) else {
@@ -752,28 +749,24 @@ input_player2_gun_start_mbtn = \"3\"
         let duty = (period / 2).max(1);
 
         format!(
-            "\n# ---- Auto-fire ----\n\
-             # Mode 3 is \"single button (hold)\": the button below pulses the\n\
-             # default button — RetroPad B, which every arcade core maps to the\n\
-             # primary fire — for as long as it is held.\n\
+            "\n# ---- Rapid fire ----\n\
+             # Mode 0 is RetroArch's original turbo: hold the button below and\n\
+             # any face button pressed while it is down repeats, at the rate\n\
+             # set here, for as long as both are held. Let go of the modifier\n\
+             # and every button is exactly what the game expects again.\n\
              #\n\
-             # Only the turbo binding is written here. Moving the *fire* button\n\
-             # was attempted with input_player1_b_btn and does not work:\n\
-             # RetroArch applies a pad's autoconfig profile when the pad\n\
-             # connects, and that overwrites player bindings from the config\n\
-             # afterwards. Turbo survives because no autoconfig file sets it.\n\
-             # The single-shot button is moved with an input remap instead,\n\
-             # which is applied last and is what remaps are for.\n\
+             # A modifier rather than a mode, because the arrangements that put\n\
+             # the repeat *on* a face button cannot work: that button still\n\
+             # sends its own shot, so holding it is one continuous press with\n\
+             # the repeat pulsing on top — and in a game where holding fire\n\
+             # charges a shot, that is not rapid fire at all. Moving the fire\n\
+             # button out of the way instead means remapping the thing the\n\
+             # player's hands already know.\n\
+             #\n\
              # The rate is a period in frames — how long one press-release\n\
              # cycle lasts — so it runs backwards from shots per second and\n\
              # the conversion happens here rather than in anyone's head.\n\
-             # The pad's own profile still binds the modifier to whatever it\n\
-             # normally is, so on the bottom face that button also sends a\n\
-             # continuous shot — a held fire with the repeat pulsing on top,\n\
-             # which is not rapid fire and reads as the wrong rate. The remap\n\
-             # clears it; see tweaks::remap_with.\n\
-             input_turbo_mode = \"3\"\n\
-             input_turbo_default_button = \"0\"\n\
+             input_turbo_mode = \"0\"\n\
              input_turbo_period = \"{period}\"\n\
              input_turbo_duty_cycle = \"{duty}\"\n\
              {}\n",
@@ -1350,7 +1343,7 @@ input_r2_axis = "+5"
         let period = |hz: u32| {
             let out = fake(&dir).autofire(
                 Some("Xbox Wireless Controller"),
-                crate::tweaks::AutoFire::BottomFace,
+                crate::tweaks::AutoFire::LeftBumper,
                 hz,
             );
             out.lines()
@@ -1375,62 +1368,66 @@ input_r2_axis = "+5"
         }
     }
 
-    /// Holding the modifier must not also send a shot. It is the pad's own
-    /// profile that binds it — the bottom face is RetroPad B on every pad —
-    /// so without clearing it, holding A is one continuous shot with the
-    /// repeat pulsing on top. In Pulstar, where holding fire charges, that is
-    /// not rapid fire at all.
+    /// Nothing is moved, cleared or swapped. That is the whole reason this
+    /// arrangement replaced the last one: putting the repeat *on* a face
+    /// button meant either a held shot underneath the repeat or remapping the
+    /// fire button somewhere the player's hands do not expect, and a game
+    /// where holding fire charges — Pulstar — survives neither.
     #[test]
-    fn the_repeat_button_sends_nothing_of_its_own() {
-        let lines = crate::tweaks::remap_with("arcade", "fbneo", crate::tweaks::AutoFire::BottomFace);
-        assert!(
-            lines.iter().any(|l| l == "input_player1_btn_b = \"-1\""),
-            "the bottom face still fires on its own: {lines:?}"
-        );
-        assert!(
-            lines.iter().any(|l| l == "input_player1_btn_x = \"0\""),
-            "the single shot has nowhere to live: {lines:?}"
-        );
-        // Two players, because a two-player cabinet game with rapid fire on
-        // one side only is worse than none.
-        assert!(lines.iter().any(|l| l == "input_player2_btn_b = \"-1\""));
-        assert!(lines.iter().any(|l| l == "input_player2_btn_x = \"0\""));
+    fn rapid_fire_moves_no_buttons_at_all() {
+        for mode in [crate::tweaks::AutoFire::LeftBumper, crate::tweaks::AutoFire::RightBumper] {
+            assert!(
+                crate::tweaks::remap_with("arcade", "fbneo", mode).is_empty(),
+                "{mode:?} remapped something it did not need to"
+            );
+        }
     }
 
-    /// The other arrangement leaves every button exactly as the game expects.
-    /// The top face is spare on these cores, so holding it repeats and nothing
-    /// else moves — which is why it is the one to try first.
+    /// Mode 0 is RetroArch's original turbo: hold the modifier, and any face
+    /// button held with it repeats. No default button is involved — that is
+    /// the single-button modes, which is what the last arrangement used and
+    /// why the fire button had to be moved out from under it.
     #[test]
-    fn holding_the_top_face_changes_no_other_button() {
-        assert!(
-            crate::tweaks::remap_with("arcade", "fbneo", crate::tweaks::AutoFire::TopFace).is_empty(),
-            "rapid fire on the top face moved something it did not need to"
-        );
-    }
-
-    #[test]
-    fn autofire_moves_the_shot_to_the_top_button_and_repeats_the_bottom_one() {
+    fn rapid_fire_is_a_shoulder_modifier_and_binds_only_that() {
         let dir = scratch("autofire");
         with_autoconfig(&dir);
-        let out = fake(&dir).autofire(Some("Xbox Wireless Controller"), crate::tweaks::AutoFire::BottomFace, 5);
+        let out = fake(&dir).autofire(
+            Some("Xbox Wireless Controller"),
+            crate::tweaks::AutoFire::LeftBumper,
+            5,
+        );
 
-        // RetroPad B is the primary fire in every arcade core, and mode 3 is
-        // "single button (hold)" — pulse it while the turbo button is down.
-        assert!(out.contains("input_turbo_mode = \"3\""), "{out}");
-        assert!(out.contains("input_turbo_default_button = \"0\""), "{out}");
+        assert!(out.contains("input_turbo_mode = \"0\""), "{out}");
         assert!(out.contains("input_player1_turbo_btn"), "{out}");
-        // And the single shot has somewhere to live.
-        assert!(out.contains("input_player1_b_btn"), "{out}");
+        assert!(
+            !out.contains("input_turbo_default_button"),
+            "a default button belongs to the single-button modes: {out}"
+        );
+        // Nothing else is bound. A line moving a face button here would be the
+        // old arrangement coming back in through the config file.
+        assert!(!out.contains("input_player1_b_btn"), "{out}");
+        assert!(!out.contains("input_player1_x_btn"), "{out}");
+    }
 
-        // The two are different buttons, or holding one would do both.
-        let val = |k: &str| {
-            out.lines()
-                .find(|l| l.starts_with(k))
-                .and_then(|l| l.split('"').nth(1))
+    /// The two shoulders write the same block with a different button, and
+    /// they are different buttons — a mode that bound the same one twice would
+    /// look like a choice and be none.
+    #[test]
+    fn the_other_shoulder_is_a_different_button() {
+        let dir = scratch("autofire-rb");
+        with_autoconfig(&dir);
+        let btn = |mode| {
+            fake(&dir)
+                .autofire(Some("Xbox Wireless Controller"), mode, 5)
+                .lines()
+                .find(|l| l.starts_with("input_player1_turbo"))
+                .map(str::to_owned)
                 .unwrap_or_default()
-                .to_owned()
         };
-        assert_ne!(val("input_player1_turbo_btn"), val("input_player1_b_btn"));
+        let l = btn(crate::tweaks::AutoFire::LeftBumper);
+        let r = btn(crate::tweaks::AutoFire::RightBumper);
+        assert!(!l.is_empty() && !r.is_empty(), "{l} / {r}");
+        assert_ne!(l, r, "both shoulders bound the same button");
     }
 
     /// A pad nothing is known about gets nothing. Guessing a button index here
@@ -1440,7 +1437,7 @@ input_r2_axis = "+5"
     fn autofire_writes_nothing_for_a_pad_with_no_profile() {
         let dir = scratch("autofire-unknown");
         assert_eq!(
-            fake(&dir).autofire(Some("Some Unheard-of Pad"), crate::tweaks::AutoFire::BottomFace, 5),
+            fake(&dir).autofire(Some("Some Unheard-of Pad"), crate::tweaks::AutoFire::LeftBumper, 5),
             ""
         );
     }

@@ -775,3 +775,45 @@ describe("where the preview toggle lives", () => {
     }
   });
 });
+
+describe("bringing the preview back", () => {
+  /// The pane is remembered as closed, which is right — and in Desk it left no
+  /// way back. "Show info" on the console screen did nothing at all: the pane
+  /// insisted on a selected game before it would appear, while the console
+  /// screen's own line said the column should be there regardless. Whichever
+  /// ran last won, and from a cold start with the preference off, neither
+  /// showed it.
+  let detail, shell, state, el;
+
+  before(async () => {
+    detail = await import("../js/detail.js");
+    shell = await import("../js/shell.js");
+    ({ state, el } = await import("../js/state.js"));
+  });
+
+  test("Show info opens the column even with nothing selected", () => {
+    shell.setMode("columns");
+    state.view = "platforms";
+    state.selected = null;
+    detail.setSidebar(false);
+    assert.equal(el.detail.hidden, true);
+
+    detail.setSidebar(true);
+    assert.equal(el.detail.hidden, false, "the column will not come back");
+  });
+
+  /// In Sofa it slides over the list rather than being part of it, so it is
+  /// only meaningful where something is under the cursor.
+  test("in Sofa it still waits for something to show", () => {
+    shell.setMode("single");
+    state.view = "platforms";
+    state.selected = null;
+    detail.setSidebar(true);
+    assert.equal(el.detail.hidden, true, "an empty pane over the console list");
+
+    state.view = "roms";
+    state.selected = 7;
+    detail.setSidebar(true);
+    assert.equal(el.detail.hidden, false);
+  });
+});

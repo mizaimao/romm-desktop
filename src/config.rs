@@ -383,7 +383,8 @@ pub struct RetroArchCfg {
     #[serde(default = "default_autofire_hz")]
     pub autofire_hz: u32,
 
-    /// `off`, `a` (bottom face repeats), or `y` (top face repeats).
+    /// `off`, `lb`, or `rb` — which shoulder button turns the face buttons
+    /// into rapid fire while it is held.
     ///
     /// Reads an old `true`/`false` as well, because this was a toggle first and
     /// the app itself wrote that boolean into people's files. Changing the type
@@ -417,7 +418,7 @@ fn default_autofire_hz() -> u32 {
 }
 
 fn default_autofire() -> String {
-    "y".to_owned()
+    "lb".to_owned()
 }
 
 /// Accept the string this setting is now, or the boolean it used to be.
@@ -430,13 +431,12 @@ where
     #[serde(untagged)]
     enum Either {
         Text(String),
-        // `true` meant the old arrangement, which put the repeat on the bottom
-        // face button.
+        // `true` meant rapid fire was wanted, back when this was a switch.
         Flag(bool),
     }
     Ok(match Either::deserialize(d)? {
         Either::Text(s) => s,
-        Either::Flag(true) => "a".to_owned(),
+        Either::Flag(true) => "lb".to_owned(),
         Either::Flag(false) => "off".to_owned(),
     })
 }
@@ -675,15 +675,28 @@ mod tests {
         assert_eq!(cfg.server.url, "http://dev.lan", "the rest of the file was lost");
         assert_eq!(cfg.retroarch.autofire, "off");
 
-        // And true meant the arrangement that is now "a".
+        // `true` meant rapid fire was wanted, so it stays wanted — on the
+        // modifier, which is the arrangement that works.
         std::fs::write(&path, "[retroarch]\nautofire = true\n").unwrap();
-        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "a");
+        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "lb");
+
+        // The face-button arrangement is gone. Anyone who had it on asked for
+        // rapid fire and still gets it, rather than finding it silently off.
+        for old in ["a", "y", "bottom", "top"] {
+            std::fs::write(&path, format!("[retroarch]\nautofire = \"{old}\"\n")).unwrap();
+            let cfg = Config::load_from(&path).unwrap();
+            assert_eq!(
+                crate::tweaks::AutoFire::parse(&cfg.retroarch.autofire),
+                crate::tweaks::AutoFire::LeftBumper,
+                "{old} lost its rapid fire"
+            );
+        }
 
         // The current form still works, and an absent one is the default.
-        std::fs::write(&path, "[retroarch]\nautofire = \"y\"\n").unwrap();
-        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "y");
+        std::fs::write(&path, "[retroarch]\nautofire = \"rb\"\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "rb");
         std::fs::write(&path, "[retroarch]\n").unwrap();
-        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "y");
+        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "lb");
     }
     use super::*;
 

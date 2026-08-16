@@ -545,12 +545,12 @@ describe("the right-click menu", () => {
 });
 
 describe("rapid fire, above the Play button", () => {
-  /// It is a thing you change about the run you are about to start — try Y,
-  /// play a level, decide it should have been A — so it sits with Play rather
-  /// than three windows away in Settings, and does not scroll off with the
-  /// artwork.
+  /// It is a thing you change about the run you are about to start — set the
+  /// rate, play a level, decide it wants to be slower — so it sits with Play
+  /// rather than three windows away in Settings, and does not scroll off with
+  /// the artwork.
   test("games that can have it get the control, pinned with Play", async () => {
-    Object.assign(DETAIL, { autofire: "y" });
+    Object.assign(DETAIL, { autofire: "rb" });
     await detail.selectRom(7);
     await settle();
 
@@ -566,7 +566,7 @@ describe("rapid fire, above the Play button", () => {
       "it should sit above Play, not below it"
     );
     assert.equal(row.querySelectorAll(".af").length, 3, "three choices");
-    assert.equal(row.querySelector(".af.on").dataset.af, "y");
+    assert.equal(row.querySelector(".af.on").dataset.af, "rb");
   });
 
   test("games it does not apply to get nothing at all", async () => {
@@ -599,19 +599,19 @@ describe("rapid fire, above the Play button", () => {
     Object.assign(DETAIL, { autofire: "off" });
     await detail.selectRom(7);
     await settle();
-    document.querySelector('.af[data-af="a"]').click();
+    document.querySelector('.af[data-af="lb"]').click();
     await settle();
     const saved = invoked.find((c) => c.cmd === "set_config_field");
     assert.ok(saved, "nothing was saved");
     assert.equal(saved.args.field, "autofire");
-    assert.equal(saved.args.value, "a");
+    assert.equal(saved.args.value, "lb");
     Object.assign(DETAIL, { autofire: null });
   });
 });
 
 describe("how fast the rapid fire goes", () => {
   test("the rate shows and steps by one", async () => {
-    Object.assign(DETAIL, { autofire: "y", autofire_hz: 5 });
+    Object.assign(DETAIL, { autofire: "rb", autofire_hz: 5 });
     await detail.selectRom(7);
     await settle();
 
@@ -651,7 +651,7 @@ describe("how fast the rapid fire goes", () => {
   /// Below one it would divide by zero inside the emulator, and above thirty
   /// it is faster than the game can read.
   test("it does not step past its limits", async () => {
-    Object.assign(DETAIL, { autofire: "a", autofire_hz: 1 });
+    Object.assign(DETAIL, { autofire: "lb", autofire_hz: 1 });
     await detail.selectRom(7);
     await settle();
     invoked.length = 0;
@@ -671,7 +671,7 @@ describe("changing rapid fire keeps your place", () => {
   /// to show the new value sent the reader back to the top of it — so every
   /// press of + threw away where they were.
   test("stepping the rate does not redraw the pane", async () => {
-    Object.assign(DETAIL, { autofire: "y", autofire_hz: 5 });
+    Object.assign(DETAIL, { autofire: "rb", autofire_hz: 5 });
     await detail.selectRom(7);
     await settle();
 
@@ -691,10 +691,10 @@ describe("changing rapid fire keeps your place", () => {
   });
 
   /// Turning it off wrote a boolean, because the field was still on the list
-  /// of settings that are booleans from when it was a toggle. "a" is not
-  /// "true", so it stored false — off. You could turn it off and never on.
+  /// of settings that are booleans from when it was a toggle. The mode name is
+  /// not "true", so it stored false — off. You could turn it off and never on.
   test("off and back on again", async () => {
-    Object.assign(DETAIL, { autofire: "y", autofire_hz: 5 });
+    Object.assign(DETAIL, { autofire: "rb", autofire_hz: 5 });
     await detail.selectRom(7);
     await settle();
 
@@ -702,17 +702,17 @@ describe("changing rapid fire keeps your place", () => {
     await settle();
     assert.equal(document.querySelector(".af.on").dataset.af, "off");
 
-    document.querySelector('.af[data-af="a"]').click();
+    document.querySelector('.af[data-af="lb"]').click();
     await settle();
     assert.equal(
       document.querySelector(".af.on").dataset.af,
-      "a",
+      "lb",
       "it could be turned off but not back on"
     );
     assert.ok(document.querySelector(".af-rate"), "the rate should come back");
 
     const saved = invoked.filter((c) => c.cmd === "set_config_field").map((c) => c.args.value);
-    assert.deepEqual(saved.slice(-2), ["off", "a"], `sent: ${saved}`);
+    assert.deepEqual(saved.slice(-2), ["off", "lb"], `sent: ${saved}`);
     Object.assign(DETAIL, { autofire: null, autofire_hz: 5 });
   });
 });

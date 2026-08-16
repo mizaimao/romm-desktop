@@ -5,6 +5,7 @@ import { tintFor } from "./tint.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, setOpenHook } from "./lightbox.js";
 import { showMenu } from "./menu.js";
+import { shellMode } from "./shell.js";
 import { deleteState } from "./states.js";
 import { launch, download } from "./actions.js";
 
@@ -19,11 +20,20 @@ export function setSidebar(on) {
   // the button itself would wipe the icon out.
   el.sidebarBtn.querySelector("span:not(.icon)").textContent = on ? "Hide info" : "Show info";
   el.sidebarBtn.querySelector(".icon").className = `icon icon-info-${on ? "on" : "off"}`;
-  // Never show the pane on the platform or collection-list screens — nothing
-  // is selected there. Games reached through a collection do get it.
+  // In Desk the preview is a column of the layout, so "show it" means show it
+  // — on the console list too, where it holds whatever was last selected.
+  // This used to insist on a game being selected, which disagreed with the
+  // console screen's own line and left the column shut with no way back:
+  // pressing Show info there did nothing at all, because nothing was selected
+  // *to* show.
+  //
+  // In Sofa it slides over the list, so it is only meaningful where there is
+  // something under the cursor.
   const allowed =
-    state.view === "roms" || state.view === "search" || state.view === "collection-roms";
-  el.detail.hidden = !(on && allowed && state.selected !== null);
+    shellMode() === "columns" ||
+    ((state.view === "roms" || state.view === "search" || state.view === "collection-roms") &&
+      state.selected !== null);
+  el.detail.hidden = !(on && allowed);
 }
 
 /// The game the pane is showing, kept so the video button can build the same
@@ -220,9 +230,9 @@ function wireShelf(d) {
 /// Where the rapid fire lives, for games that can have it.
 ///
 /// In the pinned strip directly above Play, rather than in Settings: this is a
-/// thing you change *about the run you are about to start* — try Y, play a
-/// level, decide it should have been A — and a control three windows away
-/// turns that into a trip. It does not scroll with the artwork for the same
+/// thing you change *about the run you are about to start* — set the rate,
+/// play a level, decide it wants to be slower — and a control three windows
+/// away turns that into a trip. It does not scroll with the artwork for the same
 /// reason.
 ///
 /// Absent entirely for games it does not apply to, which is most of them.
@@ -230,7 +240,7 @@ function wireShelf(d) {
 /// hand-edited config, a field that arrived as something unexpected — draws no
 /// row at all rather than an empty one, because a control with nothing
 /// selected is worse than no control.
-const AUTOFIRE_MODES = ["off", "a", "y"];
+const AUTOFIRE_MODES = ["off", "lb", "rb"];
 
 function autofireRow(d) {
   // Games this does not apply to get nothing: it is only the arcade and Neo
@@ -252,8 +262,8 @@ function autofireRow(d) {
     <div class="autofire-row" title="Applies to every arcade shooter, not only this game">
       <span class="af-label">Rapid fire</span>
       ${opt("off", "Off", "The buttons behave as the cabinet did")}
-      ${opt("a", "A", "The bottom button repeats; single shots move to Y")}
-      ${opt("y", "Y", "The top button repeats; A is untouched")}
+      ${opt("lb", "Hold LB", "Hold LB, then hold a face button, and it repeats")}
+      ${opt("rb", "Hold RB", "The same on RB, for when your left hand is busy")}
       ${rate}
     </div>`;
 }
