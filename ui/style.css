@@ -2178,44 +2178,66 @@ body.columns #consoles .grid {
   gap: 1px;
 }
 body.columns #consoles .card {
-  /* A grid rather than a row of three. Laid out as a row, the counts —
-     "322 games · 322 here" — refuse to shrink and the name is left with
-     whatever is over, which at this width was four characters and an ellipsis.
-     Two lines beside the picture gives the name the full width. */
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
-  grid-template-areas:
-    "logo name"
-    "logo meta";
-  align-items: center;
-  column-gap: 8px;
+  /* Not a card. A row of text.
+     `.card` carries a background, a border, a 12px radius, 14px of padding and
+     a hover that lifts it off the page — right for a page of them, wrong for a
+     column, and the reason this list kept coming back as a stack of boxes no
+     matter how the inside was laid out. Every one of those is turned off here,
+     and what is left is the same line the consoles above it draw: name on the
+     left, count on the right, nothing around it. */
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   padding: 5px 8px;
+  font-size: 13px;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
   min-height: 0;
   text-align: left;
 }
-body.columns #consoles .card .logo,
-body.columns #consoles .card .logo.mosaic { grid-area: logo; }
-body.columns #consoles .card .name { grid-area: name; }
-body.columns #consoles .card .meta { grid-area: meta; }
-body.columns #consoles .card .logo,
-body.columns #consoles .card .logo.mosaic {
-  flex: 0 0 26px;
-  height: 22px;
-  margin: 0;
-  background: none;
+body.columns #consoles .card:hover {
+  background: color-mix(in srgb, var(--glass) 14%, transparent);
   border: 0;
+  box-shadow: none;
+  transform: none;
 }
-body.columns #consoles .card .logo img { max-height: 22px; width: auto; }
+/* A stamp-sized mosaic of cover art is mush, and the two-letter placeholder
+   under it — "Ar" for every one of the eleven Arcade collections — says less
+   than the name it is standing next to. */
+body.columns #consoles .card .logo,
+body.columns #consoles .card .logo.mosaic { display: none; }
 body.columns #consoles .card .name {
-  font-size: 13px;
+  flex: 1;
+  min-width: 0;
   color: var(--text);
-  /* The whole point of the two lines: the name is what you are reading, so it
-     gets the width and only gives up at the real edge of the column. */
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-body.columns #consoles .card .meta { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.columns #consoles .card .meta {
+  flex: none;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+  white-space: nowrap;
+}
+/* "322 games · 322 here" for a collection that is entirely downloaded is the
+   same number twice, and it was taking the width the name needed. */
+body.columns #consoles .card .meta .here { display: none; }
+body.columns #consoles .card .meta { font-size: 11.5px; }
+/* The cursor is a lit pane on a page of cards; in a column it is the same
+   marked row the consoles use. */
+body.columns #consoles .card.sel {
+  background: color-mix(in srgb, var(--glass) 26%, transparent);
+  border: 0;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 /* The collection filter sits above the list and stays put while it scrolls. */
 body.columns #consoles .filter {
   position: sticky;

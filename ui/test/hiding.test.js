@@ -169,24 +169,41 @@ describe("the left column is a list, whatever is in it", () => {
     return { node, style };
   };
 
-  test("a collection card lies down in the column", () => {
-    const { style } = inColumn(
+  test("a collection is a line of text, not a card", () => {
+    const { node, style } = inColumn(
       `<div class="grid"><div class="card" data-cid="1">
          <div class="logo mosaic"><span class="ph">Ar</span></div>
-         <div class="name">Arcade Fighting</div>
-         <div class="meta">322 games</div>
+         <div class="name">Arcade Shmups Horizontal</div>
+         <div class="meta">110 games<span class="here"> · 110 here</span></div>
        </div></div>`,
       ".card"
     );
-    // A grid of two rows beside the picture, not a row of three: laid out as a
-    // row the counts refused to shrink and the name was left with four
-    // characters and an ellipsis.
-    assert.equal(style.display, "grid");
-    assert.match(style.gridTemplateColumns, /26px/, "the picture has no column of its own");
-    const name = dom.window.getComputedStyle(
-      dom.window.document.querySelector("#consoles .card .name")
+    // Reported seven times. Twice I laid out the *inside* of the box and called
+    // it fixed — first a row of three, then two lines beside the picture —
+    // while `.card` went on drawing the box itself. What made it a card was
+    // never the arrangement of the contents: it was the background, the border,
+    // the 12px radius and the 14px of padding, all of which are asserted gone
+    // here. A list is a line of text with nothing around it.
+    assert.equal(style.display, "flex", "still not laid out as a line");
+    assert.equal(style.borderRadius, "0px", "still has rounded corners");
+    assert.equal(style.borderTopWidth || style.borderWidth, "0px", "still boxed in");
+    assert.match(
+      style.backgroundColor || "",
+      /rgba\(0, 0, 0, 0\)|transparent|^$/,
+      "still has a card's background"
     );
-    assert.equal(name.gridArea.trim().split(" ")[0], "name", "the name is not on its own line");
+    assert.equal(style.padding, "5px 8px", "still padded like a card");
+
+    const at = (sel) => dom.window.getComputedStyle(node.querySelector(sel));
+    // A mosaic of covers at 22px is mush, and "Ar" stands in front of every one
+    // of the eleven Arcade collections saying nothing the name does not.
+    assert.equal(at(".logo").display, "none", "the stamp is still there");
+    // The name gets the width; the count keeps only what it needs. "322 games ·
+    // 322 here" is the same number twice for a collection fully downloaded, and
+    // it was taking the room the name needed.
+    assert.match(at(".name").flex, /^1 /, "the name does not take the width");
+    assert.equal(at(".name").textOverflow, "ellipsis");
+    assert.equal(at(".here").display, "none", "the count is still doubled");
   });
 
   test("and the grid of them becomes one per line", () => {
