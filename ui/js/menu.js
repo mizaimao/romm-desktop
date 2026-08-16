@@ -45,7 +45,10 @@ export function showMenu(items, x, y) {
       b.className = "dim";
     } else {
       b.addEventListener("click", () => {
-        closeMenu();
+        // Sticky items leave the menu up. A filter is built out of two or
+        // three choices, and a menu that shuts on each one turns that into
+        // four trips to the same button.
+        if (!item.sticky) closeMenu();
         item.run();
       });
     }

@@ -1246,6 +1246,8 @@ button:has(> .icon + span) {
 .icon-gamepad   { --icon: url("icons/gamepad-2.svg"); }
 /* Lucide "arrow-down-narrow-wide" — the ordering glyph, vendored like the rest. */
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
+.icon-filter    { --icon: url("icons/funnel.svg"); }
+.icon-dice      { --icon: url("icons/dices.svg"); }
 .icon-pane      { --icon: url("icons/square.svg"); }
 .icon-book      { --icon: url("icons/book-open.svg"); }
 .icon-columns   { --icon: url("icons/columns-2.svg"); }
@@ -2507,4 +2509,11 @@ code {
 #tabbar #sidebar-btn {
   margin-left: auto;
   font-size: 12px;
+}
+
+/* A filtered list looks exactly like a short one, so the button that did it
+   stays lit while anything is on. */
+#filter-btn.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }

@@ -138,11 +138,14 @@ describe("the layout switch keeps its place", () => {
 
   /// Two unlabelled glyphs in a bar full of unlabelled glyphs say nothing
   /// about what they do, and this pair changes the whole shape of the window.
+  /// Named for where you are rather than for the furniture: one is the
+  /// arrangement you drive from a controller across the room, the other the
+  /// one you drive with a mouse a foot away.
   test("each side says what it is", () => {
     const labels = [...dom.window.document.querySelectorAll("#view-switch button")].map((b) =>
       b.textContent.trim()
     );
-    assert.deepEqual(labels, ["One at a time", "Side by side"]);
+    assert.deepEqual(labels, ["Sofa", "Desk"]);
   });
 
   test("it comes before the search box", () => {

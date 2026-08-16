@@ -3,6 +3,7 @@
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
 import { sorted, refreshSortButton } from "./sort.js";
+import { filtered, refreshFilterButton, activeFilters, clearFilters } from "./filter.js";
 import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
@@ -440,10 +441,25 @@ export function renderRows(unsorted, showPlatform) {
   // Ordered here rather than by whoever supplied the rows, so every path that
   // draws a list — a console, a collection, a search, a redraw after the order
   // changed — goes through the same comparison.
-  const rows = sorted(unsorted);
+  // Narrowed first, then ordered. The other way round sorts rows that are
+  // about to be thrown away, which on 2,506 games is most of the work.
+  const rows = sorted(filtered(unsorted));
   refreshSortButton();
+  refreshFilterButton();
   if (!rows.length) {
-    region("games").innerHTML = `<div class="empty">Nothing here.</div>`;
+    // A filtered list that matches nothing looks exactly like a console with
+    // no games in it, and the filter is off screen in a menu — so the empty
+    // list has to say so, and offer the way out.
+    region("games").innerHTML = activeFilters().length
+      ? `<div class="empty">Nothing here matches the filters.
+           <button class="link clear-filters">Clear them</button></div>`
+      : `<div class="empty">Nothing here.</div>`;
+    region("games")
+      .querySelector(".clear-filters")
+      ?.addEventListener("click", () => {
+        clearFilters();
+        renderRows(unsorted, showPlatform);
+      });
     return;
   }
   // Search spans every console, so a flat list of 200 hits buries the ones you
@@ -662,4 +678,26 @@ async function flushCovers() {
     }
   }
   if (coverQueue.length) setTimeout(flushCovers, 30);
+}
+
+/// Pick something out of this list at random and put the cursor on it.
+///
+/// The reason every frontend has one: nobody knows 2,506 arcade games, and
+/// "scroll until something looks familiar" always lands in the same three
+/// letters of the alphabet. It picks from what is *shown* — the same rows the
+/// filters left — so "surprise me from the ones I have not played" is a
+/// question you can actually ask.
+///
+/// It selects rather than launches. A button that starts a game you have never
+/// heard of, with no way to see what it is first, is a button people press
+/// once.
+export function randomGame() {
+  const rows = sorted(filtered(state.rows));
+  if (!rows.length) return null;
+  const pick = rows[Math.floor(Math.random() * rows.length)];
+  selectRom(pick.id);
+  const node = region("games")?.querySelector(`[data-id="${pick.id}"]`);
+  node?.scrollIntoView({ block: "center", behavior: "smooth" });
+  toast(pick.name);
+  return pick;
 }

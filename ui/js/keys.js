@@ -6,13 +6,16 @@
 
 import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
-import { showPlatforms, setLayout, setZoom, openPlatform, scrollList } from "./library.js";
+import {
+  showPlatforms, setLayout, setZoom, openPlatform, scrollList, randomGame,
+} from "./library.js";
 import { escapeHtml, toast } from "./util.js";
 import {
   closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen, togglePlayback,
 } from "./lightbox.js";
 import { cyclePictures } from "./pictures.js";
 import { openSortMenu, cycleOrder } from "./sort.js";
+import { openFilterMenu } from "./filter.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap, padLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
@@ -281,6 +284,8 @@ export const HANDLERS = {
   scrollDown: () => scrollList(120),
   pictures: cyclePictures,
   sortMenu: () => openSortMenu(),
+  filterMenu: () => openFilterMenu(),
+  random: () => randomGame(),
   sortCycle: () => {
     const now = cycleOrder(1);
     if (now) toast(`Sorted by ${now}`);

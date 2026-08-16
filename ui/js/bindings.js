@@ -35,6 +35,8 @@ export const ACTIONS = [
   { id: "pictures",label: "Change the pictures",    fallback: null },
   { id: "sortCycle", label: "Next sort order",     fallback: null },
   { id: "sortMenu",  label: "Sort by…",            fallback: "s" },
+  { id: "filterMenu",label: "Filter this list…",   fallback: "f" },
+  { id: "random",    label: "Surprise me",         fallback: "r" },
 ];
 
 /// Controller buttons, by W3C "standard mapping" index.

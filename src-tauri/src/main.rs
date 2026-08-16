@@ -2845,7 +2845,7 @@ fn main() {
             // tauri.conf.json because the number lives in Cargo.toml and a
             // second copy of it in a config file is a copy that goes stale.
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_title(&format!("RomM Desktop {}", env!("CARGO_PKG_VERSION")));
+                let _ = win.set_title(&format!("RomM Desktop v{}", env!("CARGO_PKG_VERSION")));
             }
             Ok(())
         })

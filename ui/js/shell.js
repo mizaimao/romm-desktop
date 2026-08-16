@@ -115,7 +115,7 @@ export function paint(role, html) {
 /// what it needs rather than what it does not. `zoom: "grid"` means "only when
 /// the covers are on screen", which is the one conditional every view repeated
 /// and got to decide for itself.
-const BUTTONS = ["back", "layout", "sidebar", "grab", "sort"];
+const BUTTONS = ["back", "layout", "sidebar", "grab", "sort", "filter", "random"];
 
 const HANDLES = {
   back: () => el.back,
@@ -123,6 +123,8 @@ const HANDLES = {
   sidebar: () => el.sidebarBtn,
   grab: () => el.grabBtn,
   sort: () => el.sortBtn,
+  filter: () => el.filterBtn,
+  random: () => el.randomBtn,
 };
 
 /// Put the window into the state this view wants.
@@ -143,7 +145,11 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
     // list — but it can be closed, and once it is, this button is the only way
     // back to it. So it is always offered in columns, whatever the view asked
     // for, rather than only on the screens that have something to preview.
-    const wanted = wants[name] || (mode === "columns" && name === "sidebar");
+    // Sorting, filtering and picking at random are the same question — is
+    // there a list of games here — so a view asks once rather than three
+    // times and cannot end up offering two of the three.
+    const asked = name === "filter" || name === "random" ? wants.sort : wants[name];
+    const wanted = asked || (mode === "columns" && name === "sidebar");
     node.hidden = suppressed || !wanted;
   }
   if (el.zoomWrap) {

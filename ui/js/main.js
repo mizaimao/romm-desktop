@@ -3,9 +3,10 @@
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { openSortMenu } from "./sort.js";
+import { openFilterMenu } from "./filter.js";
 import { chooseMode, storedMode, shellMode, installColumnResizer } from "./shell.js";
 import { human, toast, escapeHtml } from "./util.js";
-import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
+import { showPlatforms, runSearch, setLayout, setZoom, renderRows, randomGame } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
@@ -61,6 +62,8 @@ el.viewSwitch?.addEventListener("click", async (ev) => {
 });
 
 el.sortBtn.addEventListener("click", () => openSortMenu(el.sortBtn));
+el.filterBtn?.addEventListener("click", () => openFilterMenu(el.filterBtn));
+el.randomBtn?.addEventListener("click", () => randomGame());
 
 el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));
 

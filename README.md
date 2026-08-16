@@ -60,13 +60,18 @@ first launch of a game that needs them.
 ## Using it
 
 One pane at a time by default: a console replaces the screen with its games and
-Back undoes it. The pair of buttons left of the search box switches between "one at a time"
-and "side by side" — what you are picking from, the games, and a preview of the one
+Back undoes it. The pair of buttons left of the search box switches between **Sofa** — one
+screen at a time, driven from a controller — and **Desk** — what you are picking from, the games, and a preview of the one
 selected — where nothing is ever replaced and both outer columns can be dragged
 and remember their widths. Four tabs across the top either way: **Library**,
 **My collections**, **History** and **RomM browse**.
 
-Consoles are listed alphabetically; collections have an order button above them
+**Filter** narrows a list to what is on this machine, what is not, what is
+starred, what you have never played, or what is rated 8 or better; several at
+once, and they all have to pass. **Surprise me** picks at random out of
+whatever the filters left — the only realistic way into an arcade set nobody
+knows by heart. Both are per-list and forgotten when the app closes, like the
+sort. Consoles are listed alphabetically; collections have an order button above them
 (name, most games, fewest, most downloaded) because the server returns them by
 size. Within a console, games sort by name, rating, year, size or recently
 played — that one is per-console and deliberately forgotten when the app closes.
