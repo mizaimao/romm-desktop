@@ -136,11 +136,15 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
   for (const name of BUTTONS) {
     const node = HANDLES[name]?.();
     if (!node) continue;
-    // Two buttons make no sense once nothing is ever replaced: there is
-    // nowhere to go back to, and the preview is a column rather than
-    // something that slides over the list.
-    const suppressed = mode === "columns" && (name === "back" || name === "sidebar");
-    node.hidden = suppressed || !wants[name];
+    // Back makes no sense once nothing is ever replaced: there is nowhere to
+    // go back to.
+    const suppressed = mode === "columns" && name === "back";
+    // The preview is a column here rather than something that slides over the
+    // list — but it can be closed, and once it is, this button is the only way
+    // back to it. So it is always offered in columns, whatever the view asked
+    // for, rather than only on the screens that have something to preview.
+    const wanted = wants[name] || (mode === "columns" && name === "sidebar");
+    node.hidden = suppressed || !wanted;
   }
   if (el.zoomWrap) {
     // The one conditional worth keeping: the slider sizes covers, so it means

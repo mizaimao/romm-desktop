@@ -411,8 +411,15 @@ describe("the video, where ES-DE puts it", () => {
     const tags = [...document.querySelectorAll("#detail .badges .badge")].map((b) =>
       b.textContent.trim()
     );
+    const trailerIcon = () => document.querySelector("#trailer .icon");
     assert.deepEqual(tags, ["Video", "Manual", "Trailer"]);
     assert.equal(document.querySelector("#detail .extras"), null, "the old foot row is still there");
+    // Not a play triangle: that one promises the video plays here, the way the
+    // tag beside it does, and this one leaves the app for a browser.
+    assert.ok(
+      trailerIcon().classList.contains("icon-external"),
+      "the trailer still wears a play icon"
+    );
     // A webview follows a link in place, so YouTube would have replaced the
     // library with no address bar and no way back.
     const trailer = document.getElementById("trailer");
@@ -707,5 +714,39 @@ describe("changing rapid fire keeps your place", () => {
     const saved = invoked.filter((c) => c.cmd === "set_config_field").map((c) => c.args.value);
     assert.deepEqual(saved.slice(-2), ["off", "a"], `sent: ${saved}`);
     Object.assign(DETAIL, { autofire: null, autofire_hz: 5 });
+  });
+});
+
+describe("closing the preview", () => {
+  /// It is a third of the window in three columns, and the only control for it
+  /// was one of nine buttons in the header. A pane you can see should be
+  /// closable from the pane.
+  test("the pane carries its own close button", async () => {
+    Object.assign(DETAIL, { has_video: false });
+    await detail.selectRom(7);
+    await settle();
+
+    const close = document.querySelector("#detail .pane-close");
+    assert.ok(close, "no way to close it from the pane itself");
+    assert.equal(document.getElementById("detail").hidden, false);
+
+    close.click();
+    await settle();
+    assert.equal(document.getElementById("detail").hidden, true, "it did not close");
+  });
+
+  /// And the choice sticks. A preview that reopens itself on the next game is
+  /// a button that appears not to have worked.
+  test("it stays closed until asked back", async () => {
+    document.querySelector("#detail .pane-close")?.click();
+    await settle();
+    await detail.selectRom(7);
+    await settle();
+    assert.equal(document.getElementById("detail").hidden, true, "it came back on its own");
+
+    detail.setSidebar(true);
+    await detail.selectRom(7);
+    await settle();
+    assert.equal(document.getElementById("detail").hidden, false, "it will not come back");
   });
 });

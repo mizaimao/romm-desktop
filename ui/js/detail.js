@@ -92,10 +92,13 @@ export async function selectRom(id) {
       ? `<button class="badge" id="manual" title="Read the manual">
            <span class="icon icon-book"></span><span>Manual</span></button>`
       : "",
+    // Not a play glyph: this one is a YouTube link and opens the browser. A
+    // play triangle beside the video tag promises the same thing happens, and
+    // it does not — one plays here, the other leaves the app entirely.
     d.youtube_id
-      ? `<button class="badge" id="trailer" title="Watch the trailer on YouTube"
+      ? `<button class="badge" id="trailer" title="Watch the trailer on YouTube — opens your browser"
            data-yt="${escapeHtml(d.youtube_id)}">
-           <span class="icon icon-play"></span><span>Trailer</span></button>`
+           <span class="icon icon-external"></span><span>Trailer</span></button>`
       : "",
   ].join("");
   const video = badges ? `<div class="badges">${badges}</div>` : "";
@@ -109,6 +112,9 @@ export async function selectRom(id) {
   // and move one into the other, instead of replacing the pane wholesale.
   await withTransition(() => {
     el.detail.innerHTML = `
+    <button class="pane-close" title="Close the preview" aria-label="Close the preview">
+      <span class="icon icon-close"></span>
+    </button>
     <div class="scroll">
       <h2>${escapeHtml(d.name)}</h2>
       <div class="sub">${escapeHtml(d.fs_name)}</div>
@@ -494,6 +500,9 @@ function wireArtwork(d) {
     const idx = [...el.detail.querySelectorAll(".shots img")].indexOf(shown);
     openLightbox(media, Math.max(media.findIndex((m) => m.id === `screenshot-${idx}`), 0));
   });
+  // On the pane rather than only in the header: the button up there is one of
+  // nine, and the thing it closes is a third of the window.
+  el.detail.querySelector(".pane-close")?.addEventListener("click", () => setSidebar(false));
   el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.id === "cover"));
   document.getElementById("playvid")?.addEventListener("click", playVideo);
   el.detail.querySelectorAll(".artstrip figure").forEach((fig) =>

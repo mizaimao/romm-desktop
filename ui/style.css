@@ -1248,7 +1248,9 @@ button:has(> .icon + span) {
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
 .icon-pane      { --icon: url("icons/square.svg"); }
 .icon-book      { --icon: url("icons/book-open.svg"); }
-.icon-columns   { --icon: url("icons/columns-3.svg"); }
+.icon-columns   { --icon: url("icons/columns-2.svg"); }
+.icon-pad       { --icon: url("icons/gamepad-2.svg"); }
+.icon-external  { --icon: url("icons/external-link.svg"); }
 
 /* Glyph-only buttons were sized for a text character; a mask needs a box. */
 #back, #settings-btn, .lb-close, .lb-nav {
@@ -2499,3 +2501,33 @@ code {
 #detail .artstrip .vidtile:hover .vidthumb {
   background: color-mix(in srgb, var(--glass) 40%, transparent);
 }
+
+/* Closing the preview from the preview.
+   The header button that does the same thing is one of nine up there, and what
+   it closes is a third of the window — so the pane carries its own, in the
+   corner every pane in every application puts one. */
+#detail .pane-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--glass) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+  cursor: pointer;
+}
+#detail .pane-close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--glass) 45%, transparent);
+}
+#detail .pane-close .icon { width: 13px; height: 13px; }
+/* The close button is positioned against the pane, so the pane has to be the
+   thing it is positioned against. */
+#detail { position: relative; }

@@ -19,7 +19,10 @@ export async function showPlatforms() {
   // In three columns the preview is a column, not something to hide, and the
   // middle is not emptied — going "back" to the consoles there is a thing that
   // does not happen.
-  el.detail.hidden = shellMode() === "columns" ? false : true;
+  // In three columns the preview is a column rather than something to hide —
+  // unless it has been closed, which is a choice that has to survive changing
+  // screens or the button that closes it does nothing you can see.
+  el.detail.hidden = shellMode() === "columns" ? !state.sidebar : true;
   enter({
     title: "Platforms",
     // Grid or list works here too. It was hidden on this screen, which is why

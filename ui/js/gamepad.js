@@ -371,8 +371,8 @@ function step() {
 ///
 /// Returns the actions this consumed, so a hold does not also fire as a press
 /// on the way down. A tap is unaffected: `fire` is skipped only once the hold
-/// has actually happened, which is three seconds after the button went down.
-const HOLD_MS = 3000;
+/// has actually happened, which is two seconds after the button went down.
+const HOLD_MS = 2000;
 const holdStart = new Map();
 
 function longPress(pressed, now) {

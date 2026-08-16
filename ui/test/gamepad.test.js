@@ -797,7 +797,7 @@ describe("holding Select rather than tapping it", () => {
   const select = () =>
     Number(Object.entries(ui.padMap()).find(([, a]) => a === "pictures")?.[0]);
 
-  test("three seconds of it goes straight to the miximage", async () => {
+  test("two seconds of it goes straight to the miximage", async () => {
     const sel = select();
     assert.ok(Number.isInteger(sel), "nothing is bound to the pictures action");
     // Out of the settle window first.
@@ -824,9 +824,9 @@ describe("holding Select rather than tapping it", () => {
       "the hold fired on the way down"
     );
 
-    // Three seconds of the same press. The loop reads the clock rather than
+    // Two seconds of the same press. The loop reads the clock rather than
     // counting frames, so the wait is real.
-    await new Promise((r) => setTimeout(r, 3050));
+    await new Promise((r) => setTimeout(r, 2050));
     ui.stepForTest();
     assert.equal(
       invoked.find((c) => c.cmd === "set_list_art")?.args.value,
