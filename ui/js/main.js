@@ -3,7 +3,7 @@
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { openSortMenu } from "./sort.js";
-import { chooseMode, storedMode } from "./shell.js";
+import { chooseMode, storedMode, installColumnResizer } from "./shell.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
@@ -207,6 +207,7 @@ function formatEta(seconds) {
   installTabs();
   await showSection("library", { force: true });
   installDetailResizer();
+  installColumnResizer();
   installKeys();
   installGamepad();
   // Measure the display now. It costs 24 animation frames, and taken on demand

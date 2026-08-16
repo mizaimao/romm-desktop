@@ -336,6 +336,45 @@ export async function runSearch(term) {
 /// selected and nothing else. Right-click there did nothing at all, and neither
 /// did double-click, on cards that look exactly like the ones below where both
 /// work.
+/// Listen once, on the container, instead of on every game.
+///
+/// Attaching three listeners per row means 7,518 of them for the arcade list,
+/// created and thrown away on every platform switch — which is what made
+/// switching consoles feel slow. One listener on the container answers for all
+/// of them, and survives the list being redrawn, so a redraw costs a string
+/// and nothing else.
+const WIRED = new WeakSet();
+
+export function delegateGames(container) {
+  if (!container || WIRED.has(container)) return;
+  WIRED.add(container);
+
+  const idOf = (ev) => {
+    const node = ev.target.closest?.("[data-id]");
+    return node && container.contains(node) ? Number(node.dataset.id) : null;
+  };
+
+  container.addEventListener("click", (ev) => {
+    const id = idOf(ev);
+    if (id !== null) selectRom(id);
+  });
+  // Double-click is the shortcut for "just play it".
+  container.addEventListener("dblclick", async (ev) => {
+    const id = idOf(ev);
+    if (id === null) return;
+    ev.preventDefault();
+    play(await invoke("rom_detail", { id }));
+  });
+  container.addEventListener("contextmenu", (ev) => {
+    const id = idOf(ev);
+    if (id === null) return;
+    ev.preventDefault();
+    gameMenu(id, ev.clientX, ev.clientY);
+  });
+}
+
+/// One game's click, double-click and right-click, for a node that is not
+/// inside a delegated container.
 export function wireGame(node, id) {
   node.addEventListener("click", () => selectRom(id));
   // Double-click is the shortcut for "just play it".
@@ -343,44 +382,49 @@ export function wireGame(node, id) {
     ev.preventDefault();
     play(await invoke("rom_detail", { id }));
   });
-  node.addEventListener("contextmenu", async (ev) => {
+  node.addEventListener("contextmenu", (ev) => {
     ev.preventDefault();
-    selectRom(id);
-    let d;
-    try {
-      d = await invoke("rom_detail", { id });
-    } catch {
-      return;
-    }
-    // The game's save states, if it has any. This menu used to offer "take
-    // this console offline" instead, which on a game in Continue playing reads
-    // as an offer to download a whole platform — the opposite of the small,
-    // local thing a right-click on one game should do. Taking a console
-    // offline is on the toolbar, where it belongs.
-    let states = [];
-    try {
-      states = await invoke("game_states", { id });
-    } catch {
-      states = [];
-    }
-    showMenu(
-      [
-        { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
-        d.downloaded ? null : { label: "Download", run: () => download(id, false) },
-        // A rule between starting the game and destroying part of it.
-        null,
-        ...(states.length
-          ? states.map((st) => ({
-              label: `Delete ${st.label}${st.when ? ` — ${st.when}` : ""}`,
-              danger: true,
-              run: () => deleteState(id, st),
-            }))
-          : [{ label: "No save states", disabled: true }]),
-      ],
-      ev.clientX,
-      ev.clientY
-    );
+    gameMenu(id, ev.clientX, ev.clientY);
   });
+}
+
+/// The right-click menu for one game.
+async function gameMenu(id, x, y) {
+  selectRom(id);
+  let d;
+  try {
+    d = await invoke("rom_detail", { id });
+  } catch {
+    return;
+  }
+  // The game's save states, if it has any. This menu used to offer "take
+  // this console offline" instead, which on a game in Continue playing reads
+  // as an offer to download a whole platform — the opposite of the small,
+  // local thing a right-click on one game should do. Taking a console
+  // offline is on the toolbar, where it belongs.
+  let states = [];
+  try {
+    states = await invoke("game_states", { id });
+  } catch {
+    states = [];
+  }
+  showMenu(
+    [
+      { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
+      d.downloaded ? null : { label: "Download", run: () => download(id, false) },
+      // A rule between starting the game and destroying part of it.
+      null,
+      ...(states.length
+        ? states.map((st) => ({
+            label: `Delete ${st.label}${st.when ? ` — ${st.when}` : ""}`,
+            danger: true,
+            run: () => deleteState(id, st),
+          }))
+        : [{ label: "No save states", disabled: true }]),
+    ],
+    x,
+    y
+  );
 }
 
 export function renderRows(unsorted, showPlatform) {
@@ -403,7 +447,7 @@ export function renderRows(unsorted, showPlatform) {
       ? gridMarkup(rows)
       : listMarkup(rows, showPlatform);
 
-  el.list.querySelectorAll("[data-id]").forEach((n) => wireGame(n, Number(n.dataset.id)));
+  delegateGames(region("games"));
 
   if (state.layout === "grid") observeCovers();
   // Put the cursor back where it was in this list, falling back to the top.

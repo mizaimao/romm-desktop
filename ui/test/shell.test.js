@@ -561,3 +561,52 @@ describe("Browse and My collections fill the middle too", () => {
     assert.equal(open?.dataset.cid, "c2", "the column does not show which is open");
   });
 });
+
+describe("the left column can be resized", () => {
+  /// 240px is a guess about somebody else's console names, and "Arcade Shmups
+  /// Horizontal" does not fit in it.
+  beforeEach(() => {
+    shell.setMode("columns");
+    document.getElementById("consoles-grip")?.remove();
+    delete el.consoles.dataset.resizable;
+    el.consoles.style.flexBasis = "";
+    localStorage.removeItem("consolesWidth");
+  });
+
+  test("there is a handle beside it, and only in three columns", () => {
+    shell.installColumnResizer();
+    const grip = document.getElementById("consoles-grip");
+    assert.ok(grip, "no handle to drag");
+    assert.equal(
+      grip.previousElementSibling,
+      el.consoles,
+      "the handle is not against the column"
+    );
+  });
+
+  test("a remembered width is applied", () => {
+    localStorage.setItem("consolesWidth", "330");
+    shell.installColumnResizer();
+    assert.equal(el.consoles.style.flexBasis, "330px");
+  });
+
+  /// Dragged to nothing it would be a column you cannot get back; dragged wide
+  /// it would eat the games.
+  test("it cannot be dragged away or over the games", () => {
+    localStorage.setItem("consolesWidth", "10");
+    shell.installColumnResizer();
+    assert.equal(el.consoles.style.flexBasis, "160px", "the column can vanish");
+
+    delete el.consoles.dataset.resizable;
+    document.getElementById("consoles-grip")?.remove();
+    localStorage.setItem("consolesWidth", "5000");
+    shell.installColumnResizer();
+    assert.equal(el.consoles.style.flexBasis, "520px", "the column can take the window");
+  });
+
+  test("installing twice does not leave two handles", () => {
+    shell.installColumnResizer();
+    shell.installColumnResizer();
+    assert.equal(document.querySelectorAll("#consoles-grip").length, 1);
+  });
+});

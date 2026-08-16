@@ -2103,6 +2103,17 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 }
 #consoles[hidden] { display: none; }
 
+/* The handle between the column and the games. Mirrors the one on the other
+   side of the preview, and is only there when the column is. */
+#consoles-grip {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: transparent;
+}
+#consoles-grip:hover,
+#consoles-grip.dragging { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+body:not(.columns) #consoles-grip { display: none; }
+
 /* A column that narrow holds one console per line, whatever the grid/list
    button says — that button is about the games in the middle. */
 body.columns #consoles .rows { gap: 1px; }
@@ -2167,17 +2178,25 @@ body.columns #consoles .grid {
   gap: 1px;
 }
 body.columns #consoles .card {
-  display: flex;
-  /* `.card` sets flex-direction: column, which is why setting display alone
-     left these as tall cards in a narrow column — the picture stayed above the
-     name rather than beside it. */
-  flex-direction: row;
+  /* A grid rather than a row of three. Laid out as a row, the counts —
+     "322 games · 322 here" — refuse to shrink and the name is left with
+     whatever is over, which at this width was four characters and an ellipsis.
+     Two lines beside the picture gives the name the full width. */
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-areas:
+    "logo name"
+    "logo meta";
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   padding: 5px 8px;
   min-height: 0;
   text-align: left;
 }
+body.columns #consoles .card .logo,
+body.columns #consoles .card .logo.mosaic { grid-area: logo; }
+body.columns #consoles .card .name { grid-area: name; }
+body.columns #consoles .card .meta { grid-area: meta; }
 body.columns #consoles .card .logo,
 body.columns #consoles .card .logo.mosaic {
   flex: 0 0 26px;
@@ -2188,13 +2207,15 @@ body.columns #consoles .card .logo.mosaic {
 }
 body.columns #consoles .card .logo img { max-height: 22px; width: auto; }
 body.columns #consoles .card .name {
-  flex: 1;
   font-size: 13px;
+  color: var(--text);
+  /* The whole point of the two lines: the name is what you are reading, so it
+     gets the width and only gives up at the real edge of the column. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-body.columns #consoles .card .meta { font-size: 11px; white-space: nowrap; }
+body.columns #consoles .card .meta { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The collection filter sits above the list and stays put while it scrolls. */
 body.columns #consoles .filter {
   position: sticky;

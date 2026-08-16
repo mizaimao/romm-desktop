@@ -178,9 +178,15 @@ describe("the left column is a list, whatever is in it", () => {
        </div></div>`,
       ".card"
     );
-    // `.card` sets flex-direction: column, which is what kept these tall.
-    assert.equal(style.display, "flex");
-    assert.equal(style.flexDirection, "row", "the card is still standing up");
+    // A grid of two rows beside the picture, not a row of three: laid out as a
+    // row the counts refused to shrink and the name was left with four
+    // characters and an ellipsis.
+    assert.equal(style.display, "grid");
+    assert.match(style.gridTemplateColumns, /26px/, "the picture has no column of its own");
+    const name = dom.window.getComputedStyle(
+      dom.window.document.querySelector("#consoles .card .name")
+    );
+    assert.equal(name.gridArea.trim().split(" ")[0], "name", "the name is not on its own line");
   });
 
   test("and the grid of them becomes one per line", () => {

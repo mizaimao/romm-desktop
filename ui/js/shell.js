@@ -163,3 +163,51 @@ export function resetGames(message) {
   const games = region("games");
   if (games) games.innerHTML = `<div class="empty">${message}</div>`;
 }
+
+/// Let the left column be dragged wider.
+///
+/// A fixed 240px is a guess about somebody else's console names, and
+/// "Arcade Shmups Horizontal" does not fit in it. The width is remembered, and
+/// bounded so the column cannot be dragged away entirely or over the games.
+export function installColumnResizer() {
+  const column = el.consoles;
+  if (!column || column.dataset.resizable) return;
+  column.dataset.resizable = "1";
+
+  const grip = document.createElement("div");
+  grip.id = "consoles-grip";
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-orientation", "vertical");
+  grip.title = "Drag to resize";
+  column.parentNode.insertBefore(grip, column.nextSibling);
+
+  const apply = (px) => {
+    const w = Math.max(160, Math.min(520, px | 0));
+    column.style.flexBasis = `${w}px`;
+    return w;
+  };
+  const saved = Number(localStorage.getItem("consolesWidth"));
+  if (saved) apply(saved);
+
+  let startX = 0;
+  let startW = 0;
+  // Dragging right widens it: it grows from its right edge, the opposite of
+  // the preview on the other side.
+  const onMove = (ev) => apply(startW + (ev.clientX - startX));
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    grip.classList.remove("dragging");
+    document.body.classList.remove("resizing-detail");
+    localStorage.setItem("consolesWidth", String(column.getBoundingClientRect().width | 0));
+  };
+  grip.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    startX = ev.clientX;
+    startW = column.getBoundingClientRect().width;
+    grip.classList.add("dragging");
+    document.body.classList.add("resizing-detail");
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  });
+}
