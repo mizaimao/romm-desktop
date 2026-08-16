@@ -754,7 +754,17 @@ input_player2_gun_start_mbtn = \"3\"
         // faster than the game can read.
         let hz = hz.clamp(1, 30);
         let period = ((60.0 / hz as f32).round() as u32).max(2);
-        let duty = (period / 2).max(1);
+        // How long the button is *held* each cycle, capped rather than half
+        // the period.
+        //
+        // Half of a slow period is a long press: at 2 shots a second it is a
+        // quarter of a second with the button down, and a quarter of a second
+        // is a held button to any game that cares — Pulstar and Blazing Star
+        // charge a shot from exactly that, so slow rapid fire spent its time
+        // charging instead of shooting. Four frames is 67ms: unmistakably a
+        // tap, and long enough for a game reading input every other frame to
+        // see it.
+        let duty = (period / 2).clamp(1, 4);
 
         eprintln!("rapid fire: hold {which:?}, {hz} shots a second (turbo mode 3, period {period})");
         format!(
@@ -1505,6 +1515,37 @@ input_r2_axis = "+5"
                 "{mode:?} remapped something it did not need to"
             );
         }
+    }
+
+    /// A tap, at every rate.
+    ///
+    /// The button was held for half the cycle, which at slow rates is a long
+    /// press — 250ms at 2 shots a second. Games with a charge shot read that
+    /// as charging, so the slowest settings on a Neo Geo shooter spent their
+    /// time winding up a beam instead of firing.
+    #[test]
+    fn the_button_is_never_held_long_enough_to_read_as_held() {
+        let dir = scratch("autofire-duty");
+        with_autoconfig(&dir);
+        let field = |hz: u32, key: &str| {
+            fake(&dir)
+                .autofire(Some("Xbox Wireless Controller"), crate::tweaks::AutoFire::LeftBumper, hz)
+                .lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split('"').nth(1))
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0)
+        };
+        for hz in 1..=30 {
+            let period = field(hz, "input_turbo_period");
+            let duty = field(hz, "input_turbo_duty_cycle");
+            assert!(duty >= 1, "{hz} Hz never presses the button");
+            assert!(duty <= 4, "{hz} Hz holds it for {duty} frames, which reads as held");
+            assert!(period > duty, "{hz} Hz never lets the button go: {duty}/{period}");
+        }
+        // The fast end is unchanged: one frame down, one up.
+        assert_eq!(field(30, "input_turbo_period"), 2);
+        assert_eq!(field(30, "input_turbo_duty_cycle"), 1);
     }
 
     /// Held, not latched.

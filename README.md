@@ -98,6 +98,9 @@ sessions this app started, since nothing else can be known.
 Arcade games where a single shot needs the button pressed repeatedly (Metal
 Slug and its relatives) can hold the fire down for you: hold **LB** — or RB — on its own and
 the game fires at the rate in Hz set beside the control on the game's page.
+Ten a second is the usual choice: it is about as fast as a good player can
+mash, and faster settings mostly waste presses on games that cap the shots on
+screen.
 It stops the moment the shoulder is released, and nothing is remapped. Do not
 hold the fire button as well: RetroArch reports a real press in place of the
 repeat, so holding both gives one continuous shot. The choice applies across the whole
