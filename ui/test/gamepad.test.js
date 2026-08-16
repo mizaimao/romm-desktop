@@ -318,10 +318,15 @@ describe("the triggers resize the covers", () => {
     const map = ui.padMap();
     assert.equal(map[6], "zoomIn", "LT grows the covers");
     assert.equal(map[7], "zoomOut", "RT shrinks them");
-    // Paging had to go somewhere; losing it entirely would be a silent
-    // regression rather than a move.
-    assert.equal(map[10], "pageUp");
-    assert.equal(map[11], "pageDown");
+    // The stick clicks sort the list now. They were paging, which the d-pad
+    // and the sticks already do a screen at a time, so pressing them looked
+    // like nothing happening.
+    assert.equal(map[10], "sortCycle");
+    assert.equal(map[11], "sortMenu");
+    // Paging is not gone, it is on the keyboard, where it has a key that says
+    // what it does.
+    assert.equal(ui.keyFor("pageUp"), "PageUp");
+    assert.equal(ui.keyFor("pageDown"), "PageDown");
   });
 
   test("zoom stops at the slider's own limits", () => {
@@ -747,5 +752,77 @@ describe("walking the reel with a pad", () => {
       "the stick did not change the picture"
     );
     ui.closeLightbox();
+  });
+});
+
+describe("sorting a list", () => {
+  const games = [
+    { id: 1, name: "Zed Blade", rating: 6.1, year: 1994, size_bytes: 900, favourite: false },
+    { id: 2, name: "Alpha Mission", rating: null, year: 1985, size_bytes: 100, favourite: false },
+    { id: 3, name: "Metal Slug", rating: 9.2, year: 1996, size_bytes: 500, favourite: false },
+    { id: 4, name: "Zzz Last", rating: 8.0, year: 1999, size_bytes: 50, favourite: true },
+  ];
+  const names = (rows) => rows.map((g) => g.name);
+
+  test("alphabetical by default", async () => {
+    const sort = await import("../js/sort.js");
+    ui.state.view = "roms";
+    ui.state.platform = "neogeo";
+    assert.equal(sort.currentOrder().id, "name");
+    // The favourite is first whatever the order — that is what a favourite is.
+    assert.deepEqual(names(sort.sorted(games)), [
+      "Zzz Last", "Alpha Mission", "Metal Slug", "Zed Blade",
+    ]);
+  });
+
+  /// An unrated game is not a bad game, and a list that opens on the unknowns
+  /// answers nothing.
+  test("rating sorts high to low, with the unrated last", async () => {
+    const sort = await import("../js/sort.js");
+    ui.state.view = "roms";
+    ui.state.platform = "neogeo";
+    sort.setOrder("rating");
+    assert.deepEqual(names(sort.sorted(games)), [
+      "Zzz Last", "Metal Slug", "Zed Blade", "Alpha Mission",
+    ]);
+    sort.setOrder("name");
+  });
+
+  /// "Sort this console by rating" is a statement about that console. Carrying
+  /// it to the next one silently reorders a screen nobody asked about.
+  test("each console keeps its own order", async () => {
+    const sort = await import("../js/sort.js");
+    ui.state.view = "roms";
+    ui.state.platform = "neogeo";
+    sort.setOrder("year");
+    assert.equal(sort.currentOrder().id, "year");
+
+    ui.state.platform = "snes";
+    assert.equal(sort.currentOrder().id, "name", "the order followed to another console");
+
+    ui.state.platform = "neogeo";
+    assert.equal(sort.currentOrder().id, "year", "and was forgotten on the way back");
+    sort.setOrder("name");
+  });
+
+  /// The console grid is a couple of dozen tiles in an order people learn the
+  /// shape of. Shuffling it costs more than it gives.
+  test("the console grid has no sort", async () => {
+    const sort = await import("../js/sort.js");
+    ui.state.view = "platforms";
+    assert.equal(sort.sortable(), false);
+    assert.equal(sort.cycleOrder(1), null, "the stick click sorted the consoles");
+    ui.state.view = "roms";
+  });
+
+  test("sorting never reorders the caller's array", async () => {
+    const sort = await import("../js/sort.js");
+    ui.state.view = "roms";
+    ui.state.platform = "neogeo";
+    sort.setOrder("size");
+    const before = names(games);
+    sort.sorted(games);
+    assert.deepEqual(names(games), before, "state.rows was sorted in place");
+    sort.setOrder("name");
   });
 });

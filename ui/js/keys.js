@@ -7,10 +7,11 @@
 import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
-import { escapeHtml } from "./util.js";
+import { escapeHtml, toast } from "./util.js";
 import { closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen } from "./lightbox.js";
 import { cyclePictures } from "./pictures.js";
-import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
+import { openSortMenu, cycleOrder } from "./sort.js";
+import { ACTIONS, actionFor, keyFor, keyLabel, padMap, padLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
 
@@ -160,13 +161,35 @@ function toggleHelp() {
   const existing = document.getElementById("shortcuts");
   if (existing) return existing.remove();
 
-  const bound = ACTIONS.filter((a) => keyFor(a.id));
+  // Both columns, side by side. This listed the keyboard and then said
+  // "Controller" over a live readout of button indices — which answers "is this
+  // pad working" and not "what does this button do", the question somebody
+  // opens a help page to ask. An action with a button and no key belongs here
+  // too, so the filter is either-or rather than keyboard-only.
+  const map = padMap();
+  const padFor = (id) => {
+    const entry = Object.entries(map).find(([, a]) => a === id);
+    return entry ? padLabel(Number(entry[0])) : null;
+  };
+  const bound = ACTIONS.map((a) => ({ ...a, key: keyFor(a.id), pad: padFor(a.id) }))
+    .filter((a) => a.key || a.pad);
+
   const box = document.createElement("div");
   box.id = "shortcuts";
-  box.innerHTML = `<div class="sc-panel"><h3>Keyboard</h3><dl>${bound
-    .map((a) => `<dt>${keyLabel(keyFor(a.id))}</dt><dd>${a.label}</dd>`)
-    .join("")}</dl>
-    <h3>Controller</h3>
+  box.innerHTML = `<div class="sc-panel">
+    <h3>Controls</h3>
+    <table class="sc-table">
+      <thead><tr><th>Action</th><th>Keyboard</th><th>Controller</th></tr></thead>
+      <tbody>${bound
+        .map(
+          (a) => `<tr>
+            <td>${escapeHtml(a.label)}</td>
+            <td>${a.key ? escapeHtml(keyLabel(a.key)) : "<span class=\"dim\">—</span>"}</td>
+            <td>${a.pad ? escapeHtml(a.pad) : "<span class=\"dim\">—</span>"}</td>
+          </tr>`
+        )
+        .join("")}</tbody>
+    </table>
     <p class="pad-readout">No controller detected.</p>
     <p>Rebind these in Settings · Esc to close</p></div>`;
   box.addEventListener("click", () => box.remove());
@@ -250,6 +273,11 @@ export const HANDLERS = {
   },
   video: playVideo,
   pictures: cyclePictures,
+  sortMenu: () => openSortMenu(),
+  sortCycle: () => {
+    const now = cycleOrder(1);
+    if (now) toast(`Sorted by ${now}`);
+  },
   // The triggers zoom whatever is in front of you: the picture on the stage
   // when the lightbox is open, the covers in the grid when it is not.
   zoomIn: () => (isLightboxOpen() ? zoomLightbox(1) : nudgeZoom(1)),

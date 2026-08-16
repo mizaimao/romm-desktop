@@ -2,6 +2,7 @@
 
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
+import { openSortMenu } from "./sort.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
@@ -39,6 +40,8 @@ listen("art-changed", () => {
 listen("icons-changed", () => {
   if (state.view === "platforms") showPlatforms();
 });
+
+el.sortBtn.addEventListener("click", () => openSortMenu(el.sortBtn));
 
 el.zoom.addEventListener("input", (e) => setZoom(Number(e.target.value)));
 

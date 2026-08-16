@@ -2,6 +2,7 @@
 
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
+import { sorted, refreshSortButton } from "./sort.js";
 import { human, escapeHtml, toast } from "./util.js";
 import { selectRom, play, withTransition } from "./detail.js";
 
@@ -214,7 +215,12 @@ export async function runSearch(term) {
   renderRows(state.rows, true);
 }
 
-export function renderRows(rows, showPlatform) {
+export function renderRows(unsorted, showPlatform) {
+  // Ordered here rather than by whoever supplied the rows, so every path that
+  // draws a list — a console, a collection, a search, a redraw after the order
+  // changed — goes through the same comparison.
+  const rows = sorted(unsorted);
+  refreshSortButton();
   if (!rows.length) {
     el.list.innerHTML = `<div class="empty">Nothing here.</div>`;
     return;

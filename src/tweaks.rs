@@ -53,6 +53,18 @@ pub fn core_options(platform: &str, core: &str) -> &'static [Opt] {
             // enough to matter and slow enough that games still register it.
             ("fceumm_turbo_delay", "3"),
         ],
+        // SwanStation asks RetroArch for a Vulkan context, which on macOS means
+        // MoltenVK, and the GPU device is lost within a second or two of the
+        // game starting: the boot logo draws, the device dies, and the picture
+        // never advances. It looks exactly like a game that will not load, and
+        // the log is the only place it says otherwise
+        // (VK_ERROR_DEVICE_LOST, over and over).
+        //
+        // OpenGL is still a hardware renderer -- upscaling and the rest are
+        // unaffected -- and it survives. Only on macOS: the Vulkan path is the
+        // better one everywhere it works.
+        #[cfg(target_os = "macos")]
+        (_, "swanstation") => &[("swanstation_GPU_Renderer", "OpenGL")],
         // The rest have their rapid-fire buttons on always; the option only
         // sets how fast they repeat. Left alone the default is slower than
         // anyone wants from a button labelled turbo.
@@ -133,6 +145,7 @@ pub fn core_dir_name(core: &str) -> Option<&'static str> {
         "gpsp" => Some("gpSP"),
         "mame2003_plus" => Some("MAME 2003-Plus"),
         "mame2003" => Some("MAME 2003"),
+        "swanstation" => Some("SwanStation"),
         _ => None,
     }
 }

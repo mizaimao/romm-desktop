@@ -47,6 +47,7 @@ export const el = {
   status: document.getElementById("status"),
   toast: document.getElementById("toast"),
   layoutBtn: document.getElementById("layout-btn"),
+  sortBtn: document.getElementById("sort-btn"),
   grabBtn: document.getElementById("grab-btn"),
   sidebarBtn: document.getElementById("sidebar-btn"),
   lb: document.getElementById("lightbox"),

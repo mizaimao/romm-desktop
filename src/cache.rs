@@ -124,6 +124,10 @@ pub struct RomRow {
     pub manual_path: Option<String>,
     pub youtube_id: Option<String>,
     pub multi_file: bool,
+    /// When this game was last played, as an ISO timestamp. Written locally
+    /// after every session and also filled in by the server, so it sorts and
+    /// compares as text either way.
+    pub last_played: Option<String>,
     /// ES-DE system directory this came from, when the library was scanned
     /// from a local ES-DE tree. Artwork there is keyed by ES-DE system name,
     /// not by RomM slug, so the two cannot be used interchangeably.
@@ -148,7 +152,8 @@ const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name
                            cover_path, screenshot_path, screenshots_json, \
                            cover_small_path, summary, meta_json, alt_names_json, \
                            regions_json, manual_path, youtube_id, \
-                           COALESCE(multi_file, 0), esde_system, local_path";
+                           COALESCE(multi_file, 0), esde_system, local_path, \
+                           last_played";
 
 fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
     Ok(RomRow {
@@ -181,6 +186,7 @@ fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
         },
         esde_system: r.get(18)?,
         local_path: r.get(19)?,
+        last_played: r.get(20)?,
     })
 }
 

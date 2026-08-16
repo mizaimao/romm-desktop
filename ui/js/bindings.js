@@ -31,6 +31,8 @@ export const ACTIONS = [
   { id: "zoomOut", label: "Smaller covers",        fallback: "-" },
   { id: "video",   label: "Play gameplay video",   fallback: "v" },
   { id: "pictures",label: "Change the pictures",    fallback: null },
+  { id: "sortCycle", label: "Next sort order",     fallback: null },
+  { id: "sortMenu",  label: "Sort by…",            fallback: "s" },
 ];
 
 /// Controller buttons, by W3C "standard mapping" index.
@@ -83,10 +85,11 @@ const PAD_FALLBACK = {
   // several times in a row while looking at them.
   8: "pictures",
   9: "help",
-  // Paging moved off the triggers to make room. The stick clicks were the only
-  // buttons still free; both remain rebindable.
-  10: "pageUp",
-  11: "pageDown",
+  // The stick clicks sort the list: the left one steps through the orders, the
+  // right one opens the menu. They were paging, which the d-pad and the sticks
+  // already do a screen at a time, so pressing them appeared to do nothing.
+  10: "sortCycle",
+  11: "sortMenu",
   12: "up",
   13: "down",
   14: "left",

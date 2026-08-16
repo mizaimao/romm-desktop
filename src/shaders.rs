@@ -197,7 +197,13 @@ pub fn write_chained(
 
     let out = dir.join("romm-motion.slangp");
     std::fs::write(&out, body).ok()?;
-    Some(out)
+    // Absolute, always. The library folder is configured as "./library" and
+    // writing that through to `video_shader` gave RetroArch a path it resolves
+    // against somewhere of its own — so the preset was silently not found and
+    // every CRT platform fell back to no shader at all. Handhelds were
+    // unaffected, because the motion pass is CRT-only, which is exactly the
+    // pattern the report described.
+    Some(out.canonicalize().unwrap_or(out))
 }
 
 /// Preset for a platform: the user's choice if set, else the shipped default.

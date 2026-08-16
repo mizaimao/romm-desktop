@@ -94,6 +94,13 @@ struct RomView {
     downloaded: bool,
     /// In a starred collection. Shown with a star and sorted to the top.
     favourite: bool,
+    /// The three things a list can be ordered by that are not the name. Pulled
+    /// out of the metadata blob here rather than in the page, because the page
+    /// would have to parse the same JSON once per game on every redraw.
+    rating: Option<f64>,
+    year: Option<i32>,
+    /// ISO timestamp, comparable as text. See util::iso_from_epoch.
+    last_played: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -906,14 +913,29 @@ fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomVie
         .and_then(|c| c.favourite_ids().ok())
         .unwrap_or_default();
     rows.into_iter()
-        .map(|r| RomView {
-            favourite: favourites.contains(&r.id),
-            downloaded: row_path(state, &r).is_some(),
-            id: r.id,
-            name: r.name,
-            fs_name: r.fs_name,
-            platform: r.platform_slug,
-            size_bytes: r.fs_size_bytes,
+        .map(|r| {
+            let meta: Option<serde_json::Value> =
+                r.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok());
+            RomView {
+                favourite: favourites.contains(&r.id),
+                downloaded: row_path(state, &r).is_some(),
+                rating: meta
+                    .as_ref()
+                    .and_then(|m| m.get("average_rating"))
+                    .and_then(|v| v.as_f64()),
+                // RomM stores the release date as epoch milliseconds.
+                year: meta
+                    .as_ref()
+                    .and_then(|m| m.get("first_release_date"))
+                    .and_then(|v| v.as_f64())
+                    .map(|ms| 1970 + (ms / 1000.0 / 31_556_952.0) as i32),
+                last_played: r.last_played.clone(),
+                id: r.id,
+                name: r.name,
+                fs_name: r.fs_name,
+                platform: r.platform_slug,
+                size_bytes: r.fs_size_bytes,
+            }
         })
         .collect()
 }

@@ -435,6 +435,16 @@ video_aspect_ratio_auto = \"true\"
 # Belt and braces: never let a launch from here rewrite the user's config.
 config_save_on_exit = \"false\"
 
+# The shader chosen here is the shader that runs.
+#
+# RetroArch looks for a preset of its own beside each core -- config/<Core>/
+# <Core>.slangp -- and that one wins over `video_shader` without saying so.
+# One left behind by a handheld, or by pressing \"save core preset\" once, meant
+# every NES game came up in crt-royale no matter what this app asked for, and
+# every attempt to change it in Settings did nothing. Those files are left
+# alone; they are just not consulted.
+auto_shaders_enable = \"false\"
+
 # Mouse wired to the light gun controls.
 #
 # RetroArch keeps gun binds apart from pad binds and ships them unbound, so a
