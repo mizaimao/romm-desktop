@@ -2118,3 +2118,77 @@ body.columns #detail {
   flex: 0 0 clamp(280px, 26vw, 420px);
   border-left: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
 }
+
+/* The console whose games are in the middle. The column stays on screen while
+   the middle changes, so without this there is nothing to say which of
+   thirty-five consoles you are looking at. */
+body.columns #consoles .prow.open,
+body.columns #consoles .card.open {
+  background: color-mix(in srgb, var(--glass) 26%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Collections and groups in the left column.
+   They are drawn as cards, which is right for a page of them and wrong for a
+   240px column — a grid two across leaves a picture the size of a stamp above
+   a name that does not fit. In the column they become rows, matching the
+   consoles above them, without changing the markup or the click handlers. */
+body.columns #consoles .grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+body.columns #consoles .card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  min-height: 0;
+  text-align: left;
+}
+body.columns #consoles .card .logo,
+body.columns #consoles .card .logo.mosaic {
+  flex: 0 0 26px;
+  height: 22px;
+  margin: 0;
+  background: none;
+  border: 0;
+}
+body.columns #consoles .card .logo img { max-height: 22px; width: auto; }
+body.columns #consoles .card .name {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.columns #consoles .card .meta { font-size: 11px; white-space: nowrap; }
+/* The collection filter sits above the list and stays put while it scrolls. */
+body.columns #consoles .filter {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+/* This is an application, not a page.
+   Dragging across a game's name and watching it turn blue is the single
+   clearest tell that a thing is a web view — nothing else in the window
+   behaves like a document. Text that exists to be copied keeps its selection:
+   a path you have to paste somewhere, a field you type into. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+input,
+textarea,
+[contenteditable],
+.summary,
+.cf-text,
+.set-path,
+code {
+  -webkit-user-select: text;
+  user-select: text;
+}

@@ -128,3 +128,28 @@ describe("the zoom slider changes the size at every step", () => {
     assert.ok(steps >= 50, `only ${steps} zoom positions, which is not continuous`);
   });
 });
+
+describe("it does not behave like a document", () => {
+  /// Dragging across a game's name and watching it turn blue is the clearest
+  /// tell that a window is a web view — nothing else on the desktop does that.
+  test("text is not selectable", () => {
+    const style = dom.window.getComputedStyle(dom.window.document.body);
+    assert.equal(
+      style.userSelect || style.webkitUserSelect,
+      "none",
+      "the library selects like a web page"
+    );
+  });
+
+  /// Except where the text exists to be copied out: a path to paste somewhere,
+  /// a field to type in.
+  test("but the things you type in and copy from still are", () => {
+    const input = dom.window.document.getElementById("search");
+    const style = dom.window.getComputedStyle(input);
+    assert.equal(
+      style.userSelect || style.webkitUserSelect,
+      "text",
+      "the search field cannot be selected in"
+    );
+  });
+});

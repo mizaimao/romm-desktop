@@ -40,12 +40,21 @@ export async function showPlatforms() {
 
   renderPlatforms(items);
   if (shellMode() === "columns") {
-    // The middle column belongs to the games. Left as it was if a console is
-    // already open, and otherwise saying what to do rather than sitting blank.
+    // Three columns, three columns' worth of content. A window that opens with
+    // two thirds of itself empty until something is clicked is asking to be
+    // told what it already knows: which console you were last in, or failing
+    // that the first one. Choosing it fills the middle, and the middle fills
+    // the preview.
     if (!state.platform) {
+      const pick =
+        items.find((p) => p.slug === state.lastPlatform)?.slug ?? items[0]?.slug;
+      if (pick) {
+        await showRoms(pick);
+        markPlatform(pick);
+        return;
+      }
       region("games").innerHTML =
-        `<div class="empty">Pick something on the left.</div>`;
-      await showRecent();
+        `<div class="empty">Nothing here yet — sync with the server first.</div>`;
     }
     restorePlatformCursor();
     return;
@@ -138,6 +147,16 @@ export async function showAllRecent() {
 /// core is installed — so switching layout changes the density and nothing
 /// else. The list is for finding a console you can name; the grid is for
 /// recognising one you cannot.
+/// Light up the console whose games are showing, in the left column.
+///
+/// The column stays on screen while the middle changes, so without this there
+/// is nothing to say which of thirty-five consoles you are looking at.
+function markPlatform(slug) {
+  for (const node of region("picker").querySelectorAll("[data-slug]")) {
+    node.classList.toggle("open", node.dataset.slug === slug);
+  }
+}
+
 function renderPlatforms(items) {
   // Into the consoles region, which is its own column when there is one and
   // the main pane when there is not. The rest of this function does not know
@@ -152,8 +171,12 @@ function renderPlatforms(items) {
     : `<div class="grid">${items.map(platformCard).join("")}</div>`;
 
   into.querySelectorAll(".card, .prow").forEach((c) =>
-    c.addEventListener("click", () => openPlatform(c.dataset.slug, c))
+    c.addEventListener("click", () => {
+      if (shellMode() === "columns") markPlatform(c.dataset.slug);
+      openPlatform(c.dataset.slug, c);
+    })
   );
+  if (shellMode() === "columns" && state.platform) markPlatform(state.platform);
   resetNav();
 }
 

@@ -151,6 +151,10 @@ beforeEach(async () => {
   ui.state.view = "platforms";
   ui.state.platform = null;
   ui.trail.length = 0;
+  // One pane unless a test says otherwise: nearly everything in this file is
+  // about the arrangement where a screen is replaced and Back brings it back.
+  // Three columns has its own file.
+  ui.setMode("single");
   ui.resetPad();
   // Flush anything the previous test left held. The loop only forgets a button
   // on a poll where it is not pressed, and a test does not poll on the way out.
@@ -1168,5 +1172,35 @@ describe("the triggers scroll by how hard they are pulled", () => {
   test("a pulled trigger is reported as already handled", () => {
     assert.deepEqual([...pull(rt(), 1).consumed], ["scrollDown"]);
     assert.deepEqual([...pull(rt(), 0.02).consumed], [], "a resting trigger is not consumed");
+  });
+});
+
+describe("the settings shortcut", () => {
+  // The keyboard handler is attached by installKeys, which the app calls at
+  // startup and this file otherwise has no reason to.
+  before(() => ui.installKeys());
+
+  /// Cmd+, on macOS, Ctrl+, everywhere else. The one shortcut every desktop
+  /// application has, and this one did not.
+  const press = (init) =>
+    window.dispatchEvent(new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+
+  test("Cmd+, and Ctrl+, both open settings", () => {
+    invoked.length = 0;
+    press({ key: ",", metaKey: true });
+    assert.ok(
+      invoked.some((c) => c.cmd === "open_settings"),
+      "Cmd+, did not open settings"
+    );
+
+    invoked.length = 0;
+    press({ key: ",", ctrlKey: true });
+    assert.ok(invoked.some((c) => c.cmd === "open_settings"), "Ctrl+, did not");
+  });
+
+  test("a bare comma does not", () => {
+    invoked.length = 0;
+    press({ key: "," });
+    assert.equal(invoked.some((c) => c.cmd === "open_settings"), false);
   });
 });

@@ -314,6 +314,16 @@ export function installKeys() {
     // Rebinding swallows everything, so any key can be assigned.
     if (isCapturing() && captureKey(ev)) return;
 
+    // Settings, the way every desktop opens settings: Cmd+, on macOS and
+    // Ctrl+, everywhere else. Checked before anything else, including the
+    // lightbox and the text fields, because it is the one shortcut people
+    // expect to work from wherever they happen to be.
+    if (ev.key === "," && (ev.metaKey || ev.ctrlKey) && !ev.altKey) {
+      ev.preventDefault();
+      toggleSettings();
+      return;
+    }
+
     // The lightbox owns the keyboard while it is open — but not entirely. The
     // button that opened it has to close it again: pressing Y to start a video
     // and then having to reach for the mouse to stop it is the worst kind of

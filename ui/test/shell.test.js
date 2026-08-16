@@ -48,7 +48,12 @@ before(async () => {
       // arrays — a thinner stub throws inside the pane, after the test has
       // finished, as an unhandled rejection rather than a failure.
       invoke: async (cmd, args) =>
-        cmd === "rom_detail"
+        cmd === "platforms"
+          ? [
+              { slug: "arcade", name: "Arcade", rom_count: 9 },
+              { slug: "gb", name: "Game Boy", rom_count: 4 },
+            ]
+          : cmd === "rom_detail"
           ? {
               id: args.id,
               name: `Game ${args.id}`,
@@ -370,5 +375,51 @@ describe("each tab fills the left column with its own list", () => {
     state.view = "platforms";
     await history.showHistory();
     assert.equal(state.view, "history");
+  });
+});
+
+describe("three columns opens with all three filled", () => {
+  /// A window that opens with two thirds of itself empty is asking to be told
+  /// what it already knows: which console you were last in, or failing that
+  /// the first one.
+  let library, state, asked;
+
+  before(async () => {
+    library = await import("../js/library.js");
+    ({ state } = await import("../js/state.js"));
+  });
+
+  beforeEach(() => {
+    for (const role of ["primary", "aside", "nav", "games", "picker"]) {
+      shell.setRegion(role, null);
+    }
+    shell.setMode("columns");
+    el.consoles.innerHTML = "";
+    el.list.innerHTML = "";
+    state.platform = null;
+    state.lastPlatform = null;
+  });
+
+  test("a console is opened without being clicked", async () => {
+    await library.showPlatforms();
+    assert.ok(state.platform, "no console was opened, so the middle is empty");
+    assert.ok(el.consoles.innerHTML.length > 0, "the left column is empty");
+  });
+
+  /// The one you were last in, not merely the first alphabetically — coming
+  /// back to where you were is the point of remembering it at all.
+  test("it picks up where you left off", async () => {
+    state.lastPlatform = "gb";
+    await library.showPlatforms();
+    assert.equal(state.platform, "gb");
+  });
+
+  /// The column stays on screen while the middle changes, so without a mark
+  /// there is nothing to say which of thirty-five consoles you are looking at.
+  test("the open console is marked in the column", async () => {
+    await library.showPlatforms();
+    const lit = el.consoles.querySelectorAll(".open");
+    assert.equal(lit.length, 1, `${lit.length} consoles look open`);
+    assert.equal(lit[0].dataset.slug, state.platform);
   });
 });
