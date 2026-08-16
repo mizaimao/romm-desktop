@@ -1,0 +1,79 @@
+// One button that changes whatever pictures are on screen.
+//
+// Which pictures depends on where you are, and that is the point: on the
+// console grid there is one kind of picture worth changing (the console's), and
+// inside a console there is another (the game's). A single button that means
+// "show me these differently" needs no explanation in either place, where two
+// buttons would need one in both.
+//
+// It replaced Select-opens-settings. Settings is a second window of text fields
+// and tables that a controller cannot navigate, so that button opened something
+// you could then only leave again.
+
+import { state, invoke } from "./state.js";
+import { toast } from "./util.js";
+import { showPlatforms, renderRows } from "./library.js";
+
+/// Views that are lists of games rather than lists of consoles.
+const GAME_VIEWS = new Set(["roms", "search", "collection-roms"]);
+
+/// Step to the next entry, wrapping. `-1` (not found) lands on the first,
+/// which is what should happen when the current setting is one that has since
+/// stopped being offered.
+function next(values, current) {
+  if (!values.length) return null;
+  return values[(values.indexOf(current) + 1) % values.length];
+}
+
+/// Cycle the pictures for whatever is on screen.
+export async function cyclePictures() {
+  return GAME_VIEWS.has(state.view) ? cycleListArt() : cycleIconStyle();
+}
+
+/// The console grid: logos, consoles, controllers, hardware.
+async function cycleIconStyle() {
+  let styles;
+  try {
+    styles = await invoke("icon_styles");
+  } catch (e) {
+    return toast(String(e), 6000);
+  }
+  // Only styles that have pictures. Cycling onto an empty one shows a grid of
+  // nothing, which reads as the button having broken the page.
+  const usable = styles.filter((s) => s.available > 0);
+  if (usable.length < 2) {
+    return toast("Only one set of console pictures is installed — Settings → Appearance");
+  }
+  const now = usable.find((s) => s.selected)?.key ?? usable[0].key;
+  const want = next(usable.map((s) => s.key), now);
+  try {
+    const label = await invoke("set_icon_style", { key: want });
+    // Redraw here and tell the settings window, which cannot see this one.
+    await showPlatforms();
+    window.__TAURI__?.event?.emit?.("icons-changed");
+    toast(`Console pictures: ${label}`);
+  } catch (e) {
+    toast(String(e), 6000);
+  }
+}
+
+/// A list of games: cartridge, box, 3D box, mix, and so on.
+async function cycleListArt() {
+  let options, current;
+  try {
+    [options, current] = await invoke("list_art_options");
+  } catch (e) {
+    return toast(String(e), 6000);
+  }
+  const keys = options.map(([k]) => k);
+  const want = next(keys, current);
+  if (!want) return;
+  try {
+    const label = await invoke("set_list_art", { value: want });
+    if (state.rows.length) renderRows(state.rows, state.view === "search");
+    window.__TAURI__?.event?.emit?.("art-changed");
+    toast(String(label));
+  } catch (e) {
+    toast(String(e), 6000);
+  }
+}

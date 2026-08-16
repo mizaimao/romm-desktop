@@ -172,6 +172,10 @@ let complained = false;
 function poll() {
   if (!running) return;
   requestAnimationFrame(poll);
+  // Nothing to read while the window is not on screen: a button pressed behind
+  // another application is not aimed at this one, and the emulator owns the pad
+  // anyway during the one case where this window is hidden and a pad is in use.
+  if (document.hidden) return;
   try {
     step();
   } catch (e) {
@@ -183,9 +187,23 @@ function poll() {
   }
 }
 
+/// Whether the lightbox was open on the previous poll.
+let wasLightboxOpen = false;
+
 function step() {
 
   const map = padMap();
+
+  // Opening or closing the lightbox is a change of context, and anything the
+  // pad was holding belonged to the old one. Without this, a direction held
+  // while the lightbox opens is still counted as held inside it, so its repeat
+  // timer is already running and the first real press does nothing — which
+  // looks exactly like the stick not being wired up.
+  const lightboxOpen = !el.lb.hidden;
+  if (lightboxOpen !== wasLightboxOpen) {
+    wasLightboxOpen = lightboxOpen;
+    held.clear();
+  }
 
   // The lightbox used to swallow the pad completely, which meant the button
   // that opened a video could not close it — the only way out was the mouse.

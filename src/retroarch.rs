@@ -170,39 +170,46 @@ const SCREEN_FILL: f32 = 0.94;
 /// units the desktop uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Screen {
+    /// Top-left of this monitor, in the desktop's coordinates, y counting down.
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Height of the primary monitor. Needed only on macOS, where window
+    /// coordinates count up from the bottom of *that* screen — see below.
+    pub primary_height: u32,
 }
 
-/// Open the game window as large as it sensibly goes, in the middle of the
-/// screen the library is on.
+/// Space the menu bar takes at the top of a macOS screen.
 ///
-/// The settings that do this are not the ones with the obvious names, which
-/// cost an afternoon to discover. `video_window_width` and
-/// `video_window_height` are what the documentation and every forum answer
-/// name, and RetroArch 1.20 does not have them: they are absent from a config
-/// it wrote itself, which writes every setting it knows. Asking for a 2406-wide
-/// window through those keys produced a 720-wide one, because the size actually
-/// came from `video_scale` -- three times the core's own resolution -- and
-/// nothing had been overridden at all.
+/// A window placed under it is pushed down by the window server, which then
+/// makes the bottom of the window hang off the screen. Leaving the room costs
+/// nothing and is the difference between "as tall as the screen" and "as tall
+/// as the screen, with the bottom inch missing".
+const MENU_BAR: u32 = 38;
+
+/// Open the game window in the top-left of the screen the library is on, as
+/// tall as that screen allows.
 ///
-/// The real keys are `video_windowed_position_width` and `_height`, and they
-/// are only read when `video_window_save_positions` is on. That is also why the
-/// position has to be written now: with saved positions on, RetroArch no longer
-/// centres a window it has no coordinates for, so leaving them out puts the
-/// window wherever it was last dragged.
+/// Two things here were found by measuring rather than by reading, because both
+/// are silent when wrong.
 ///
-/// The coordinates are absolute desktop ones, taken from the monitor the
-/// library window is on. On a laptop with an external display those two
-/// monitors do not both start at zero, and centring within a monitor while
-/// writing coordinates relative to the primary one lands the window on the
-/// wrong screen -- or half off the edge of it.
+/// The first is the setting names. `video_window_width` and
+/// `video_window_height` are what the documentation says, and RetroArch 1.20
+/// does not have them -- they are absent from a config it wrote itself, which
+/// writes every setting it knows. Asking for a 2406-wide window through those
+/// produced a 720-wide one, because the size came from `video_scale` and
+/// nothing had been overridden at all. The keys that work are
+/// `video_windowed_position_width` and `_height`, and they are only read when
+/// `video_window_save_positions` is on.
 ///
-/// The old keys are still written. They are harmless where they are not
-/// understood, and this is a family of builds across three operating systems
-/// where the setting names have moved at least once.
+/// The second is what the coordinates mean. Asking for y = 0 on an
+/// 1169-point-tall screen put the window's *bottom* at the bottom of the
+/// screen: RetroArch passes the value to Cocoa, whose origin is the bottom-left
+/// of the primary display with y counting upwards. So "the top of this monitor"
+/// is not 0, and on a second monitor it is not even a positive number in the
+/// obvious direction. The arithmetic below is that conversion, and it is why
+/// the primary monitor's height has to travel with the rest.
 pub fn window_lines(screen: Option<Screen>) -> String {
     let Some(s) = screen else {
         return String::new();
@@ -210,16 +217,30 @@ pub fn window_lines(screen: Option<Screen>) -> String {
     if s.width == 0 || s.height == 0 {
         return String::new();
     }
-    let (w, h) = (
-        (s.width as f32 * SCREEN_FILL) as u32,
-        (s.height as f32 * SCREEN_FILL) as u32,
-    );
-    // Centred on that monitor, in desktop coordinates.
-    let x = s.x + ((s.width - w) / 2) as i32;
-    let y = s.y + ((s.height - h) / 2) as i32;
+
+    // As tall as the screen allows, less the menu bar. Width is left a little
+    // short of the full screen: a window exactly as wide as the display has no
+    // edge left to grab, and every console here is squarer than a modern
+    // monitor anyway, so the extra width would be black bars.
+    let (top_gap, bottom_gap) = if cfg!(target_os = "macos") {
+        (MENU_BAR, 0)
+    } else {
+        (0, 0)
+    };
+    let h = s.height.saturating_sub(top_gap + bottom_gap);
+    let w = (s.width as f32 * SCREEN_FILL) as u32;
+
+    let x = s.x;
+    let y = if cfg!(target_os = "macos") {
+        // Cocoa: distance from the bottom of the primary display up to the
+        // bottom edge of the window.
+        s.primary_height as i32 - s.y - (h + top_gap) as i32
+    } else {
+        s.y
+    };
+
     format!(
-        "\n# As large as the display sensibly allows, centred on the screen the\n\
-         # library is on.\n\
+        "\n# Top-left of the screen the library is on, as tall as it goes.\n\
          video_fullscreen = \"false\"\n\
          # On: this is what makes the size below be read at all.\n\
          video_window_save_positions = \"true\"\n\
@@ -879,7 +900,7 @@ input_r2_axis = "+5"
     /// modify their retroarch.cfg and never win an argument with it.
     /// One monitor, at the desktop origin.
     fn screen(width: u32, height: u32) -> Screen {
-        Screen { x: 0, y: 0, width, height }
+        Screen { x: 0, y: 0, width, height, primary_height: height }
     }
 
     fn val(out: &str, key: &str) -> String {
@@ -899,31 +920,71 @@ input_r2_axis = "+5"
         let out = window_lines(Some(screen(2560, 1440)));
         assert_eq!(val(&out, "video_window_save_positions"), "true");
         assert_eq!(val(&out, "video_windowed_position_width"), "2406");
-        assert_eq!(val(&out, "video_windowed_position_height"), "1353");
+        // The full height of the screen less the menu bar, not a fraction of
+        // it: vertical space is the thing being maximised.
+        assert_eq!(
+            val(&out, "video_windowed_position_height"),
+            if cfg!(target_os = "macos") { "1402" } else { "1440" }
+        );
         // And the documented names too, for builds that have them.
         assert_eq!(val(&out, "video_window_custom_size_enable"), "true");
         assert_eq!(val(&out, "video_window_width"), "2406");
     }
 
-    /// Centring is now ours to do: with saved positions on, RetroArch stops
-    /// centring a window it has no coordinates for and uses wherever the last
-    /// one was dragged to.
+    /// Top-left, and as tall as the screen allows.
+    ///
+    /// The vertical coordinate is the part that cannot be reasoned out: asking
+    /// for y = 0 on an 1169-tall screen put the window's *bottom* at the bottom
+    /// of the screen, because RetroArch hands the number to Cocoa, whose origin
+    /// is the bottom-left of the primary display. On the primary monitor that
+    /// makes the top of the screen y = 0 only because the window is exactly as
+    /// tall as the space below the menu bar.
     #[test]
-    fn the_window_is_centred_on_its_monitor() {
-        let out = window_lines(Some(screen(2560, 1440)));
-        assert_eq!(val(&out, "video_windowed_position_x"), "77");
-        assert_eq!(val(&out, "video_windowed_position_y"), "43");
+    #[cfg(target_os = "macos")]
+    fn the_window_sits_under_the_menu_bar_at_the_top_left() {
+        let out = window_lines(Some(screen(1800, 1169)));
+        assert_eq!(val(&out, "video_windowed_position_x"), "0");
+        assert_eq!(val(&out, "video_windowed_position_height"), "1131");
+        // 1169 - 0 - (1131 + 38) = 0: the window's bottom edge on the bottom
+        // of the screen, its top just under the menu bar.
+        assert_eq!(val(&out, "video_windowed_position_y"), "0");
     }
 
-    /// A second monitor does not start at zero. Centring within it while
-    /// writing coordinates relative to the primary screen puts the window on
-    /// the wrong display — or half off the edge of it.
+    /// A monitor above the primary one has negative coordinates going down and
+    /// positive ones going up. Getting this backwards puts the window off the
+    /// bottom of the desktop, which is where it went.
     #[test]
-    fn a_window_on_the_second_monitor_is_centred_on_that_monitor() {
-        let out = window_lines(Some(Screen { x: 2560, y: -200, width: 1920, height: 1080 }));
-        assert_eq!(val(&out, "video_windowed_position_width"), "1804");
-        assert_eq!(val(&out, "video_windowed_position_x"), "2618");
-        assert_eq!(val(&out, "video_windowed_position_y"), "-168");
+    #[cfg(target_os = "macos")]
+    fn a_monitor_above_the_primary_one_is_measured_upwards() {
+        let out = window_lines(Some(Screen {
+            x: -380,
+            y: -1440,
+            width: 2560,
+            height: 1440,
+            primary_height: 1169,
+        }));
+        assert_eq!(val(&out, "video_windowed_position_x"), "-380");
+        assert_eq!(val(&out, "video_windowed_position_height"), "1402");
+        // 1169 - (-1440) - 1440 = 1169: the window's bottom edge level with the
+        // top of the primary screen, which is the bottom of this one.
+        assert_eq!(val(&out, "video_windowed_position_y"), "1169");
+    }
+
+    /// Everywhere else y counts down from the top, so a monitor's own origin
+    /// is already the answer.
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn elsewhere_the_monitor_origin_is_the_position() {
+        let out = window_lines(Some(Screen {
+            x: 1920,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            primary_height: 1080,
+        }));
+        assert_eq!(val(&out, "video_windowed_position_x"), "1920");
+        assert_eq!(val(&out, "video_windowed_position_y"), "0");
+        assert_eq!(val(&out, "video_windowed_position_height"), "1440");
     }
 
     /// The ceiling is a separate setting that silently wins. RetroArch keeps
@@ -950,11 +1011,13 @@ input_r2_axis = "+5"
     #[test]
     fn the_window_is_a_little_smaller_than_the_display() {
         let out = window_lines(Some(screen(1000, 1000)));
-        for key in ["video_windowed_position_width", "video_windowed_position_height"] {
-            let v: u32 = val(&out, key).parse().unwrap();
-            assert!(v < 1000, "{key} = {v}, which fills the whole display");
-            assert!(v > 850, "{key} = {v}, which wastes the screen");
-        }
+        let w: u32 = val(&out, "video_windowed_position_width").parse().unwrap();
+        assert!(w < 1000, "width {w} fills the display, leaving no edge to grab");
+        assert!(w > 850, "width {w} wastes the screen");
+        // Height is the one thing that is not held back: "as much vertical
+        // space as the screen has" is the whole point of the placement.
+        let h: u32 = val(&out, "video_windowed_position_height").parse().unwrap();
+        assert!(h >= 1000 - super::MENU_BAR, "height {h} is not the full screen");
     }
 
     /// Nothing known about the display means nothing written: the emulator's
@@ -974,7 +1037,7 @@ input_r2_axis = "+5"
         std::fs::write(&user, "video_driver = \"vulkan\"\n").unwrap();
 
         let path = fake(&dir)
-            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", None)
+            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", None, true)
             .unwrap();
         let body = std::fs::read_to_string(path).unwrap();
 
@@ -992,7 +1055,7 @@ input_r2_axis = "+5"
         let dir = scratch("missing-user");
         with_autoconfig(&dir);
         let path = fake(&dir)
-            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None)
+            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None, true)
             .unwrap();
         assert!(std::fs::read_to_string(path).unwrap().contains("input_enable_hotkey_btn"));
     }
@@ -1011,7 +1074,7 @@ input_r2_axis = "+5"
         let dir = scratch("hotkeys");
         with_autoconfig(&dir);
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap(),
         )
         .unwrap();
 
@@ -1048,7 +1111,7 @@ input_r2_axis = "+5"
         let dir = scratch("quit-safety");
         with_autoconfig(&dir);
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap(),
         )
         .unwrap();
 
@@ -1073,7 +1136,7 @@ input_r2_axis = "+5"
     #[test]
     fn every_emitted_line_parses_as_a_setting() {
         let dir = scratch("well-formed");
-        let path = fake(&dir).write_overrides_full(&dir, None, "", None).unwrap();
+        let path = fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap();
         for line in std::fs::read_to_string(path).unwrap().lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -1122,7 +1185,7 @@ input_r2_axis = "+5"
     fn no_profile_means_no_hotkeys_rather_than_a_guess() {
         let dir = scratch("no-profile");
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", Some("Some Unusual Pad")).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", Some("Some Unusual Pad"), true).unwrap(),
         )
         .unwrap();
 
@@ -1145,7 +1208,7 @@ input_r2_axis = "+5"
     fn the_no_profile_note_binds_nothing() {
         let dir = scratch("no-profile-lines");
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", None, true).unwrap(),
         )
         .unwrap();
         // Only the hotkey keys: `input_overlay_enable` and friends are ordinary

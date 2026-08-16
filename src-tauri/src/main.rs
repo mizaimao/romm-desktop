@@ -1410,6 +1410,21 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
     // relative to the primary one lands the window on the wrong screen.
     let size = monitor.size();
     let at = monitor.position();
+    // The primary monitor's height, because macOS window coordinates are
+    // measured from the bottom of *that* screen — see retroarch::window_lines.
+    let primary_height = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let s = m.size();
+            if cfg!(target_os = "macos") {
+                (s.height as f64 / m.scale_factor().max(1.0)) as u32
+            } else {
+                s.height
+            }
+        })
+        .unwrap_or(0);
     if cfg!(target_os = "macos") {
         // macOS reports pixels and lays out in points. Everything RetroArch is
         // told here is in the desktop's own units, so both are divided.
@@ -1420,6 +1435,7 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
             y: by(at.y as f64),
             width: (size.width as f64 / scale) as u32,
             height: (size.height as f64 / scale) as u32,
+            primary_height,
         })
     } else {
         Some(romm_desktop::retroarch::Screen {
@@ -1427,6 +1443,7 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
             y: at.y,
             width: size.width,
             height: size.height,
+            primary_height,
         })
     }
 }

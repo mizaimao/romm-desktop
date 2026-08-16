@@ -18,8 +18,8 @@ import { toast, escapeHtml } from "./util.js";
 import { editServer, editAchievements, editScraper } from "./credentials.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
-  backdropWanted, setBackdropWanted, PRESETS,
-  GLASS_PRESETS, glassTint, setGlassTint, glassStrength, setGlassStrength,
+  backdropWanted, setBackdropWanted,
+  SCHEMES, glassTint, setGlassTint, glassStrength, setGlassStrength,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -205,31 +205,31 @@ export function paneHtml(id) {
           <span class="set-icons-note"></span></div>
       </div>
 
-      <h4>Glass</h4>
+      <h4>Color</h4>
       <div class="srow">
-        <label>Window colour</label>
-        <div class="ctl">
-          <select class="glass-preset"></select>
-          <input class="glass-custom" type="color" />
-        </div>
+        <label>Scheme</label>
+        <div class="ctl"><select class="scheme-preset"></select></div>
       </div>
+      <p class="hint">One palette for the whole window: the glass over the
+        cards and controls, and the gradient the shader draws behind them. These
+        used to be two dropdowns, and every combination worth having was a
+        matching pair. Custom sets all three colors separately.</p>
       <div class="srow">
         <label>Tint strength</label>
         <div class="ctl"><input class="glass-strength" type="range" min="0" max="60" step="2" />
           <span class="glass-strength-val"></span></div>
       </div>
-      <p class="hint">Tints the cards, the selection glow and the controls —
-        one colour for all of it. At 0 the glass is clear and only the blur
-        remains.</p>
+      <p class="hint">How much of that color the glass carries. At 0 the glass
+        is clear and only the blur remains.</p>
+      <div class="srow bd-custom">
+        <label>Glass color</label>
+        <div class="ctl"><input class="glass-custom" type="color" /></div>
+      </div>
 
       <h4>Shader backdrop</h4>
       <div class="srow">
         <label>Enabled</label>
         <div class="ctl"><button class="set-backdrop">Shader backdrop: off</button></div>
-      </div>
-      <div class="srow">
-        <label>Colour scheme</label>
-        <div class="ctl"><select class="bd-preset"></select></div>
       </div>
       <div class="srow">
         <label>Motion</label>
@@ -242,18 +242,17 @@ export function paneHtml(id) {
           <span class="bd-strength-val"></span></div>
       </div>
       <div class="srow bd-custom">
-        <label>Dark colour</label>
+        <label>Dark color</label>
         <div class="ctl"><input class="bd-low" type="color" />
           <button class="bd-low-reset">Use theme</button></div>
       </div>
       <div class="srow bd-custom">
-        <label>Light colour</label>
+        <label>Light color</label>
         <div class="ctl"><input class="bd-high" type="color" />
           <button class="bd-high-reset">Use theme</button></div>
       </div>
       <p class="hint">Drawn on the GPU behind the library — not behind this
-        window. Motion at 0 holds it still. Colours left on "theme" follow
-        whatever palette is in force.</p>
+        window. Motion at 0 holds it still.</p>
       <p class="hint set-backdrop-status"></p>`;
   if (id === "control") return `      <h4>Players</h4>
       <p class="hint">Four ports, one per controller, assigned in the order they
@@ -687,6 +686,11 @@ async function wireIconStyles(box) {
   };
   await draw();
 
+  // The pad changes this from the library window, which cannot reach this one.
+  // Without the redraw the panel would sit there showing the style that was
+  // selected when it opened, disagreeing with the screen behind it.
+  listen("icons-changed", draw);
+
   box.querySelector(".set-icons")?.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
@@ -728,6 +732,15 @@ function wireAppearance(box) {
           .join("");
       })
       .catch(() => (artSel.disabled = true));
+    // Same again for the game-list pictures, which Select cycles from inside a
+    // console.
+    listen("art-changed", () => {
+      invoke("list_art_options")
+        .then(([, current]) => {
+          if (artSel.isConnected) artSel.value = current;
+        })
+        .catch(() => {});
+    });
     artSel.addEventListener("change", async () => {
       try {
         toast(await invoke("set_list_art", { value: artSel.value }));
@@ -775,34 +788,15 @@ function wireAppearance(box) {
   const low = box.querySelector(".bd-low");
   const high = box.querySelector(".bd-high");
 
-  // Glass tint. Applied to this window immediately as well as announced, so
-  // the effect is visible on the control that changed it.
-  const glassSel = box.querySelector(".glass-preset");
+  // One scheme for both surfaces. The glass tint applies to this window
+  // immediately as well as being announced, so the effect is visible on the
+  // control that changed it.
+  const schemeSel = box.querySelector(".scheme-preset");
   const glassCustom = box.querySelector(".glass-custom");
-  if (glassSel) {
-    glassSel.innerHTML =
-      GLASS_PRESETS.map((g) => `<option value="${g.colour}">${g.label}</option>`).join("") +
-      `<option value="custom">Custom…</option>`;
-    const current = glassTint();
-    const known = GLASS_PRESETS.find((g) => g.colour.toLowerCase() === current.toLowerCase());
-    glassSel.value = known ? known.colour : "custom";
-    glassCustom.value = current;
-    glassCustom.hidden = !!known;
+  const strengthEl = box.querySelector(".glass-strength");
+  const strengthOut = box.querySelector(".glass-strength-val");
 
-    glassSel.addEventListener("change", () => {
-      if (glassSel.value === "custom") {
-        glassCustom.hidden = false;
-        setGlassTint(glassCustom.value);
-      } else {
-        glassCustom.hidden = true;
-        glassCustom.value = glassSel.value;
-        setGlassTint(glassSel.value);
-      }
-    });
-    glassCustom.addEventListener("input", () => setGlassTint(glassCustom.value));
-
-    const strengthEl = box.querySelector(".glass-strength");
-    const strengthOut = box.querySelector(".glass-strength-val");
+  if (strengthEl) {
     strengthEl.value = String(glassStrength());
     strengthOut.textContent = `${glassStrength()}%`;
     strengthEl.addEventListener("input", () => {
@@ -810,22 +804,36 @@ function wireAppearance(box) {
     });
   }
 
-  // The custom pickers only mean anything on the "custom" scheme; showing them
-  // beside a preset invites changing one and watching nothing happen.
-  const preset = box.querySelector(".bd-preset");
-  preset.innerHTML = PRESETS.map(
-    (p) => `<option value="${p.id}">${p.label}</option>`
-  ).join("");
-  preset.value = cfg.preset || "midnight";
+  // The individual pickers only mean anything on "custom"; beside a preset
+  // they invite changing one and watching the preset put it back.
   const showCustom = () => {
-    const on = preset.value === "custom";
+    const on = schemeSel.value === "custom";
     box.querySelectorAll(".bd-custom").forEach((r) => (r.hidden = !on));
   };
+
+  schemeSel.innerHTML = SCHEMES.map(
+    (c) => `<option value="${c.id}">${c.label}</option>`
+  ).join("");
+  schemeSel.value = SCHEMES.some((c) => c.id === cfg.preset) ? cfg.preset : "midnight";
+  glassCustom.value = glassTint();
   showCustom();
-  preset.addEventListener("change", () => {
-    saveBackdropSettings({ preset: preset.value });
+
+  schemeSel.addEventListener("change", () => {
+    const chosen = SCHEMES.find((c) => c.id === schemeSel.value);
     showCustom();
+    if (!chosen || chosen.id === "custom") {
+      // Keep whatever the three pickers already hold rather than blanking
+      // them: "custom" means "leave this to me", not "start again".
+      saveBackdropSettings({ preset: "custom" });
+      return;
+    }
+    setGlassTint(chosen.glass);
+    glassCustom.value = chosen.glass;
+    low.value = chosen.low;
+    high.value = chosen.high;
+    saveBackdropSettings({ preset: chosen.id });
   });
+  glassCustom.addEventListener("input", () => setGlassTint(glassCustom.value));
 
   const showValues = (c) => {
     speedVal.textContent = `${Math.round(c.speed * 100)}%`;
@@ -912,22 +920,35 @@ function wireControl(box) {
   window.addEventListener("gamepaddisconnected", drawList);
 
   const live = box.querySelector(".pad-live");
-  const tick = () => {
-    if (!document.getElementById("settings")) return;
+  // Twice the rate a button can be pressed and released is fast enough to look
+  // instant, and 120 times a second is not twelve times better. This used to
+  // rebuild the line on every animation frame, which meant re-measuring and
+  // re-laying-out text at the display's refresh rate for a string that changes
+  // when a thumb moves.
+  let lastLine = "";
+  const readPad = () => {
+    // `box.isConnected`, not a lookup for an element id that no longer exists
+    // anywhere in either document — that check was always false, so this
+    // readout stopped after one frame and reported "no controller" for good.
+    if (!box.isConnected) return;
     const pad = (navigator.getGamepads?.() ?? []).find(Boolean);
-    if (!pad) {
-      live.textContent = "No controller detected — press a button to wake it.";
-    } else {
-      const down = pad.buttons
-        .map((b, i) => (b.pressed ? i : null))
-        .filter((i) => i !== null);
-      live.textContent =
-        `${pad.id} · mapping: ${pad.mapping || "(none reported)"} · ` +
-        `${pad.buttons.length} buttons · pressed: ${down.length ? down.join(", ") : "none"}`;
+    const line = !pad
+      ? "No controller detected — press a button to wake it."
+      : `${pad.id} · mapping: ${pad.mapping || "(none reported)"} · ` +
+        `${pad.buttons.length} buttons · pressed: ${
+          pad.buttons
+            .map((b, i) => (b.pressed ? i : null))
+            .filter((i) => i !== null)
+            .join(", ") || "none"
+        }`;
+    // Writing the same string still dirties the node and costs a relayout.
+    if (line !== lastLine) {
+      lastLine = line;
+      live.textContent = line;
     }
-    requestAnimationFrame(tick);
+    setTimeout(readPad, 60);
   };
-  requestAnimationFrame(tick);
+  readPad();
 
   box.querySelectorAll("tr[data-id]").forEach((row) => {
     const btn = row.querySelector(".pad-cell .set-pad");

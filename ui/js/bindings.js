@@ -30,6 +30,7 @@ export const ACTIONS = [
   { id: "zoomIn",  label: "Bigger covers",         fallback: "+" },
   { id: "zoomOut", label: "Smaller covers",        fallback: "-" },
   { id: "video",   label: "Play gameplay video",   fallback: "v" },
+  { id: "pictures",label: "Change the pictures",    fallback: null },
 ];
 
 /// Controller buttons, by W3C "standard mapping" index.
@@ -75,7 +76,12 @@ const PAD_FALLBACK = {
   // The top face button plays the gameplay video. It is the one thing ES-DE
   // has that is genuinely hard to find, so here it is on a button.
   3: "video",
-  8: "settings",
+  // Select cycles the pictures rather than opening settings. Settings is a
+  // second window full of text fields and tables that a pad cannot navigate,
+  // so the button opened something you then could not use and could only leave
+  // again — whereas changing what the covers show is a thing you want to try
+  // several times in a row while looking at them.
+  8: "pictures",
   9: "help",
   // Paging moved off the triggers to make room. The stick clicks were the only
   // buttons still free; both remain rebindable.
@@ -104,7 +110,29 @@ function loadPad() {
 /// open anything at all.
 const ESSENTIAL = ["up", "down", "left", "right", "activate"];
 
+/// The resolved map, held between calls.
+///
+/// `padMap` is called from the controller poll, which runs on every animation
+/// frame — 120 times a second on this display. Rebuilding it there meant a
+/// synchronous localStorage read, a JSON parse, an object spread and a scan of
+/// the result, at 120Hz, forever, for a value that changes only when somebody
+/// rebinds a button. It was the app's largest idle cost.
+let cached = null;
+
+/// Forget the cached map. Called by everything that writes the bindings, and by
+/// a storage event — the settings window is a separate document, so rebinding
+/// there changes nothing this one can see until the browser tells it.
+function forgetPadMap() {
+  cached = null;
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (ev) => {
+    if (!ev.key || ev.key === PAD_KEY) forgetPadMap();
+  });
+}
+
 export function padMap() {
+  if (cached) return cached;
   const map = { ...PAD_FALLBACK, ...loadPad() };
 
   // Rebinding clears whichever button previously held that action by writing
@@ -119,6 +147,7 @@ export function padMap() {
     // steals a button the user deliberately assigned to something else.
     if (home !== undefined && !map[home]) map[home] = action;
   }
+  cached = map;
   return map;
 }
 
@@ -137,10 +166,12 @@ export function setPad(action, index) {
   }
   if (index !== null) custom[index] = action;
   localStorage.setItem(PAD_KEY, JSON.stringify(custom));
+  forgetPadMap();
 }
 
 export function resetPad() {
   localStorage.removeItem(PAD_KEY);
+  forgetPadMap();
 }
 
 export function padLabel(index) {

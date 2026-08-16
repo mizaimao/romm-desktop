@@ -122,6 +122,10 @@ beforeEach(async () => {
   ui.state.platform = null;
   ui.trail.length = 0;
   ui.resetPad();
+  // Flush anything the previous test left held. The loop only forgets a button
+  // on a poll where it is not pressed, and a test does not poll on the way out.
+  pads = [];
+  ui.stepForTest();
   // The section is module state and survives between tests. A test that ends
   // in My collections would otherwise change what "back" means for the next
   // one, which is the kind of coupling that makes a suite lie.
@@ -157,7 +161,10 @@ describe("pad bindings", () => {
     const map = ui.padMap();
     assert.equal(map[0], "activate", "bottom face button opens");
     assert.equal(map[1], "back", "right face button goes back");
-    assert.equal(map[8], "settings", "Back/Select opens settings");
+    // Select cycles the pictures. It used to open settings — a second window
+    // of text fields and tables that a pad cannot navigate, so the button
+    // opened something you could then only leave again.
+    assert.equal(map[8], "pictures", "Select should change the pictures");
   });
 
   test("every default binding names a handler that exists", () => {
@@ -701,5 +708,44 @@ describe("four controllers", () => {
     const map = ui.padMap();
     const acts = ui.pressedActions([pad([]), pad([], { axes: [1, 0] })], map);
     assert.equal(acts.has("right"), false, "another pad's stick moved the cursor");
+  });
+});
+
+describe("walking the reel with a pad", () => {
+  test("the d-pad steps through the artwork while a video plays", () => {
+    const map = ui.padMap();
+    const right = Number(Object.entries(map).find(([, a]) => a === "right")?.[0]);
+    ui.openLightbox(
+      [
+        { src: "a.png", kind: "image", caption: "Mix" },
+        { src: "b.mp4", kind: "video", caption: "Gameplay" },
+      ],
+      1
+    );
+    const shown = () =>
+      document.querySelector("#lightbox figcaption").textContent.split(" — ")[0];
+    assert.equal(shown(), "Gameplay");
+    pads = [pad([right])];
+    ui.stepForTest();
+    assert.equal(shown(), "Mix", "the d-pad did not change the picture");
+    ui.closeLightbox();
+  });
+
+  test("the left stick does the same", () => {
+    ui.openLightbox(
+      [
+        { src: "a.png", kind: "image", caption: "Mix" },
+        { src: "b.mp4", kind: "video", caption: "Gameplay" },
+      ],
+      1
+    );
+    pads = [pad([], { axes: [1, 0] })];
+    ui.stepForTest();
+    assert.equal(
+      document.querySelector("#lightbox figcaption").textContent.split(" — ")[0],
+      "Mix",
+      "the stick did not change the picture"
+    );
+    ui.closeLightbox();
   });
 });

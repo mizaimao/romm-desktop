@@ -104,21 +104,13 @@ const DEFAULTS = { speed: 4, strength: 0.32, low: "", high: "", preset: "midnigh
 /// them, so the pair is the whole scheme. Kept deliberately low in value — a
 /// bright pair produces a backdrop that competes with the artwork no matter
 /// what the brightness slider says.
-export const PRESETS = [
-  { id: "midnight",  label: "Midnight",  low: "#0b0d16", high: "#2a3566" },
-  { id: "ember",     label: "Ember",     low: "#140b09", high: "#5c2418" },
-  { id: "moss",      label: "Moss",      low: "#0a1210", high: "#1f4a37" },
-  { id: "plum",      label: "Plum",      low: "#120a16", high: "#452b5e" },
-  { id: "slate",     label: "Slate",     low: "#0f1113", high: "#333a42" },
-  { id: "rust",      label: "Rust",      low: "#150f09", high: "#5e3a17" },
-  { id: "abyss",     label: "Abyss",     low: "#06090c", high: "#12414d" },
-  { id: "wine",      label: "Wine",      low: "#130a0e", high: "#54203a" },
-  { id: "custom",    label: "Custom",    low: null,      high: null },
-];
-
-/// The colours a preset resolves to, or the user's own for "custom".
+/// The gradient a scheme resolves to, or the user's own on "custom".
+///
+/// An unknown id falls through to the stored colours as well: schemes can be
+/// renamed or dropped, and a settings file naming one that no longer exists
+/// should leave the window looking like something rather than nothing.
 export function presetColours(cfg) {
-  const p = PRESETS.find((x) => x.id === cfg.preset);
+  const p = SCHEMES.find((x) => x.id === cfg.preset);
   if (!p || p.id === "custom") return { low: cfg.low, high: cfg.high };
   return { low: p.low, high: p.high };
 }
@@ -280,12 +272,38 @@ export function startBackdrop() {
   let frame = 0;
   let stopped = false;
   const start = performance.now();
+  let lastDraw = 0;
+
+  // A drifting gradient at 30fps and the same gradient at 120fps are the same
+  // picture. On a ProMotion display the loop was running four times faster than
+  // anything in it changes, which is four times the GPU for no difference —
+  // and this thing is on screen the entire time the app is open.
+  const MIN_GAP_MS = 1000 / 30;
+
   const draw = (now) => {
     if (stopped) return;
     frame = requestAnimationFrame(draw);
+    if (now - lastDraw < MIN_GAP_MS) return;
+    lastDraw = now;
     gl.uniform1f(uTime, (now - start) / 1000);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
+
+  // Nothing to draw for while the window is not on screen. WebKit does not
+  // reliably throttle an occluded window's animation frames here, so an app
+  // left open behind something else kept a shader running at full rate for as
+  // long as it was open — which is most of the day.
+  const onVisibility = () => {
+    if (document.hidden) {
+      cancelAnimationFrame(frame);
+    } else if (!stopped) {
+      // Reset the clock so the gradient carries on from where it was rather
+      // than jumping forward by however long the window was covered.
+      lastDraw = 0;
+      frame = requestAnimationFrame(draw);
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibility);
 
   document.body.prepend(canvas);
   // Without this the page's own opaque background sits on top of the canvas and
@@ -296,6 +314,7 @@ export function startBackdrop() {
   running = () => {
     stopped = true;
     cancelAnimationFrame(frame);
+    document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("resize", resize);
     canvas.remove();
     document.documentElement.classList.remove("backdrop-on");
@@ -333,15 +352,31 @@ export function backdropSupported() {
 // other. Same idea: one colour drives the bars, the button gel, the hover glow
 // and the focus ring, because in Aero they were all the same light.
 
-export const GLASS_PRESETS = [
-  { id: "aero",     label: "Aero blue",  colour: "#4d8fd6" },
-  { id: "frost",    label: "Frost",      colour: "#8fb8d8" },
-  { id: "graphite", label: "Graphite",   colour: "#6d7681" },
-  { id: "jade",     label: "Jade",       colour: "#3f9e86" },
-  { id: "amber",    label: "Amber",      colour: "#c8873c" },
-  { id: "ruby",     label: "Ruby",       colour: "#b04a55" },
-  { id: "violet",   label: "Violet",     colour: "#7b62c4" },
+/// One palette for both surfaces.
+///
+/// The glass tint and the shader backdrop were two dropdowns of seven and eight
+/// colours, chosen separately, and every sensible combination was a pair that
+/// already matched — "Aero blue" glass over the "Midnight" backdrop, "Jade"
+/// over "Moss". Two controls whose only correct settings are a diagonal of the
+/// grid they span is one control.
+///
+/// `glass` tints the cards, the selection glow and the controls; `low` and
+/// `high` are the two ends of the gradient the shader draws. Custom keeps all
+/// three separately settable, because someone who wants an unmatched pair
+/// should still be able to have one.
+export const SCHEMES = [
+  { id: "midnight", label: "Midnight", glass: "#4d8fd6", low: "#0b0d16", high: "#2a3566" },
+  { id: "frost",    label: "Frost",    glass: "#8fb8d8", low: "#0b0f14", high: "#33506b" },
+  { id: "abyss",    label: "Abyss",    glass: "#3aa0b5", low: "#06090c", high: "#12414d" },
+  { id: "moss",     label: "Moss",     glass: "#3f9e86", low: "#0a1210", high: "#1f4a37" },
+  { id: "ember",    label: "Ember",    glass: "#c8873c", low: "#140b09", high: "#5c2418" },
+  { id: "rust",     label: "Rust",     glass: "#b06a35", low: "#150f09", high: "#5e3a17" },
+  { id: "wine",     label: "Wine",     glass: "#b04a55", low: "#130a0e", high: "#54203a" },
+  { id: "plum",     label: "Plum",     glass: "#7b62c4", low: "#120a16", high: "#452b5e" },
+  { id: "slate",    label: "Slate",    glass: "#6d7681", low: "#0f1113", high: "#333a42" },
+  { id: "custom",   label: "Custom",   glass: null,      low: null,      high: null },
 ];
+
 
 const GLASS_KEY = "glassTint";
 const TINT_KEY = "glassStrength";

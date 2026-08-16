@@ -9,6 +9,7 @@ import { selectRom, setSidebar, play, playVideo } from "./detail.js";
 import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
 import { escapeHtml } from "./util.js";
 import { closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen } from "./lightbox.js";
+import { cyclePictures } from "./pictures.js";
 import { ACTIONS, actionFor, keyFor, keyLabel, padMap } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
@@ -176,9 +177,13 @@ function toggleHelp() {
   // are by index, and an index that is not the one you think it is looks
   // exactly like an app that ignores the button.
   const out = box.querySelector(".pad-readout");
+  // Every 60ms rather than every animation frame. The body of this rebuilds a
+  // paragraph of markup, and doing that at the display's refresh rate is text
+  // layout 120 times a second for something a thumb changes a few times.
+  let last = "";
   const tick = () => {
     if (!box.isConnected) return;
-    requestAnimationFrame(tick);
+    setTimeout(tick, 60);
     const pad = (navigator.getGamepads?.() ?? []).find(Boolean);
     if (!pad) return;
     // The index alone is not the answer. A rebind clears whatever else held
@@ -198,15 +203,19 @@ function toggleHelp() {
     const axes = pad.axes
       .map((v, i) => (Math.abs(v) > 0.35 ? `axis${i}: ${v.toFixed(2)}` : null))
       .filter(Boolean);
-    out.innerHTML =
+    const html =
       `<strong>${escapeHtml(pad.id)}</strong><br>` +
       `mapping: ${pad.mapping || "(none reported)"} · ${pad.buttons.length} buttons<br>` +
       `pressed: <strong>${down.length ? down.join(" · ") : "nothing"}</strong>` +
       (axes.length ? `<br>${axes.join(" · ")}` : "") +
       `<br><span class="hint">A button that says "not bound" is why it does ` +
       `nothing — Settings · Control · Reset controller puts the defaults back.</span>`;
+    if (html !== last) {
+      last = html;
+      out.innerHTML = html;
+    }
   };
-  requestAnimationFrame(tick);
+  tick();
 }
 
 export const HANDLERS = {
@@ -240,6 +249,7 @@ export const HANDLERS = {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
   },
   video: playVideo,
+  pictures: cyclePictures,
   // The triggers zoom whatever is in front of you: the picture on the stage
   // when the lightbox is open, the covers in the grid when it is not.
   zoomIn: () => (isLightboxOpen() ? zoomLightbox(1) : nudgeZoom(1)),
