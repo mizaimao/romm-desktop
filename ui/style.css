@@ -1,4 +1,21 @@
 :root {
+  /* ---- Theme tokens ----------------------------------------------------
+     A theme is a set of these and nothing else. The defaults reproduce the
+     look this app has always had, exactly, so "no theme chosen" and "the
+     original theme" are the same thing rather than two designs that drifted
+     apart.
+
+     Roundness and density are multipliers rather than sizes. Every corner in
+     the app was drawn at its own value — 4px here, 12px there, and the
+     difference between them is deliberate — so a theme that set one radius for
+     everything would flatten distinctions that took a while to get right.
+     Multiplying keeps the relationships and still allows square corners at 0
+     or something very soft at 1.8. */
+  --round: 1;
+  --density: 1;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
   --bg: #14161a;
   --panel: #1b1e24;
   --panel-2: #21252c;
@@ -29,7 +46,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font: 14px/1.45 var(--font);
   overflow: hidden;
 }
 
@@ -88,7 +105,7 @@ header h1 {
   background: transparent;
   color: color-mix(in srgb, var(--text) 78%, transparent);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   /* Icon and word together, so it takes its own width rather than a square. */
   gap: 5px;
   /* No left padding of its own: the header's clearance already puts it as far
@@ -112,7 +129,7 @@ header h1 {
   margin-left: auto;
   width: 260px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   border: 1px solid transparent;
   background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
@@ -131,7 +148,7 @@ header h1 {
   background: transparent;
   color: color-mix(in srgb, var(--text) 80%, transparent);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   padding: 6px 10px;
   font-size: 13.5px;
   /* Heavier than the body text. With no panel behind them these labels are the
@@ -274,14 +291,16 @@ body.has-pad #tabbar .bumper { display: inline; }
 #list {
   flex: 1;
   overflow-y: auto;
-  padding: 14px;
+  /* Density applies to the library, not to the bars: the header and the tab
+     strip are fixed heights that other things line up against. */
+  padding: calc(14px * var(--density));
 }
 
 /* Platform grid */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(calc(var(--card, 150px) * 1.25), 1fr));
-  gap: 10px;
+  gap: calc(10px * var(--density));
 }
 
 /* Glass, here rather than on the bars. A card has artwork and a shader behind
@@ -296,7 +315,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
   border: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--round));
   padding: 14px;
   cursor: pointer;
   transition: background .14s, border-color .14s, box-shadow .18s, transform .14s;
@@ -345,7 +364,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 .card .logo.mosaic { height: 92px; }
 .card .logo.mosaic img {
   height: 100%;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--round));
   object-fit: cover;
   filter: none;
 }
@@ -360,7 +379,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   max-width: 340px;
   margin-bottom: 12px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
@@ -373,7 +392,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 #core-pick {
   max-width: 100%;
   padding: 2px 4px;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--round));
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
@@ -422,7 +441,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   /* Cards scale from --card (the zoom slider) and widen for landscape art. */
   grid-template-columns: repeat(auto-fill, minmax(
     clamp(90px, calc(var(--card, 150px) * var(--ar, 0.75) / 0.75), 420px), 1fr));
-  gap: 14px;
+  gap: calc(14px * var(--density));
   /* Default until the platform's real ratio is measured. */
   --ar: 0.75;
 }
@@ -435,7 +454,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   backdrop-filter: blur(10px) saturate(150%);
   -webkit-backdrop-filter: blur(10px) saturate(150%);
   border: 1px solid color-mix(in srgb, var(--glass) 18%, transparent);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--round));
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -483,8 +502,8 @@ body.has-pad #tabbar .bumper { display: inline; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
-  border-radius: 6px;
+  padding: calc(7px * var(--density)) 10px;
+  border-radius: calc(6px * var(--round));
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -543,7 +562,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 
 #detail video, #detail img.cover {
   width: 100%;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   background: var(--panel-2);
   margin-bottom: 12px;
   display: block;
@@ -555,7 +574,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   overflow: hidden;
   background: var(--panel-2);
   margin-bottom: 12px;
@@ -601,7 +620,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 }
 .shots:hover .nav { opacity: 1; }
 .shots .nav.prev { left: 0; border-radius: 0 6px 6px 0; }
-.shots .nav.next { right: 0; border-radius: 6px 0 0 6px; }
+.shots .nav.next { right: 0; border-radius: calc(6px * var(--round)) 0 0 6px; }
 
 #detail .summary {
   font-size: 12.5px;
@@ -655,7 +674,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   padding: 0 0 6px;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   cursor: pointer;
   text-align: left;
   overflow: hidden;
@@ -711,7 +730,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   object-fit: contain;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   display: block;
   margin: 0;
 }
@@ -728,7 +747,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--text);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   padding: 5px 11px;
   font-size: 12px;
   cursor: pointer;
@@ -746,7 +765,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 button.primary, button.ghost {
   flex: 1;
   padding: 8px 12px;
-  border-radius: 7px;
+  border-radius: calc(7px * var(--round));
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -767,7 +786,7 @@ footer#toast {
   transform: translateX(-50%);
   background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   padding: 8px 16px;
   font-size: 13px;
   max-width: 70%;
@@ -828,7 +847,7 @@ footer#toast {
   /* Bounded so tall box art cannot push the caption off-screen. */
   max-height: calc(100vh - 130px);
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   box-shadow: 0 18px 60px rgba(0, 0, 0, .6);
   background: #000;
 }
@@ -860,7 +879,7 @@ footer#toast {
   background: rgba(255, 255, 255, .09);
   border: 1px solid rgba(255, 255, 255, .16);
   color: #fff;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -899,7 +918,7 @@ footer#toast {
 #shortcuts .sc-panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--round));
   padding: 22px 26px;
   min-width: 340px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
@@ -914,7 +933,7 @@ footer#toast {
 }
 #shortcuts dt {
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   white-space: nowrap;
 }
@@ -937,7 +956,7 @@ footer#toast {
 #settings .set-panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--round));
   width: 440px;
   max-height: 78vh;
   display: flex;
@@ -971,11 +990,11 @@ footer#toast {
 #settings .set-key {
   min-width: 118px;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   cursor: pointer;
 }
@@ -995,7 +1014,7 @@ footer#toast {
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--text);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   padding: 6px 12px;
   font-size: 12px;
   cursor: pointer;
@@ -1028,7 +1047,7 @@ footer#toast {
   width: 100%;
   max-width: 260px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
@@ -1039,7 +1058,7 @@ footer#toast {
 .badge {
   font-size: 10px;
   padding: 2px 7px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--round));
   border: 1px solid var(--line);
   color: var(--dim);
 }
@@ -1056,7 +1075,7 @@ footer#toast {
 .icon-styles { display: flex; gap: 6px; flex-wrap: wrap; }
 .icon-style {
   padding: 5px 11px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: var(--text);
@@ -1088,7 +1107,7 @@ footer#toast {
   color: inherit;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--round));
 }
 .set-panel .set-ra-status {
   min-height: 1.2em;
@@ -1166,7 +1185,7 @@ button:has(> .icon + span) {
 .conflict-box {
   background: var(--panel, #1b1b20);
   border: 1px solid var(--line, #33333c);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--round));
   padding: 1.4rem 1.6rem;
   width: min(46rem, 92vw);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
@@ -1192,7 +1211,7 @@ button:has(> .icon + span) {
   text-align: left;
   background: var(--card, #24242b);
   border: 2px solid transparent;
-  border-radius: 9px;
+  border-radius: calc(9px * var(--round));
   cursor: pointer;
   color: inherit;
   font: inherit;
@@ -1213,7 +1232,7 @@ button:has(> .icon + span) {
   margin-top: 1.1rem;
   background: none;
   border: 1px solid var(--line, #33333c);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   padding: 0.5rem 0.9rem;
   color: inherit;
   font: inherit;
@@ -1282,7 +1301,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   background: var(--panel-2);
   border: 1px solid var(--line);
 }
@@ -1363,7 +1382,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
    fastest — a button that looks pressable in three dimensions belongs to a
    decade that had window frames to match. */
 header button {
-  border-radius: 9px;
+  border-radius: calc(9px * var(--round));
   background: transparent;
   border: 1px solid transparent;
   box-shadow: none;
@@ -1427,7 +1446,7 @@ header button:focus-visible {
 #search {
   background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: calc(9px * var(--round));
   box-shadow: none;
 }
 #search:focus {
@@ -1461,7 +1480,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   background: var(--panel-2);
   border: 1px solid var(--line);
 }
@@ -1678,7 +1697,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   gap: 7px;
   margin: 10px 0 4px;
   padding: 7px 12px;
-  border-radius: 9px;
+  border-radius: calc(9px * var(--round));
   border: 1px solid color-mix(in srgb, var(--pick, var(--glass)) 45%, transparent);
   background: color-mix(in srgb, var(--pick, var(--glass)) 12%, transparent);
   color: var(--text);
@@ -1713,7 +1732,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   max-height: 88vh;
   overflow-y: auto;
   padding: 22px 24px;
-  border-radius: 14px;
+  border-radius: calc(14px * var(--round));
   background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
@@ -1774,7 +1793,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 2px 14px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--round));
   background: color-mix(in srgb, var(--glass) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
 }
@@ -1783,7 +1802,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   align-items: center;
   gap: 8px;
   padding: 3px 4px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   font-size: 13px;
   cursor: pointer;
 }
@@ -1827,7 +1846,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   align-items: center;
   gap: 12px;
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: calc(7px * var(--round));
   font-size: 13px;
 }
 .hist-row:hover { background: color-mix(in srgb, var(--glass) 16%, transparent); }
@@ -1835,7 +1854,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 .hist-name em { color: var(--dim); font-style: normal; font-size: 11px; margin-left: 8px; }
 .hist-bar {
   height: 8px;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--round));
   background: color-mix(in srgb, var(--glass) 22%, transparent);
   overflow: hidden;
 }
@@ -1843,7 +1862,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--round));
 }
 .hist-time { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 .hist-game { grid-template-columns: 1fr 150px; }
@@ -1861,7 +1880,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   z-index: 70;
   min-width: 190px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--glass) 34%, transparent);
   box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
@@ -1871,7 +1890,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   width: 100%;
   padding: 7px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   background: none;
   color: var(--text);
   font-size: 13px;
@@ -1898,7 +1917,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
-  border-radius: 7px;
+  border-radius: calc(7px * var(--round));
   background: color-mix(in srgb, var(--glass) 14%, transparent);
   font-size: 13px;
 }
@@ -1906,7 +1925,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   flex: 0 0 auto;
   min-width: 26px;
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--round));
   background: var(--accent);
   color: #fff;
   font-size: 11px;
@@ -1940,7 +1959,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   z-index: 70;
   min-width: 170px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round));
   background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--glass) 34%, transparent);
   box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
@@ -1950,7 +1969,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   width: 100%;
   padding: 7px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round));
   background: none;
   color: var(--text);
   font-size: 13px;

@@ -16,10 +16,11 @@ import {
 import { invoke, listen } from "./state.js";
 import { toast, escapeHtml } from "./util.js";
 import { editServer, editAchievements, editScraper } from "./credentials.js";
+import { THEMES, applyTheme, currentThemeId, tokenOf } from "./themes.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted,
-  SCHEMES, glassTint, setGlassTint, glassStrength, setGlassStrength,
+  glassTint, setGlassTint, glassStrength, setGlassStrength,
 } from "./backdrop.js";
 
 /// Set while waiting for a keypress to assign, so the window's own key handler
@@ -230,15 +231,15 @@ export function paneHtml(id) {
           <span class="set-icons-note"></span></div>
       </div>
 
-      <h4>Color</h4>
+      <h4>Theme</h4>
       <div class="srow">
-        <label>Scheme</label>
+        <label>Theme</label>
         <div class="ctl"><select class="scheme-preset"></select></div>
       </div>
-      <p class="hint">One palette for the whole window: the glass over the
-        cards and controls, and the gradient the shader draws behind them. These
-        used to be two dropdowns, and every combination worth having was a
-        matching pair. Custom sets all three colors separately.</p>
+      <p class="hint">A theme sets the whole window: the colors, how round the
+        corners are, how tightly the library is packed, and the typeface. The
+        shader backdrop's gradient comes with it. Custom keeps the colors under
+        your control and leaves everything else as the last theme had it.</p>
       <div class="srow">
         <label>Tint strength</label>
         <div class="ctl"><input class="glass-strength" type="range" min="0" max="60" step="2" />
@@ -879,24 +880,28 @@ function wireAppearance(box) {
     box.querySelectorAll(".bd-custom").forEach((r) => (r.hidden = !on));
   };
 
-  schemeSel.innerHTML = SCHEMES.map(
-    (c) => `<option value="${c.id}">${c.label}</option>`
-  ).join("");
-  schemeSel.value = SCHEMES.some((c) => c.id === cfg.preset) ? cfg.preset : "midnight";
+  schemeSel.innerHTML =
+    THEMES.map(
+      (t) => `<option value="${t.id}" title="${escapeHtml(t.note)}">${escapeHtml(t.label)}</option>`
+    ).join("") + `<option value="custom">Custom…</option>`;
+  schemeSel.value = THEMES.some((t) => t.id === cfg.preset) ? cfg.preset : currentThemeId();
   glassCustom.value = glassTint();
   showCustom();
 
   schemeSel.addEventListener("change", () => {
-    const chosen = SCHEMES.find((c) => c.id === schemeSel.value);
     showCustom();
-    if (!chosen || chosen.id === "custom") {
-      // Keep whatever the three pickers already hold rather than blanking
-      // them: "custom" means "leave this to me", not "start again".
+    if (schemeSel.value === "custom") {
+      // Keep whatever the pickers already hold rather than blanking them:
+      // "custom" means "leave this to me", not "start again".
       saveBackdropSettings({ preset: "custom" });
       return;
     }
-    setGlassTint(chosen.glass);
-    glassCustom.value = chosen.glass;
+    // Applied to this window too, not only announced, so the settings panel
+    // changes under the control that changed it — a theme picker that leaves
+    // its own window on the old theme looks like it did not work.
+    const chosen = applyTheme(schemeSel.value);
+    setGlassTint(tokenOf("glass", chosen));
+    glassCustom.value = tokenOf("glass", chosen);
     low.value = chosen.low;
     high.value = chosen.high;
     saveBackdropSettings({ preset: chosen.id });
