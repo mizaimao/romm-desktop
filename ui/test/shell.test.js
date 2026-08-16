@@ -71,6 +71,11 @@ before(async () => {
     },
     event: { listen: async () => () => {} },
   };
+  // jsdom implements no layout, so it has no scrollIntoView — and the list
+  // calls it to keep the cursor visible. A no-op is the honest stand-in: there
+  // is nothing to scroll into view in a document with no viewport.
+  dom.window.Element.prototype.scrollIntoView = function () {};
+
   shell = await import("../js/shell.js");
   ({ el } = await import("../js/state.js"));
 });
@@ -117,6 +122,7 @@ describe("a layout this app does not have", () => {
     document.body.insertAdjacentHTML("beforeend", THREE_COLUMNS);
     shell.setRegion("nav", document.getElementById("col-consoles"));
     shell.setRegion("primary", document.getElementById("col-games"));
+    shell.setRegion("games", document.getElementById("col-games"));
     shell.setRegion("aside", document.getElementById("col-preview"));
   };
 
@@ -208,5 +214,100 @@ describe("a layout this app does not have", () => {
   test("a role with no mapping anywhere resolves to nothing", () => {
     assert.equal(shell.region("sidebar-that-does-not-exist"), null);
     assert.equal(shell.paint("sidebar-that-does-not-exist", "<p>x</p>"), null);
+  });
+});
+
+describe("three columns, in the real page", () => {
+  /// Not a made-up skeleton this time: the app's own index.html, switched to
+  /// the other arrangement. The one element three columns adds is the left
+  /// one; the middle and right are the same #list and #detail the single pane
+  /// uses, which is why this is a handful of rules rather than a second UI.
+  let library, state;
+
+  before(async () => {
+    library = await import("../js/library.js");
+    ({ state } = await import("../js/state.js"));
+  });
+
+  beforeEach(() => {
+    // The suite above points the roles at its own made-up columns, and those
+    // overrides outlive it — this one is about the real page.
+    for (const role of ["primary", "aside", "nav", "games", "consoles"]) {
+      shell.setRegion(role, null);
+    }
+    shell.setMode("single");
+    el.consoles.innerHTML = "";
+    el.list.innerHTML = "";
+    state.platform = null;
+  });
+
+  test("the consoles get their own column, and the games keep the middle", () => {
+    shell.setMode("columns");
+    assert.equal(shell.region("consoles"), el.consoles, "consoles did not move left");
+    assert.equal(shell.region("games"), el.list, "the games left the middle");
+    assert.equal(el.consoles.hidden, false, "the left column is still hidden");
+    assert.ok(document.body.classList.contains("columns"));
+  });
+
+  test("in one pane the consoles and the games share the same element", () => {
+    shell.setMode("single");
+    assert.equal(shell.region("consoles"), el.list);
+    assert.equal(shell.region("games"), el.list);
+    assert.equal(el.consoles.hidden, true, "the left column is showing in one pane");
+  });
+
+  /// The point of the arrangement: opening a console fills the middle and
+  /// leaves the console list where it is. In one pane the same call replaces
+  /// the screen.
+  test("opening a console does not take the console list away", () => {
+    shell.setMode("columns");
+    el.consoles.innerHTML = `<div class="rows"><div class="prow" data-slug="arcade"></div></div>`;
+
+    library.renderRows(
+      [
+        {
+          id: 1,
+          name: "Metal Slug",
+          fs_name: "mslug.zip",
+          platform: "arcade",
+          size_bytes: 1,
+          downloaded: true,
+          favourite: false,
+        },
+      ],
+      false
+    );
+
+    assert.match(el.list.innerHTML, /Metal Slug/, "the games did not reach the middle");
+    assert.ok(
+      el.consoles.querySelector('[data-slug="arcade"]'),
+      "the console list was wiped by opening a console"
+    );
+  });
+
+  /// Nothing is ever replaced, so there is nothing to go back to and the
+  /// preview is a column rather than something to slide over the list.
+  test("Back and the preview toggle are not offered", () => {
+    shell.setMode("columns");
+    shell.enter({ title: "Arcade", back: true, sidebar: true, layout: true });
+    assert.equal(el.back.hidden, true, "a Back button with nowhere to go");
+    assert.equal(el.sidebarBtn.hidden, true, "a toggle for a column");
+    assert.equal(el.layoutBtn.hidden, false, "grid/list still applies to the games");
+
+    // And both come back in one pane.
+    shell.setMode("single");
+    shell.enter({ title: "Arcade", back: true, sidebar: true, layout: true });
+    assert.equal(el.back.hidden, false);
+    assert.equal(el.sidebarBtn.hidden, false);
+  });
+
+  test("the choice is remembered", () => {
+    shell.chooseMode("columns");
+    assert.equal(shell.storedMode(), "columns");
+    shell.chooseMode("single");
+    assert.equal(shell.storedMode(), "single");
+    // Anything unrecognised is the one that has always worked.
+    shell.chooseMode("nonsense");
+    assert.equal(shell.shellMode(), "single");
   });
 });

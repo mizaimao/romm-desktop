@@ -40,6 +40,7 @@ export const trail = [];
 export const el = {
   tabbar: document.getElementById("tabbar"),
   list: document.getElementById("list"),
+  consoles: document.getElementById("consoles"),
   detail: document.getElementById("detail"),
   title: document.getElementById("title"),
   back: document.getElementById("back"),

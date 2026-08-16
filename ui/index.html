@@ -28,6 +28,10 @@
     <nav id="tabbar" role="tablist" aria-label="Sections"></nav>
 
     <main>
+      <!-- The left column, in the three-column arrangement only. In the
+           one-pane arrangement the console list is drawn into #list like
+           everything else and this stays empty and hidden. -->
+      <nav id="consoles" hidden aria-label="Consoles"></nav>
       <section id="list"></section>
       <aside id="detail" hidden></aside>
     </main>

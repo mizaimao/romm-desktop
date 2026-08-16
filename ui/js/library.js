@@ -3,7 +3,7 @@
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
 import { sorted, refreshSortButton } from "./sort.js";
-import { enter, region, showZoom } from "./shell.js";
+import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
@@ -15,7 +15,10 @@ export async function showPlatforms() {
   trail.length = 0;
   state.platform = null;
   state.selected = null;
-  el.detail.hidden = true;
+  // In three columns the preview is a column, not something to hide, and the
+  // middle is not emptied — going "back" to the consoles there is a thing that
+  // does not happen.
+  el.detail.hidden = shellMode() === "columns" ? false : true;
   enter({
     title: "Platforms",
     // Grid or list works here too. It was hidden on this screen, which is why
@@ -36,6 +39,17 @@ export async function showPlatforms() {
   state.platforms = items;
 
   renderPlatforms(items);
+  if (shellMode() === "columns") {
+    // The middle column belongs to the games. Left as it was if a console is
+    // already open, and otherwise saying what to do rather than sitting blank.
+    if (!state.platform) {
+      region("games").innerHTML =
+        `<div class="empty">Pick a console on the left.</div>`;
+      await showRecent();
+    }
+    restorePlatformCursor();
+    return;
+  }
   await showRecent();
 
   restorePlatformCursor();
@@ -125,11 +139,19 @@ export async function showAllRecent() {
 /// else. The list is for finding a console you can name; the grid is for
 /// recognising one you cannot.
 function renderPlatforms(items) {
-  region("primary").innerHTML = state.layout === "grid"
-      ? `<div class="grid">${items.map(platformCard).join("")}</div>`
-      : `<div class="rows">${items.map(platformRow).join("")}</div>`;
+  // Into the consoles region, which is its own column when there is one and
+  // the main pane when there is not. The rest of this function does not know
+  // or care which it got.
+  const into = region("consoles");
+  if (!into) return;
+  // A column is narrow, so the console cards are always a list there — a grid
+  // of two-across cards in a 260px column is neither a grid nor readable.
+  const asList = state.layout !== "grid" || shellMode() === "columns";
+  into.innerHTML = asList
+    ? `<div class="rows">${items.map(platformRow).join("")}</div>`
+    : `<div class="grid">${items.map(platformCard).join("")}</div>`;
 
-  el.list.querySelectorAll(".card, .prow").forEach((c) =>
+  into.querySelectorAll(".card, .prow").forEach((c) =>
     c.addEventListener("click", () => openPlatform(c.dataset.slug, c))
   );
   resetNav();
@@ -231,6 +253,13 @@ function restorePlatformCursor() {
 
 export async function showRoms(slug) {
   state.view = "roms";
+  // The console list is a column of its own here and stays where it is; only
+  // the middle changes. In one pane it has already been replaced by the time
+  // this runs, which is the difference between the two arrangements in one
+  // line.
+  if (shellMode() === "columns" && !region("consoles").children.length) {
+    await showPlatforms();
+  }
   state.platform = slug;
   state.lastPlatform = slug;
   localStorage.setItem("lastPlatform", slug);
@@ -331,14 +360,14 @@ export function renderRows(unsorted, showPlatform) {
   const rows = sorted(unsorted);
   refreshSortButton();
   if (!rows.length) {
-    region("primary").innerHTML = `<div class="empty">Nothing here.</div>`;
+    region("games").innerHTML = `<div class="empty">Nothing here.</div>`;
     return;
   }
   // Search spans every console, so a flat list of 200 hits buries the ones you
   // meant. Grouping also lets each console keep its own cover shape, which a
   // single mixed grid cannot.
   resetNav();
-  region("primary").innerHTML = showPlatform
+  region("games").innerHTML = showPlatform
     ? groupedMarkup(rows)
     : state.layout === "grid"
       ? gridMarkup(rows)

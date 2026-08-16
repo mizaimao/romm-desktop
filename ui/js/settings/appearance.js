@@ -8,7 +8,22 @@ import {
   glassTint, setGlassTint, glassStrength, setGlassStrength,
 } from "../backdrop.js";
 
-export const html = `      <h4>Artwork</h4>
+export const html = `      <h4>Layout</h4>
+      <div class="srow">
+        <label>Window</label>
+        <div class="ctl">
+          <select class="shell-mode">
+            <option value="single">One pane — a screen at a time</option>
+            <option value="columns">Three columns — consoles, games, preview</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">One pane shows a screen at a time and Back returns to the
+        one before. Three columns keeps the consoles on the left, the games in
+        the middle and the preview on the right, so nothing is ever replaced
+        and there is nothing to go back to.</p>
+
+      <h4>Artwork</h4>
       <div class="srow">
         <label>Game list shows</label>
         <div class="ctl"><select class="list-art"></select></div>
@@ -85,6 +100,7 @@ export const html = `      <h4>Artwork</h4>
       <p class="hint set-backdrop-status"></p>`;
 
 export function wire(box) {
+  wireShellMode(box);
   wireIconStyles(box);
 
   // What the game lists draw. Populated from the backend rather than listed
@@ -240,6 +256,22 @@ export function wire(box) {
 /// it only ever read the per-system artwork out of one — so all that offered
 /// was a choice that changed nothing and a download measured in hundreds of
 /// megabytes. What is left is the part that does change the screen.
+/// One pane or three columns.
+///
+/// Applied to the library window rather than this one — the setting is about
+/// where things are drawn over there, and this window has no list, no consoles
+/// and no preview to rearrange.
+function wireShellMode(box) {
+  const sel = box.querySelector(".shell-mode");
+  if (!sel) return;
+  sel.value = localStorage.getItem("romm.shell") === "columns" ? "columns" : "single";
+  sel.addEventListener("change", () => {
+    localStorage.setItem("romm.shell", sel.value);
+    window.__TAURI__?.event?.emit?.("shell-mode", sel.value);
+    toast(sel.value === "columns" ? "Three columns" : "One pane");
+  });
+}
+
 async function wireIconStyles(box) {
   const holder = box.querySelector(".icon-styles");
   const note = box.querySelector(".set-icons-note");

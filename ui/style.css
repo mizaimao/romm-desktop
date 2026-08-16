@@ -2089,3 +2089,32 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   font-size: 11.5px;
 }
 .autofire-cue .icon { width: 13px; height: 13px; }
+
+/* ---- Three columns -------------------------------------------------------
+   Consoles on the left, games in the middle, the preview on the right. The
+   same three elements the one-pane arrangement uses — the console list simply
+   has a column of its own instead of taking over the middle — so this is a
+   handful of rules rather than a second stylesheet. */
+#consoles {
+  flex: 0 0 240px;
+  overflow-y: auto;
+  padding: 10px 8px;
+  border-right: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
+}
+#consoles[hidden] { display: none; }
+
+/* A column that narrow holds one console per line, whatever the grid/list
+   button says — that button is about the games in the middle. */
+body.columns #consoles .rows { gap: 1px; }
+body.columns #consoles .prow {
+  padding: 5px 8px;
+  font-size: 13px;
+}
+body.columns #consoles .prow .logo { height: 22px; }
+
+/* The preview is a column rather than a panel that slides over the list, so it
+   keeps its width instead of being resizable to nothing. */
+body.columns #detail {
+  flex: 0 0 clamp(280px, 26vw, 420px);
+  border-left: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
+}

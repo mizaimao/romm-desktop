@@ -25,7 +25,53 @@ import { el } from "./state.js";
 /// A three-column shell adds `nav` for the left column; a view that has
 /// nothing to put there simply never asks for it, and asking for a region the
 /// shell does not have is not an error — it is a region that is not shown.
+/// One pane, or three columns.
+///
+/// The difference is entirely in where things are drawn and what the top bar
+/// offers. In one pane, choosing a console *replaces* the screen and Back
+/// brings it back. In three columns the consoles stay on the left, choosing
+/// one fills the middle, and there is nothing to go back to — so no Back
+/// button, and the preview is always there rather than something to toggle.
+let mode = "single";
+
+export function setMode(next) {
+  mode = next === "columns" ? "columns" : "single";
+  if (el.consoles) el.consoles.hidden = mode !== "columns";
+  document.body.classList.toggle("columns", mode === "columns");
+  return mode;
+}
+
+export function shellMode() {
+  return mode;
+}
+
+const MODE_KEY = "romm.shell";
+
+/// The arrangement chosen last time. Kept in localStorage rather than
+/// config.toml because it is about this window rather than about the library,
+/// and because the settings window has to be able to read it too.
+export function storedMode() {
+  return localStorage.getItem(MODE_KEY) === "columns" ? "columns" : "single";
+}
+
+/// Choose an arrangement and remember it. The other window is told, because
+/// the picker lives there and the library is what changes.
+export function chooseMode(next, { announce = true } = {}) {
+  const applied = setMode(next);
+  if (announce) {
+    localStorage.setItem(MODE_KEY, applied);
+    window.__TAURI__?.event?.emit?.("shell-mode", applied);
+  }
+  return applied;
+}
+
 const REGIONS = {
+  // The console list. Its own column when there is one; otherwise the main
+  // pane, which is what makes one set of view code serve both arrangements.
+  consoles: () => (mode === "columns" ? el.consoles : el.list),
+  // The games. Always the main pane — in three columns that pane *is* the
+  // middle column.
+  games: () => el.list,
   primary: () => el.list,
   aside: () => el.detail,
 };
@@ -78,7 +124,12 @@ const HANDLES = {
 export function enter({ title = "", zoom = false, gridLayout = true, ...wants } = {}) {
   for (const name of BUTTONS) {
     const node = HANDLES[name]?.();
-    if (node) node.hidden = !wants[name];
+    if (!node) continue;
+    // Two buttons make no sense once nothing is ever replaced: there is
+    // nowhere to go back to, and the preview is a column rather than
+    // something that slides over the list.
+    const suppressed = mode === "columns" && (name === "back" || name === "sidebar");
+    node.hidden = suppressed || !wants[name];
   }
   if (el.zoomWrap) {
     // The one conditional worth keeping: the slider sizes covers, so it means

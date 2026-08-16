@@ -3,10 +3,11 @@
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { openSortMenu } from "./sort.js";
+import { chooseMode, storedMode } from "./shell.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
-import { installTabs, showSection, resetSection } from "./tabs.js";
+import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 import { warmRefresh } from "./actions.js";
@@ -37,6 +38,14 @@ listen("art-changed", () => {
 // The console pictures, which are the other half: `art-changed` deliberately
 // skips the console grid because game artwork is not what changed there. This
 // is the one that redraws it.
+// Chosen in the settings window, which cannot reach this document.
+listen("shell-mode", async ({ payload }) => {
+  chooseMode(String(payload), { announce: false });
+  // Redrawn from scratch: the console list has moved to a different element,
+  // and everything on screen was laid out for the old arrangement.
+  await showSection(activeSection(), { force: true });
+});
+
 listen("icons-changed", () => {
   if (state.view === "platforms") showPlatforms();
 });
@@ -188,6 +197,8 @@ function formatEta(seconds) {
   }
   // Off by default: it is a preference, and starting a GPU loop uninvited on
   // someone's machine is not a decision this app should make for them.
+  // Before anything is drawn: which arrangement decides where things go.
+  chooseMode(storedMode(), { announce: false });
   if (localStorage.getItem("backdrop") === "on") startBackdrop();
   applyStoredGlassTint();
   setZoom(state.zoom);
