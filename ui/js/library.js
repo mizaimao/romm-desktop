@@ -453,6 +453,15 @@ function gridMarkup(rows, platform) {
 }
 
 /// Card size, applied as a CSS variable so both grids scale from one number.
+/// Scroll the game list by `amount` pixels.
+///
+/// Its own function so the pad, the keyboard and anything else move the same
+/// list in the same way — and so "which element actually scrolls" is answered
+/// in one place rather than assumed in three.
+export function scrollList(amount) {
+  el.list.scrollTop += amount;
+}
+
 export function setZoom(px) {
   state.zoom = px;
   localStorage.setItem("zoom", String(px));

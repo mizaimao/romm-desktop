@@ -163,7 +163,13 @@ beforeEach(async () => {
 });
 
 /// A gamepad with `down` pressed, shaped like the real thing.
-function pad(down = [], { mapping = "standard", axes = [0, 0] } = {}) {
+/// A gamepad with `down` pressed, shaped like the real thing.
+///
+/// `analogue` gives a button a partial value, which is what a trigger reports:
+/// `{ 7: 0.4 }` is the right trigger pulled a little under half way. A trigger
+/// that far in is not "pressed" yet on most pads, so it is separate from
+/// `down` rather than derived from it.
+function pad(down = [], { mapping = "standard", axes = [0, 0], analogue = {} } = {}) {
   return {
     id: "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)",
     mapping,
@@ -171,7 +177,7 @@ function pad(down = [], { mapping = "standard", axes = [0, 0] } = {}) {
     axes,
     buttons: Array.from({ length: 17 }, (_, i) => ({
       pressed: down.includes(i),
-      value: down.includes(i) ? 1 : 0,
+      value: analogue[i] ?? (down.includes(i) ? 1 : 0),
     })),
   };
 }
@@ -342,13 +348,14 @@ describe("the poll loop", () => {
   });
 });
 
-describe("the triggers resize the covers", () => {
-  test("LT and RT are bound to zoom, not to paging", () => {
+describe("the triggers scroll the list", () => {
+  test("LT and RT are the list's scroll, not zoom or paging", () => {
     const map = ui.padMap();
-    // LT out, RT in: the left trigger takes you back and the right one takes
-    // you further, which is how every other pair of triggers here works.
-    assert.equal(map[6], "zoomOut", "LT shrinks the covers");
-    assert.equal(map[7], "zoomIn", "RT grows them");
+    // The only two analogue controls on the pad besides the sticks, on a
+    // screen whose main job is moving through two thousand games. Zoom is a
+    // thing you set once and leave.
+    assert.equal(map[6], "scrollUp", "LT scrolls up");
+    assert.equal(map[7], "scrollDown", "RT scrolls down");
     // The stick clicks sort the list now. They were paging, which the d-pad
     // and the sticks already do a screen at a time, so pressing them looked
     // like nothing happening.
@@ -694,24 +701,19 @@ describe("the lightbox and the controller", () => {
     assert.equal(ui.isLightboxOpen(), false);
   });
 
-  /// The triggers zoom whatever is in front of you. With the player open that
-  /// is the video, not the covers behind it — which is what they used to
-  /// resize, invisibly, while a video played over the top.
-  test("the triggers zoom the video, not the grid behind it", () => {
-    const zin = Number(Object.entries(ui.padMap()).find(([, a]) => a === "zoomIn")?.[0]);
-    assert.ok(Number.isInteger(zin), "nothing is bound to zoom in");
-
+  /// Zoom goes to whatever is in front of you: the picture on the stage when
+  /// the player is open, the covers in the grid when it is not. It used to
+  /// resize the grid invisibly while a video played over the top.
+  test("zoom goes to the video, not the grid behind it", () => {
     const before = ui.state.zoom;
     ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
-    pads = [pad([])];
-    ui.stepForTest();
-    pads = [pad([zin])];
-    ui.stepForTest();
+    ui.runAction("zoomIn");
 
     assert.equal(ui.isLightboxOpen(), true, "zooming must not close it");
     assert.equal(ui.state.zoom, before, "the grid behind was resized instead");
     const scale = Number(document.getElementById("lightbox").style.getPropertyValue("--lb-zoom"));
     assert.ok(scale > 1, `the stage did not zoom (--lb-zoom = ${scale})`);
+    ui.closeLightbox();
   });
 
   /// Coming back to a picture at whatever scale the last one was left at is
@@ -1088,5 +1090,61 @@ describe("search results group the twins together", () => {
     ]);
     const order = heads();
     assert.deepEqual(order.slice(0, 3), ["nes", "famicom", "psx"], `${order}`);
+  });
+});
+
+describe("the triggers scroll by how hard they are pulled", () => {
+  const map = () => ui.padMap();
+  const lt = () => Number(Object.entries(map()).find(([, a]) => a === "scrollUp")?.[0]);
+  const rt = () => Number(Object.entries(map()).find(([, a]) => a === "scrollDown")?.[0]);
+
+  /// jsdom has no layout, so a real element's scrollTop is clamped to zero
+  /// forever — nothing has a height, so nothing can scroll. An own property
+  /// shadows the prototype's accessor and gives the list somewhere to record
+  /// the movement, which is the thing under test.
+  const scrollable = () => {
+    const list = document.getElementById("list");
+    let top = 1000;
+    Object.defineProperty(list, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v) => (top = v),
+    });
+    return list;
+  };
+
+  /// One frame of the trigger pulled that far, straight into the reader —
+  /// the poll loop around it has its own state (settling windows, repeat
+  /// timers) that has nothing to do with how an analogue trigger is read.
+  const pull = (index, value) => {
+    const list = scrollable();
+    const before = list.scrollTop;
+    const consumed = ui.analogueScroll([pad([], { analogue: { [index]: value } })], map());
+    return { moved: list.scrollTop - before, consumed };
+  };
+
+  test("a harder pull scrolls further than a light one", () => {
+    const light = pull(rt(), 0.3).moved;
+    const hard = pull(rt(), 1).moved;
+    assert.ok(light > 0, "a light pull did nothing at all");
+    assert.ok(hard > light * 2, `a full pull (${hard}) barely beat a light one (${light})`);
+  });
+
+  test("the left one goes the other way", () => {
+    assert.ok(pull(lt(), 1).moved < 0, "the left trigger scrolled down");
+  });
+
+  /// A trigger at rest reports a small value on plenty of pads, and a list
+  /// that creeps on its own is worse than one that does not move.
+  test("a resting trigger does not creep", () => {
+    assert.equal(pull(rt(), 0.03).moved, 0);
+  });
+
+  /// A trigger past its threshold reads as "pressed" as well, so the poll has
+  /// to be told this one is already dealt with — otherwise it jumps a fixed
+  /// step on every repeat on top of the smooth movement.
+  test("a pulled trigger is reported as already handled", () => {
+    assert.deepEqual([...pull(rt(), 1).consumed], ["scrollDown"]);
+    assert.deepEqual([...pull(rt(), 0.02).consumed], [], "a resting trigger is not consumed");
   });
 });

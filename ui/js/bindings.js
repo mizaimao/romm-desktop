@@ -27,6 +27,8 @@ export const ACTIONS = [
   { id: "settings",label: "Open settings",        fallback: null },
   { id: "prevSection", label: "Previous section",  fallback: "q" },
   { id: "nextSection", label: "Next section",      fallback: "e" },
+  { id: "scrollUp",  label: "Scroll the list up",  fallback: null },
+  { id: "scrollDown",label: "Scroll the list down",fallback: null },
   { id: "zoomIn",  label: "Bigger covers",         fallback: "+" },
   { id: "zoomOut", label: "Smaller covers",        fallback: "-" },
   { id: "video",   label: "Play gameplay video",   fallback: "v" },
@@ -73,11 +75,12 @@ const PAD_FALLBACK = {
   // The triggers resize the covers. They are analog, so they are the closest
   // thing a pad has to the slider this replaces, and holding one sweeps the
   // whole range rather than stepping.
-  // LT out, RT in — the left trigger takes you back and the right one takes
-  // you further, which is the way round every other pair of triggers in this
-  // app works. They were the other way and read as backwards.
-  6: "zoomOut",
-  7: "zoomIn",
+  // The triggers scroll the list, and how hard you pull decides how fast.
+  // They were zoom, which is a thing you set once and then leave — a poor use
+  // of the only two analogue controls on the pad, on a screen whose main job
+  // is moving through two thousand games.
+  6: "scrollUp",
+  7: "scrollDown",
   // The top face button plays the gameplay video. It is the one thing ES-DE
   // has that is genuinely hard to find, so here it is on a button.
   3: "video",

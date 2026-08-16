@@ -15,6 +15,7 @@ import { runAction } from "./keys.js";
 import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
 import { scrollDetail } from "./detail.js";
+import { scrollList } from "./library.js";
 import { closeLightbox, stepLightbox } from "./lightbox.js";
 
 // Rebindable in Settings; padMap() layers the user's choices over the
@@ -29,6 +30,15 @@ const REPEATABLE = new Set([
 const FIRST_REPEAT_MS = 380;
 const REPEAT_MS = 110;
 const STICK_DEADZONE = 0.55;
+
+/// Below this a trigger is resting, or being brushed. Lower than the stick's
+/// because a trigger is pulled deliberately and has no centre to drift around.
+const TRIGGER_DEADZONE = 0.06;
+
+/// Pixels a frame at a full pull. About a screen every third of a second on a
+/// laptop display — fast enough to cross a long list, slow enough to stop on
+/// something.
+const TRIGGER_TOP_SPEED = 34;
 
 const held = new Map(); // action -> next fire time
 let running = false;
@@ -325,11 +335,53 @@ function step() {
     return;
   }
 
-  for (const action of pressed) fire(action, now);
+  // The triggers scroll the list, proportionally. Handled here rather than as
+  // an action because it is continuous: how far the trigger is pulled decides
+  // the speed, which a press-and-repeat cannot express. `analogueScroll`
+  // reports which actions it consumed, so they do not also fire as presses —
+  // a trigger past its threshold reads as "pressed" too, and without this it
+  // would scroll a page per repeat on top of the smooth movement.
+  const smooth = analogueScroll(navigator.getGamepads?.() ?? [], map);
+  for (const action of pressed) {
+    if (!smooth.has(action)) fire(action, now);
+  }
   // Release anything no longer held so the next press fires immediately.
   for (const action of [...held.keys()]) {
     if (!pressed.has(action)) held.delete(action);
   }
+}
+
+/// Scroll the list by however hard the triggers are pulled.
+///
+/// Returns the actions it dealt with, so the caller does not fire them again
+/// as ordinary presses.
+///
+/// A trigger on a standard pad reports a value from 0 to 1 as well as a
+/// pressed flag, which is the only analogue control here besides the sticks —
+/// and a list of two thousand games is exactly what an analogue control is
+/// for. A pad whose triggers are digital reports 0 or 1 and falls through to
+/// the press handler, which scrolls a fixed step.
+export function analogueScroll(pads, map) {
+  const done = new Set();
+  const pad = primaryPad(pads);
+  if (!pad) return done;
+
+  let amount = 0;
+  for (const [index, action] of Object.entries(map)) {
+    if (action !== "scrollUp" && action !== "scrollDown") continue;
+    const button = pad.buttons[index];
+    // `value` where the pad reports one; a digital trigger only has `pressed`,
+    // and is left to the press handler so it still does something.
+    const pull = button?.value ?? 0;
+    if (pull <= TRIGGER_DEADZONE) continue;
+    // Squared, so a light pull creeps and a full pull moves properly. The same
+    // shape the right stick uses on the info pane.
+    const speed = pull ** 2 * TRIGGER_TOP_SPEED;
+    amount += action === "scrollUp" ? -speed : speed;
+    done.add(action);
+  }
+  if (amount) scrollList(amount);
+  return done;
 }
 
 /// The modal currently over the window, if any.

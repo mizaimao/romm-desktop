@@ -6,7 +6,7 @@
 
 import { el, state, trail, invoke } from "./state.js";
 import { selectRom, setSidebar, play, playVideo } from "./detail.js";
-import { showPlatforms, setLayout, setZoom, openPlatform } from "./library.js";
+import { showPlatforms, setLayout, setZoom, openPlatform, scrollList } from "./library.js";
 import { escapeHtml, toast } from "./util.js";
 import { closeLightbox, zoomLightbox, stepLightbox, isLightboxOpen } from "./lightbox.js";
 import { cyclePictures } from "./pictures.js";
@@ -272,6 +272,11 @@ export const HANDLERS = {
     if (state.view === "roms" || state.view === "search") setSidebar(!state.sidebar);
   },
   video: playVideo,
+  // A press worth of scrolling, for a digital trigger or a key. A pad with
+  // analogue triggers never comes through here — see gamepad.js, which reads
+  // how far they are pulled and scrolls by that instead.
+  scrollUp: () => scrollList(-120),
+  scrollDown: () => scrollList(120),
   pictures: cyclePictures,
   sortMenu: () => openSortMenu(),
   sortCycle: () => {
