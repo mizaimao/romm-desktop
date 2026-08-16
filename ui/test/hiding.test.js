@@ -1,4 +1,4 @@
-// The window chrome, checked against the real stylesheet.
+// Hiding things, checked against the real stylesheet.
 //
 // This file exists because of one bug that looked like three. `hidden` is
 // implemented by the browser's own stylesheet as `[hidden] { display: none }`,

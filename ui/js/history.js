@@ -44,7 +44,7 @@ function games(rows, note) {
 }
 
 export async function showHistory() {
-  // It set no chrome at all, so it kept whatever the tab before it left on
+  // It set no buttons at all, so it kept whatever the tab before it left on
   // screen — Back, Take offline, the zoom slider — all of them acting on a
   // console that is no longer showing. A view that declares nothing gets
   // nothing, which is what this page wants: it is a page, not a list.

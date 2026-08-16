@@ -1,7 +1,7 @@
 // The seam a different layout is built through.
 //
 // The claim this file has to keep honest is that the views no longer know what
-// the window looks like. That was not true before: every screen set the chrome
+// the window looks like. That was not true before: every screen set the top bar
 // itself — hide Back, show Grid, show the zoom slider unless we are in list
 // mode — six or seven imperative lines repeated in each of six functions, each
 // copy stating in code that this is a single-pane app with a back button.
@@ -137,7 +137,7 @@ describe("a layout this app does not have", () => {
 
   /// A three-column layout has no Back button, because a column that is always
   /// on screen is never navigated away from. Every view still asks for one.
-  test("asking for chrome the layout does not have is not an error", () => {
+  test("asking for a button the layout does not have is not an error", () => {
     threeColumns();
     // The handles, not the nodes. `el` is built from getElementById once at
     // import, so a skeleton without these ids holds null — removing the

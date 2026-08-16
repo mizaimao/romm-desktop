@@ -8,7 +8,7 @@
 //
 // Why a colour rather than a border: a highlight in the game's own colours
 // tells you which game is selected *and* something about the game, from the
-// corner of your eye, without adding a single pixel of chrome.
+// corner of your eye, without adding a single button or bar.
 //
 // ## Why the canvas is readable
 //

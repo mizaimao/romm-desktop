@@ -416,7 +416,7 @@ export function setGlassTint(colour, { announce = true } = {}) {
   return value;
 }
 
-/// Called at startup in every window that has chrome to tint.
+/// Called at startup in every window with bars and cards to tint.
 export function applyStoredGlassTint() {
   setGlassTint(glassTint(), { announce: false });
   setGlassStrength(glassStrength(), { announce: false });

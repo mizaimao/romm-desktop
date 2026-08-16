@@ -14,8 +14,8 @@ function enter(fn) {
   trail.push(fn);
 }
 
-/// Common chrome for the two collection-browsing levels.
-function chrome(title) {
+/// The top bar both collection-browsing levels want.
+function topBar(title) {
   state.view = "collections";
   state.platform = null;
   state.selected = null;
@@ -28,7 +28,7 @@ function chrome(title) {
 
 export async function showCollectionGroups({ exclude = [] } = {}) {
   trail.length = 0;
-  chrome("Browse");
+  topBar("Browse");
 
   // `user` lives in its own tab now, so showing it here too would be the same
   // collections in two places with different names.
@@ -62,7 +62,7 @@ export async function showCollectionGroups({ exclude = [] } = {}) {
 }
 
 export async function showCollectionsIn(group, label) {
-  chrome(label || group);
+  topBar(label || group);
   const items = await invoke("collections_in", { group });
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate

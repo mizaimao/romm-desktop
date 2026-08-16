@@ -423,7 +423,7 @@ describe("the right-click menu", () => {
     assert.ok(menu, "no menu opened");
     // Placed where the click was. That the rule making the placement mean
     // anything exists at all is checked against the stylesheet, in
-    // chrome.test.js — that is the half that was missing.
+    // hiding.test.js — that is the half that was missing.
     assert.equal(menu.style.left, "120px");
     assert.equal(menu.style.top, "90px");
     assert.match(menu.textContent, /Delete/);

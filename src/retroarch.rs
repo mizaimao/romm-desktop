@@ -335,14 +335,14 @@ pub fn window_lines(
     let x = left;
     let y = bottom;
 
-    let chrome = if decorations {
+    let title_bar = if decorations {
         ""
     } else {
         "# No title bar. The way out is the controller combination or Escape.\n\
          video_window_show_decorations = \"false\"\n"
     };
     format!(
-        "{shape}{chrome}\n# Top-left of the screen the library is on, as tall as it goes.\n\
+        "{shape}{title_bar}\n# Top-left of the screen the library is on, as tall as it goes.\n\
          video_fullscreen = \"false\"\n\
          # On: this is what makes the size below be read at all.\n\
          video_window_save_positions = \"true\"\n\

@@ -22,7 +22,7 @@ export const html = `      <h4>Emulators</h4>
         <label>Title bar</label>
         <div class="ctl"><button data-field="window_decorations">…</button></div>
       </div>
-      <p class="hint">Off gives a clean edge with no chrome at all. There is
+      <p class="hint">Off gives a clean edge with no title bar at all. There is
         then nothing to drag and nothing to click to close, so the way out is
         the controller combination or Escape.</p>
 

@@ -1435,7 +1435,7 @@ header button:focus-visible {
   text-underline-offset: 6px;
 }
 
-/* Search: a recessed field, no border chrome. */
+/* Search: a recessed field, with no border drawn round it. */
 #search {
   background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid transparent;

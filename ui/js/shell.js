@@ -1,7 +1,7 @@
 // Where a view is drawn, and what the window looks like while it is.
 //
 // This exists so the layout is one decision rather than forty-three. Every
-// screen used to set the chrome itself — hide Back, show Grid, show the zoom
+// screen used to set the top bar itself — hide Back, show Grid, show the zoom
 // slider unless we are in list mode, set the title — six or seven imperative
 // lines repeated in each of six functions. That is not merely repetitive: each
 // copy states, in code, that this is a single-pane app with a back button.
@@ -54,13 +54,13 @@ export function paint(role, html) {
   return node;
 }
 
-/// The chrome a view wants.
+/// The buttons in the top bar a view can ask for.
 ///
 /// Everything is optional and everything defaults to hidden, so a view lists
 /// what it needs rather than what it does not. `zoom: "grid"` means "only when
 /// the covers are on screen", which is the one conditional every view repeated
 /// and got to decide for itself.
-const CHROME = ["back", "layout", "sidebar", "grab", "sort"];
+const BUTTONS = ["back", "layout", "sidebar", "grab", "sort"];
 
 const HANDLES = {
   back: () => el.back,
@@ -72,11 +72,11 @@ const HANDLES = {
 
 /// Put the window into the state this view wants.
 ///
-/// A shell with no Back button, or no zoom slider, simply has nothing to set —
-/// which is why every lookup tolerates a missing element instead of assuming
+/// A window with no Back button, or no zoom slider, simply has nothing to set
+/// — which is why every lookup tolerates a missing element instead of assuming
 /// the skeleton this app happens to ship with.
 export function enter({ title = "", zoom = false, gridLayout = true, ...wants } = {}) {
-  for (const name of CHROME) {
+  for (const name of BUTTONS) {
     const node = HANDLES[name]?.();
     if (node) node.hidden = !wants[name];
   }
