@@ -230,16 +230,15 @@ function autofireRow(d) {
   const opt = (key, label, title) =>
     `<button class="af ${d.autofire === key ? "on" : ""}" data-af="${key}"
        title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
-  // The rate only means anything when it is on, so it goes away when it is
-  // not — a stepper next to "Off" is a control for nothing.
-  const rate =
-    d.autofire === "off"
-      ? ""
-      : `<span class="af-rate">
-           <button class="af-step" data-hz="-1" title="Slower">−</button>
-           <span class="af-hz">${d.autofire_hz ?? 5} Hz</span>
-           <button class="af-step" data-hz="1" title="Faster">+</button>
-         </span>`;
+  // Always here, including next to "Off". Hiding it meant the row changed
+  // width as you moved between the three, and the rate is a thing you may want
+  // to set before switching on rather than after — turning it on and finding
+  // it too fast, then turning it off to slow it down, is a loop with no exit.
+  const rate = `<span class="af-rate">
+      <button class="af-step" data-hz="-1" title="Slower">−</button>
+      <span class="af-hz">${d.autofire_hz ?? 5} Hz</span>
+      <button class="af-step" data-hz="1" title="Faster">+</button>
+    </span>`;
   return `
     <div class="autofire-row" title="Applies to every arcade shooter, not only this game">
       <span class="af-label">Rapid fire</span>

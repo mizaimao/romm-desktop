@@ -538,13 +538,28 @@ describe("how fast the rapid fire goes", () => {
     assert.equal(saved.args.value, "6");
   });
 
-  /// A stepper beside "Off" is a control for nothing.
-  test("there is no rate to set when it is off", async () => {
+  /// Shown next to "Off" as well. The rate is something you may want to set
+  /// before switching on, and hiding it also made the row change width as you
+  /// moved between the three.
+  test("the rate is there even when rapid fire is off", async () => {
     Object.assign(DETAIL, { autofire: "off", autofire_hz: 5 });
     await detail.selectRom(7);
     await settle();
     assert.ok(document.querySelector(".autofire-row"), "the row should still be there");
-    assert.equal(document.querySelector(".af-rate"), null, "a rate with nothing to apply to");
+    assert.ok(document.querySelector(".af-rate"), "the rate disappeared when off");
+    assert.match(document.querySelector(".af-hz").textContent, /5 Hz/);
+  });
+
+  test("and can be set while off, ready for when it is turned on", async () => {
+    Object.assign(DETAIL, { autofire: "off", autofire_hz: 5 });
+    await detail.selectRom(7);
+    await settle();
+    document.querySelector('.af-step[data-hz="1"]').click();
+    await settle();
+    const saved = invoked.filter((c) => c.cmd === "set_config_field").at(-1);
+    assert.equal(saved.args.field, "autofire_hz");
+    assert.equal(saved.args.value, "6");
+    assert.match(document.querySelector(".af-hz").textContent, /6 Hz/);
   });
 
   /// Below one it would divide by zero inside the emulator, and above thirty
@@ -600,7 +615,6 @@ describe("changing rapid fire keeps your place", () => {
     document.querySelector('.af[data-af="off"]').click();
     await settle();
     assert.equal(document.querySelector(".af.on").dataset.af, "off");
-    assert.equal(document.querySelector(".af-rate"), null, "no rate while off");
 
     document.querySelector('.af[data-af="a"]').click();
     await settle();
