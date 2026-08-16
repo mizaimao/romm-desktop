@@ -63,6 +63,8 @@ before(async () => {
         if (cmd === "play_history") return historyData;
         if (cmd === "launch_rom") return "played for 3 minutes";
         if (cmd === "game_video") return "/v/clip.mp4";
+        if (cmd === "confirm_delete_state") return false;
+        if (cmd === "delete_state") return "deleted Slot 3";
         return [];
       },
       convertFileSrc: (p) => `asset://${p}`,
@@ -344,5 +346,74 @@ describe("the video button", () => {
       "the player opened on something that is not the video"
     );
     lb.closeLightbox();
+  });
+});
+
+describe("the right-click menu", () => {
+  /// It shipped with no stylesheet, so it was laid out in the normal flow and
+  /// appeared past the end of the page — a menu that existed in the DOM and
+  /// could not be seen or reached. Nothing about the JavaScript said so.
+  test("right-clicking a save state opens a menu that is actually placed", async () => {
+    states = [
+      {
+        slot: "2",
+        label: "Slot 2",
+        thumb: null,
+        when: "yesterday",
+        size_bytes: 900,
+        core: "snes9x",
+        resumable: true,
+      },
+    ];
+    await detail.selectRom(7);
+    await settle();
+
+    const btn = document.querySelector(".state");
+    const ev = new dom.window.MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 120,
+      clientY: 90,
+    });
+    btn.dispatchEvent(ev);
+    await settle();
+
+    assert.equal(ev.defaultPrevented, true, "the browser's own menu was left to appear");
+    const menu = document.querySelector(".ctx-menu");
+    assert.ok(menu, "no menu opened");
+    // Placed where the click was. That the rule making the placement mean
+    // anything exists at all is checked against the stylesheet, in
+    // chrome.test.js — that is the half that was missing.
+    assert.equal(menu.style.left, "120px");
+    assert.equal(menu.style.top, "90px");
+    assert.match(menu.textContent, /Delete/);
+  });
+
+  test("choosing delete asks the backend for that slot", async () => {
+    states = [
+      {
+        slot: "3",
+        label: "Slot 3",
+        thumb: null,
+        when: "yesterday",
+        size_bytes: 900,
+        core: "snes9x",
+        resumable: true,
+      },
+    ];
+    await detail.selectRom(7);
+    await settle();
+
+    document.querySelector(".state").dispatchEvent(
+      new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+    );
+    await settle();
+    document.querySelector(".ctx-menu button").click();
+    await settle();
+
+    const call = invoked.find((c) => c.cmd === "delete_state");
+    assert.ok(call, "nothing was deleted");
+    assert.equal(call.args.slot, "3");
+    assert.equal(call.args.id, 7);
   });
 });

@@ -322,7 +322,12 @@ describe("the triggers resize the covers", () => {
     // and the sticks already do a screen at a time, so pressing them looked
     // like nothing happening.
     assert.equal(map[10], "sortCycle");
-    assert.equal(map[11], "sortMenu");
+    // Nothing on the right stick click. It opened the sort menu, which a pad
+    // cannot navigate — so the button opened something you could then only
+    // close again.
+    assert.equal(map[11], undefined, "the right stick click should be unbound");
+    // The menu is still reachable by mouse and by key.
+    assert.equal(ui.keyFor("sortMenu"), "s");
     // Paging is not gone, it is on the keyboard, where it has a key that says
     // what it does.
     assert.equal(ui.keyFor("pageUp"), "PageUp");

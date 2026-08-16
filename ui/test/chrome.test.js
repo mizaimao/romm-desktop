@@ -71,3 +71,27 @@ describe("hidden actually hides", () => {
     });
   }
 });
+
+describe("the right-click menu is positioned by the stylesheet", () => {
+  /// The menu shipped with `left` and `top` set inline and no `position` rule
+  /// anywhere, so the browser laid it out in the normal document flow: it
+  /// appeared past the end of the page, with the coordinates ignored. Nothing
+  /// in the JavaScript was wrong and nothing reported anything — it simply
+  /// looked like a right-click that did nothing.
+  test("a menu given coordinates is taken out of the flow", () => {
+    const menu = dom.window.document.createElement("div");
+    menu.className = "ctx-menu";
+    menu.style.left = "120px";
+    menu.style.top = "90px";
+    dom.window.document.body.appendChild(menu);
+
+    const style = dom.window.getComputedStyle(menu);
+    assert.equal(
+      style.position,
+      "fixed",
+      "left and top mean nothing on a statically positioned element, so the " +
+        "menu lands wherever the document flow puts it"
+    );
+    menu.remove();
+  });
+});

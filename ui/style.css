@@ -1851,23 +1851,22 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 .hist-empty h2 { font-size: 18px; margin: 0 0 10px; }
 .hist-empty p { color: var(--dim); font-size: 13px; line-height: 1.6; }
 
-/* The right-click menu on a save state.
-   Shipped without these rules first time round, which is the whole reason it
-   looked like the menu did nothing: a div with `left` and `top` set and no
-   `position` is laid out in the normal flow, so it appeared at the bottom of
-   the page, past the end of everything, and the native menu came up over the
-   top of it. */
-#state-menu {
+/* The right-click menu, wherever it is opened.
+   The first version of this shipped with no rules at all, which is why it
+   looked like a menu that did nothing: a div with `left` and `top` set and no
+   `position` is laid out in the normal flow, so it appeared past the end of
+   the page with nothing on screen to show for it. */
+.ctx-menu {
   position: fixed;
   z-index: 70;
-  min-width: 180px;
+  min-width: 190px;
   padding: 4px;
   border-radius: 8px;
   background: var(--panel);
   border: 1px solid color-mix(in srgb, var(--glass) 34%, transparent);
   box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
 }
-#state-menu button {
+.ctx-menu button {
   display: block;
   width: 100%;
   padding: 7px 12px;
@@ -1877,11 +1876,17 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   color: var(--text);
   font-size: 13px;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
 }
-#state-menu button:hover { background: color-mix(in srgb, var(--glass) 24%, transparent); }
-#state-menu button.danger { color: #e0736a; }
-#state-menu button.danger:hover { background: color-mix(in srgb, #e0736a 22%, transparent); }
+.ctx-menu button:hover { background: color-mix(in srgb, var(--glass) 24%, transparent); }
+.ctx-menu button.danger { color: #e0736a; }
+.ctx-menu button.danger:hover { background: color-mix(in srgb, #e0736a 22%, transparent); }
+.ctx-menu hr {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
+  margin: 4px 6px;
+}
 
 /* Which controller is which player. In connection order, because that is the
    order RetroArch assigns ports in — so this is the only way to find out which

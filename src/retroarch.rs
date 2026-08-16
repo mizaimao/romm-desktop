@@ -210,7 +210,11 @@ const MENU_BAR: u32 = 38;
 /// is not 0, and on a second monitor it is not even a positive number in the
 /// obvious direction. The arithmetic below is that conversion, and it is why
 /// the primary monitor's height has to travel with the rest.
-pub fn window_lines(screen: Option<Screen>, aspect: Option<f32>, decorations: bool) -> String {
+pub fn window_lines(
+    screen: Option<Screen>,
+    aspect: Option<crate::aspect::Shape>,
+    decorations: bool,
+) -> String {
     let Some(s) = screen else {
         return String::new();
     };
@@ -261,10 +265,37 @@ pub fn window_lines(screen: Option<Screen>, aspect: Option<f32>, decorations: bo
     // window of the wrong shape is a window with black bars in it — and on a
     // maximised one those bars are large. Giving it a window of the right shape
     // leaves nothing over to put a bar in.
+    let mut shape = String::new();
     if let Some(a) = aspect {
-        let (fw, fh) = crate::aspect::fit(w, h, a);
+        let (fw, fh) = crate::aspect::fit(w, h, a.ratio);
         w = fw;
         h = fh;
+
+        // And tell RetroArch to draw at that same shape.
+        //
+        // Sizing the window alone was half a fix. The default here is square
+        // pixel, which is the frame buffer's shape rather than the
+        // television's: a Neo Geo frame is 320x224, which is 10:7, and it was
+        // meant to be seen as 4:3. So the window was 4:3, the picture was
+        // 10:7, and RetroArch did the only thing it could and put bars in the
+        // difference. They agree now, and there is no difference to fill.
+        //
+        // Index 20 is "Config", which means "use video_aspect_ratio" — exact
+        // for any ratio, where the numbered entries only cover a fixed list.
+        // Only where every game on the platform really is this shape. Arcade
+        // is sized to a 4:3 cabinet but drawn at whatever the game is, because
+        // a rotated vertical shooter in that same cabinet is 3:4 and forcing
+        // it to 4:3 would stretch it rather than letterbox it.
+        if a.exact {
+            shape = format!(
+            "\n# Draw at the same shape as the window, so there is nothing left\n\
+             # over to letterbox. 20 is \"Config\": use the ratio below.\n\
+             aspect_ratio_index = \"20\"\n\
+             video_aspect_ratio = \"{a:.6}\"\n\
+             video_aspect_ratio_auto = \"false\"\n",
+                a = a.ratio
+            );
+        }
     }
 
     // A screen so far off to the left that clamping leaves nothing worth
@@ -284,7 +315,7 @@ pub fn window_lines(screen: Option<Screen>, aspect: Option<f32>, decorations: bo
          video_window_show_decorations = \"false\"\n"
     };
     format!(
-        "{chrome}\n# Top-left of the screen the library is on, as tall as it goes.\n\
+        "{shape}{chrome}\n# Top-left of the screen the library is on, as tall as it goes.\n\
          video_fullscreen = \"false\"\n\
          # On: this is what makes the size below be read at all.\n\
          video_window_save_positions = \"true\"\n\
@@ -1122,12 +1153,33 @@ input_r2_axis = "+5"
         assert!(read(&fitted, "video_windowed_position_height") <= 1440.0);
     }
 
-    /// Arcade has no single shape, so nothing is imposed on it.
+    /// A platform nobody has mapped is left exactly as it was: no shaping of
+    /// the window, and no ratio forced on the picture.
     #[test]
     fn a_platform_with_no_one_shape_is_left_alone() {
-        let a = window_lines(Some(screen(1800, 1169)), crate::aspect::of("arcade"), true);
+        let a = window_lines(Some(screen(1800, 1169)), crate::aspect::of("some-new-thing"), true);
         let b = window_lines(Some(screen(1800, 1169)), None, true);
         assert_eq!(a, b);
+        assert!(!b.contains("aspect_ratio_index"), "{b}");
+    }
+
+    /// Sizing the window was half the job. The picture is drawn at whatever
+    /// ratio RetroArch is set to, and the default is the frame buffer's shape
+    /// rather than the television's — a Neo Geo frame is 320x224, which is
+    /// 10:7, shown as 4:3. So a 4:3 window held a 10:7 picture and RetroArch
+    /// put bars in the difference, which is exactly what a fitted window is
+    /// supposed to remove.
+    #[test]
+    fn the_picture_is_drawn_at_the_shape_the_window_was_given() {
+        let out = window_lines(Some(screen(1800, 1169)), crate::aspect::of("neogeoaes"), true);
+        assert_eq!(val(&out, "aspect_ratio_index"), "20", "20 is \"use the ratio below\"");
+        let asked: f32 = val(&out, "video_aspect_ratio").parse().unwrap();
+        assert!((asked - 4.0 / 3.0).abs() < 0.001, "{out}");
+
+        // And the window really is that shape, or the two still disagree.
+        let w: f32 = val(&out, "video_windowed_position_width").parse().unwrap();
+        let h: f32 = val(&out, "video_windowed_position_height").parse().unwrap();
+        assert!((w / h - asked).abs() < 0.01, "window {w}x{h} is not {asked}");
     }
 
     /// RetroArch loads a preset of its own from `config/<Core>/<Core>.slangp`
@@ -1143,6 +1195,22 @@ input_r2_axis = "+5"
         assert!(
             body.contains("auto_shaders_enable = \"false\""),
             "a preset beside the core will quietly replace ours:\n{body}"
+        );
+    }
+
+    /// Arcade gets the cabinet's shape for its window and nothing forced on
+    /// the picture. Both halves matter: a window the width of the screen puts
+    /// a black column down each side of every horizontal game, and a forced
+    /// 4:3 would stretch every vertical one.
+    #[test]
+    fn arcade_is_given_a_cabinet_shaped_window_but_no_forced_ratio() {
+        let out = window_lines(Some(screen(2560, 1440)), crate::aspect::of("arcade"), true);
+        let w: f32 = val(&out, "video_windowed_position_width").parse().unwrap();
+        let h: f32 = val(&out, "video_windowed_position_height").parse().unwrap();
+        assert!((w / h - 4.0 / 3.0).abs() < 0.01, "window {w}x{h} is not a cabinet");
+        assert!(
+            !out.contains("aspect_ratio_index"),
+            "a vertical shooter would be stretched to fit:\n{out}"
         );
     }
 

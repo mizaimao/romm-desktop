@@ -3,8 +3,11 @@
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
 import { sorted, refreshSortButton } from "./sort.js";
+import { showMenu } from "./menu.js";
+import { askDownload } from "./bulk.js";
 import { human, escapeHtml, toast } from "./util.js";
 import { selectRom, play, withTransition } from "./detail.js";
+import { download } from "./actions.js";
 
 export async function showPlatforms() {
   state.view = "platforms";
@@ -242,6 +245,32 @@ export function renderRows(unsorted, showPlatform) {
     n.addEventListener("dblclick", async (ev) => {
       ev.preventDefault();
       play(await invoke("rom_detail", { id }));
+    });
+    // Right-click. Before this it did nothing at all on a game: the browser's
+    // own menu is suppressed, because this is an application, and nothing had
+    // been put in its place outside the save-state shelf.
+    n.addEventListener("contextmenu", async (ev) => {
+      ev.preventDefault();
+      selectRom(id);
+      let d;
+      try {
+        d = await invoke("rom_detail", { id });
+      } catch {
+        return;
+      }
+      showMenu(
+        [
+          { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
+          d.downloaded ? null : { label: "Download", run: () => download(id, false) },
+          null,
+          {
+            label: `Take ${d.platform ?? "this console"} offline…`,
+            run: () => askDownload({ platform: state.platform ?? undefined }),
+          },
+        ],
+        ev.clientX,
+        ev.clientY
+      );
     });
   });
 

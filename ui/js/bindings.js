@@ -85,11 +85,12 @@ const PAD_FALLBACK = {
   // several times in a row while looking at them.
   8: "pictures",
   9: "help",
-  // The stick clicks sort the list: the left one steps through the orders, the
-  // right one opens the menu. They were paging, which the d-pad and the sticks
-  // already do a screen at a time, so pressing them appeared to do nothing.
+  // The left stick click steps through the sort orders, with the new one
+  // named in a toast. The right one used to open the sort menu, which is a
+  // list of items with no keyboard or pad navigation — so a controller could
+  // open it and then only close it again. A button that opens something
+  // unusable is worse than a button that does nothing, so it does nothing.
   10: "sortCycle",
-  11: "sortMenu",
   12: "up",
   13: "down",
   14: "left",

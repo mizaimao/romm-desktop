@@ -15,14 +15,32 @@
 //! Handhelds are the other way round: their pixels really are square, because
 //! the panel was part of the machine.
 
+/// A platform's shape, and whether every game on it really has that shape.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    /// Width divided by height.
+    pub ratio: f32,
+    /// True when the whole platform shares this shape, so the picture can be
+    /// drawn at it as well as the window being sized to it.
+    ///
+    /// False for arcade. A cabinet was a 4:3 television, so a 4:3 window is a
+    /// far better fit than a window the width of the screen — but a rotated
+    /// vertical shooter is 3:4 in the same cabinet, and forcing it to 4:3
+    /// would not letterbox it, it would stretch it. Those games keep their own
+    /// shape inside the window and are pillarboxed, which is what they were on
+    /// a horizontal screen anyway.
+    pub exact: bool,
+}
+
 /// The shape of `platform`'s picture, as width divided by height.
 ///
 /// `None` for anything whose games disagree with each other. Arcade is the
 /// clear case — a vertical shooter and a driving cabinet are both "arcade" and
 /// they are not the same shape — and guessing there would rotate half the
 /// library into a letterbox.
-pub fn of(platform: &str) -> Option<f32> {
-    Some(match platform {
+pub fn of(platform: &str) -> Option<Shape> {
+    let exact = !matches!(platform, "arcade" | "mame" | "fbneo");
+    let ratio = match platform {
         // Handhelds: square pixels, so the panel's own resolution is the shape.
         "gb" | "gbc" | "gamegear" => 160.0 / 144.0,
         "gba" => 240.0 / 160.0,
@@ -36,9 +54,18 @@ pub fn of(platform: &str) -> Option<f32> {
         "nes" | "famicom" | "snes" | "sfc" | "megadrive" | "mastersystem" | "pcengine"
         | "n64" | "psx" | "saturn" | "dc" | "ngc" | "3do" | "neogeoaes" | "neogeo" => 4.0 / 3.0,
 
-        // Arcade, and anything not listed: no single answer.
+        // Arcade cabinets of this era were 4:3 televisions turned into
+        // furniture, and the Neo Geo is the same hardware in a cabinet or a
+        // console. A vertical shooter in a rotated cabinet is the exception,
+        // and it was pillarboxed on any horizontal screen too — there is no
+        // way to know which from the platform alone, and 4:3 is right for the
+        // large majority.
+        "arcade" | "mame" | "fbneo" | "neogeocd" => 4.0 / 3.0,
+
+        // Anything not listed: no single answer.
         _ => return None,
-    })
+    };
+    Some(Shape { ratio, exact })
 }
 
 /// Fit the largest `aspect`-shaped box inside `width` x `height`.
@@ -67,7 +94,7 @@ mod tests {
     /// put a bar in.
     #[test]
     fn a_fitted_window_has_the_games_shape() {
-        let (w, h) = fit(1692, 1048, of("gba").unwrap());
+        let (w, h) = fit(1692, 1048, of("gba").unwrap().ratio);
         // 3:2, and inside the space it was given.
         assert!((w as f32 / h as f32 - 1.5).abs() < 0.01, "{w}x{h}");
         assert!(w <= 1692 && h <= 1048);
@@ -92,24 +119,45 @@ mod tests {
     #[test]
     fn console_games_are_shaped_for_the_television_not_the_framebuffer() {
         for p in ["snes", "nes", "megadrive", "psx", "n64"] {
-            assert!((of(p).unwrap() - 4.0 / 3.0).abs() < 0.001, "{p}");
+            assert!((of(p).unwrap().ratio - 4.0 / 3.0).abs() < 0.001, "{p}");
         }
     }
 
     #[test]
     fn handhelds_keep_their_own_panels_shape() {
-        assert!((of("gba").unwrap() - 1.5).abs() < 0.001);
-        assert!((of("gb").unwrap() - 160.0 / 144.0).abs() < 0.001);
+        assert!((of("gba").unwrap().ratio - 1.5).abs() < 0.001);
+        assert!((of("gb").unwrap().ratio - 160.0 / 144.0).abs() < 0.001);
         // Two screens stacked, so taller than it is wide.
-        assert!(of("nds").unwrap() < 1.0);
+        assert!(of("nds").unwrap().ratio < 1.0);
     }
 
-    /// A vertical shooter and a driving cabinet are both "arcade". Picking one
-    /// shape would letterbox half the library.
+    /// Cabinets were 4:3 televisions in furniture. A rotated vertical shooter
+    /// is the exception and was pillarboxed on any horizontal screen anyway —
+    /// there is nothing in the platform to tell the two apart, and leaving
+    /// arcade unshaped meant a window as wide as the screen with a black
+    /// column down each side of every game in it.
+    /// A rotated shooter in the same cabinet is 3:4, and forcing it to 4:3
+    /// would stretch it rather than letterbox it. So arcade gets the window
+    /// shape but not the drawing ratio.
     #[test]
-    fn platforms_whose_games_disagree_have_no_answer() {
-        assert_eq!(of("arcade"), None);
-        assert_eq!(of("mame"), None);
+    fn arcade_is_shaped_but_its_games_are_not_all_that_shape() {
+        assert!(!of("arcade").unwrap().exact);
+        assert!(!of("fbneo").unwrap().exact);
+        // A console's games really are all the one shape.
+        assert!(of("snes").unwrap().exact);
+        assert!(of("neogeoaes").unwrap().exact);
+    }
+
+    #[test]
+    fn arcade_cabinets_are_four_by_three() {
+        for p in ["arcade", "mame", "fbneo", "neogeoaes", "neogeocd"] {
+            assert!((of(p).unwrap().ratio - 4.0 / 3.0).abs() < 0.001, "{p}");
+        }
+    }
+
+    #[test]
+    fn a_platform_nobody_has_mapped_has_no_answer() {
+        assert_eq!(of("some-new-console"), None);
         assert_eq!(of(""), None);
     }
 

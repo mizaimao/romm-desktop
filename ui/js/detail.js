@@ -4,6 +4,7 @@ import { el, state, invoke, convertFileSrc, rememberRom } from "./state.js";
 import { tintFor } from "./tint.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, setOpenHook } from "./lightbox.js";
+import { showMenu } from "./menu.js";
 import { launch, download } from "./actions.js";
 
 let slideTimer;
@@ -200,59 +201,45 @@ function wireShelf(d) {
   }
 }
 
-/// The right-click menu on a save state. One item, for now.
-///
-/// Its own element rather than a browser context menu because there is no way
-/// to put anything into that one from a page, and no native menu API a webview
-/// can reach.
+/// The right-click menu on a save state.
 function stateMenu(d, btn, x, y) {
-  document.getElementById("state-menu")?.remove();
-  const menu = document.createElement("div");
-  menu.id = "state-menu";
-  menu.innerHTML = `<button class="danger">Delete this state</button>`;
-  // Placed before measuring, then pulled back inside the window: a menu opened
-  // near the bottom edge would otherwise hang off it with no way to scroll to.
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  document.body.appendChild(menu);
-  const box = menu.getBoundingClientRect();
-  if (box.bottom > window.innerHeight) menu.style.top = `${y - box.height}px`;
-  if (box.right > window.innerWidth) menu.style.left = `${x - box.width}px`;
-
-  const close = () => menu.remove();
-  // `once`, and on the next frame: the click that opened this would otherwise
-  // close it again immediately.
-  setTimeout(() => {
-    window.addEventListener("pointerdown", close, { once: true });
-    window.addEventListener("keydown", (e) => e.key === "Escape" && close(), { once: true });
-  }, 0);
-
-  menu.querySelector("button").addEventListener("click", async () => {
-    close();
-    const slot = btn.dataset.slot;
-    const label = btn.querySelector(".state-label")?.textContent?.trim() ?? `slot ${slot}`;
-    // Off by default. Deleting states is housekeeping done several at a time,
-    // and a dialog for each turns a tidy-up into a chore. The file is copied to
-    // the backups folder either way, so the undo exists regardless.
-    let ask = false;
-    try {
-      ask = await invoke("confirm_delete_state");
-    } catch {
-      // A setting that cannot be read is not a reason to skip the question.
-      ask = true;
-    }
-    if (ask && !window.confirm(`Delete ${label}? A copy goes to the backups folder.`)) {
-      return;
-    }
-    try {
-      toast(await invoke("delete_state", { id: d.id, slot }));
-      // Redraw from the backend rather than removing the button here: the
-      // shelf is what the folder says it is, not what this page remembers.
-      await selectRom(d.id);
-    } catch (e) {
-      toast(`Could not delete — ${e}`, 8000);
-    }
-  });
+  const slot = btn.dataset.slot;
+  const label = btn.querySelector(".state-label")?.textContent?.trim() ?? `slot ${slot}`;
+  showMenu(
+    [
+      {
+        label: "Delete this state",
+        danger: true,
+        run: async () => {
+          // Off by default. Deleting states is housekeeping done several at a
+          // time, and a dialog for each turns a tidy-up into a chore. The file
+          // is copied to the backups folder either way, so the undo exists
+          // regardless of whether the question was asked.
+          let ask = false;
+          try {
+            ask = await invoke("confirm_delete_state");
+          } catch {
+            // A setting that cannot be read is not a reason to skip the question.
+            ask = true;
+          }
+          if (ask && !window.confirm(`Delete ${label}? A copy goes to the backups folder.`)) {
+            return;
+          }
+          try {
+            toast(await invoke("delete_state", { id: d.id, slot }));
+            // Redrawn from the backend rather than by removing the button
+            // here: the shelf is what the folder says it is, not what this
+            // page remembers.
+            await selectRom(d.id);
+          } catch (e) {
+            toast(`Could not delete — ${e}`, 8000);
+          }
+        },
+      },
+    ],
+    x,
+    y
+  );
 }
 
 /// A dropdown of the cores this game can run under.
