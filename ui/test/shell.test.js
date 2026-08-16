@@ -232,7 +232,7 @@ describe("three columns, in the real page", () => {
   beforeEach(() => {
     // The suite above points the roles at its own made-up columns, and those
     // overrides outlive it — this one is about the real page.
-    for (const role of ["primary", "aside", "nav", "games", "consoles"]) {
+    for (const role of ["primary", "aside", "nav", "games", "picker"]) {
       shell.setRegion(role, null);
     }
     shell.setMode("single");
@@ -243,7 +243,7 @@ describe("three columns, in the real page", () => {
 
   test("the consoles get their own column, and the games keep the middle", () => {
     shell.setMode("columns");
-    assert.equal(shell.region("consoles"), el.consoles, "consoles did not move left");
+    assert.equal(shell.region("picker"), el.consoles, "consoles did not move left");
     assert.equal(shell.region("games"), el.list, "the games left the middle");
     assert.equal(el.consoles.hidden, false, "the left column is still hidden");
     assert.ok(document.body.classList.contains("columns"));
@@ -251,7 +251,7 @@ describe("three columns, in the real page", () => {
 
   test("in one pane the consoles and the games share the same element", () => {
     shell.setMode("single");
-    assert.equal(shell.region("consoles"), el.list);
+    assert.equal(shell.region("picker"), el.list);
     assert.equal(shell.region("games"), el.list);
     assert.equal(el.consoles.hidden, true, "the left column is showing in one pane");
   });
@@ -306,8 +306,69 @@ describe("three columns, in the real page", () => {
     assert.equal(shell.storedMode(), "columns");
     shell.chooseMode("single");
     assert.equal(shell.storedMode(), "single");
-    // Anything unrecognised is the one that has always worked.
+    // Anything unrecognised is the one being worked on, which is the default
+    // while three columns is being built.
     shell.chooseMode("nonsense");
-    assert.equal(shell.shellMode(), "single");
+    assert.equal(shell.shellMode(), "columns");
+    shell.chooseMode("single");
+  });
+});
+
+describe("each tab fills the left column with its own list", () => {
+  /// The left column is not "the consoles" — it is whatever this tab is a list
+  /// of. Library gives consoles, My collections gives collections, Browse
+  /// gives the groups. It was drawing consoles in every tab because the role
+  /// was named after the first thing that used it.
+  let collections, history, state;
+
+  before(async () => {
+    collections = await import("../js/collections.js");
+    history = await import("../js/history.js");
+    ({ state } = await import("../js/state.js"));
+  });
+
+  beforeEach(() => {
+    for (const role of ["primary", "aside", "nav", "games", "picker"]) {
+      shell.setRegion(role, null);
+    }
+    shell.setMode("columns");
+    el.consoles.innerHTML = "";
+    el.list.innerHTML = "";
+  });
+
+  test("My collections puts the collections there, not the consoles", async () => {
+    await collections.showCollectionsIn("user", "My collections");
+    assert.equal(
+      shell.region("picker"),
+      el.consoles,
+      "the picker is not the left column in three columns"
+    );
+    assert.match(el.consoles.innerHTML, /Filter/, "the collections did not reach the column");
+  });
+
+  test("Browse puts the groups there", async () => {
+    await collections.showCollectionGroups({ exclude: ["user"] });
+    // The stub answers with nothing, which is still an answer drawn into the
+    // column rather than into the middle.
+    assert.ok(el.consoles.innerHTML.length > 0, "the groups did not reach the column");
+  });
+
+  /// History is a page rather than a list with a detail beside it, so it owns
+  /// no left column — and leaving the last tab's list there would be a list
+  /// that acts on a screen that is gone.
+  test("History clears the column and draws into the middle", async () => {
+    el.consoles.innerHTML = "<div class='prow'>Arcade</div>";
+    await history.showHistory();
+    assert.equal(el.consoles.innerHTML, "", "the previous tab's list is still there");
+    assert.match(el.list.innerHTML, /Nothing recorded yet|hist/, "History did not draw");
+  });
+
+  /// It set no view name at all, so the section machinery parked History under
+  /// whatever was showing before — usually the console grid — and restored
+  /// that instead every time the tab was opened. The tab simply never showed.
+  test("History says which view it is", async () => {
+    state.view = "platforms";
+    await history.showHistory();
+    assert.equal(state.view, "history");
   });
 });

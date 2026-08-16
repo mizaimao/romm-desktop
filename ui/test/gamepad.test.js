@@ -132,6 +132,7 @@ before(async () => {
     ...(await load("library.js")),
     ...(await load("bulk.js")),
     ...(await load("lightbox.js")),
+    ...(await load("shell.js")),
   };
 });
 
@@ -481,29 +482,50 @@ describe("grid / list on the consoles screen", () => {
   });
 
   test("consoles render in both layouts, and stay reachable by keyboard", async () => {
+    // The grid/list button is about the one-pane arrangement: in three columns
+    // the console list is a 240px column and always a list, whatever the
+    // button says.
+    ui.setMode("single");
     ui.state.platforms = [
       { slug: "snes", name: "Super Nintendo", rom_count: 50, playable: true },
       { slug: "gb", name: "Game Boy", rom_count: 32, playable: false },
     ];
     ui.state.view = "platforms";
 
+    // Counted inside the region the consoles were drawn into, not across the
+    // document: the other arrangement's copy is still in the page and would be
+    // counted too.
+    const inPane = (sel) => document.getElementById("list").querySelectorAll(sel).length;
+    const inColumn = (sel) => document.getElementById("consoles").querySelectorAll(sel).length;
+
     ui.setLayout("list");
-    assert.equal(document.querySelectorAll(".prow").length, 2);
+    assert.equal(inPane(".prow"), 2);
     // The navigation code selects `.card, .gcard, .row, .tcard`; a console row
     // that is not one of those cannot be reached without a mouse.
-    assert.equal(document.querySelectorAll(".row").length, 2, "rows must be navigable");
+    assert.equal(inPane(".row"), 2, "rows must be navigable");
 
     ui.setLayout("grid");
-    assert.equal(document.querySelectorAll(".card").length, 2);
-    assert.equal(document.querySelectorAll(".prow").length, 0);
+    assert.equal(inPane(".card"), 2);
+    assert.equal(inPane(".prow"), 0);
+
+    // And in a column it stays a list, because a grid two cards across in
+    // 240px is neither a grid nor readable.
+    ui.setMode("columns");
+    ui.setLayout("grid");
+    assert.equal(inColumn(".prow"), 2, "a grid in the column");
+    assert.equal(inColumn(".card"), 0);
+    ui.setMode("single");
   });
 
   test("opening a console from a row works, not just from a card", async () => {
+    ui.setMode("single");
     ui.state.platforms = [{ slug: "gb", name: "Game Boy", rom_count: 32, playable: true }];
     ui.state.view = "platforms";
     ui.setLayout("list");
 
-    document.querySelector(".prow").click();
+    // Inside the pane the consoles were drawn into: the left column still
+    // holds the previous test's copy, and it comes first in the document.
+    document.getElementById("list").querySelector(".prow").click();
     await settle();
     assert.equal(openedPlatform(), "gb");
   });

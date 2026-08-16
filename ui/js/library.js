@@ -44,7 +44,7 @@ export async function showPlatforms() {
     // already open, and otherwise saying what to do rather than sitting blank.
     if (!state.platform) {
       region("games").innerHTML =
-        `<div class="empty">Pick a console on the left.</div>`;
+        `<div class="empty">Pick something on the left.</div>`;
       await showRecent();
     }
     restorePlatformCursor();
@@ -142,7 +142,7 @@ function renderPlatforms(items) {
   // Into the consoles region, which is its own column when there is one and
   // the main pane when there is not. The rest of this function does not know
   // or care which it got.
-  const into = region("consoles");
+  const into = region("picker");
   if (!into) return;
   // A column is narrow, so the console cards are always a list there — a grid
   // of two-across cards in a 260px column is neither a grid nor readable.
@@ -257,7 +257,7 @@ export async function showRoms(slug) {
   // the middle changes. In one pane it has already been replaced by the time
   // this runs, which is the difference between the two arrangements in one
   // line.
-  if (shellMode() === "columns" && !region("consoles").children.length) {
+  if (shellMode() === "columns" && !region("picker").children.length) {
     await showPlatforms();
   }
   state.platform = slug;

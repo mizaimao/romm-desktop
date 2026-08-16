@@ -32,10 +32,10 @@ import { el } from "./state.js";
 /// brings it back. In three columns the consoles stay on the left, choosing
 /// one fills the middle, and there is nothing to go back to — so no Back
 /// button, and the preview is always there rather than something to toggle.
-let mode = "single";
+let mode = "columns";
 
 export function setMode(next) {
-  mode = next === "columns" ? "columns" : "single";
+  mode = next === "single" ? "single" : "columns";
   if (el.consoles) el.consoles.hidden = mode !== "columns";
   document.body.classList.toggle("columns", mode === "columns");
   return mode;
@@ -51,7 +51,9 @@ const MODE_KEY = "romm.shell";
 /// config.toml because it is about this window rather than about the library,
 /// and because the settings window has to be able to read it too.
 export function storedMode() {
-  return localStorage.getItem(MODE_KEY) === "columns" ? "columns" : "single";
+  // Three columns while it is being worked on. Anything explicitly stored
+  // wins, so choosing one pane sticks.
+  return localStorage.getItem(MODE_KEY) === "single" ? "single" : "columns";
 }
 
 /// Choose an arrangement and remember it. The other window is told, because
@@ -66,9 +68,10 @@ export function chooseMode(next, { announce = true } = {}) {
 }
 
 const REGIONS = {
-  // The console list. Its own column when there is one; otherwise the main
-  // pane, which is what makes one set of view code serve both arrangements.
-  consoles: () => (mode === "columns" ? el.consoles : el.list),
+  // The list you pick from: consoles in the Library tab, collections in the
+  // others. Its own column when there is one; otherwise the main pane, which
+  // is what makes one set of view code serve both arrangements.
+  picker: () => (mode === "columns" ? el.consoles : el.list),
   // The games. Always the main pane — in three columns that pane *is* the
   // middle column.
   games: () => el.list,

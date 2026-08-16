@@ -12,7 +12,7 @@
 // the ones you kept opening and kept putting down are the only list here that
 // tells you something you did not already know.
 
-import { invoke } from "./state.js";
+import { state, invoke } from "./state.js";
 import { region, enter } from "./shell.js";
 import { escapeHtml, toast } from "./util.js";
 
@@ -48,7 +48,14 @@ export async function showHistory() {
   // screen — Back, Take offline, the zoom slider — all of them acting on a
   // console that is no longer showing. A view that declares nothing gets
   // nothing, which is what this page wants: it is a page, not a list.
+  // Its own view name. Without one it kept whatever the last tab set, so the
+  // section machinery parked History under "platforms" and restored the
+  // console grid every time you came back to it — the tab simply never showed.
+  state.view = "history";
   enter({ title: "History" });
+  // Nothing to pick from: this is a page, not a list with a detail beside it.
+  const picker = region("picker");
+  if (picker && picker !== region("games")) picker.innerHTML = "";
 
   let h;
   try {
@@ -60,7 +67,7 @@ export async function showHistory() {
   // Nothing recorded yet is the normal state on a fresh install, and an empty
   // page with three empty headings reads as broken rather than as new.
   if (!h.sessions) {
-    region("primary").innerHTML = `
+    region("games").innerHTML = `
       <div class="hist-empty">
         <h2>Nothing recorded yet</h2>
         <p>Time gets counted from the next game you start here. Sessions shorter
@@ -73,7 +80,7 @@ export async function showHistory() {
   const maxPlatform = Math.max(...h.platforms.map((p) => p.seconds), 0);
   const hours = Math.round(h.total_seconds / 360) / 10;
 
-  region("primary").innerHTML = `
+  region("games").innerHTML = `
     <div class="hist">
       <div class="hist-top">
         <div><strong>${hours}</strong><span>hours</span></div>

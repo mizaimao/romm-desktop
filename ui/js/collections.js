@@ -36,11 +36,11 @@ export async function showCollectionGroups({ exclude = [] } = {}) {
     (g) => !exclude.includes(g.group)
   );
   if (!groups.length) {
-    region("primary").innerHTML = `<div class="empty">No collections on the server. Run a sync, or make one in RomM.</div>`;
+    region("picker").innerHTML = `<div class="empty">No collections on the server. Run a sync, or make one in RomM.</div>`;
     return;
   }
 
-  region("primary").innerHTML = `<div class="grid">${groups
+  region("picker").innerHTML = `<div class="grid">${groups
     .map(
       (g) => `
       <div class="card" data-group="${escapeHtml(g.group)}">
@@ -67,7 +67,7 @@ export async function showCollectionsIn(group, label) {
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate
   // from the header search, which searches games rather than collections.
-  region("primary").innerHTML = `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
+  region("picker").innerHTML = `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
     `<div class="grid" id="cgrid"></div>`;
 
   const grid = document.getElementById("cgrid");
