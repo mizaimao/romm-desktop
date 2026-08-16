@@ -95,3 +95,36 @@ describe("the right-click menu is positioned by the stylesheet", () => {
     menu.remove();
   });
 });
+
+describe("the zoom slider changes the size at every step", () => {
+  /// Reported as "multiple levels share the same icon size", which is what a
+  /// grid of `minmax(X, 1fr)` columns does: the column count is
+  /// floor(width / X) and the cards then stretch to fill, so the width drawn
+  /// is row-width divided by column count and only moves when the count does.
+  /// Most of the slider's travel drew identical cards.
+  test("cards are a width, not a minimum they stretch past", () => {
+    // Comments stripped first: the rule below is explained in a comment that
+    // quotes the very pattern being asserted against, and matching that would
+    // fail on the explanation rather than on the code.
+    const css = readFileSync(join(uiDir, "style.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const gcards = css.slice(css.indexOf(".gcards {"), css.indexOf("}", css.indexOf(".gcards {")));
+    assert.ok(
+      gcards.includes("repeat(auto-fill, var(--gcard))"),
+      `game cards still stretch to fill the row:\n${gcards}`
+    );
+    assert.ok(!/minmax\([^)]*1fr\)/.test(gcards), "a 1fr column is still in there");
+
+    const grid = css.slice(css.indexOf(".grid {"), css.indexOf("}", css.indexOf(".grid {")));
+    assert.ok(!/minmax\([^)]*1fr\)/.test(grid), "console cards still stretch");
+  });
+
+  /// A step so large that the slider has only a handful of usable positions is
+  /// the other half of the same complaint.
+  test("the slider moves in small enough steps to be continuous", () => {
+    const html = readFileSync(join(uiDir, "index.html"), "utf8");
+    const el = html.match(/<input id="zoom"[^>]*>/)[0];
+    const num = (k) => Number(el.match(new RegExp(`${k}="(\\d+)"`))[1]);
+    const steps = (num("max") - num("min")) / num("step");
+    assert.ok(steps >= 50, `only ${steps} zoom positions, which is not continuous`);
+  });
+});

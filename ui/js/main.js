@@ -3,7 +3,6 @@
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { openSortMenu } from "./sort.js";
-import { applyStoredTheme, applyTheme } from "./themes.js";
 import { human, toast } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
@@ -38,9 +37,6 @@ listen("art-changed", () => {
 // The console pictures, which are the other half: `art-changed` deliberately
 // skips the console grid because game artwork is not what changed there. This
 // is the one that redraws it.
-// Chosen in the settings window, which cannot reach this document.
-listen("theme-changed", ({ payload }) => applyTheme(String(payload), { announce: false }));
-
 listen("icons-changed", () => {
   if (state.view === "platforms") showPlatforms();
 });
@@ -193,9 +189,6 @@ function formatEta(seconds) {
   // Off by default: it is a preference, and starting a GPU loop uninvited on
   // someone's machine is not a decision this app should make for them.
   if (localStorage.getItem("backdrop") === "on") startBackdrop();
-  // The theme first: it writes every palette token, and the stored glass tint
-  // is allowed to override the theme's own afterwards.
-  applyStoredTheme();
   applyStoredGlassTint();
   setZoom(state.zoom);
   setLayout(state.layout);

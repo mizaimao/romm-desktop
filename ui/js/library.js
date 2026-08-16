@@ -65,9 +65,7 @@ async function showRecent() {
          <div class="gmeta">${r.downloaded ? "▣ " : ""}${r.platform}</div>
        </div>`).join("")}</div>`;
   el.list.prepend(strip);
-  strip.querySelectorAll(".gcard").forEach((c) =>
-    c.addEventListener("click", () => selectRom(Number(c.dataset.id)))
-  );
+  strip.querySelectorAll(".gcard").forEach((c) => wireGame(c, Number(c.dataset.id)));
   // Re-observe after prepending, so these cards get covers like any others.
   // The observer was set up before this row existed.
   observeCovers();
@@ -218,6 +216,47 @@ export async function runSearch(term) {
   renderRows(state.rows, true);
 }
 
+/// Click, double-click and right-click on one game.
+///
+/// Shared, because there are two places that draw games — the list, and the
+/// "continue playing" strip above it — and they had drifted: the strip could be
+/// selected and nothing else. Right-click there did nothing at all, and neither
+/// did double-click, on cards that look exactly like the ones below where both
+/// work.
+export function wireGame(node, id) {
+  node.addEventListener("click", () => selectRom(id));
+  // Double-click is the shortcut for "just play it".
+  node.addEventListener("dblclick", async (ev) => {
+    ev.preventDefault();
+    play(await invoke("rom_detail", { id }));
+  });
+  node.addEventListener("contextmenu", async (ev) => {
+    ev.preventDefault();
+    selectRom(id);
+    let d;
+    try {
+      d = await invoke("rom_detail", { id });
+    } catch {
+      return;
+    }
+    showMenu(
+      [
+        { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
+        d.downloaded ? null : { label: "Download", run: () => download(id, false) },
+        null,
+        {
+          // The game's own console, not whatever page this is: the strip on the
+          // front page holds games from several.
+          label: `Take ${d.platform ?? "this console"} offline…`,
+          run: () => askDownload({ platform: d.platform_slug ?? state.platform ?? undefined }),
+        },
+      ],
+      ev.clientX,
+      ev.clientY
+    );
+  });
+}
+
 export function renderRows(unsorted, showPlatform) {
   // Ordered here rather than by whoever supplied the rows, so every path that
   // draws a list — a console, a collection, a search, a redraw after the order
@@ -238,41 +277,7 @@ export function renderRows(unsorted, showPlatform) {
       ? gridMarkup(rows)
       : listMarkup(rows, showPlatform);
 
-  el.list.querySelectorAll("[data-id]").forEach((n) => {
-    const id = Number(n.dataset.id);
-    n.addEventListener("click", () => selectRom(id));
-    // Double-click is the shortcut for "just play it".
-    n.addEventListener("dblclick", async (ev) => {
-      ev.preventDefault();
-      play(await invoke("rom_detail", { id }));
-    });
-    // Right-click. Before this it did nothing at all on a game: the browser's
-    // own menu is suppressed, because this is an application, and nothing had
-    // been put in its place outside the save-state shelf.
-    n.addEventListener("contextmenu", async (ev) => {
-      ev.preventDefault();
-      selectRom(id);
-      let d;
-      try {
-        d = await invoke("rom_detail", { id });
-      } catch {
-        return;
-      }
-      showMenu(
-        [
-          { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
-          d.downloaded ? null : { label: "Download", run: () => download(id, false) },
-          null,
-          {
-            label: `Take ${d.platform ?? "this console"} offline…`,
-            run: () => askDownload({ platform: state.platform ?? undefined }),
-          },
-        ],
-        ev.clientX,
-        ev.clientY
-      );
-    });
-  });
+  el.list.querySelectorAll("[data-id]").forEach((n) => wireGame(n, Number(n.dataset.id)));
 
   if (state.layout === "grid") observeCovers();
   // Put the cursor back where it was in this list, falling back to the top.

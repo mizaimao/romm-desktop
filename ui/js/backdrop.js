@@ -1,4 +1,3 @@
-import { THEMES, tokenOf } from "./themes.js";
 // An animated shader behind the library.
 //
 // WebGL2, which every webview this app runs in has had for years — WKWebView on
@@ -111,12 +110,9 @@ const DEFAULTS = { speed: 4, strength: 0.32, low: "", high: "", preset: "midnigh
 /// renamed or dropped, and a settings file naming one that no longer exists
 /// should leave the window looking like something rather than nothing.
 export function presetColours(cfg) {
-  // "custom" and an unknown id both mean "use whatever is stored": a theme can
-  // be renamed or dropped, and a settings file naming one that has gone should
-  // leave the window looking like something rather than nothing.
-  if (cfg.preset === "custom") return { low: cfg.low, high: cfg.high };
-  const t = THEMES.find((x) => x.id === cfg.preset);
-  return t ? { low: t.low, high: t.high } : { low: cfg.low, high: cfg.high };
+  const p = SCHEMES.find((x) => x.id === cfg.preset);
+  if (!p || p.id === "custom") return { low: cfg.low, high: cfg.high };
+  return { low: p.low, high: p.high };
 }
 
 /// Motion, as the slider expresses it.
@@ -356,6 +352,30 @@ export function backdropSupported() {
 // other. Same idea: one colour drives the bars, the button gel, the hover glow
 // and the focus ring, because in Aero they were all the same light.
 
+/// One palette for both surfaces.
+///
+/// The glass tint and the shader backdrop were two dropdowns of seven and eight
+/// colours, chosen separately, and every sensible combination was a pair that
+/// already matched — "Aero blue" glass over the "Midnight" backdrop, "Jade"
+/// over "Moss". Two controls whose only correct settings are a diagonal of the
+/// grid they span is one control.
+///
+/// `glass` tints the cards, the selection glow and the controls; `low` and
+/// `high` are the two ends of the gradient the shader draws. Custom keeps all
+/// three separately settable, because someone who wants an unmatched pair
+/// should still be able to have one.
+export const SCHEMES = [
+  { id: "midnight", label: "Midnight", glass: "#4d8fd6", low: "#0b0d16", high: "#2a3566" },
+  { id: "frost",    label: "Frost",    glass: "#8fb8d8", low: "#0b0f14", high: "#33506b" },
+  { id: "abyss",    label: "Abyss",    glass: "#3aa0b5", low: "#06090c", high: "#12414d" },
+  { id: "moss",     label: "Moss",     glass: "#3f9e86", low: "#0a1210", high: "#1f4a37" },
+  { id: "ember",    label: "Ember",    glass: "#c8873c", low: "#140b09", high: "#5c2418" },
+  { id: "rust",     label: "Rust",     glass: "#b06a35", low: "#150f09", high: "#5e3a17" },
+  { id: "wine",     label: "Wine",     glass: "#b04a55", low: "#130a0e", high: "#54203a" },
+  { id: "plum",     label: "Plum",     glass: "#7b62c4", low: "#120a16", high: "#452b5e" },
+  { id: "slate",    label: "Slate",    glass: "#6d7681", low: "#0f1113", high: "#333a42" },
+  { id: "custom",   label: "Custom",   glass: null,      low: null,      high: null },
+];
 
 
 const GLASS_KEY = "glassTint";
@@ -378,11 +398,11 @@ export function setGlassStrength(pct, { announce = true } = {}) {
 }
 
 export function glassTint() {
-  // The theme's own tint when nothing has been chosen. This used to read
-  // GLASS_PRESETS, which was removed with the old two-dropdown design — so on
-  // a machine with no stored tint, which is every new install, the first call
-  // threw before anything was painted.
-  return localStorage.getItem(GLASS_KEY) || tokenOf("glass");
+  // The first scheme's glass when nothing has been chosen. This read
+  // GLASS_PRESETS, which was deleted when the two colour dropdowns were merged
+  // — so on a machine with no stored tint, which is every new install, the
+  // first call threw before anything had been painted.
+  return localStorage.getItem(GLASS_KEY) || SCHEMES[0].glass;
 }
 
 /// Apply the tint to this document, and tell the other window.
@@ -391,7 +411,7 @@ export function glassTint() {
 /// controls. A tint applied in one and not the other is worse than no tint,
 /// because it looks like a bug.
 export function setGlassTint(colour, { announce = true } = {}) {
-  const value = /^#[0-9a-f]{6}$/i.test(colour) ? colour : tokenOf("glass");
+  const value = /^#[0-9a-f]{6}$/i.test(colour) ? colour : SCHEMES[0].glass;
   document.documentElement.style.setProperty("--glass", value);
   if (announce) {
     localStorage.setItem(GLASS_KEY, value);

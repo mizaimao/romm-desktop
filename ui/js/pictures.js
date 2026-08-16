@@ -52,8 +52,14 @@ async function cycleIconStyle() {
   const want = next(usable.map((s) => s.key), now);
   try {
     const label = await invoke("set_icon_style", { key: want });
-    // Redraw here and tell the settings window, which cannot see this one.
-    await showPlatforms();
+    // Only when the console grid is what is on screen.
+    //
+    // Redrawing it unconditionally put the platform grid inside whichever tab
+    // was open — press Select in My collections and that tab was showing
+    // consoles. The section machinery then remembered where each tab had been
+    // left, so My collections went on showing the platform grid every time you
+    // returned to it, and after a few presses every tab showed the same thing.
+    if (state.view === "platforms") await showPlatforms();
     window.__TAURI__?.event?.emit?.("icons-changed");
     toast(`Console pictures: ${label}`);
   } catch (e) {

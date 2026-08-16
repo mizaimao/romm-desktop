@@ -133,20 +133,38 @@ describe("the settings tabs", () => {
     );
   });
 
-  /// One control for the whole look. It was two dropdowns whose only sensible
-  /// settings were a matching pair, and before that the glass tint alone.
-  test("one theme control drives the whole window", async () => {
+  /// Two dropdowns whose only sensible settings were a matching pair. One
+  /// palette now drives the glass and the shader backdrop together.
+  test("one color scheme drives the glass and the backdrop", async () => {
     const { paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    const { SCHEMES } = await import(join(uiDir, "js", "backdrop.js"));
     const pane = new JSDOM(`<body>${paneHtml("appearance")}</body>`).window.document;
 
-    assert.ok(pane.querySelector(".scheme-preset"), "no theme control");
+    assert.ok(pane.querySelector(".scheme-preset"), "no single scheme control");
     assert.equal(pane.querySelector(".glass-preset"), null, "the glass dropdown is still there");
     assert.equal(pane.querySelector(".bd-preset"), null, "the backdrop dropdown is still there");
 
-    // The things that are not part of a theme survive.
+    // The things that are not a color survive the merge.
     assert.ok(pane.querySelector(".glass-strength"), "tint strength was lost");
     assert.ok(pane.querySelector(".bd-speed"), "motion was lost");
     assert.ok(pane.querySelector(".bd-strength"), "brightness was lost");
+
+    // The first scheme is the fallback when nothing is stored, which is every
+    // new install — so it has to carry a glass colour rather than being a
+    // placeholder. A missing one used to be a crash before the first paint.
+    assert.match(SCHEMES[0].glass ?? "", /^#[0-9a-f]{6}$/i, "the default scheme has no glass");
+
+    // Every scheme carries all three colors, or picking it would leave one
+    // surface on the last scheme's palette.
+    for (const c of SCHEMES.filter((x) => x.id !== "custom")) {
+      for (const k of ["glass", "low", "high"]) {
+        assert.match(c[k] ?? "", /^#[0-9a-f]{6}$/i, `${c.id} has no ${k}`);
+      }
+    }
+    // And custom leaves all three to the user.
+    const custom = SCHEMES.find((x) => x.id === "custom");
+    assert.ok(custom, "no way to set an unmatched pair");
+    assert.equal(custom.glass, null);
   });
 
   /// Which screen a game opens on. The control is in the markup but starts

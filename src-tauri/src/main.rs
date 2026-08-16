@@ -113,6 +113,10 @@ struct RomDetail {
     name: String,
     fs_name: String,
     platform: String,
+    /// The slug as well as the display name. The row of recent games holds
+    /// games from several consoles, so anything acting on "this game's
+    /// console" cannot read it off the page it is on.
+    platform_slug: String,
     size_bytes: i64,
     downloaded: bool,
     core: Option<String>,
@@ -1168,6 +1172,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
         art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
+        platform_slug: row.platform_slug.clone(),
         id: row.id,
         name: row.name,
         fs_name: row.fs_name,

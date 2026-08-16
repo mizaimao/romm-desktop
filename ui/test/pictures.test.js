@@ -155,3 +155,33 @@ describe("the button that changes the pictures", () => {
     await assert.doesNotReject(() => pictures.cyclePictures());
   });
 });
+
+describe("changing the pictures leaves the tab you are in alone", () => {
+  /// Reported as "after pressing Select, the shoulder buttons stop working and
+  /// only Library shows". What actually happened: the console grid was redrawn
+  /// into whatever tab was open, and the tab machinery remembers where each
+  /// section was left — so My collections went on showing the platform grid on
+  /// every later visit, and after a few presses every tab showed the same
+  /// screen.
+  test("it does not draw the console grid into another section", async () => {
+    ui.state.view = "collections";
+    await pictures.cyclePictures();
+    await settle();
+
+    assert.equal(
+      invoked.some((c) => c.cmd === "platforms"),
+      false,
+      "the console grid was drawn over a collections page"
+    );
+    // The setting still changed; only the redraw was wrong.
+    assert.ok(invoked.some((c) => c.cmd === "set_icon_style"));
+    assert.equal(ui.state.view, "collections", "the view was replaced");
+  });
+
+  test("and does redraw it when the console grid is what is showing", async () => {
+    ui.state.view = "platforms";
+    await pictures.cyclePictures();
+    await settle();
+    assert.ok(invoked.some((c) => c.cmd === "platforms"), "the grid was not redrawn");
+  });
+});

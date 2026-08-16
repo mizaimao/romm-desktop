@@ -44,7 +44,7 @@ body.settings-window {
   text-align: left;
   padding: 9px 12px;
   border: 0;
-  border-radius: calc(7px * var(--round));
+  border-radius: 7px;
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -147,7 +147,7 @@ body.settings-window {
   bottom: 18px;
   transform: translateX(-50%);
   padding: 8px 14px;
-  border-radius: calc(8px * var(--round));
+  border-radius: 8px;
   background: var(--panel-2);
   border: 1px solid var(--line);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
@@ -159,7 +159,7 @@ body.settings-window {
   height: 26px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: calc(5px * var(--round));
+  border-radius: 5px;
   background: none;
   cursor: pointer;
 }
@@ -178,7 +178,7 @@ body.settings-window {
 .cred-box input {
   width: 100%;
   padding: 7px 9px;
-  border-radius: calc(6px * var(--round));
+  border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: inherit;
@@ -187,7 +187,7 @@ body.settings-window {
 .cred-actions { display: flex; gap: 8px; margin-top: 14px; }
 .cred-actions button {
   padding: 7px 14px;
-  border-radius: calc(7px * var(--round));
+  border-radius: 7px;
   border: 1px solid var(--line);
   background: var(--panel-2);
   color: inherit;
@@ -200,7 +200,7 @@ body.settings-window {
 .cred-summary { opacity: 0.6; font-size: 12px; }
 #pane select {
   padding: 6px 8px;
-  border-radius: calc(6px * var(--round));
+  border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: inherit;

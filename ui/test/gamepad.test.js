@@ -316,8 +316,10 @@ describe("the poll loop", () => {
 describe("the triggers resize the covers", () => {
   test("LT and RT are bound to zoom, not to paging", () => {
     const map = ui.padMap();
-    assert.equal(map[6], "zoomIn", "LT grows the covers");
-    assert.equal(map[7], "zoomOut", "RT shrinks them");
+    // LT out, RT in: the left trigger takes you back and the right one takes
+    // you further, which is how every other pair of triggers here works.
+    assert.equal(map[6], "zoomOut", "LT shrinks the covers");
+    assert.equal(map[7], "zoomIn", "RT grows them");
     // The stick clicks sort the list now. They were paging, which the d-pad
     // and the sticks already do a screen at a time, so pressing them looked
     // like nothing happening.

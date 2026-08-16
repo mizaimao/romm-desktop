@@ -11,7 +11,6 @@
 
 import { TABS, paneHtml, wirePane, isCapturing, captureKey } from "./settings-panes.js";
 import { applyStoredGlassTint } from "./backdrop.js";
-import { applyStoredTheme } from "./themes.js";
 
 const tabsEl = document.getElementById("tabs");
 const paneEl = document.getElementById("pane");
@@ -119,7 +118,6 @@ async function showVersions() {
   }
 }
 
-applyStoredTheme();
 applyStoredGlassTint();
 showVersions();
 buildTabs();
