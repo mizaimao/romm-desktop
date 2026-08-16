@@ -139,7 +139,11 @@ header h1 {
 /* No surface on the top row either. These are ID rules and the flat block
    further down is not, so without matching them here they would win on
    specificity and the pills would come back. */
-#systems-btn, #settings-btn, #sidebar-btn, #layout-btn, #themes-btn, #collections-btn {
+/* Take offline belongs in this list: left out of it, it kept the generic
+   button styling — a filled panel with a border — and sat in the tab row
+   next to the preview toggle looking like a different application's. */
+#systems-btn, #settings-btn, #sidebar-btn, #layout-btn, #themes-btn, #collections-btn,
+#grab-btn {
   background: transparent;
   color: color-mix(in srgb, var(--text) 80%, transparent);
   border: 1px solid transparent;
@@ -155,7 +159,8 @@ header h1 {
 /* Hover lights the label rather than drawing a panel behind it — the same
    signal the tab strip uses, so the two rows behave alike. A fill here was the
    last surface left in the top bar. */
-#systems-btn:hover, #settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #themes-btn:hover {
+#systems-btn:hover, #settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #themes-btn:hover,
+#grab-btn:hover {
   background: transparent;
   color: color-mix(in srgb, var(--glass) 30%, white 70%);
   /* Two shadows: a tight bright core and a wide soft halo. One alone reads as

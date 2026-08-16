@@ -737,12 +737,18 @@ input_player2_gun_start_mbtn = \"3\"
             return String::new();
         };
 
-        // 60fps content, so a period of 12 frames is five presses a second.
+        // The period is one full press-and-release in frames, so at 60fps four
+        // shots a second is a period of 15 with the button down for 7 of them.
+        //
+        // Rounded rather than truncated: 7 Hz is 8.57 frames, and 60/7 in
+        // integers is 8 — 7.5 shots a second, half a shot fast. Every rate
+        // that does not divide 60 was drifting the same way.
+        //
         // Clamped rather than trusted: a period of zero is a division by zero
         // inside the emulator, and anything above about 30 shots a second is
         // faster than the game can read.
         let hz = hz.clamp(1, 30);
-        let period = (60 / hz).max(2);
+        let period = ((60.0 / hz as f32).round() as u32).max(2);
         let duty = (period / 2).max(1);
 
         format!(
@@ -761,6 +767,11 @@ input_player2_gun_start_mbtn = \"3\"
              # The rate is a period in frames — how long one press-release\n\
              # cycle lasts — so it runs backwards from shots per second and\n\
              # the conversion happens here rather than in anyone's head.\n\
+             # The pad's own profile still binds the modifier to whatever it\n\
+             # normally is, so on the bottom face that button also sends a\n\
+             # continuous shot — a held fire with the repeat pulsing on top,\n\
+             # which is not rapid fire and reads as the wrong rate. The remap\n\
+             # clears it; see tweaks::remap_with.\n\
              input_turbo_mode = \"3\"\n\
              input_turbo_default_button = \"0\"\n\
              input_turbo_period = \"{period}\"\n\
@@ -1332,6 +1343,71 @@ input_r2_axis = "+5"
     /// Auto-fire moves two buttons and nothing else. Getting only half of it
     /// written would be worse than none: a shot button that repeats, with
     /// nowhere left to fire a single shot from, is a game you cannot aim in.
+    #[test]
+    fn autofire_rate_is_the_nearest_whole_frame_to_what_was_asked() {
+        let dir = scratch("autofire-rate");
+        with_autoconfig(&dir);
+        let period = |hz: u32| {
+            let out = fake(&dir).autofire(
+                Some("Xbox Wireless Controller"),
+                crate::tweaks::AutoFire::BottomFace,
+                hz,
+            );
+            out.lines()
+                .find(|l| l.starts_with("input_turbo_period"))
+                .and_then(|l| l.split('"').nth(1))
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0)
+        };
+        // The ones that divide 60 exactly.
+        assert_eq!(period(4), 15, "four shots a second is 15 frames");
+        assert_eq!(period(5), 12);
+        assert_eq!(period(10), 6);
+        // And the ones that do not. Truncating 60/7 gives 8 frames, which is
+        // 7.5 shots a second — every rate that does not divide 60 was drifting
+        // fast the same way.
+        assert_eq!(period(7), 9, "7 Hz is 8.57 frames, so 9");
+        assert_eq!(period(9), 7);
+        // The button is down for half the cycle, and never for zero frames.
+        for hz in 1..=30 {
+            let p = period(hz);
+            assert!(p >= 2, "{hz} Hz gave a period of {p}");
+        }
+    }
+
+    /// Holding the modifier must not also send a shot. It is the pad's own
+    /// profile that binds it — the bottom face is RetroPad B on every pad —
+    /// so without clearing it, holding A is one continuous shot with the
+    /// repeat pulsing on top. In Pulstar, where holding fire charges, that is
+    /// not rapid fire at all.
+    #[test]
+    fn the_repeat_button_sends_nothing_of_its_own() {
+        let lines = crate::tweaks::remap_with("arcade", "fbneo", crate::tweaks::AutoFire::BottomFace);
+        assert!(
+            lines.iter().any(|l| l == "input_player1_btn_b = \"-1\""),
+            "the bottom face still fires on its own: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "input_player1_btn_x = \"0\""),
+            "the single shot has nowhere to live: {lines:?}"
+        );
+        // Two players, because a two-player cabinet game with rapid fire on
+        // one side only is worse than none.
+        assert!(lines.iter().any(|l| l == "input_player2_btn_b = \"-1\""));
+        assert!(lines.iter().any(|l| l == "input_player2_btn_x = \"0\""));
+    }
+
+    /// The other arrangement leaves every button exactly as the game expects.
+    /// The top face is spare on these cores, so holding it repeats and nothing
+    /// else moves — which is why it is the one to try first.
+    #[test]
+    fn holding_the_top_face_changes_no_other_button() {
+        assert!(
+            crate::tweaks::remap_with("arcade", "fbneo", crate::tweaks::AutoFire::TopFace).is_empty(),
+            "rapid fire on the top face moved something it did not need to"
+        );
+    }
+
     #[test]
     fn autofire_moves_the_shot_to_the_top_button_and_repeats_the_bottom_one() {
         let dir = scratch("autofire");

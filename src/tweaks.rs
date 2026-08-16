@@ -127,6 +127,8 @@ const PAD_Y: &str = "1";
 const PAD_X: &str = "9";
 /// RetroPad B — the primary fire in every arcade core.
 const PAD_B: &str = "0";
+/// "Nothing", in a remap. RetroArch writes -1 for a binding cleared to `---`.
+const UNMAPPED: &str = "-1";
 
 /// Cores whose emulated pad has rapid-fire copies of its face buttons.
 ///
@@ -182,8 +184,21 @@ pub fn remap(platform: &str, core: &str) -> Vec<String> {
 pub fn remap_with(platform: &str, core: &str, autofire: AutoFire) -> Vec<String> {
     let mut out = Vec::new();
     if autofire == AutoFire::BottomFace {
-        // RetroPad X (top face) sends RetroPad B (fire).
-        out.push(format!("input_player1_btn_x = \"{PAD_B}\""));
+        for p in 1..=2 {
+            // RetroPad X (top face) sends RetroPad B (fire): the single shot,
+            // moved off the button that is now the repeat.
+            out.push(format!("input_player{p}_btn_x = \"{PAD_B}\""));
+            // And the bottom face stops sending a shot of its own.
+            //
+            // This is what made rapid fire on A unplayable. That button is the
+            // turbo *modifier*, but the pad's own profile still binds it to
+            // RetroPad B — so holding it sent one continuous shot with the
+            // repeat pulsing on top of it. In a game where holding fire means
+            // something (Pulstar charges a shot) that is not rapid fire at
+            // all, and the rate looked wrong because the held shot never let
+            // go. A modifier has to be silent on its own.
+            out.push(format!("input_player{p}_btn_b = \"{UNMAPPED}\""));
+        }
     }
     out.extend(turbo_remap(platform, core));
     out
