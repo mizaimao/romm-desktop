@@ -166,9 +166,9 @@ function stateShelf(states) {
         ${states
           .map(
             (s) => `
-          <button class="state" data-slot="${escapeHtml(s.slot)}"
-            ${s.resumable ? "" : "disabled"}
-            title="${s.resumable ? `Start from ${escapeHtml(s.label)}` : "RetroArch loads this one itself when you next play"}">
+          <button class="state ${s.resumable ? "" : "noresume"}"
+            data-slot="${escapeHtml(s.slot)}"
+            title="${s.resumable ? `Start from ${escapeHtml(s.label)}` : "RetroArch loads this one itself when you next play — right-click to delete it"}">
             ${
               s.thumb
                 ? `<img src="${convertFileSrc(s.thumb)}" alt="" loading="lazy" />`
@@ -185,7 +185,11 @@ function stateShelf(states) {
 
 function wireShelf(d) {
   for (const btn of document.querySelectorAll(".state")) {
-    if (!btn.disabled) {
+    // `noresume` rather than `disabled`. A disabled button fires no mouse
+    // events at all — not click, not contextmenu — so marking the autosave
+    // disabled also made it impossible to right-click, which is the only way
+    // to delete one. It is greyed the same way and simply does not launch.
+    if (!btn.classList.contains("noresume")) {
       btn.addEventListener("click", () => {
         // Same launch path as the Play button, so a state that needs a core
         // fetched, a BIOS file, or a save sync gets all of it.

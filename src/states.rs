@@ -57,14 +57,20 @@ impl Slot {
     fn order(&self) -> (u8, u32) {
         match self.slot.as_str() {
             "auto" => (0, 0),
-            n => (1, n.parse().unwrap_or(u32::MAX)),
+            _ => (1, self.entry_slot().unwrap_or(u32::MAX)),
         }
     }
 
     /// The `--entryslot` argument RetroArch wants, or `None` for the autosave,
     /// which has no number and is loaded a different way.
+    ///
+    /// The scanner names slots `slot0`, `slot3`, `auto` — that string is the
+    /// pairing key the server uses, so it is not a number and cannot become
+    /// one. Reading it as a number regardless is what made *every* state
+    /// non-resumable: the parse failed, the shelf marked each one as
+    /// unstartable, and the interface disabled all of them.
     pub fn entry_slot(&self) -> Option<u32> {
-        self.slot.parse().ok()
+        self.slot.strip_prefix("slot").unwrap_or(&self.slot).parse().ok()
     }
 }
 
@@ -154,7 +160,7 @@ fn modified_at(path: &Path) -> Option<u64> {
 /// one you get by pressing the save-state key without thinking about slots at
 /// all, which makes it the quick one.
 fn label_for(slot: &str) -> String {
-    match slot {
+    match slot.strip_prefix("slot").unwrap_or(slot) {
         "auto" => "Where you left off".to_owned(),
         "0" => "Quick slot".to_owned(),
         n => format!("Slot {n}"),
@@ -194,7 +200,7 @@ mod tests {
 
     #[test]
     fn the_autosave_comes_first_and_the_numbered_slots_in_order() {
-        let mut slots: Vec<Slot> = ["3", "0", "auto", "10", "1"]
+        let mut slots: Vec<Slot> = ["slot3", "slot0", "auto", "slot10", "slot1"]
             .iter()
             .map(|s| Slot {
                 slot: (*s).to_owned(),
@@ -210,14 +216,15 @@ mod tests {
         let order: Vec<&str> = slots.iter().map(|s| s.slot.as_str()).collect();
         // 10 after 1, not between 0 and 3: the slot is a number, and sorting it
         // as text is how slot 10 ends up looking like the second one you made.
-        assert_eq!(order, ["auto", "0", "1", "3", "10"]);
+        assert_eq!(order, ["auto", "slot0", "slot1", "slot3", "slot10"]);
     }
 
     #[test]
     fn slots_are_named_for_what_they_are_rather_than_numbered() {
+        // The names the scanner really produces, which are not bare numbers.
         assert_eq!(label_for("auto"), "Where you left off");
-        assert_eq!(label_for("0"), "Quick slot");
-        assert_eq!(label_for("7"), "Slot 7");
+        assert_eq!(label_for("slot0"), "Quick slot");
+        assert_eq!(label_for("slot7"), "Slot 7");
     }
 
     /// The autosave has no number, and asking RetroArch to enter slot "auto"
@@ -234,7 +241,12 @@ mod tests {
             core: String::new(),
         };
         assert_eq!(auto.entry_slot(), None);
-        assert_eq!(Slot { slot: "4".into(), ..auto }.entry_slot(), Some(4));
+        assert_eq!(Slot { slot: "slot4".into(), ..auto.clone() }.entry_slot(), Some(4));
+        // Every state came back unstartable because this parsed "slot4" as a
+        // number, failed, and the shelf disabled the button — which also stops
+        // a right-click reaching it, since a disabled button fires no mouse
+        // events at all.
+        assert_eq!(Slot { slot: "slot0".into(), ..auto }.entry_slot(), Some(0));
     }
 
     #[test]

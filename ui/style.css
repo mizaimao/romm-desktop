@@ -670,14 +670,15 @@ body.has-pad #tabbar .bumper { display: inline; }
   text-align: left;
   overflow: hidden;
 }
-#detail .state:hover:not([disabled]) {
+#detail .state:hover:not(.noresume) {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 /* The autosave: RetroArch loads it itself, so there is nothing to click. Kept
    on the shelf anyway — it is usually the most recent thing there, and a shelf
    that hid it would look wrong to anyone who knew it existed. */
-#detail .state[disabled] { cursor: default; opacity: 0.72; }
+#detail .state.noresume { cursor: default; opacity: 0.72; }
+#detail .state.noresume:hover { border-color: var(--line); box-shadow: none; }
 #detail .state img {
   width: 100%;
   aspect-ratio: 4 / 3;

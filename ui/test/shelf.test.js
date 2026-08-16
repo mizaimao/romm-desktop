@@ -158,7 +158,11 @@ describe("the save-state shelf", () => {
 
     const auto = document.querySelector(".state");
     assert.ok(auto, "the autosave should still be visible");
-    assert.equal(auto.disabled, true, "it must not look like a button that works");
+    // Greyed, but not `disabled`: a disabled button fires no mouse events at
+    // all, so marking it disabled also made it impossible to right-click —
+    // and right-click is the only way to delete a state.
+    assert.equal(auto.disabled, false, "a disabled button cannot be right-clicked");
+    assert.ok(auto.classList.contains("noresume"), "it must not look like it works");
 
     auto.click();
     await settle();
@@ -166,6 +170,41 @@ describe("the save-state shelf", () => {
       invoked.filter((c) => c.cmd === "launch_rom").length,
       0,
       "clicking it started the game — from the title screen, silently"
+    );
+  });
+
+  /// The one this keeps failing on. A state that cannot be resumed still has
+  /// to be deletable, and the only route to that is the right-click menu.
+  test("the autosave can be right-clicked even though it cannot be started", async () => {
+    states = [
+      {
+        slot: "auto",
+        label: "Where you left off",
+        thumb: null,
+        when: "just now",
+        size_bytes: 900,
+        core: "FinalBurn Neo",
+        resumable: false,
+      },
+    ];
+    await detail.selectRom(7);
+    await settle();
+
+    const auto = document.querySelector(".state");
+    auto.dispatchEvent(
+      new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+    );
+    await settle();
+
+    const menu = document.querySelector(".ctx-menu");
+    assert.ok(menu, "no menu on the one state that can only be deleted");
+    assert.match(menu.textContent, /Delete/);
+    menu.querySelector("button").click();
+    await settle();
+    assert.equal(
+      invoked.find((c) => c.cmd === "delete_state")?.args.slot,
+      "auto",
+      "the autosave was not the state that got deleted"
     );
   });
 
