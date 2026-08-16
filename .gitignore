@@ -73,3 +73,7 @@ src-tauri/icons/macos.iconset/
 
 # local safety copies of gamelists/settings before edits
 backups/
+
+# Backups of files taken from outside the project. Personal config, not
+# ours to publish — kept on disk, out of the history.
+backups/

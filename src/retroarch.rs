@@ -844,17 +844,24 @@ input_player2_gun_start_mbtn = \"3\"
         else {
             return Vec::new();
         };
-        let keys = |text: &str| -> Vec<String> {
+        // Values, not just key names. A core override that happens to say the
+        // same thing we do is not a conflict, and reporting it as one would
+        // switch off every override file for a launch that had no argument
+        // with any of them.
+        let settings = |text: &str| -> Vec<(String, String)> {
             text.lines()
                 .filter(|l| !l.trim_start().starts_with('#'))
-                .filter_map(|l| l.split('=').next())
-                .map(|k| k.trim().to_owned())
-                .filter(|k| !k.is_empty())
+                .filter_map(|l| l.split_once('='))
+                .map(|(k, v)| (k.trim().to_owned(), v.trim().trim_matches('"').to_owned()))
+                .filter(|(k, _)| !k.is_empty())
                 .collect()
         };
-        let mine = keys(&ours);
-        let mut clash: Vec<String> =
-            keys(&theirs).into_iter().filter(|k| mine.contains(k)).collect();
+        let mine = settings(&ours);
+        let mut clash: Vec<String> = settings(&theirs)
+            .into_iter()
+            .filter(|(k, v)| mine.iter().any(|(mk, mv)| mk == k && mv != v))
+            .map(|(k, _)| k)
+            .collect();
         clash.sort();
         clash.dedup();
         clash
@@ -1466,9 +1473,19 @@ input_r2_axis = "+5"
 
         let clash = ra.override_clash(Some("Geolith"), &ours);
         assert_eq!(clash, vec!["input_turbo_mode", "input_turbo_period"]);
-        // Only what both set: their video_smooth is theirs to keep, and our
-        // turbo button is not contested.
+        // Only what both set *differently*: their video_smooth is theirs to
+        // keep, and our turbo button is not contested.
         assert!(!clash.iter().any(|k| k == "video_smooth" || k == "input_player1_turbo_btn"));
+
+        // Agreement is not a conflict. Switching off every override file over
+        // a setting both sides already agree on would throw away whatever else
+        // is in there for nothing.
+        std::fs::write(
+            core_cfg.join("Geolith.cfg"),
+            "input_turbo_mode = \"3\"\ninput_turbo_period = \"15\"\n",
+        )
+        .unwrap();
+        assert!(ra.override_clash(Some("Geolith"), &ours).is_empty());
 
         // A core with no override of its own, and a core we have no name for.
         assert!(ra.override_clash(Some("SwanStation"), &ours).is_empty());
