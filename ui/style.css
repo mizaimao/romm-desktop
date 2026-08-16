@@ -2107,8 +2107,36 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
    button says — that button is about the games in the middle. */
 body.columns #consoles .rows { gap: 1px; }
 body.columns #consoles .prow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   padding: 5px 8px;
   font-size: 13px;
+}
+/* The console's name, at full strength. In a column it is the only thing worth
+   reading at a glance, and it was inheriting the same muted colour as the
+   count beside it. */
+body.columns #consoles .prow .nm {
+  flex: 1;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The slug repeats what the name already said, in a column with no room for
+   it. */
+body.columns #consoles .prow .pf { display: none; }
+body.columns #consoles .prow .sz {
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+/* The dot is a riddle without the words beside it: the row says "no core" in
+   the count, and the title says it in full. */
+body.columns #consoles .prow .have { display: none; }
+body.columns #consoles .card .meta {
+  color: color-mix(in srgb, var(--text) 62%, transparent);
 }
 body.columns #consoles .prow .logo { height: 22px; }
 

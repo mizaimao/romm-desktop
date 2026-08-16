@@ -248,8 +248,15 @@ function platformRow(p) {
   // `row` as well as `prow` so keyboard and pad navigation pick it up: the
   // movement code selects `.card, .gcard, .row, .tcard`, and a row that is not
   // one of those is unreachable without a mouse.
+  // The dot says whether an emulator for this console is installed — green for
+  // yes, grey for no. It is a fair signal on a wide row where the words "no
+  // core" are beside it, and a riddle in a 240px column where they are not, so
+  // the row says so in words and the title says it in full.
   return `
-      <div class="row prow" data-slug="${p.slug}">
+      <div class="row prow" data-slug="${p.slug}"
+        title="${escapeHtml(p.name)} — ${p.rom_count} games${
+          p.playable ? "" : ", but no emulator installed for it"
+        }">
         <span class="have"><span class="dot ${p.playable ? "on" : ""}"></span></span>
         <span class="nm">${escapeHtml(p.name)}</span>
         <span class="pf">${escapeHtml(p.slug)}</span>

@@ -9,9 +9,20 @@ import { el, state, trail, invoke, convertFileSrc } from "./state.js";
 import { enter as enterView, region, resetGames } from "./shell.js";
 import { escapeHtml } from "./util.js";
 import { renderRows } from "./library.js";
+import { shellMode } from "./shell.js";
 
 function enter(fn) {
   trail.push(fn);
+}
+
+/// Light up the collection whose games are in the middle.
+///
+/// The column stays on screen while the middle changes, so without this there
+/// is nothing to say which of twenty-seven you are looking at.
+function markOpen(grid, cid) {
+  for (const card of grid.querySelectorAll(".card")) {
+    card.classList.toggle("open", card.dataset.cid === cid);
+  }
 }
 
 /// The top bar both collection-browsing levels want.
@@ -52,24 +63,57 @@ export async function showCollectionGroups({ exclude = [] } = {}) {
     )
     .join("")}</div>`;
 
-  el.list.querySelectorAll(".card").forEach((c) =>
+  // Attached inside the region the groups were drawn into. They were attached
+  // to cards in the middle, which has none of them — so clicking a group in
+  // the left column did nothing at all.
+  const picker = region("picker");
+  picker.querySelectorAll(".card").forEach((c) =>
     c.addEventListener("click", () => {
       const g = groups.find((x) => x.group === c.dataset.group);
+      state.lastGroup = g.group;
+      markGroup(picker, g.group);
       enter(showCollectionGroups);
-      showCollectionsIn(g.group, g.label);
+      showCollectionsIn(g.group, g.label, { into: intoFor("browse") });
     })
   );
-  el.list.querySelector(".card")?.classList.add("sel");
+  picker.querySelector(".card")?.classList.add("sel");
+
+  // Browse is three levels deep — groups, then collections, then games — and
+  // there are two columns for lists. So the groups keep the column and their
+  // collections go to the middle, rather than replacing the groups and leaving
+  // no way to see that a group list existed at all.
+  if (shellMode() === "columns" && groups.length) {
+    const want = groups.find((g) => g.group === state.lastGroup) ?? groups[0];
+    state.lastGroup = want.group;
+    markGroup(picker, want.group);
+    await showCollectionsIn(want.group, want.label, { into: "games" });
+  }
 }
 
-export async function showCollectionsIn(group, label) {
+/// Which region a group's collections belong in.
+///
+/// In My collections they are the top level and take the column. Reached
+/// through Browse they are one level down, and the column already holds the
+/// groups they came from.
+function intoFor(section) {
+  if (shellMode() !== "columns") return "picker";
+  return section === "browse" ? "games" : "picker";
+}
+
+function markGroup(picker, group) {
+  for (const card of picker.querySelectorAll("[data-group]")) {
+    card.classList.toggle("open", card.dataset.group === group);
+  }
+}
+
+export async function showCollectionsIn(group, label, { into = "picker" } = {}) {
   topBar(label || group);
-  resetGames("Pick a collection on the left.");
+  if (into === "picker") resetGames("Pick a collection on the left.");
   const items = await invoke("collections_in", { group });
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate
   // from the header search, which searches games rather than collections.
-  region("picker").innerHTML = `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
+  region(into).innerHTML = `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
     `<div class="grid" id="cgrid"></div>`;
 
   const grid = document.getElementById("cgrid");
@@ -92,6 +136,8 @@ export async function showCollectionsIn(group, label) {
     grid.querySelectorAll(".card").forEach((card) =>
       card.addEventListener("click", () => {
         const c = list.find((x) => String(x.id) === card.dataset.cid);
+        state.lastCollection = { id: c.id, name: c.name };
+        markOpen(grid, card.dataset.cid);
         enter(() => showCollectionsIn(group, label));
         showCollectionRoms(c.id, c.name);
       })
@@ -113,6 +159,19 @@ export async function showCollectionsIn(group, label) {
   });
 
   draw(items);
+
+  // The middle belongs to a collection's games, and one of them may as well be
+  // showing: the one you were last in, or the first. The same thing Library
+  // does with consoles, and what makes returning to a tab put you back where
+  // you were rather than at a prompt.
+  if (shellMode() === "columns" && into === "picker" && items.length) {
+    const want =
+      items.find((c) => String(c.id) === String(state.lastCollection?.id)) ?? items[0];
+    state.lastCollection = { id: want.id, name: want.name };
+    markOpen(grid, String(want.id));
+    await showCollectionRoms(want.id, want.name);
+  }
+
   // Deliberately not focused: arrow keys and the controller should navigate
   // the grid straight away. Click the box, or press the search key, to filter.
 }
@@ -152,7 +211,10 @@ async function loadMosaics(list) {
     for (const c of list) {
       const cover = byId.get(c.sample_ids[0]);
       if (!cover) continue;
-      const logo = el.list.querySelector(
+      // In the region the cards were drawn into. Looking in the middle meant
+      // the artwork never arrived in the left column — the same mistake as the
+      // click handlers, in the same file.
+      const logo = region(into).querySelector(
         `.card[data-cid="${CSS.escape(String(c.id))}"] .logo`
       );
       if (logo) logo.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;

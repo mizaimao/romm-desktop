@@ -153,3 +153,57 @@ describe("it does not behave like a document", () => {
     );
   });
 });
+
+describe("the left column is a list, whatever is in it", () => {
+  /// Reported four times, and my first two attempts at it were CSS I never
+  /// checked. The collections are drawn as cards — right for a page of them,
+  /// wrong for a 240px column, where a grid two across leaves a stamp-sized
+  /// picture above a name that does not fit. Asserted against the real
+  /// stylesheet rather than by reading it.
+  const inColumn = (html, sel) => {
+    const doc = dom.window.document;
+    doc.body.classList.add("columns");
+    doc.getElementById("consoles").innerHTML = html;
+    const node = doc.querySelector(`#consoles ${sel}`);
+    const style = dom.window.getComputedStyle(node);
+    return { node, style };
+  };
+
+  test("a collection card lies down in the column", () => {
+    const { style } = inColumn(
+      `<div class="grid"><div class="card" data-cid="1">
+         <div class="logo mosaic"><span class="ph">Ar</span></div>
+         <div class="name">Arcade Fighting</div>
+         <div class="meta">322 games</div>
+       </div></div>`,
+      ".card"
+    );
+    // `.card` sets flex-direction: column, which is what kept these tall.
+    assert.equal(style.display, "flex");
+    assert.equal(style.flexDirection, "row", "the card is still standing up");
+  });
+
+  test("and the grid of them becomes one per line", () => {
+    const { style } = inColumn(
+      `<div class="grid"><div class="card"></div><div class="card"></div></div>`,
+      ".grid"
+    );
+    assert.equal(style.display, "flex");
+    assert.equal(style.flexDirection, "column", "still a grid across the column");
+  });
+
+  /// "What is the green dot" is a fair question when the words that explain it
+  /// have been cut off by a narrow column.
+  test("the console rows drop the dot in the column and keep the words", () => {
+    const { style } = inColumn(
+      `<div class="rows"><div class="row prow" data-slug="snes">
+         <span class="have"><span class="dot on"></span></span>
+         <span class="nm">Super Nintendo</span>
+         <span class="pf">snes</span>
+         <span class="sz">50 games</span>
+       </div></div>`,
+      ".prow .have"
+    );
+    assert.equal(style.display, "none", "the unexplained dot is still there");
+  });
+});

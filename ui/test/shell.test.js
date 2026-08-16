@@ -24,6 +24,10 @@ const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 let dom, shell, el;
 
+/// Every command the page has asked the backend for, so a click can be checked
+/// by what it went and did rather than by what it drew.
+const asked = [];
+
 /// A layout this app does not have. Deliberately missing things the current
 /// one takes for granted: there is no #back, because a column that is always
 /// on screen is never navigated away from.
@@ -50,8 +54,16 @@ before(async () => {
       // Selecting a row draws the info pane, which joins several of these
       // arrays — a thinner stub throws inside the pane, after the test has
       // finished, as an unhandled rejection rather than a failure.
-      invoke: async (cmd, args) =>
-        cmd === "platforms"
+      invoke: async (cmd, args) => (
+        asked.push(cmd),
+        cmd === "collection_groups"
+          ? [{ group: "genre", label: "Genre", count: 3 }]
+          : cmd === "collections_in"
+            ? [
+                { id: "c1", name: "First", rom_count: 5, local_count: 5, sample_ids: [] },
+                { id: "c2", name: "Second", rom_count: 7, local_count: 0, sample_ids: [] },
+              ]
+            : cmd === "platforms"
           ? [
               { slug: "arcade", name: "Arcade", rom_count: 9 },
               { slug: "gb", name: "Game Boy", rom_count: 4 },
@@ -74,7 +86,7 @@ before(async () => {
               alt_names: [],
               art: {},
             }
-          : [],
+          : []),
       convertFileSrc: (p) => p,
     },
     event: { listen: async () => () => {} },
@@ -479,6 +491,73 @@ describe("switching tabs in three columns", () => {
 
     await tabs.showSection("browse");
     assert.notEqual(el.list.innerHTML, wasHistory, "the History page is still in the middle");
-    assert.match(el.list.innerHTML, /Pick a group/);
+    // Browse now opens a group and then a collection, so the middle holds
+    // that collection's games rather than a prompt — either way it is no
+    // longer History's page.
+    assert.doesNotMatch(el.list.innerHTML, /Nothing recorded yet|hist-/);
+  });
+});
+
+describe("Browse and My collections fill the middle too", () => {
+  let collections, state;
+
+  before(async () => {
+    collections = await import("../js/collections.js");
+    ({ state } = await import("../js/state.js"));
+  });
+
+  beforeEach(() => {
+    for (const role of ["primary", "aside", "nav", "games", "picker"]) {
+      shell.setRegion(role, null);
+    }
+    shell.setMode("columns");
+    el.consoles.innerHTML = "";
+    el.list.innerHTML = "";
+    state.lastCollection = null;
+    state.lastGroup = null;
+  });
+
+  /// The handlers were attached to cards in the middle while the groups were
+  /// drawn in the left column, so clicking one did nothing whatsoever.
+  test("clicking a group in the column does something", async () => {
+    await collections.showCollectionGroups({ exclude: [] });
+    const card = el.consoles.querySelector(".card[data-group]");
+    assert.ok(card, "no groups in the column");
+    assert.ok(
+      el.list.querySelector(".card"),
+      "the group's collections did not fill the middle"
+    );
+
+    asked.length = 0;
+    card.click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(
+      asked.includes("collections_in"),
+      `the click did nothing — asked for: ${asked.join(", ") || "nothing"}`
+    );
+  });
+
+  /// A tab that opens on "pick something on the left" has two thirds of the
+  /// window doing nothing, which is the complaint Library already answered.
+  test("My collections opens with a collection showing", async () => {
+    await collections.showCollectionsIn("user", "My collections");
+    assert.ok(state.lastCollection, "nothing was opened");
+    assert.equal(
+      el.list.innerHTML.includes("Pick a collection"),
+      false,
+      "the middle is still a prompt"
+    );
+  });
+
+  /// Coming back to a tab should put you where you were, which is what the
+  /// section machinery did before three columns took its job away.
+  test("it returns to the collection you were in", async () => {
+    await collections.showCollectionsIn("user", "My collections");
+    state.lastCollection = { id: "c2", name: "Second" };
+
+    await collections.showCollectionsIn("user", "My collections");
+    assert.equal(state.lastCollection.id, "c2", "it went back to the first one");
+    const open = el.consoles.querySelector(".card.open");
+    assert.equal(open?.dataset.cid, "c2", "the column does not show which is open");
   });
 });
