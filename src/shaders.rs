@@ -37,7 +37,8 @@ pub struct ShaderOption {
 /// a worse experience than a considered dozen.
 pub const CATALOGUE: &[ShaderOption] = &[
     // --- CRT ---
-    ShaderOption { path: "crt/crt-guest-advanced", label: "CRT — Guest Advanced", note: "Best looking, heaviest", display: Display::Crt },
+    ShaderOption { path: "crt/crt-guest-advanced", label: "CRT — Guest Advanced", note: "Best looking — 12 passes, heaviest by far", display: Display::Crt },
+    ShaderOption { path: "crt/crt-guest-advanced-fast", label: "CRT — Guest Advanced (fast)", note: "The same look, 9 passes", display: Display::Crt },
     ShaderOption { path: "crt/crt-royale", label: "CRT — Royale", note: "Classic reference, heavy", display: Display::Crt },
     ShaderOption { path: "crt/crt-geom", label: "CRT — Geom", note: "Curvature, moderate cost", display: Display::Crt },
     ShaderOption { path: "crt/crt-hyllian", label: "CRT — Hyllian", note: "Sharp, good for 2D", display: Display::Crt },

@@ -4,7 +4,7 @@ import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state
 import { resetNav } from "./keys.js";
 import { sorted, refreshSortButton } from "./sort.js";
 import { showMenu } from "./menu.js";
-import { askDownload } from "./bulk.js";
+import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
 import { selectRom, play, withTransition } from "./detail.js";
 import { download } from "./actions.js";
@@ -45,20 +45,35 @@ export async function showPlatforms() {
 /// which is the point: the thing you were in the middle of is rarely on the
 /// computer you are now sitting at. Absent entirely when nothing has been
 /// played, rather than an empty row explaining itself.
+/// How many recent games the strip will hold before it stops growing.
+///
+/// One row that scrolls sideways, up to about two screens' worth. Past that the
+/// strip stops being a shortcut and becomes a second library above the real
+/// one — so the rest go behind a button rather than off the side of a scroll
+/// nobody would reach the end of.
+const RECENT_IN_STRIP = 20;
+
 async function showRecent() {
   let rows = [];
   try {
-    rows = await invoke("recent_games", { limit: 8 });
+    // One more than fits, so the strip can tell whether there is a "more" to
+    // show without a second call.
+    rows = await invoke("recent_games", { limit: RECENT_IN_STRIP + 1 });
   } catch {
     return;
   }
   if (!rows.length) return;
 
+  const overflow = rows.length > RECENT_IN_STRIP;
+  const shown = rows.slice(0, RECENT_IN_STRIP);
+
   const strip = document.createElement("section");
   strip.className = "recent";
   strip.innerHTML =
-    `<h2 class="ghead"><span class="gslug">Continue playing</span></h2>` +
-    `<div class="gcards">${rows.map((r) => `
+    `<h2 class="ghead"><span class="gslug">Continue playing</span>` +
+    (overflow ? `<button class="link recent-more">More…</button>` : "") +
+    `</h2>` +
+    `<div class="gcards">${shown.map((r) => `
        <div class="gcard" data-id="${r.id}">
          <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
          <div class="gname">${escapeHtml(r.name)}</div>
@@ -66,9 +81,36 @@ async function showRecent() {
        </div>`).join("")}</div>`;
   el.list.prepend(strip);
   strip.querySelectorAll(".gcard").forEach((c) => wireGame(c, Number(c.dataset.id)));
+  strip.querySelector(".recent-more")?.addEventListener("click", showAllRecent);
   // Re-observe after prepending, so these cards get covers like any others.
   // The observer was set up before this row existed.
   observeCovers();
+}
+
+/// Everything you have played, as a page rather than a strip.
+export async function showAllRecent() {
+  state.view = "search";
+  state.platform = null;
+  trail.length = 0;
+  trail.push(() => showPlatforms());
+  el.back.hidden = false;
+  el.detail.hidden = !state.sidebar;
+  el.layoutBtn.hidden = false;
+  el.sidebarBtn.hidden = false;
+  el.grabBtn.hidden = true;
+  el.zoomWrap.hidden = state.layout !== "grid";
+  el.title.textContent = "Continue playing";
+
+  let rows = [];
+  try {
+    rows = await invoke("recent_games", { limit: 500 });
+  } catch (e) {
+    el.list.innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
+    return;
+  }
+  // Grouped by console, like a search: these come from everywhere.
+  state.rows = rows;
+  renderRows(rows, true);
 }
 
 /// Draw the consoles, in whichever layout is selected.
@@ -239,17 +281,28 @@ export function wireGame(node, id) {
     } catch {
       return;
     }
+    // The game's save states, if it has any. This menu used to offer "take
+    // this console offline" instead, which on a game in Continue playing reads
+    // as an offer to download a whole platform — the opposite of the small,
+    // local thing a right-click on one game should do. Taking a console
+    // offline is on the toolbar, where it belongs.
+    let states = [];
+    try {
+      states = await invoke("game_states", { id });
+    } catch {
+      states = [];
+    }
     showMenu(
       [
         { label: d.downloaded ? "Play" : "Download and play", run: () => play(d) },
         d.downloaded ? null : { label: "Download", run: () => download(id, false) },
-        null,
-        {
-          // The game's own console, not whatever page this is: the strip on the
-          // front page holds games from several.
-          label: `Take ${d.platform ?? "this console"} offline…`,
-          run: () => askDownload({ platform: d.platform_slug ?? state.platform ?? undefined }),
-        },
+        // A rule between starting the game and destroying part of it.
+        states.length ? null : undefined,
+        ...states.map((st) => ({
+          label: `Delete ${st.label}${st.when ? ` — ${st.when}` : ""}`,
+          danger: true,
+          run: () => deleteState(id, st),
+        })),
       ],
       ev.clientX,
       ev.clientY

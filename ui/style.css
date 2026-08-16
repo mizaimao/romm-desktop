@@ -1969,3 +1969,33 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 }
 #sort-menu button:hover { background: color-mix(in srgb, var(--glass) 24%, transparent); }
 #sort-menu button.on { color: var(--accent); font-weight: 600; }
+
+/* "Continue playing": one row that scrolls sideways.
+   It used to wrap, so eight games became two rows on a narrow window and the
+   library itself started halfway down the screen. A shortcut that pushes the
+   thing it is a shortcut to off the page is not a shortcut. */
+.recent .gcards {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding-bottom: 6px;
+}
+.recent .gcard {
+  flex: 0 0 var(--gcard, 150px);
+}
+.recent .ghead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.recent .recent-more {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.recent .recent-more:hover { text-decoration: underline; }

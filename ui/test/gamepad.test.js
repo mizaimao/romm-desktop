@@ -33,10 +33,33 @@ let dom, invoked, pads, ui;
 /// bare null here surfaces as an unhandled rejection a frame later rather than
 /// as a failed assertion.
 function reply(cmd, args) {
-  if (cmd === "rom_detail") return { id: args.id, downloaded: false, files: [] };
+  // Enough of a detail for the info pane to render: it joins several of these
+  // arrays, so a thinner stub throws inside the pane rather than failing an
+  // assertion here.
+  if (cmd === "rom_detail")
+    return {
+      id: args.id,
+      name: `Game ${args.id}`,
+      fs_name: `game${args.id}.rom`,
+      platform: "Super Nintendo",
+      platform_slug: "snes",
+      size_bytes: 1024,
+      downloaded: false,
+      files: [],
+      screenshots: [],
+      genres: [],
+      companies: [],
+      franchises: [],
+      game_modes: [],
+      regions: [],
+      alt_names: [],
+      art: {},
+    };
   if (cmd === "status") return { configured: true };
   if (cmd === "recent_games") return recentGames;
   if (cmd === "download_estimate") return [estimateSummary, estimateFits, "note"];
+  if (cmd === "game_states")
+    return [{ slot: "1", label: "Slot 1", when: "yesterday", resumable: true }];
   if (cmd === "platforms")
     return [
       { slug: "snes", name: "Super Nintendo", rom_count: 12 },
@@ -867,5 +890,32 @@ describe("opening the player with a held button", () => {
     pads = [pad([y])];
     ui.stepForTest();
     assert.equal(ui.isLightboxOpen(), false, "a second press should close it");
+  });
+});
+
+describe("the menu on a game", () => {
+  /// It offered "take this console offline", which on a game in Continue
+  /// playing reads as an offer to download a whole platform — the opposite of
+  /// the small local thing a right-click on one game should do. What it offers
+  /// now is that game's own save states.
+  test("offers this game's save states, not a platform download", async () => {
+    document.getElementById("list").innerHTML =
+      `<div class="gcards"><div class="gcard" data-id="7"></div></div>`;
+    const card = document.querySelector(".gcard");
+    ui.wireGame(card, 7);
+
+    card.dispatchEvent(
+      new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+    );
+    await settle();
+    await settle();
+
+    const menu = document.querySelector(".ctx-menu");
+    assert.ok(menu, "no menu opened");
+    const text = menu.textContent;
+    assert.doesNotMatch(text, /offline/i, "still offering to download the console");
+    assert.match(text, /play/i, "no way to start the game");
+    assert.match(text, /Delete Slot 1/, "the game's own states are not offered");
+    document.querySelector(".ctx-menu")?.remove();
   });
 });
