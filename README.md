@@ -103,6 +103,8 @@ remapped. The choice applies across the whole
 arcade system, and the control is absent for games where it would mean
 nothing.
 
+Selecting a console shows the console in the preview — its game count, the
+emulator and shader it will use, and whether that emulator is installed at all.
 The top-right tag says which server it is talking to, with a coloured dot for
 whether it is reachable; hovering gives the game count, the cores, the disk
 usage and the folders everything lives in. **Settings → About**, and the macOS

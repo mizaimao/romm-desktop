@@ -721,6 +721,13 @@ input_player2_gun_start_mbtn = \"3\"
         let Some(profile) = padprofile::find_with_driver(&roots, device, driver.as_deref())
             .or_else(|| padprofile::known(device))
         else {
+            // Nothing known about the pad means nothing written, and rapid
+            // fire silently not happening looks exactly like rapid fire not
+            // working — which is a different problem with a different fix.
+            eprintln!(
+                "rapid fire: no autoconfig profile for {}, so nothing was written",
+                device.unwrap_or("(no pad)")
+            );
             return String::new();
         };
         // The modifier, and only the modifier. Nothing else is bound, moved
@@ -731,6 +738,7 @@ input_player2_gun_start_mbtn = \"3\"
             AutoFire::Off => unreachable!("returned above"),
         };
         let Some(hold) = profile.get(which) else {
+            eprintln!("rapid fire: this pad's profile has no {which:?} button");
             return String::new();
         };
 
@@ -748,6 +756,7 @@ input_player2_gun_start_mbtn = \"3\"
         let period = ((60.0 / hz as f32).round() as u32).max(2);
         let duty = (period / 2).max(1);
 
+        eprintln!("rapid fire: hold {which:?}, {hz} shots a second (turbo mode 3, period {period})");
         format!(
             "\n# ---- Rapid fire ----\n\
              # Mode 3 is \"single button (hold)\": while the button below is\n\

@@ -2522,3 +2522,27 @@ code {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
+
+/* A console in the preview pane.
+   The Library screen used to leave this pane empty and hidden, so the button
+   that opens it did nothing you could see. */
+#detail .pcover {
+  display: block;
+  max-width: 70%;
+  max-height: 120px;
+  margin: 6px auto 14px;
+  object-fit: contain;
+}
+@media (prefers-color-scheme: light) {
+  /* Wordmark art is white-on-transparent, the same rule the console grid uses. */
+  #detail .pcover.wordmark { filter: invert(1); }
+}
+#detail .warn {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text) 85%, transparent);
+  background: color-mix(in srgb, #d8823c 18%, transparent);
+  border: 1px solid color-mix(in srgb, #d8823c 40%, transparent);
+}

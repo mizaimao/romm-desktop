@@ -808,18 +808,87 @@ describe("bringing the preview back", () => {
     assert.equal(el.detail.hidden, false, "the column will not come back");
   });
 
-  /// In Sofa it slides over the list rather than being part of it, so it is
-  /// only meaningful where something is under the cursor.
-  test("in Sofa it still waits for something to show", () => {
+  /// The console screen shows the console under the cursor now, so the pane is
+  /// meaningful there too — it was not, which is why pressing Show info on the
+  /// Library screen did nothing at all.
+  test("in Sofa it opens on the console screen as well", () => {
     shell.setMode("single");
     state.view = "platforms";
     state.selected = null;
     detail.setSidebar(true);
-    assert.equal(el.detail.hidden, true, "an empty pane over the console list");
+    assert.equal(el.detail.hidden, false, "nothing to show on the Library screen");
 
     state.view = "roms";
     state.selected = 7;
     detail.setSidebar(true);
     assert.equal(el.detail.hidden, false);
+  });
+
+  /// A game list with nothing selected is still nothing to preview: there it
+  /// slides over the list rather than being part of it.
+  test("and still waits when there is genuinely nothing", () => {
+    shell.setMode("single");
+    state.view = "roms";
+    state.selected = null;
+    detail.setSidebar(true);
+    assert.equal(el.detail.hidden, true);
+  });
+});
+
+describe("a console in the preview pane", () => {
+  /// The Library screen had a preview that was always empty: nothing is
+  /// selected there, so the pane stayed hidden and the button that opens it
+  /// did nothing you could see — reported three times as the pane being gone.
+  /// A console has facts of its own, and all of them lived in Settings.
+  let detail, shell, state, el, asked;
+
+  before(async () => {
+    detail = await import("../js/detail.js");
+    shell = await import("../js/shell.js");
+    ({ state, el } = await import("../js/state.js"));
+  });
+
+  beforeEach(() => {
+    state.platforms = [
+      { slug: "arcade", name: "Arcade", rom_count: 2506, playable: true, logo: null },
+      { slug: "3do", name: "3DO Interactive Multiplayer", rom_count: 12, playable: false, logo: null },
+    ];
+    state.view = "platforms";
+    detail.setSidebar(true);
+  });
+
+  test("it shows the console's name and how many games it has", async () => {
+    await detail.showPlatformInfo("arcade");
+    assert.equal(el.detail.hidden, false, "the pane stayed shut");
+    assert.match(el.detail.textContent, /Arcade/);
+    assert.match(el.detail.textContent, /2506/);
+  });
+
+  /// The one fact that decides whether anything here will start, and it was
+  /// only visible as a coloured dot in the list — or in Settings, two windows
+  /// away.
+  test("a console with no emulator says so, in words", async () => {
+    await detail.showPlatformInfo("3do");
+    assert.match(el.detail.textContent, /none installed/i);
+    assert.ok(el.detail.querySelector(".warn"), "no warning about a console that cannot start");
+  });
+
+  test("and one that can start does not cry wolf", async () => {
+    await detail.showPlatformInfo("arcade");
+    assert.equal(el.detail.querySelector(".warn"), null);
+  });
+
+  test("an unknown console leaves the pane alone", async () => {
+    await detail.showPlatformInfo("arcade");
+    const before = el.detail.innerHTML;
+    await detail.showPlatformInfo("nothing-like-this");
+    assert.equal(el.detail.innerHTML, before);
+  });
+
+  /// Take offline is on the pane as well as in the tab row: the pane is where
+  /// you are looking when you decide a console is worth having on the plane.
+  test("it offers to take the console offline", async () => {
+    await detail.showPlatformInfo("arcade");
+    assert.ok(el.detail.querySelector(".pf-grab"), "no way to download it from here");
   });
 });

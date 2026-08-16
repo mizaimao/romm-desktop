@@ -8,6 +8,7 @@ import { showMenu } from "./menu.js";
 import { shellMode } from "./shell.js";
 import { deleteState } from "./states.js";
 import { launch, download } from "./actions.js";
+import { askDownload } from "./bulk.js";
 
 let slideTimer;
 setOpenHook(() => clearInterval(slideTimer));
@@ -31,9 +32,79 @@ export function setSidebar(on) {
   // something under the cursor.
   const allowed =
     shellMode() === "columns" ||
+    // The console screen has something to show now — the console under the
+    // cursor — so the pane is meaningful there too. It was not, which is why
+    // pressing Show info on the Library screen did nothing at all.
+    state.view === "platforms" ||
     ((state.view === "roms" || state.view === "search" || state.view === "collection-roms") &&
       state.selected !== null);
   el.detail.hidden = !(on && allowed);
+}
+
+/// The console the pane is showing, when it is showing a console rather than a
+/// game. Kept so the emulator lookup can be skipped on a repeat.
+let systemsCache = null;
+
+/// Show a console in the preview, instead of nothing.
+///
+/// The Library screen had a preview pane that was always empty: there is no
+/// game selected there, so the pane was hidden and the button that opens it
+/// appeared to do nothing at all. A console is a thing with facts about it —
+/// how many games, how many are here, which emulator runs it, which shader it
+/// gets, whether that emulator is even installed — and every one of those was
+/// only findable in Settings.
+export async function showPlatformInfo(slug) {
+  const p = (state.platforms ?? []).find((x) => x.slug === slug);
+  if (!p) return;
+  state.platformShown = slug;
+  el.detail.hidden = !state.sidebar;
+  if (el.detail.hidden) return;
+
+  const logo = p.logo
+    ? `<img class="pcover${p.logo_wordmark ? " wordmark" : ""}" src="${convertFileSrc(p.logo)}" alt="" />`
+    : "";
+  el.detail.innerHTML = `
+    <div class="scroll">
+      ${logo}
+      <h2>${escapeHtml(p.name)}</h2>
+      <div class="sub">${escapeHtml(p.slug)}</div>
+      <dl>
+        <dt>Games</dt><dd>${p.rom_count}</dd>
+        <dt>Emulator</dt><dd class="pf-core">${p.playable ? "…" : "none installed"}</dd>
+        <dt>Shader</dt><dd class="pf-shader">…</dd>
+      </dl>
+      ${
+        p.playable
+          ? ""
+          : `<p class="warn">No core for this console is installed, so nothing here
+               will start. Settings → Emulators installs one.</p>`
+      }
+      <div class="pinned">
+        <button class="pf-grab">Take offline</button>
+      </div>
+    </div>`;
+  el.detail.querySelector(".pf-grab")?.addEventListener("click", () =>
+    askDownload({ platform: slug })
+  );
+
+  // The emulator and shader come from the same place the Emulators tab reads,
+  // so the two cannot disagree. Asked once and kept: it is a list of
+  // thirty-five rows that only changes when a setting does.
+  try {
+    systemsCache ??= await invoke("systems");
+  } catch {
+    return;
+  }
+  if (state.platformShown !== slug) return;
+  const sys = systemsCache.find((x) => x.slug === slug);
+  if (!sys) return;
+  const label = (list, want) => list?.find((o) => o.core === want || o.key === want)?.label;
+  const core = el.detail.querySelector(".pf-core");
+  if (core && p.playable) {
+    core.textContent = label(sys.emulators, sys.core) ?? sys.core ?? "default";
+  }
+  const shader = el.detail.querySelector(".pf-shader");
+  if (shader) shader.textContent = label(sys.shaders, sys.shader) ?? sys.shader ?? "none";
 }
 
 /// The game the pane is showing, kept so the video button can build the same

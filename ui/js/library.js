@@ -9,7 +9,7 @@ import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
 import { byName } from "./picker-order.js";
-import { selectRom, play, withTransition } from "./detail.js";
+import { selectRom, play, withTransition, showPlatformInfo } from "./detail.js";
 import { download } from "./actions.js";
 
 export async function showPlatforms() {
@@ -180,12 +180,17 @@ function renderPlatforms(items) {
     ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
     : `<div class="grid">${ordered.map(platformCard).join("")}</div>`;
 
-  into.querySelectorAll(".card, .prow").forEach((c) =>
+  into.querySelectorAll(".card, .prow").forEach((c) => {
+    // The console under the pointer goes in the preview before it is opened,
+    // so hovering the list is a way to read what each console has.
+    c.addEventListener("mouseenter", () => {
+      if (state.view === "platforms") showPlatformInfo(c.dataset.slug);
+    });
     c.addEventListener("click", () => {
       if (shellMode() === "columns") markPlatform(c.dataset.slug);
       openPlatform(c.dataset.slug, c);
-    })
-  );
+    });
+  });
   if (shellMode() === "columns" && state.platform) markPlatform(state.platform);
   resetNav();
 }

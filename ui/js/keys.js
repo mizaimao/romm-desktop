@@ -5,7 +5,7 @@
 // `.tcard` (themes), so one implementation serves every view.
 
 import { el, state, trail, invoke } from "./state.js";
-import { selectRom, setSidebar, play, playVideo } from "./detail.js";
+import { selectRom, setSidebar, play, playVideo, showPlatformInfo } from "./detail.js";
 import {
   showPlatforms, setLayout, setZoom, openPlatform, scrollList, randomGame,
 } from "./library.js";
@@ -77,10 +77,14 @@ function locate() {
 
 function focusNode(node) {
   if (!node) return;
-  // Games own their selection (it drives the detail pane); other views just
-  // need the highlight.
+  // Games own their selection (it drives the preview); a console highlights
+  // itself and puts its own facts in the pane, which is what that pane shows
+  // on the Library screen.
   if (node.dataset.id) selectRom(Number(node.dataset.id));
-  else items().forEach((n) => n.classList.toggle("sel", n === node));
+  else {
+    items().forEach((n) => n.classList.toggle("sel", n === node));
+    if (node.dataset.slug) showPlatformInfo(node.dataset.slug);
+  }
   node.scrollIntoView({ block: "nearest" });
 }
 
