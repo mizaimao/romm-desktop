@@ -88,3 +88,21 @@ async function cycleListArt() {
     toast(String(e), 6000);
   }
 }
+
+/// The miximage, without cycling to find it.
+///
+/// Bound to a long press of the same button that cycles, because the cycle is
+/// seven long and the miximage is the one people come back to: it carries a
+/// screenshot, the box and the logo in one picture, so it is the setting that
+/// works for every console at once. Six presses to get home from the wrong end
+/// of the list is how a good control becomes an annoying one.
+export async function useMiximage() {
+  try {
+    const label = await invoke("set_list_art", { value: "miximages" });
+    if (state.rows.length) renderRows(state.rows, state.view === "search");
+    window.__TAURI__?.event?.emit?.("art-changed");
+    toast(String(label));
+  } catch (e) {
+    toast(String(e), 6000);
+  }
+}

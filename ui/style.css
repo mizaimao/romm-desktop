@@ -1247,6 +1247,7 @@ button:has(> .icon + span) {
 /* Lucide "arrow-down-narrow-wide" — the ordering glyph, vendored like the rest. */
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
 .icon-pane      { --icon: url("icons/square.svg"); }
+.icon-book      { --icon: url("icons/book-open.svg"); }
 .icon-columns   { --icon: url("icons/columns-3.svg"); }
 
 /* Glyph-only buttons were sized for a text character; a mask needs a box. */
@@ -2430,10 +2431,18 @@ code {
   border: 1px solid color-mix(in srgb, var(--glass) 22%, transparent);
 }
 #view-switch button {
+  /* Named, not just drawn. Two unlabelled glyphs in a bar full of unlabelled
+     glyphs say nothing about what they do to the window, and this one changes
+     the whole shape of the app. */
+  display: flex;
+  align-items: center;
+  gap: 5px;
   background: none;
   border: 0;
   border-radius: 7px;
-  padding: 4px 8px;
+  padding: 4px 9px;
+  font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
   color: color-mix(in srgb, var(--text) 55%, transparent);
 }
@@ -2443,3 +2452,50 @@ code {
   color: var(--text);
 }
 #view-switch .icon { width: 16px; height: 16px; }
+
+/* What a game has, in one row of tags.
+   A button for the video up here and two links at the very foot of the pane
+   were the same kind of thing in two places, and the one at the foot was below
+   the artwork strip, the save states and every metadata row — so nobody found
+   it. */
+#detail .badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+#detail .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  background: color-mix(in srgb, var(--glass) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+}
+#detail .badge:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--glass) 42%, transparent);
+}
+#detail .badge .icon { width: 12px; height: 12px; }
+
+/* The video's place in the artwork strip.
+   No thumbnail: the file is fetched when it is asked for, and a tile that has
+   to download 30MB to draw itself is not a thumbnail. */
+#detail .artstrip .vidtile .vidthumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--glass) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+}
+#detail .artstrip .vidtile .icon { width: 22px; height: 22px; opacity: 0.8; }
+#detail .artstrip .vidtile:hover .vidthumb {
+  background: color-mix(in srgb, var(--glass) 40%, transparent);
+}

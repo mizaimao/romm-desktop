@@ -136,6 +136,15 @@ describe("the layout switch keeps its place", () => {
     assert.notEqual(search.marginLeft, "auto", "the gap is split three ways");
   });
 
+  /// Two unlabelled glyphs in a bar full of unlabelled glyphs say nothing
+  /// about what they do, and this pair changes the whole shape of the window.
+  test("each side says what it is", () => {
+    const labels = [...dom.window.document.querySelectorAll("#view-switch button")].map((b) =>
+      b.textContent.trim()
+    );
+    assert.deepEqual(labels, ["One pane", "Columns"]);
+  });
+
   test("it comes before the search box", () => {
     const header = dom.window.document.querySelector("header");
     const order = [...header.children].map((c) => c.id);

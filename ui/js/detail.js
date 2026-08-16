@@ -74,16 +74,31 @@ export async function selectRom(id) {
     ? `<img class="cover" style="view-transition-name: cover" src="${convertFileSrc(d.cover)}" alt="" />`
     : "";
 
-  // An indicator, not a player. ES-DE starts the video by itself after a pause
-  // and plays its audio, which leaves you muting the emulator to browse and
-  // then having no sound when you actually want to watch something. So this
-  // says a video exists and waits to be asked — and because being asked is
-  // explicit, it plays with sound.
-  const video = d.has_video
-    ? `<button id="playvid" class="vidbtn" title="Play the gameplay video (Y)">
-         <span class="icon icon-play"></span><span>Gameplay video</span>
-       </button>`
-    : "";
+  // What this game has, as three small tags rather than a button here and two
+  // links at the very bottom of the pane.
+  //
+  // The video one is a label, not a player: it says a video exists and waits
+  // to be asked, because ES-DE starting one by itself after a pause leaves you
+  // muting the emulator to browse and then having no sound when you actually
+  // want to watch something. Y opens it, and it is the first thing in the
+  // artwork reel below — so this does not need to be the way in, only the way
+  // you find out there is one.
+  const badges = [
+    d.has_video
+      ? `<button class="badge" id="playvid" title="Play it (Y)">
+           <span class="icon icon-play"></span><span>Video</span></button>`
+      : "",
+    d.manual
+      ? `<button class="badge" id="manual" title="Read the manual">
+           <span class="icon icon-book"></span><span>Manual</span></button>`
+      : "",
+    d.youtube_id
+      ? `<button class="badge" id="trailer" title="Watch the trailer on YouTube"
+           data-yt="${escapeHtml(d.youtube_id)}">
+           <span class="icon icon-play"></span><span>Trailer</span></button>`
+      : "",
+  ].join("");
+  const video = badges ? `<div class="badges">${badges}</div>` : "";
 
   el.detail.hidden = !state.sidebar;
   // The glow around the selection takes the cover's own colour. Started here
@@ -118,15 +133,6 @@ export async function selectRom(id) {
       </dl>
       ${stateShelf(states)}
       ${artStrip(d)}
-      ${
-        d.manual || d.youtube_id
-          ? `<div class="extras">
-               ${d.manual ? `<button class="link" id="manual">📖 Manual</button>` : ""}
-               ${d.youtube_id ? `<a class="link" target="_blank"
-                   href="https://www.youtube.com/watch?v=${encodeURIComponent(d.youtube_id)}">▶ Trailer</a>` : ""}
-             </div>`
-          : ""
-      }
     </div>
     <div class="pinned">
       ${autofireRow(d)}
@@ -372,8 +378,20 @@ const ART_ORDER = [
 /// Thumbnail row of everything ES-DE has for this game beyond the cover.
 function artStrip(d) {
   const items = ART_ORDER.filter(([k]) => d.art && d.art[k]);
-  if (!items.length) return "";
-  return `<div class="artstrip">${items
+  if (!items.length && !d.has_video) return "";
+  // The video first, the way ES-DE lays a game out: it is the thing you look
+  // at, and it used to be a button somewhere else entirely, which left the
+  // arrows walking a reel that started at the box art and never reached it.
+  // No thumbnail because the file is not here yet — it is fetched when asked
+  // for, and a tile that has to download 30MB to draw itself is not a
+  // thumbnail.
+  const vid = d.has_video
+    ? `<figure data-art="video" class="vidtile" title="Gameplay video">
+         <div class="vidthumb"><span class="icon icon-play"></span></div>
+         <figcaption>Video</figcaption>
+       </figure>`
+    : "";
+  return `<div class="artstrip">${vid}${items
     .map(
       ([k, label]) =>
         `<figure data-art="${k}" title="${label}">
@@ -392,12 +410,15 @@ function artStrip(d) {
 export async function playVideo() {
   const id = state.selected;
   if (id === null) return;
+  // The game is the authority on whether there is a video, not the presence of
+  // a button. Y has to work whether or not the tag is on screen — it is a tag
+  // now, and the pane it lives in can be hidden.
+  if (!currentDetail?.has_video) return;
   const btn = document.getElementById("playvid");
-  if (!btn) return; // no video for this game
-  if (btn.dataset.busy) return;
+  if (btn?.dataset.busy) return;
 
-  btn.dataset.busy = "1";
-  const label = btn.querySelector("span:not(.icon)");
+  if (btn) btn.dataset.busy = "1";
+  const label = btn?.querySelector("span:not(.icon)");
   const was = label?.textContent;
   if (label) label.textContent = "Fetching…";
   try {
@@ -413,7 +434,7 @@ export async function playVideo() {
   } catch (e) {
     toast(String(e), 6000);
   } finally {
-    delete btn.dataset.busy;
+    if (btn) delete btn.dataset.busy;
     if (label && was) label.textContent = was;
   }
 }
@@ -433,6 +454,12 @@ export async function playVideo() {
 /// is not known until someone asks for it.
 function mediaSet(d, videoSrc = null) {
   const items = [];
+  // First, matching the strip below the details and matching ES-DE. It used to
+  // be last, so "one more right" from the end of a dozen pictures was the
+  // video and there was no way to reach it from the left at all.
+  if (videoSrc) {
+    items.push({ src: convertFileSrc(videoSrc), kind: "video", caption: "Gameplay", id: "video" });
+  }
   for (const [kind, label] of ART_ORDER) {
     if (d.art?.[kind]) {
       items.push({ src: convertFileSrc(d.art[kind]), kind: "image", caption: label, id: kind });
@@ -448,12 +475,6 @@ function mediaSet(d, videoSrc = null) {
   );
   if (d.cover) {
     items.push({ src: convertFileSrc(d.cover), kind: "image", caption: "Cover", id: "cover" });
-  }
-  // Last, so a game with a dozen pictures does not open on the video when the
-  // cover was clicked — and so "one more right" from the end of the artwork is
-  // the video, which is where ES-DE puts it too.
-  if (videoSrc) {
-    items.push({ src: convertFileSrc(videoSrc), kind: "video", caption: "Gameplay", id: "video" });
   }
   return items;
 }
@@ -476,11 +497,26 @@ function wireArtwork(d) {
   el.detail.querySelector("img.cover")?.addEventListener("click", openAt((m) => m.id === "cover"));
   document.getElementById("playvid")?.addEventListener("click", playVideo);
   el.detail.querySelectorAll(".artstrip figure").forEach((fig) =>
-    fig.addEventListener("click", openAt((m) => m.id === fig.dataset.art))
+    // The video tile has no picture behind it — the file is fetched when it is
+    // asked for — so it goes the same way Y does rather than through the reel,
+    // which has no video in it until that fetch has happened.
+    fig.addEventListener(
+      "click",
+      fig.dataset.art === "video" ? playVideo : openAt((m) => m.id === fig.dataset.art)
+    )
   );
   document.getElementById("manual")?.addEventListener("click", () =>
     openLightbox([{ src: convertFileSrc(d.manual), kind: "pdf", caption: "Manual" }], 0)
   );
+  // Out to the browser rather than into this window. It was an <a target=
+  // "_blank">, which in a webview is a navigation: YouTube would have replaced
+  // the library, with no address bar and no way back.
+  document.getElementById("trailer")?.addEventListener("click", (ev) => {
+    const yt = ev.currentTarget.dataset.yt;
+    invoke("open_link", { url: `https://www.youtube.com/watch?v=${encodeURIComponent(yt)}` }).catch(
+      (e) => toast(`Could not open the trailer — ${e}`)
+    );
+  });
 }
 
 function startSlideshow(count) {

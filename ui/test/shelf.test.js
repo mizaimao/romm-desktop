@@ -385,14 +385,52 @@ describe("browsing a game's media", () => {
   });
 });
 
-describe("the video button", () => {
+describe("the video, where ES-DE puts it", () => {
+  /// It was a button at the top of the pane and the last thing in the reel, so
+  /// the arrows walked a dozen pictures before reaching it and could not reach
+  /// it from the left at all. It is the first tile in the artwork strip now,
+  /// and the first thing in the reel.
+  test("it leads the artwork strip", async () => {
+    Object.assign(DETAIL, {
+      has_video: true,
+      art: { miximages: "/a/mix.png", physicalmedia: "/a/cart.png" },
+    });
+    await detail.selectRom(7);
+    await settle();
+    const first = document.querySelector(".artstrip figure");
+    assert.equal(first?.dataset.art, "video", "the strip still starts with a picture");
+  });
+
+  /// A tag, not a button: it says a video exists and waits to be asked. The
+  /// manual and the trailer were links at the very foot of the pane, below the
+  /// artwork, the save states and every metadata row, where nobody found them.
+  test("what a game has is one row of tags near the top", async () => {
+    Object.assign(DETAIL, { has_video: true, manual: "/a/m.pdf", youtube_id: "abc123" });
+    await detail.selectRom(7);
+    await settle();
+    const tags = [...document.querySelectorAll("#detail .badges .badge")].map((b) =>
+      b.textContent.trim()
+    );
+    assert.deepEqual(tags, ["Video", "Manual", "Trailer"]);
+    assert.equal(document.querySelector("#detail .extras"), null, "the old foot row is still there");
+    // A webview follows a link in place, so YouTube would have replaced the
+    // library with no address bar and no way back.
+    const trailer = document.getElementById("trailer");
+    assert.equal(trailer.tagName, "BUTTON", "the trailer still navigates this window");
+    trailer.click();
+    await settle();
+    const call = invoked.find((c) => c.cmd === "open_link");
+    assert.ok(call, "the trailer did not go out to the browser");
+    assert.match(call.args.url, /youtube\.com\/watch\?v=abc123/);
+  });
+
   test("pressing it opens the player", async () => {
     Object.assign(DETAIL, { has_video: true, art: { miximages: "/a/mix.png" } });
     await detail.selectRom(7);
     await settle();
 
     const btn = document.getElementById("playvid");
-    assert.ok(btn, "no video button for a game that has one");
+    assert.ok(btn, "no video tag for a game that has one");
 
     await detail.playVideo();
     await settle();
@@ -403,6 +441,29 @@ describe("the video button", () => {
       document.querySelector("#lightbox video"),
       "the player opened on something that is not the video"
     );
+    // First in the reel, so one step left from it is the last picture rather
+    // than nothing at all.
+    assert.match(
+      document.querySelector("#lightbox figcaption").textContent,
+      /1 of|Gameplay/,
+      "the video is not at the head of the reel"
+    );
+    lb.closeLightbox();
+  });
+
+  /// Y opens it, and the pane it used to live in can be hidden entirely. The
+  /// game is the authority on whether there is a video, not the presence of a
+  /// button on screen.
+  test("it plays with the pane hidden", async () => {
+    Object.assign(DETAIL, { has_video: true });
+    await detail.selectRom(7);
+    await settle();
+    document.getElementById("playvid").remove();
+
+    await detail.playVideo();
+    await settle();
+    const lb = await import("../js/lightbox.js");
+    assert.equal(lb.isLightboxOpen(), true, "Y needs the button to be on screen");
     lb.closeLightbox();
   });
 });

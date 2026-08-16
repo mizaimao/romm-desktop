@@ -60,9 +60,14 @@ before(async () => {
           ? [{ group: "genre", label: "Genre", count: 3 }]
           : cmd === "collections_in"
             ? [
-                { id: "c1", name: "First", rom_count: 5, local_count: 5, sample_ids: [] },
-                { id: "c2", name: "Second", rom_count: 7, local_count: 0, sample_ids: [] },
+                { id: "c1", name: "First", rom_count: 5, local_count: 5, sample_ids: [11] },
+                { id: "c2", name: "Second", rom_count: 7, local_count: 0, sample_ids: [12] },
               ]
+            : cmd === "rom_covers"
+              ? [
+                  { id: 11, cover: "/art/11.png" },
+                  { id: 12, cover: "/art/12.png" },
+                ]
             : cmd === "platforms"
           ? [
               { slug: "arcade", name: "Arcade", rom_count: 9 },
@@ -684,4 +689,31 @@ describe("the layout switch in the header", () => {
     shell.setMode("single");
     assert.deepEqual(lit(), ["single"]);
   });
+});
+
+describe("collections show their artwork", () => {
+  /// Every collection in the app drew the two-letter placeholder, in both
+  /// arrangements, and nothing ever said why: the loader looked up its
+  /// container as `region(into)` where `into` is a parameter of the function
+  /// that *calls* it. A ReferenceError on the first card, every time, caught
+  /// by a `catch` meant for a failed cover lookup and thrown away.
+  let collections, shell;
+
+  before(async () => {
+    collections = await import("../js/collections.js");
+    shell = await import("../js/shell.js");
+  });
+
+  for (const mode of ["single", "columns"]) {
+    test(`a cover reaches the card in ${mode}`, async () => {
+      shell.setMode(mode);
+      await collections.showCollectionsIn("user", "My collections");
+      // The covers arrive a round trip after the cards are drawn.
+      await new Promise((r) => setTimeout(r, 20));
+      const card = document
+        .querySelector('.card[data-cid="c1"] .logo img');
+      assert.ok(card, "the card still shows the two-letter placeholder");
+      assert.match(card.getAttribute("src"), /11\.png/);
+    });
+  }
 });

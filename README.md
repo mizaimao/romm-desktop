@@ -71,7 +71,9 @@ Consoles are listed alphabetically; collections have an order button above them
 size. Within a console, games sort by name, rating, year, size or recently
 played — that one is per-console and deliberately forgotten when the app closes.
 
-Arrows or the left stick move, Enter or the bottom face button opens and plays,
+Holding Select for three seconds puts every list back to the miximage rather
+than tapping through seven kinds of artwork to reach it. Arrows or the left
+stick move, Enter or the bottom face button opens and plays,
 Esc or the right face button goes back, `/` searches, `?` lists every binding, Space plays and pauses a video,
 `Cmd+,` opens Settings. The shoulder buttons move between tabs and the triggers
 scroll the game list — how hard you pull decides how fast. Keyboard and
@@ -79,9 +81,12 @@ controller are rebound separately in Settings; both persist. Dialogs are
 driveable from the pad, so a sync question mid-launch does not send you back to
 the mouse.
 
-A game's page carries its save states, each with the picture RetroArch saved
-beside it, and starting from one enters that slot directly. Right-click deletes
-one. **History** counts what you have actually played — hours per console, the
+A game's page opens with tags for what it has — video, manual, trailer — then
+the artwork strip, which starts with the gameplay video and runs through every
+picture the server holds. Clicking any of them opens the reel full size, and
+the arrows walk it; space or the bottom face button pauses a video. It also
+carries the game's save states, each with the picture RetroArch saved beside
+it, and starting from one enters that slot directly. Right-click deletes one. **History** counts what you have actually played — hours per console, the
 games you played most, and the ones you kept opening and putting down — from
 sessions this app started, since nothing else can be known.
 

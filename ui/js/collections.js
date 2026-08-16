@@ -159,7 +159,7 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
     // Leave a selection so the controller can act immediately, as the
     // platform grid does.
     grid.querySelector(".card")?.classList.add("sel");
-    loadMosaics(list.slice(0, 60));
+    loadMosaics(list.slice(0, 60), grid);
   }
 
   let timer;
@@ -212,7 +212,7 @@ export async function showCollectionRoms(id, name) {
 
 /// Fill collection cards with a member's cover, through the same local cache
 /// the game grids use — so this works offline and needs no server request.
-async function loadMosaics(list) {
+async function loadMosaics(list, into) {
   const ids = list.flatMap((c) => c.sample_ids.slice(0, 1));
   if (!ids.length) return;
   try {
@@ -221,12 +221,14 @@ async function loadMosaics(list) {
     for (const c of list) {
       const cover = byId.get(c.sample_ids[0]);
       if (!cover) continue;
-      // In the region the cards were drawn into. Looking in the middle meant
-      // the artwork never arrived in the left column — the same mistake as the
-      // click handlers, in the same file.
-      const logo = region(into).querySelector(
-        `.card[data-cid="${CSS.escape(String(c.id))}"] .logo`
-      );
+      // The grid the cards were actually drawn into, passed in.
+      //
+      // This read `region(into)`, and `into` is a parameter of the function
+      // that *calls* this one — so it was a ReferenceError on the first card,
+      // every time. The catch below is meant for a failed cover lookup and
+      // swallowed that instead, so every collection in the app drew the
+      // two-letter placeholder and nothing ever said why.
+      const logo = into.querySelector(`.card[data-cid="${CSS.escape(String(c.id))}"] .logo`);
       if (logo) logo.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;
     }
   } catch {

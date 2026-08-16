@@ -16,7 +16,8 @@ import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
 import { scrollDetail } from "./detail.js";
 import { scrollList } from "./library.js";
-import { closeLightbox, stepLightbox } from "./lightbox.js";
+import { closeLightbox, stepLightbox, togglePlayback } from "./lightbox.js";
+import { useMiximage } from "./pictures.js";
 
 // Rebindable in Settings; padMap() layers the user's choices over the
 // position-based defaults in bindings.js.
@@ -242,6 +243,14 @@ function step() {
           // Settle, so lifting the button does not register anywhere else.
           settling = true;
         }
+      } else if (action === "activate") {
+        // The bottom button pauses whatever is playing, the way it does in
+        // every media player on a console. Edge-triggered: held down it would
+        // toggle sixty times a second.
+        if (!held.has(action)) {
+          held.set(action, now);
+          togglePlayback();
+        }
       } else if (action === "zoomIn" || action === "zoomOut") {
         fire(action, now);
       } else if (action === "left" || action === "right") {
@@ -342,14 +351,52 @@ function step() {
   // a trigger past its threshold reads as "pressed" too, and without this it
   // would scroll a page per repeat on top of the smooth movement.
   const smooth = analogueScroll(navigator.getGamepads?.() ?? [], map);
+  const long = longPress(pressed, now);
   for (const action of pressed) {
-    if (!smooth.has(action)) fire(action, now);
+    if (!smooth.has(action) && !long.has(action)) fire(action, now);
   }
   // Release anything no longer held so the next press fires immediately.
   for (const action of [...held.keys()]) {
     if (!pressed.has(action)) held.delete(action);
   }
 }
+
+/// Hold a button rather than pressing it, for the one action worth two.
+///
+/// Only the picture cycle so far: it is seven long, and the miximage is the
+/// one people come back to — a screenshot, the box and the logo in one
+/// picture, which is the setting that suits every console at once. Six presses
+/// to get home from the wrong end of a list is how a good control becomes an
+/// annoying one.
+///
+/// Returns the actions this consumed, so a hold does not also fire as a press
+/// on the way down. A tap is unaffected: `fire` is skipped only once the hold
+/// has actually happened, which is three seconds after the button went down.
+const HOLD_MS = 3000;
+const holdStart = new Map();
+
+function longPress(pressed, now) {
+  const consumed = new Set();
+  for (const [action, fn] of Object.entries(HOLD_ACTIONS)) {
+    if (!pressed.has(action)) {
+      holdStart.delete(action);
+      continue;
+    }
+    const since = holdStart.get(action);
+    if (since === undefined) {
+      holdStart.set(action, now);
+    } else if (since !== "done" && now - since >= HOLD_MS) {
+      // Marked rather than deleted, so it fires once for the hold and not
+      // again every frame the button stays down.
+      holdStart.set(action, "done");
+      fn();
+    }
+    if (since === "done") consumed.add(action);
+  }
+  return consumed;
+}
+
+const HOLD_ACTIONS = { pictures: () => useMiximage() };
 
 /// Scroll the list by however hard the triggers are pulled.
 ///

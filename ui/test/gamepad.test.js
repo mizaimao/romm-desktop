@@ -754,6 +754,113 @@ describe("the lightbox and the controller", () => {
   });
 });
 
+describe("A pauses what is playing", () => {
+  /// The bottom button, the way it works in every media player on a console.
+  /// It used to do nothing in there at all — the pad could open a video and
+  /// close it, and had no way to stop it halfway.
+  test("the bottom button toggles the video on the stage", () => {
+    const a = Number(Object.entries(ui.padMap()).find(([, act]) => act === "activate")?.[0]);
+    ui.openLightbox([{ src: "x.mp4", kind: "video", caption: "Gameplay" }], 0);
+
+    const video = document.querySelector("#lightbox video");
+    assert.ok(video, "no video on the stage");
+    const state = { paused: true };
+    Object.defineProperty(video, "paused", { get: () => state.paused, configurable: true });
+    video.play = () => ((state.paused = false), Promise.resolve());
+    video.pause = () => (state.paused = true);
+
+    pads = [pad([])];
+    ui.stepForTest();
+    pads = [pad([a])];
+    ui.stepForTest();
+    assert.equal(state.paused, false, "A did not start it");
+
+    // Held down it must not toggle sixty times a second: one press, one
+    // change.
+    ui.stepForTest();
+    assert.equal(state.paused, false, "holding A flickered it");
+
+    pads = [pad([])];
+    ui.stepForTest();
+    pads = [pad([a])];
+    ui.stepForTest();
+    assert.equal(state.paused, true, "A did not stop it");
+    ui.closeLightbox();
+  });
+});
+
+describe("holding Select rather than tapping it", () => {
+  /// Tapping it steps through seven kinds of artwork. The miximage is the one
+  /// people come back to — a screenshot, the box and the logo in one picture —
+  /// and six presses to get home from the wrong end of the list is how a good
+  /// control becomes an annoying one.
+  const select = () =>
+    Number(Object.entries(ui.padMap()).find(([, a]) => a === "pictures")?.[0]);
+
+  test("three seconds of it goes straight to the miximage", async () => {
+    const sel = select();
+    assert.ok(Number.isInteger(sel), "nothing is bound to the pictures action");
+    // Out of the settle window first.
+    //
+    // Closing a video with the pad leaves the loop settling — ignoring
+    // everything until the buttons have been up for a moment, so that letting
+    // go of the button that closed it does not also register in the library
+    // underneath. That window is real time, and a press arriving inside it is
+    // deliberately ignored, so the test has to wait it out rather than poll
+    // once and assume.
+    pads = [pad([])];
+    ui.stepForTest();
+    // The floor under that window is 200ms.
+    await new Promise((r) => setTimeout(r, 260));
+    ui.stepForTest();
+    invoked.length = 0;
+
+    pads = [pad([sel])];
+    ui.stepForTest();
+    // Not yet: a tap is still a tap.
+    assert.equal(
+      invoked.find((c) => c.cmd === "set_list_art")?.args.value,
+      undefined,
+      "the hold fired on the way down"
+    );
+
+    // Three seconds of the same press. The loop reads the clock rather than
+    // counting frames, so the wait is real.
+    await new Promise((r) => setTimeout(r, 3050));
+    ui.stepForTest();
+    assert.equal(
+      invoked.find((c) => c.cmd === "set_list_art")?.args.value,
+      "miximages",
+      "holding Select did not reach the miximage"
+    );
+
+    // Once for the hold, not once a frame while the button stays down.
+    invoked.length = 0;
+    ui.stepForTest();
+    ui.stepForTest();
+    assert.equal(
+      invoked.filter((c) => c.cmd === "set_list_art").length,
+      0,
+      "it fired again while the button was still down"
+    );
+    pads = [pad([])];
+    ui.stepForTest();
+  });
+
+  /// And a tap still cycles, or the hold has cost the button its real job.
+  test("a tap still steps to the next one", () => {
+    invoked.length = 0;
+    pads = [pad([select()])];
+    ui.stepForTest();
+    pads = [pad([])];
+    ui.stepForTest();
+    assert.ok(
+      invoked.some((c) => c.cmd === "icon_styles" || c.cmd === "list_art_options"),
+      "tapping Select no longer cycles the pictures"
+    );
+  });
+});
+
 describe("four controllers", () => {
   /// With four pads plugged in for a four-player game, every one of them moved
   /// the cursor in the library — so three people fidgeting with sticks made the
