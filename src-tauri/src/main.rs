@@ -329,6 +329,7 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "shaders_enabled" => ("shaders", "enabled"),
         "confirm_delete_state" => ("saves", "confirm_delete_state"),
         "mirror_player_one" => ("controllers", "mirror_player_one"),
+        "game_display" => ("retroarch", "game_display"),
         other => return Err(format!("unknown setting {other}")),
     };
 
@@ -1434,13 +1435,23 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
     //
     // CoreGraphics reports points directly, in the space the window server and
     // therefore RetroArch use.
-    if let Some(b) = romm_desktop::macdisplay::main_display() {
+    let all = romm_desktop::macdisplay::displays();
+    if !all.is_empty() {
+        let choice = romm_desktop::macdisplay::Choice::parse(&state_game_display());
+        // The main display's height is the origin of the vertical coordinate
+        // space whichever screen the game lands on, so it travels separately.
+        let primary = all
+            .iter()
+            .find(|d| d.main)
+            .map(|d| d.bounds.height)
+            .unwrap_or(all[0].bounds.height);
+        let d = romm_desktop::macdisplay::choose(&all, choice)?;
         return Some(romm_desktop::retroarch::Screen {
-            x: b.x as i32,
-            y: b.y as i32,
-            width: b.width as u32,
-            height: b.height as u32,
-            primary_height: b.height as u32,
+            x: d.bounds.x as i32,
+            y: d.bounds.y as i32,
+            width: d.bounds.width as u32,
+            height: d.bounds.height as u32,
+            primary_height: primary as u32,
         });
     }
 
@@ -1466,6 +1477,51 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
         height: size.height,
         primary_height,
     })
+}
+
+/// The stored screen preference, read fresh so unplugging a monitor and
+/// changing the setting both take effect on the next launch rather than the
+/// next restart.
+fn state_game_display() -> String {
+    Config::load().unwrap_or_default().retroarch.game_display
+}
+
+/// The screens a game could open on, and which one is chosen.
+#[derive(Serialize)]
+struct DisplayView {
+    key: String,
+    label: String,
+    selected: bool,
+}
+
+#[tauri::command]
+fn game_displays() -> CmdResult<Vec<DisplayView>> {
+    use romm_desktop::macdisplay::{self, Choice};
+    let all = macdisplay::displays();
+    // One screen is not a choice, and a dropdown with a single entry is a
+    // control that asks a question with one answer.
+    if all.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let now = Choice::parse(&state_game_display());
+    let mut out = vec![
+        DisplayView {
+            key: "auto".to_owned(),
+            label: "Automatic — prefer an external screen".to_owned(),
+            selected: now == Choice::PreferExternal,
+        },
+        DisplayView {
+            key: "main".to_owned(),
+            label: "The one with the menu bar".to_owned(),
+            selected: now == Choice::Main,
+        },
+    ];
+    out.extend(all.iter().enumerate().map(|(i, d)| DisplayView {
+        key: i.to_string(),
+        label: d.label(),
+        selected: now == Choice::Index(i),
+    }));
+    Ok(out)
 }
 
 /// `pad` is the name the frontend's Gamepad API reports for the connected
@@ -2564,6 +2620,7 @@ fn main() {
             bios_status,
             download_set,
             recent_games,
+            game_displays,
             game_states,
             delete_state,
             confirm_delete_state,

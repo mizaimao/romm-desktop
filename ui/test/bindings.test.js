@@ -162,6 +162,17 @@ describe("the settings tabs", () => {
     assert.equal(custom.glass, null);
   });
 
+  /// Which screen a game opens on. The control is in the markup but starts
+  /// hidden: with one display attached it is a question with one answer.
+  test("the emulator tab can choose a screen for games", async () => {
+    const { paneHtml } = await import(join(uiDir, "js", "settings-panes.js"));
+    const pane = new JSDOM(`<body>${paneHtml("systems")}</body>`).window.document;
+    const row = pane.querySelector(".sys-screen");
+    assert.ok(row, "no way to choose which screen a game opens on");
+    assert.ok(pane.querySelector("select.game-display"), "no picker in the row");
+    assert.equal(row.hidden, true, "it should stay hidden until there are two screens");
+  });
+
   /// Every tab the window offers has to render something. A tab whose id has
   /// no markup opens onto a blank pane, which is indistinguishable from a
   /// window that has broken.

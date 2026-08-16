@@ -227,17 +227,44 @@ pub fn window_lines(screen: Option<Screen>) -> String {
     } else {
         (0, 0)
     };
-    let h = s.height.saturating_sub(top_gap + bottom_gap);
-    let w = (s.width as f32 * SCREEN_FILL) as u32;
+    // Negative coordinates do not survive the trip. Asking for x = -378 — the
+    // left edge of a monitor sitting up and to the left of the built-in one —
+    // put the window at x = 2142, most of it off the right-hand side of the
+    // desktop, which is the "still at the right edge" this kept producing.
+    // Asking for x = 0 on the same monitor landed exactly at 0. So the setting
+    // is read as unsigned somewhere between here and the window.
+    //
+    // Clamping at zero rather than refusing: on a screen that starts left of
+    // the origin, x = 0 is still a point on that screen, so the window opens
+    // where it was asked to open — just not flush against the left edge. The
+    // width comes down to match, or it would run off the far side.
+    let left = s.x.max(0);
+    let lost_x = (left - s.x).max(0) as u32;
+    let usable_w = s.width.saturating_sub(lost_x);
 
-    let x = s.x;
-    let y = if cfg!(target_os = "macos") {
-        // Cocoa: distance from the bottom of the primary display up to the
-        // bottom edge of the window.
-        s.primary_height as i32 - s.y - (h + top_gap) as i32
+    // Same for the vertical, in Cocoa's terms: the distance from the bottom of
+    // the primary display up to the bottom edge of the window.
+    let want_y = if cfg!(target_os = "macos") {
+        s.primary_height as i32 - s.y - s.height as i32
     } else {
         s.y
     };
+    let bottom = want_y.max(0);
+    let lost_y = (bottom - want_y).max(0) as u32;
+    let usable_h = s.height.saturating_sub(lost_y);
+
+    let h = usable_h.saturating_sub(top_gap + bottom_gap);
+    let w = (usable_w as f32 * SCREEN_FILL) as u32;
+
+    // A screen so far off to the left that clamping leaves nothing worth
+    // opening. Better to write no geometry at all and let RetroArch use its own
+    // than to ask for a window nobody could play in.
+    if w < 640 || h < 480 {
+        return String::new();
+    }
+
+    let x = left;
+    let y = bottom;
 
     format!(
         "\n# Top-left of the screen the library is on, as tall as it goes.\n\
@@ -963,9 +990,15 @@ input_r2_axis = "+5"
     /// A monitor above the primary one has negative coordinates going down and
     /// positive ones going up. Getting this backwards puts the window off the
     /// bottom of the desktop, which is where it went.
+    ///
+    /// The horizontal is the other half: a monitor that starts left of the
+    /// origin cannot be addressed by its own left edge, because a negative x
+    /// does not survive — asking for -378 put the window at 2142, most of it
+    /// off the right of the desktop. Zero is still a point on that screen, so
+    /// that is where it goes, with the width brought in to match.
     #[test]
     #[cfg(target_os = "macos")]
-    fn a_monitor_above_the_primary_one_is_measured_upwards() {
+    fn a_monitor_above_and_left_of_the_primary_one_is_still_reachable() {
         let out = window_lines(Some(Screen {
             x: -380,
             y: -1440,
@@ -973,11 +1006,28 @@ input_r2_axis = "+5"
             height: 1440,
             primary_height: 1169,
         }));
-        assert_eq!(val(&out, "video_windowed_position_x"), "-380");
+        assert_eq!(val(&out, "video_windowed_position_x"), "0");
+        // 2560 wide starting 380 to the left of the origin leaves 2180 usable.
+        assert_eq!(val(&out, "video_windowed_position_width"), "2049");
         assert_eq!(val(&out, "video_windowed_position_height"), "1402");
         // 1169 - (-1440) - 1440 = 1169: the window's bottom edge level with the
         // top of the primary screen, which is the bottom of this one.
         assert_eq!(val(&out, "video_windowed_position_y"), "1169");
+    }
+
+    /// A screen entirely left of the origin still gets a window, and the
+    /// arithmetic must not underflow on the way — these are unsigned widths.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_screen_far_off_to_the_left_does_not_underflow() {
+        let out = window_lines(Some(Screen {
+            x: -3000,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            primary_height: 1169,
+        }));
+        assert_eq!(out, "", "a window nobody could play in is not worth asking for");
     }
 
     /// Everywhere else y counts down from the top, so a monitor's own origin

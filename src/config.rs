@@ -353,6 +353,20 @@ pub struct RetroArchCfg {
     /// wins, so button maps and video filters can be pinned without ever
     /// opening RetroArch's menu.
     pub user_config: Option<String>,
+
+    /// Which screen a game opens on: `auto`, `main`, or a display number.
+    ///
+    /// `auto` prefers an external display, because plugging a monitor into a
+    /// laptop is a deliberate act and nobody does it wanting the game on the
+    /// laptop panel. macOS only for now — it is the one platform where the
+    /// screen geometry can be asked for in the units the window manager
+    /// actually uses.
+    #[serde(default = "default_game_display")]
+    pub game_display: String,
+}
+
+fn default_game_display() -> String {
+    "auto".to_owned()
 }
 
 #[derive(Debug, Clone, Deserialize)]

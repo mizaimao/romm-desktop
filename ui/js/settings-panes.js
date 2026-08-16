@@ -132,6 +132,13 @@ export function paneHtml(id) {
       <p class="hint">Which emulator runs each console, which shader it gets,
         and whether a light gun takes the second controller port. Changes are
         written to config.toml and apply to the next game you launch.</p>
+      <div class="srow sys-screen" hidden>
+        <label>Open games on</label>
+        <div class="ctl"><select class="game-display"></select></div>
+      </div>
+      <p class="hint sys-screen-hint" hidden>Which screen a game opens on.
+        Automatic prefers an external one: plugging a monitor into a laptop is a
+        deliberate act, and rarely done wanting the game on the laptop panel.</p>
       <div class="sys-motion"></div>
       <div class="sys-table">Loading…</div>
 
@@ -328,6 +335,7 @@ async function wireSystems(box) {
   // controls belong to a pane that is gone.
   if (!box.isConnected) return;
 
+  await wireGameDisplay(box);
   box.querySelector(".sys-motion").innerHTML = motionMarkup(motion);
   table.innerHTML = `
     <table class="systbl">
@@ -369,6 +377,43 @@ async function wireSystems(box) {
       }
     });
   }
+}
+
+/// Which screen a game opens on.
+///
+/// Hidden entirely with one display attached: a dropdown with a single entry is
+/// a question that has one answer, and this is the settings pane rather than an
+/// inventory of the machine.
+async function wireGameDisplay(box) {
+  const row = box.querySelector(".sys-screen");
+  const hint = box.querySelector(".sys-screen-hint");
+  const sel = box.querySelector(".game-display");
+  if (!sel) return;
+
+  let screens = [];
+  try {
+    screens = await invoke("game_displays");
+  } catch {
+    return;
+  }
+  if (!screens.length || !box.isConnected) return;
+
+  row.hidden = false;
+  hint.hidden = false;
+  sel.innerHTML = screens
+    .map(
+      (d) =>
+        `<option value="${escapeHtml(d.key)}" ${d.selected ? "selected" : ""}>
+           ${escapeHtml(d.label)}</option>`
+    )
+    .join("");
+  sel.addEventListener("change", async () => {
+    try {
+      toast(await invoke("set_config_field", { field: "game_display", value: sel.value }));
+    } catch (e) {
+      toast(`Could not save — ${e}`, 8000);
+    }
+  });
 }
 
 /// The strobe/BFI layer. Above the table and separate from it: it chains onto
