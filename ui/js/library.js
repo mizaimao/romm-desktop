@@ -7,6 +7,7 @@ import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
+import { pickerBar, wirePickerBar, sortPicker } from "./picker-order.js";
 import { selectRom, play, withTransition } from "./detail.js";
 import { download } from "./actions.js";
 
@@ -166,9 +167,15 @@ function renderPlatforms(items) {
   // A column is narrow, so the console cards are always a list there — a grid
   // of two-across cards in a 260px column is neither a grid nor readable.
   const asList = state.layout !== "grid" || shellMode() === "columns";
-  into.innerHTML = asList
-    ? `<div class="rows">${items.map(platformRow).join("")}</div>`
-    : `<div class="grid">${items.map(platformCard).join("")}</div>`;
+  // The server hands these back by size, so the list opened on whichever
+  // console has the most ROMs and there was no way to say otherwise.
+  const ordered = sortPicker("platforms", items);
+  into.innerHTML =
+    pickerBar({ kind: "platforms" }) +
+    (asList
+      ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
+      : `<div class="grid">${ordered.map(platformCard).join("")}</div>`);
+  wirePickerBar(into, "platforms", () => renderPlatforms(items));
 
   into.querySelectorAll(".card, .prow").forEach((c) =>
     c.addEventListener("click", () => {

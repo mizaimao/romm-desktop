@@ -124,7 +124,9 @@ const HANDLES = {
 /// A window with no Back button, or no zoom slider, simply has nothing to set
 /// — which is why every lookup tolerates a missing element instead of assuming
 /// the skeleton this app happens to ship with.
-export function enter({ title = "", zoom = false, gridLayout = true, ...wants } = {}) {
+export function enter({ title = "", zoom = false, gridLayout = true, picker = true, ...wants } = {}) {
+  // A view with nothing to pick from gets no column, rather than an empty one.
+  if (el.consoles) el.consoles.hidden = mode !== "columns" || !picker;
   for (const name of BUTTONS) {
     const node = HANDLES[name]?.();
     if (!node) continue;

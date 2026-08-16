@@ -376,11 +376,23 @@ describe("each tab fills the left column with its own list", () => {
   /// History is a page rather than a list with a detail beside it, so it owns
   /// no left column — and leaving the last tab's list there would be a list
   /// that acts on a screen that is gone.
-  test("History clears the column and draws into the middle", async () => {
+  /// It used to empty the column, which left a 240px strip of nothing down the
+  /// left with a drag handle beside it — a list that looks like it failed to
+  /// load. There is nothing to pick from on this page, so there is no column.
+  test("History takes the column away and draws into the middle", async () => {
+    el.consoles.hidden = false;
     el.consoles.innerHTML = "<div class='prow'>Arcade</div>";
     await history.showHistory();
-    assert.equal(el.consoles.innerHTML, "", "the previous tab's list is still there");
+    assert.equal(el.consoles.hidden, true, "an empty column is still on screen");
     assert.match(el.list.innerHTML, /Nothing recorded yet|hist/, "History did not draw");
+  });
+
+  /// And gives it back. Hiding it in one view and forgetting to show it in the
+  /// next is how a tab ends up with no list at all.
+  test("the column comes back with the next tab", async () => {
+    await history.showHistory();
+    shell.enter({ title: "Library" });
+    assert.equal(el.consoles.hidden, false, "Library has no column any more");
   });
 
   /// It set no view name at all, so the section machinery parked History under
@@ -608,5 +620,25 @@ describe("the left column can be resized", () => {
     shell.installColumnResizer();
     shell.installColumnResizer();
     assert.equal(document.querySelectorAll("#consoles-grip").length, 1);
+  });
+});
+
+describe("the order of the tabs", () => {
+  let tabs;
+  before(async () => (tabs = await import("../js/tabs.js")));
+
+  /// Browse is the server's own groupings — 1,040 companies, every genre it
+  /// knows — and it sat second from the left, in front of History and level
+  /// with the collections you made yourself. It is the one you reach for
+  /// least, so it goes to the end.
+  test("RomM browse is last, and says whose collections it is", () => {
+    const ids = tabs.SECTIONS.map((s) => s.id);
+    assert.equal(ids.at(-1), "browse", "Browse is not the last tab");
+    assert.deepEqual(ids, ["library", "mine", "history", "browse"]);
+    assert.equal(
+      tabs.SECTIONS.find((s) => s.id === "browse").label,
+      "RomM browse",
+      "the tab still calls itself Browse, which every tab here does"
+    );
   });
 });

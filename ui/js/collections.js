@@ -8,6 +8,7 @@
 import { el, state, trail, invoke, convertFileSrc } from "./state.js";
 import { enter as enterView, region, resetGames } from "./shell.js";
 import { escapeHtml } from "./util.js";
+import { pickerBar, wirePickerBar, sortPicker } from "./picker-order.js";
 import { renderRows } from "./library.js";
 import { shellMode } from "./shell.js";
 
@@ -39,7 +40,7 @@ function topBar(title) {
 
 export async function showCollectionGroups({ exclude = [] } = {}) {
   trail.length = 0;
-  topBar("Browse");
+  topBar("RomM browse");
   resetGames("Pick a group on the left.");
 
   // `user` lives in its own tab now, so showing it here too would be the same
@@ -113,13 +114,26 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate
   // from the header search, which searches games rather than collections.
-  region(into).innerHTML = `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
+  // The filter and the order button in one opaque bar. The filter box on its
+  // own was sticky and see-through, so the names scrolled through the middle
+  // of it.
+  region(into).innerHTML =
+    pickerBar({ kind: "collections", filter: `Filter ${items.length} collections…` }) +
     `<div class="grid" id="cgrid"></div>`;
+  wirePickerBar(region(into), "collections", () => draw(shown()));
 
   const grid = document.getElementById("cgrid");
   const filter = document.getElementById("cfilter");
 
-  function draw(list) {
+  /// What the filter box leaves, unordered — `draw` applies the order, so
+  /// changing the order does not throw away what was typed.
+  function shown() {
+    const q = filter.value.trim().toLowerCase();
+    return q ? items.filter((c) => c.name.toLowerCase().includes(q)) : items;
+  }
+
+  function draw(unordered) {
+    const list = sortPicker("collections", unordered);
     grid.innerHTML = list
       .map(
         (c) => `
@@ -151,11 +165,7 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
   let timer;
   filter.addEventListener("input", () => {
     clearTimeout(timer);
-    const q = filter.value.trim().toLowerCase();
-    timer = setTimeout(
-      () => draw(q ? items.filter((c) => c.name.toLowerCase().includes(q)) : items),
-      150
-    );
+    timer = setTimeout(() => draw(shown()), 150);
   });
 
   draw(items);

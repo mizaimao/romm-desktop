@@ -185,6 +185,11 @@ describe("the left column is a list, whatever is in it", () => {
     // the 12px radius and the 14px of padding, all of which are asserted gone
     // here. A list is a line of text with nothing around it.
     assert.equal(style.display, "flex", "still not laid out as a line");
+    // The eighth report, and the one thing neither earlier attempt asserted.
+    // `.card` sets `flex-direction: column`; `display: flex` on its own
+    // inherits that, so the name and the count went on stacking even after the
+    // box around them was gone. A line is a line because it runs across.
+    assert.equal(style.flexDirection, "row", "still stacked into two lines");
     assert.equal(style.borderRadius, "0px", "still has rounded corners");
     assert.equal(style.borderTopWidth || style.borderWidth, "0px", "still boxed in");
     assert.match(

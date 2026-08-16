@@ -2184,8 +2184,14 @@ body.columns #consoles .card {
      column, and the reason this list kept coming back as a stack of boxes no
      matter how the inside was laid out. Every one of those is turned off here,
      and what is left is the same line the consoles above it draw: name on the
-     left, count on the right, nothing around it. */
+     left, count on the right, nothing around it.
+
+     `flex-direction` is the one that made it two lines: `.card` sets `column`,
+     and setting `display: flex` here without saying which way inherits it —
+     which is how the name and the count went on stacking after the box around
+     them was gone. */
   display: flex;
+  flex-direction: row;
   align-items: baseline;
   gap: 6px;
   padding: 5px 8px;
@@ -2238,14 +2244,59 @@ body.columns #consoles .card.sel {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* The collection filter sits above the list and stays put while it scrolls. */
-body.columns #consoles .filter {
+/* The bar above the column: the filter box, and the button that says how the
+   list is ordered.
+
+   It stays put while the list scrolls under it, and it is opaque. The filter
+   box used to be the sticky element itself — an input with a see-through
+   background — so console names slid visibly through the middle of it. The
+   strip has to be a solid band the full width of the column, which an input
+   with rounded corners can never be. */
+body.columns #consoles .pickbar {
   position: sticky;
-  top: 0;
-  z-index: 1;
-  width: 100%;
-  margin-bottom: 6px;
+  top: -10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Out to the column's padding on both sides, so nothing shows past its
+     edges as it scrolls behind. */
+  margin: -10px -8px 6px;
+  padding: 10px 8px 6px;
+  background: var(--bg);
 }
+/* With the shader on, the page itself is see-through and an opaque band would
+   be a hole in it. Frosted instead, the same as the sticky headings in the
+   grid. */
+html.backdrop-on body.columns #consoles .pickbar {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(10px);
+}
+body.columns #consoles .pickbar .filter { flex: 1; min-width: 0; width: auto; margin: 0; }
+/* Outside a column there is no filter and nothing to stick to — just the
+   button, sitting above the grid. */
+.pickbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.pick-sort {
+  flex: none;
+  background: color-mix(in srgb, var(--glass) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--text) 78%, transparent);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pick-sort:hover {
+  background: color-mix(in srgb, var(--glass) 40%, transparent);
+  color: var(--text);
+}
+/* The handle goes with the column it belongs to — History has neither. */
+#consoles[hidden] + #consoles-grip { display: none; }
 
 /* This is an application, not a page.
    Dragging across a game's name and watching it turn blue is the single

@@ -1,4 +1,4 @@
-// The top-level sections: Library, My collections, Browse.
+// The top-level sections: Library, My collections, History, RomM browse.
 //
 // Three views that were previously reached through the same header button and a
 // drill-down, which meant "my six hand-made collections" and "one thousand and
@@ -36,14 +36,18 @@ export const SECTIONS = [
     open: () => showCollectionsIn("user", "My collections"),
   },
   {
-    id: "browse",
-    label: "Browse",
-    open: () => showCollectionGroups({ exclude: ["user"] }),
-  },
-  {
     id: "history",
     label: "History",
     open: () => showHistory(),
+  },
+  {
+    id: "browse",
+    // "Browse" said nothing — every tab here browses something. These are the
+    // server's own groupings: genres, franchises, companies, mirrored from
+    // RomM rather than made by anyone. Naming it after where it comes from is
+    // the difference between it and the tab above.
+    label: "RomM browse",
+    open: () => showCollectionGroups({ exclude: ["user"] }),
   },
 ];
 
