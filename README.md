@@ -114,7 +114,10 @@ usage and the folders everything lives in. **Settings → About**, and the macOS
 About panel, carry the version and the source.
 
 Launching writes a temporary config that RetroArch layers on top of its own, so
-**your `retroarch.cfg` is never modified**. That layer carries a consistent
+**your `retroarch.cfg` is never modified**. RetroArch loads its own per-core
+override — `config/<Core>/<Core>.cfg` — *after* that file, so anything in there
+silently wins; when it contradicts something this launch set, the launch says
+which keys and ignores the override for that run only, leaving the file alone. That layer carries a consistent
 gamepad hotkey set — RetroArch binds keyboard hotkeys but none for a pad, which
 otherwise leaves a handheld user unable to quit a game. Hold **Back/Select**:
 

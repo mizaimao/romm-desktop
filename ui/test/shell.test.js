@@ -319,6 +319,24 @@ describe("three columns, in the real page", () => {
   /// control nobody finds. Once the preview has been closed it is also the
   /// only way back to it, so hiding it on any screen is how someone ends up
   /// with no preview and no button.
+  /// On the console list there is nothing to preview, so the button is dead
+  /// rather than gone — the third report of it being missing was it being
+  /// hidden, and hiding it is what makes it unfindable.
+  test("it is disabled where there is nothing to preview", () => {
+    shell.setMode("single");
+    shell.enter({ title: "Platforms", layout: true });
+    assert.equal(el.sidebarBtn.hidden, false, "hidden again");
+    assert.equal(el.sidebarBtn.disabled, true, "it still claims to do something");
+
+    shell.enter({ title: "Arcade", sidebar: true, layout: true });
+    assert.equal(el.sidebarBtn.disabled, false, "dead where there is a game to preview");
+
+    // In Desk the preview is a column of the layout, so it is live everywhere.
+    shell.setMode("columns");
+    shell.enter({ title: "Platforms", layout: true });
+    assert.equal(el.sidebarBtn.disabled, false);
+  });
+
   test("Back is not offered, and the preview toggle never disappears", () => {
     for (const mode of ["columns", "single"]) {
       shell.setMode(mode);

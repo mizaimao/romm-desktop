@@ -266,6 +266,69 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         )
         .ok();
 
+    // RetroArch's own per-core override, which is applied *after* ours.
+    //
+    // This is the answer to ten rounds of "rapid fire is still a toggle". The
+    // config we write was right; `config/Geolith/Geolith.cfg` on that machine
+    // held three lines — turbo mode 2, single button *toggle*, period 6 — and
+    // RetroArch loads core overrides after `--appendconfig`, so ours never had
+    // a chance. Nothing in the app could see it and nothing said a word.
+    //
+    // Their file is not ours to edit. Instead: say exactly which keys are
+    // being overridden and where, and turn override loading off for this
+    // launch so the settings we were asked for are the ones in force.
+    if let Some(path) = overrides.as_ref() {
+        let clash = ra.override_clash(map.label_for(&core), path);
+        if !clash.is_empty() {
+            notes.push(format!(
+                "RetroArch's own override for {} sets {} — ignoring its override file for \
+                 this launch so these settings apply",
+                map.label_for(&core).unwrap_or(&core),
+                clash.join(", ")
+            ));
+            // Appended after the fact: the file has to exist to be compared
+            // with, and this line only makes sense once something has clashed.
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(path) {
+                let _ = writeln!(
+                    f,
+                    "\n# RetroArch loads config/<core>/<core>.cfg after --appendconfig, and that\n\
+                     # file sets things this launch was asked to set. Off for this run only;\n\
+                     # the file itself is untouched.\n\
+                     auto_overrides_enable = \"false\""
+                );
+            }
+        }
+    }
+
+    // Say, in the launch notes, what rapid fire actually ended up in the file.
+    //
+    // Ten rounds of "it is still a toggle" against a config that reads
+    // correctly here, with no way to tell from the outside whether the block
+    // was written at all — a pad the autoconfig does not know produces silence
+    // that looks exactly like a setting that does not work.
+    if req.autofire != crate::tweaks::AutoFire::Off {
+        let written = overrides
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .unwrap_or_default();
+        notes.push(if written.contains("input_player1_turbo_btn") {
+            format!(
+                "rapid fire: hold {} on its own for {} shots a second (RetroArch turbo mode 3)",
+                match req.autofire {
+                    crate::tweaks::AutoFire::RightBumper => "RB",
+                    _ => "LB",
+                },
+                req.autofire_hz
+            )
+        } else {
+            format!(
+                "rapid fire: nothing was written — no autoconfig profile for {}",
+                req.pad.unwrap_or("this pad")
+            )
+        });
+    }
+
     Ok(Plan {
         entry_slot: req.entry_slot,
         core_label: map.label_for(&core).map(str::to_owned),

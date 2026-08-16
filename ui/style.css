@@ -2546,3 +2546,10 @@ code {
   background: color-mix(in srgb, #d8823c 18%, transparent);
   border: 1px solid color-mix(in srgb, #d8823c 40%, transparent);
 }
+
+/* A control that is present but cannot do anything here. */
+#tabbar #sidebar-btn:disabled,
+#tabbar #grab-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

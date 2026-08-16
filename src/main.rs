@@ -120,7 +120,13 @@ fn cmd_doctor() -> Result<()> {
     Ok(())
 }
 
-async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscreen: bool) -> Result<()> {
+async fn cmd_launch(
+    rom: &Path,
+    go: bool,
+    core_override: Option<&str>,
+    fullscreen: bool,
+    pad: Option<&str>,
+) -> Result<()> {
     let cfg = Config::load()?;
     let ra = RetroArch::locate(cfg.retroarch.root.as_deref())?
         .with_system_dir(Some(cfg.system_dir()));
@@ -137,8 +143,10 @@ async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscree
     let user_cfg = cfg.user_retroarch_config();
     let achievements = cfg.achievements.settings();
     let req = launch::Request {
-        autofire: romm_desktop::tweaks::AutoFire::Off,
-        autofire_hz: 5,
+        // The same settings the window uses, so a dry run writes the same file
+        // a real launch does.
+        autofire: romm_desktop::tweaks::AutoFire::parse(&cfg.retroarch.autofire),
+        autofire_hz: cfg.retroarch.autofire_hz,
         window_decorations: true,
         fit_window: true,
         mirror_players: true,
@@ -159,7 +167,7 @@ async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscree
         core_override,
 motion_shader: cfg.shaders.motion.as_deref(),
         refresh_hz: None,
-        pad: None,
+        pad,
         achievements: Some(&achievements),
     };
     // Cores, shaders and BIOS, fetched on the way in rather than as advice to
@@ -1821,6 +1829,13 @@ enum Command {
         /// Actually spawn the emulator; without this it is a dry run
         #[arg(long)]
         go: bool,
+        /// The controller name, as RetroArch's autoconfig knows it. The pad
+        /// decides the hotkey and rapid-fire button numbers, so a dry run
+        /// without one writes neither — which is why "rapid fire does
+        /// nothing" could not be told apart from "rapid fire was never
+        /// written" from a terminal.
+        #[arg(long, value_name = "NAME")]
+        pad: Option<String>,
     },
     /// Resolve a ROM's artwork, fetching from the server if needed
     Art {
@@ -2047,7 +2062,8 @@ async fn main() -> Result<()> {
             core,
             fullscreen,
             go,
-        } => cmd_launch(&rom, go, core.as_deref(), fullscreen).await,
+            pad,
+        } => cmd_launch(&rom, go, core.as_deref(), fullscreen, pad.as_deref()).await,
         Command::Art { term } => cmd_art(&term).await,
         Command::Hashcheck { file } => cmd_hashcheck(&file),
         Command::SyncBios => cmd_sync_bios().await,

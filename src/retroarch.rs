@@ -822,7 +822,45 @@ input_player2_gun_start_mbtn = \"3\"
         crate::players::config_lines(profile.as_ref(), mirror)
     }
 
-    /// Write a starter user-settings file if none exists yet.
+    /// Which of the keys we just wrote a core's own override file also sets.
+        ///
+    /// RetroArch applies `config/<Core Name>/<Core Name>.cfg` after everything
+    /// passed with `--appendconfig`, so anything in there silently wins. That
+    /// is invisible from this side — the config we write is correct and the
+    /// emulator behaves as though it is not — and it cost ten rounds of
+    /// chasing a rapid fire setting that was being replaced three lines at a
+    /// time.
+    ///
+    /// Compares by key rather than against a list of interesting settings, so
+    /// a clash in anything we set is reported rather than only the ones
+    /// somebody thought to check.
+    pub fn override_clash(&self, core_label: Option<&str>, ours: &Path) -> Vec<String> {
+        let Some(label) = core_label else {
+            return Vec::new();
+        };
+        let theirs = self.config_dir().join(label).join(format!("{label}.cfg"));
+        let (Ok(ours), Ok(theirs)) =
+            (std::fs::read_to_string(ours), std::fs::read_to_string(theirs))
+        else {
+            return Vec::new();
+        };
+        let keys = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+                .filter_map(|l| l.split('=').next())
+                .map(|k| k.trim().to_owned())
+                .filter(|k| !k.is_empty())
+                .collect()
+        };
+        let mine = keys(&ours);
+        let mut clash: Vec<String> =
+            keys(&theirs).into_iter().filter(|k| mine.contains(k)).collect();
+        clash.sort();
+        clash.dedup();
+        clash
+    }
+
+/// Write a starter user-settings file if none exists yet.
     ///
     /// Seeded with commented examples rather than active values: silently
     /// changing someone's controls is worse than leaving them alone.
@@ -1397,6 +1435,44 @@ input_r2_axis = "+5"
             let p = period(hz);
             assert!(p >= 2, "{hz} Hz gave a period of {p}");
         }
+    }
+
+    /// The file that beat us for ten rounds.
+    ///
+    /// RetroArch applies `config/<Core>/<Core>.cfg` after everything passed
+    /// with `--appendconfig`, so three lines in there — turbo mode 2, single
+    /// button *toggle* — replaced the mode we asked for on every launch. The
+    /// config we wrote was correct and the emulator behaved as though it was
+    /// not, with nothing anywhere saying why.
+    #[test]
+    fn a_cores_own_override_is_noticed_key_by_key() {
+        let dir = scratch("override-clash");
+        let ra = fake(&dir);
+        let core_cfg = ra.config_dir().join("Geolith");
+        std::fs::create_dir_all(&core_cfg).unwrap();
+        std::fs::write(
+            core_cfg.join("Geolith.cfg"),
+            "input_turbo_mode = \"2\"\ninput_turbo_period = \"6\"\nvideo_smooth = \"true\"\n",
+        )
+        .unwrap();
+
+        let ours = dir.join("ours.cfg");
+        std::fs::write(
+            &ours,
+            "# a comment mentioning input_turbo_mode\ninput_turbo_mode = \"3\"\n\
+             input_turbo_period = \"15\"\ninput_player1_turbo_btn = \"10\"\n",
+        )
+        .unwrap();
+
+        let clash = ra.override_clash(Some("Geolith"), &ours);
+        assert_eq!(clash, vec!["input_turbo_mode", "input_turbo_period"]);
+        // Only what both set: their video_smooth is theirs to keep, and our
+        // turbo button is not contested.
+        assert!(!clash.iter().any(|k| k == "video_smooth" || k == "input_player1_turbo_btn"));
+
+        // A core with no override of its own, and a core we have no name for.
+        assert!(ra.override_clash(Some("SwanStation"), &ours).is_empty());
+        assert!(ra.override_clash(None, &ours).is_empty());
     }
 
     /// Nothing is moved, cleared or swapped. That is the whole reason this

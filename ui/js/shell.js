@@ -153,6 +153,15 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
     // anywhere is how someone ends up with no preview and no button.
     const wanted = asked || name === "sidebar";
     node.hidden = suppressed || !wanted;
+    // The preview toggle stays put but goes dead on the console list, where
+    // there is nothing to preview. Disabled rather than hidden: a control that
+    // vanishes from a row that never does is one nobody finds again, and this
+    // one has been reported missing three times.
+    if (name === "sidebar") {
+      const dead = !wants.sidebar && mode !== "columns";
+      node.disabled = dead;
+      node.title = dead ? "Nothing to preview on this screen" : "Show or hide the detail pane";
+    }
   }
   if (el.zoomWrap) {
     // The one conditional worth keeping: the slider sizes covers, so it means
