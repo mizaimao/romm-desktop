@@ -4,6 +4,7 @@ import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { openSortMenu } from "./sort.js";
 import { openFilterMenu } from "./filter.js";
+import { installPageFilter, layoutPageFilter } from "./pagefilter.js";
 import { chooseMode, storedMode, shellMode, installColumnResizer } from "./shell.js";
 import { human, toast, escapeHtml } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows, randomGame } from "./library.js";
@@ -278,6 +279,8 @@ function statusCard(s) {
   setSidebar(state.sidebar);
   installTabs();
   await showSection("library", { force: true });
+  installPageFilter();
+  window.addEventListener("resize", layoutPageFilter);
   installDetailResizer();
   installColumnResizer();
   installKeys();

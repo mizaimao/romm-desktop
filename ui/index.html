@@ -40,6 +40,15 @@
          the shoulder buttons have somewhere obvious to be moving between. -->
     <nav id="tabbar" role="tablist" aria-label="Sections"></nav>
 
+    <!-- Search inside the page, and the button that orders it. Declared here
+         rather than inside the tab row because that row is rebuilt from
+         scratch whenever the sections change; `installTabs` moves this into
+         it. -->
+    <span id="page-filter">
+      <input id="pfilter" class="filter" type="search" placeholder="Filter this page…" />
+      <span id="page-filter-extra"></span>
+    </span>
+
     <main>
       <!-- The left column, in the three-column arrangement only. In the
            one-pane arrangement the console list is drawn into #list like

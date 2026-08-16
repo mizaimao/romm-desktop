@@ -58,6 +58,8 @@ export const el = {
   zoom: document.getElementById("zoom"),
   zoomWrap: document.getElementById("zoom-wrap"),
   viewSwitch: document.getElementById("view-switch"),
+  pageFilter: document.getElementById("pfilter"),
+  pageFilterBar: document.getElementById("page-filter"),
 };
 
 // Tauri globals, exposed once so modules do not each reach into window.

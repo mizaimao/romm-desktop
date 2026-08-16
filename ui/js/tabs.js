@@ -227,6 +227,10 @@ export function installTabs() {
   // `hidden`, hidden means out of the layout, and the preview toggle slid back
   // up against RB in the middle of the row. A holder is always there whatever
   // is inside it.
+  // The filter goes in before the end holder, so the two buttons stay at the
+  // very right and the box sits clear of the preview column beneath it.
+  if (el.pageFilterBar) el.tabbar.appendChild(el.pageFilterBar);
+
   const end = document.createElement("span");
   end.className = "tabbar-end";
   if (el.grabBtn) end.appendChild(el.grabBtn);

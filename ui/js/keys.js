@@ -21,7 +21,11 @@ import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } 
 import { cycleSection, resetSection } from "./tabs.js";
 
 function items() {
-  return [...el.list.querySelectorAll(".card, .gcard, .row, .tcard")];
+  // Not the ones the page filter has hidden: the cursor stepping onto a card
+  // that is not on screen looks like the cursor disappearing.
+  return [...el.list.querySelectorAll(".card, .gcard, .row, .tcard")].filter(
+    (n) => !n.classList.contains("filtered-out")
+  );
 }
 
 // Rows are derived from where things actually landed, not from a column count.

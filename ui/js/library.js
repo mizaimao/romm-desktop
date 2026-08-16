@@ -9,6 +9,7 @@ import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
 import { byName } from "./picker-order.js";
+import { setPageFilterLabel, refreshPageFilter } from "./pagefilter.js";
 import { selectRom, play, withTransition, showPlatformInfo } from "./detail.js";
 import { download } from "./actions.js";
 
@@ -179,6 +180,8 @@ function renderPlatforms(items) {
   into.innerHTML = asList
     ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
     : `<div class="grid">${ordered.map(platformCard).join("")}</div>`;
+  setPageFilterLabel(`${items.length} consoles`);
+  refreshPageFilter();
 
   into.querySelectorAll(".card, .prow").forEach((c) => {
     // Selection, not hover. The preview follows the cursor here exactly as it
@@ -479,6 +482,8 @@ export function renderRows(unsorted, showPlatform) {
       : listMarkup(rows, showPlatform);
 
   delegateGames(region("games"));
+  setPageFilterLabel(`${rows.length} games`);
+  refreshPageFilter();
 
   if (state.layout === "grid") observeCovers();
   // Put the cursor back where it was in this list, falling back to the top.

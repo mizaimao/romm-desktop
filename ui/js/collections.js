@@ -9,6 +9,9 @@ import { el, state, trail, invoke, convertFileSrc } from "./state.js";
 import { enter as enterView, region, resetGames } from "./shell.js";
 import { escapeHtml } from "./util.js";
 import { pickerBar, wirePickerBar, sortPicker } from "./picker-order.js";
+import {
+  setPageFilterLabel, setPageFilterExtra, refreshPageFilter,
+} from "./pagefilter.js";
 import { renderRows } from "./library.js";
 import { shellMode } from "./shell.js";
 
@@ -114,23 +117,18 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate
   // from the header search, which searches games rather than collections.
-  // The filter and the order button in one opaque bar. The filter box on its
-  // own was sticky and see-through, so the names scrolled through the middle
-  // of it.
-  region(into).innerHTML =
-    pickerBar({ kind: "collections", filter: `Filter ${items.length} collections…` }) +
-    `<div class="grid" id="cgrid"></div>`;
-  wirePickerBar(region(into), "collections", () => draw(shown()));
+  // No filter box drawn into the list any more: that is the one in the tab
+  // row now, where it is in the same place on every screen instead of only
+  // this one, and where it does not sit in the middle of a page of cards.
+  region(into).innerHTML = `<div class="grid" id="cgrid"></div>`;
+  setPageFilterLabel(`${items.length} collections`);
+  // The order button rides beside it.
+  const bar = document.createElement("span");
+  bar.innerHTML = pickerBar({ kind: "collections" });
+  setPageFilterExtra(bar.firstElementChild);
+  wirePickerBar(document.getElementById("page-filter-extra"), "collections", () => draw(items));
 
   const grid = document.getElementById("cgrid");
-  const filter = document.getElementById("cfilter");
-
-  /// What the filter box leaves, unordered — `draw` applies the order, so
-  /// changing the order does not throw away what was typed.
-  function shown() {
-    const q = filter.value.trim().toLowerCase();
-    return q ? items.filter((c) => c.name.toLowerCase().includes(q)) : items;
-  }
 
   function draw(unordered) {
     const list = sortPicker("collections", unordered);
@@ -160,13 +158,9 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
     // platform grid does.
     grid.querySelector(".card")?.classList.add("sel");
     loadMosaics(list.slice(0, 60), grid);
+    // The list is new; whatever is in the filter box has never seen it.
+    refreshPageFilter();
   }
-
-  let timer;
-  filter.addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => draw(shown()), 150);
-  });
 
   draw(items);
 

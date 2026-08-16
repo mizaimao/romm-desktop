@@ -18,6 +18,7 @@
 // column is. That is the whole point of the split.
 
 import { el } from "./state.js";
+import { clearPageFilter, layoutPageFilter, setPageFilterExtra } from "./pagefilter.js";
 
 /// Where content goes, by role rather than by element.
 ///
@@ -168,6 +169,12 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
     // nothing in a list.
     el.zoomWrap.hidden = zoom === "grid" ? !gridLayout : !zoom;
   }
+  // A filter typed for one screen means nothing on the next, and text left in
+  // the box means arriving at a list that is missing things for no visible
+  // reason. The button beside it belongs to the view too.
+  clearPageFilter();
+  setPageFilterExtra(null);
+  layoutPageFilter();
   if (el.title) {
     el.title.textContent = title;
     // It has a fixed share of the bar now, so a long console name ellipsises.

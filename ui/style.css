@@ -2562,3 +2562,35 @@ code {
   opacity: 0.35;
   cursor: default;
 }
+
+/* Search inside the page, in the tab row.
+   Pushed right, but stopping short of the preview column beneath it — the
+   inset is measured in `layoutPageFilter`, because it is that column's width
+   less the two small buttons that stay at the very end. */
+#tabbar #page-filter {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+#tabbar #page-filter .filter {
+  width: clamp(140px, 18vw, 260px);
+  height: 26px;
+  padding: 3px 9px;
+  font-size: 12px;
+  margin: 0;
+}
+#page-filter-extra:empty { display: none; }
+/* The order button beside it, sized for this row rather than for a list. */
+#tabbar #page-filter .pickbar {
+  margin: 0;
+  padding: 0;
+  position: static;
+  background: none;
+  border: 0;
+}
+#tabbar #page-filter .pick-sort { font-size: 11.5px; padding: 3px 8px; }
+
+/* What the filter hid. */
+.filtered-out { display: none !important; }

@@ -401,7 +401,9 @@ describe("each tab fills the left column with its own list", () => {
       el.consoles,
       "the picker is not the left column in three columns"
     );
-    assert.match(el.consoles.innerHTML, /Filter/, "the collections did not reach the column");
+    // The filter box is in the tab row now, not drawn into the list, so what
+    // proves the collections landed here is the collections.
+    assert.match(el.consoles.innerHTML, /cgrid|card/, "the collections did not reach the column");
   });
 
   test("Browse puts the groups there", async () => {
@@ -522,7 +524,9 @@ describe("switching tabs in three columns", () => {
     );
 
     await tabs.showSection("mine");
-    assert.ok(el.consoles.querySelector(".filter"), "the collections did not take the column");
+    // The filter box moved to the tab row; the collections themselves are what
+    // says the column changed hands.
+    assert.ok(el.consoles.querySelector("#cgrid"), "the collections did not take the column");
 
     await tabs.showSection("library");
     assert.ok(

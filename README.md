@@ -66,7 +66,10 @@ selected — where nothing is ever replaced and both outer columns can be dragge
 and remember their widths. Four tabs across the top either way: **Library**,
 **My collections**, **History** and **RomM browse**.
 
-**Filter** narrows a list to what is on this machine, what is not, what is
+The box at the right of the tab row searches the page you are on — consoles,
+collections or games — and leaves you where you are, which is the difference
+between it and the search box above, which spans the library and takes you to a
+different screen. **Filter** narrows a list to what is on this machine, what is not, what is
 starred, what you have never played, or what is rated 8 or better; several at
 once, and they all have to pass. **Random** picks out of whatever the filters left —
 the only realistic way into an arcade set nobody knows by heart, and on the

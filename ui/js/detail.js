@@ -6,6 +6,7 @@ import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, setOpenHook } from "./lightbox.js";
 import { showMenu } from "./menu.js";
 import { shellMode } from "./shell.js";
+import { layoutPageFilter } from "./pagefilter.js";
 import { deleteState } from "./states.js";
 import { launch, download } from "./actions.js";
 import { askDownload } from "./bulk.js";
@@ -39,6 +40,8 @@ export function setSidebar(on) {
     ((state.view === "roms" || state.view === "search" || state.view === "collection-roms") &&
       state.selected !== null);
   el.detail.hidden = !(on && allowed);
+  // The filter box in the tab row is positioned against this pane's edge.
+  layoutPageFilter();
 }
 
 /// The console the pane is showing, when it is showing a console rather than a
