@@ -6,6 +6,7 @@
 // so this sits next to the platform grid rather than inside it.
 
 import { el, state, trail, invoke, convertFileSrc } from "./state.js";
+import { enter as enterView , region } from "./shell.js";
 import { escapeHtml } from "./util.js";
 import { renderRows } from "./library.js";
 
@@ -18,14 +19,11 @@ function chrome(title) {
   state.view = "collections";
   state.platform = null;
   state.selected = null;
-  el.back.hidden = false;
   el.detail.hidden = true;
-  el.layoutBtn.hidden = true;
-  el.grabBtn.hidden = true;
-  el.sidebarBtn.hidden = true;
-  el.zoomWrap.hidden = false;
   el.search.value = "";
-  el.title.textContent = title;
+  // The zoom slider stays: these are cards too, and sizing them is the same
+  // want as sizing covers.
+  enterView({ title, back: true, zoom: true });
 }
 
 export async function showCollectionGroups({ exclude = [] } = {}) {
@@ -38,11 +36,11 @@ export async function showCollectionGroups({ exclude = [] } = {}) {
     (g) => !exclude.includes(g.group)
   );
   if (!groups.length) {
-    el.list.innerHTML = `<div class="empty">No collections on the server. Run a sync, or make one in RomM.</div>`;
+    region("primary").innerHTML = `<div class="empty">No collections on the server. Run a sync, or make one in RomM.</div>`;
     return;
   }
 
-  el.list.innerHTML = `<div class="grid">${groups
+  region("primary").innerHTML = `<div class="grid">${groups
     .map(
       (g) => `
       <div class="card" data-group="${escapeHtml(g.group)}">
@@ -69,8 +67,7 @@ export async function showCollectionsIn(group, label) {
 
   // 1,040 companies is not a browsable list, so filter locally. Kept separate
   // from the header search, which searches games rather than collections.
-  el.list.innerHTML =
-    `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
+  region("primary").innerHTML = `<input id="cfilter" class="filter" type="search" placeholder="Filter ${items.length} collections…" />` +
     `<div class="grid" id="cgrid"></div>`;
 
   const grid = document.getElementById("cgrid");
@@ -125,15 +122,19 @@ export async function showCollectionRoms(id, name) {
   // parked section used to hand the title back as the name, so "Arcade Sports —
   // 256 games" became the name and gained a second "— 256 games" every time.
   state.collectionName = name;
-  el.back.hidden = false;
-  el.grabBtn.hidden = false;
-  el.layoutBtn.hidden = false;
-  el.sidebarBtn.hidden = false;
-  el.zoomWrap.hidden = state.layout !== "grid";
   el.search.value = "";
 
   state.rows = await invoke("collection_roms", { id: String(id) });
-  el.title.textContent = `${name} — ${state.rows.length} games`;
+  enterView({
+    title: `${name} — ${state.rows.length} games`,
+    back: true,
+    layout: true,
+    sidebar: true,
+    grab: true,
+    sort: true,
+    zoom: "grid",
+    gridLayout: state.layout === "grid",
+  });
   // Collections mix platforms, so the list view needs the platform column.
   renderRows(state.rows, true);
 }

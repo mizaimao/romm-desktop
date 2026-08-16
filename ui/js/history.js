@@ -12,7 +12,8 @@
 // the ones you kept opening and kept putting down are the only list here that
 // tells you something you did not already know.
 
-import { el, invoke } from "./state.js";
+import { invoke } from "./state.js";
+import { region, enter } from "./shell.js";
 import { escapeHtml, toast } from "./util.js";
 
 /// Longest bar in the group is full width; everything else is relative to it.
@@ -43,6 +44,12 @@ function games(rows, note) {
 }
 
 export async function showHistory() {
+  // It set no chrome at all, so it kept whatever the tab before it left on
+  // screen — Back, Take offline, the zoom slider — all of them acting on a
+  // console that is no longer showing. A view that declares nothing gets
+  // nothing, which is what this page wants: it is a page, not a list.
+  enter({ title: "History" });
+
   let h;
   try {
     h = await invoke("play_history");
@@ -53,7 +60,7 @@ export async function showHistory() {
   // Nothing recorded yet is the normal state on a fresh install, and an empty
   // page with three empty headings reads as broken rather than as new.
   if (!h.sessions) {
-    el.list.innerHTML = `
+    region("primary").innerHTML = `
       <div class="hist-empty">
         <h2>Nothing recorded yet</h2>
         <p>Time gets counted from the next game you start here. Sessions shorter
@@ -66,7 +73,7 @@ export async function showHistory() {
   const maxPlatform = Math.max(...h.platforms.map((p) => p.seconds), 0);
   const hours = Math.round(h.total_seconds / 360) / 10;
 
-  el.list.innerHTML = `
+  region("primary").innerHTML = `
     <div class="hist">
       <div class="hist-top">
         <div><strong>${hours}</strong><span>hours</span></div>

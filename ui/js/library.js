@@ -3,6 +3,7 @@
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
 import { sorted, refreshSortButton } from "./sort.js";
+import { enter, region, showZoom } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
@@ -14,19 +15,20 @@ export async function showPlatforms() {
   trail.length = 0;
   state.platform = null;
   state.selected = null;
-  el.back.hidden = true;
   el.detail.hidden = true;
-  // Grid or list works here too. It was hidden on this screen, which is why
-  // there was no way to see thirty-five consoles without scrolling past
-  // thirty-five pictures of them.
-  el.layoutBtn.hidden = false;
-  el.sidebarBtn.hidden = true;
-  // Offered here as well as inside a console: burying it one level down means
-  // it is only found by someone who already knows it exists.
-  el.grabBtn.hidden = false;
-  el.zoomWrap.hidden = state.layout !== "grid";
+  enter({
+    title: "Platforms",
+    // Grid or list works here too. It was hidden on this screen, which is why
+    // there was no way to see thirty-five consoles without scrolling past
+    // thirty-five pictures of them.
+    layout: true,
+    // Offered here as well as inside a console: burying it one level down
+    // means it is only found by someone who already knows it exists.
+    grab: true,
+    zoom: "grid",
+    gridLayout: state.layout === "grid",
+  });
   coverObserver?.disconnect();
-  el.title.textContent = "Platforms";
 
   const items = await invoke("platforms");
   for (const p of items) if (p.cover_aspect) state.aspects[p.slug] = p.cover_aspect;
@@ -93,19 +95,22 @@ export async function showAllRecent() {
   state.platform = null;
   trail.length = 0;
   trail.push(() => showPlatforms());
-  el.back.hidden = false;
   el.detail.hidden = !state.sidebar;
-  el.layoutBtn.hidden = false;
-  el.sidebarBtn.hidden = false;
-  el.grabBtn.hidden = true;
-  el.zoomWrap.hidden = state.layout !== "grid";
-  el.title.textContent = "Continue playing";
+  enter({
+    title: "Continue playing",
+    back: true,
+    layout: true,
+    sidebar: true,
+    sort: true,
+    zoom: "grid",
+    gridLayout: state.layout === "grid",
+  });
 
   let rows = [];
   try {
     rows = await invoke("recent_games", { limit: 500 });
   } catch (e) {
-    el.list.innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
+    region("primary").innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
     return;
   }
   // Grouped by console, like a search: these come from everywhere.
@@ -120,8 +125,7 @@ export async function showAllRecent() {
 /// else. The list is for finding a console you can name; the grid is for
 /// recognising one you cannot.
 function renderPlatforms(items) {
-  el.list.innerHTML =
-    state.layout === "grid"
+  region("primary").innerHTML = state.layout === "grid"
       ? `<div class="grid">${items.map(platformCard).join("")}</div>`
       : `<div class="rows">${items.map(platformRow).join("")}</div>`;
 
@@ -230,14 +234,18 @@ export async function showRoms(slug) {
   state.platform = slug;
   state.lastPlatform = slug;
   localStorage.setItem("lastPlatform", slug);
-  el.back.hidden = false;
-  el.layoutBtn.hidden = false;
-  el.sidebarBtn.hidden = false;
-  el.grabBtn.hidden = false;
-  el.zoomWrap.hidden = state.layout !== "grid";
   el.search.value = "";
   state.rows = await invoke("roms", { platform: slug });
-  el.title.textContent = `${slug} — ${state.rows.length} games`;
+  enter({
+    title: `${slug} — ${state.rows.length} games`,
+    back: true,
+    layout: true,
+    sidebar: true,
+    grab: true,
+    sort: true,
+    zoom: "grid",
+    gridLayout: state.layout === "grid",
+  });
   renderRows(state.rows, false);
 }
 
@@ -246,15 +254,19 @@ export async function runSearch(term) {
     return state.platform ? showRoms(state.platform) : showPlatforms();
   }
   state.view = "search";
-  el.back.hidden = false;
-  el.layoutBtn.hidden = false;
-  el.sidebarBtn.hidden = false;
-  el.zoomWrap.hidden = state.layout !== "grid";
   state.rows = await invoke("search", { term });
   const consoles = new Set(state.rows.map((r) => r.platform)).size;
-  el.title.textContent =
-    `Search “${term}” — ${state.rows.length}` +
-    (consoles > 1 ? ` across ${consoles} consoles` : "");
+  enter({
+    title:
+      `Search “${term}” — ${state.rows.length}` +
+      (consoles > 1 ? ` across ${consoles} consoles` : ""),
+    back: true,
+    layout: true,
+    sidebar: true,
+    sort: true,
+    zoom: "grid",
+    gridLayout: state.layout === "grid",
+  });
   renderRows(state.rows, true);
 }
 
@@ -319,14 +331,14 @@ export function renderRows(unsorted, showPlatform) {
   const rows = sorted(unsorted);
   refreshSortButton();
   if (!rows.length) {
-    el.list.innerHTML = `<div class="empty">Nothing here.</div>`;
+    region("primary").innerHTML = `<div class="empty">Nothing here.</div>`;
     return;
   }
   // Search spans every console, so a flat list of 200 hits buries the ones you
   // meant. Grouping also lets each console keep its own cover shape, which a
   // single mixed grid cannot.
   resetNav();
-  el.list.innerHTML = showPlatform
+  region("primary").innerHTML = showPlatform
     ? groupedMarkup(rows)
     : state.layout === "grid"
       ? gridMarkup(rows)
@@ -477,7 +489,7 @@ export function setLayout(next) {
   el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
   // Only a grid has anything to resize, on the consoles screen as much as
   // anywhere else.
-  el.zoomWrap.hidden = next !== "grid";
+  showZoom(next === "grid");
 
   // Redraw whatever is actually on screen.
   //
