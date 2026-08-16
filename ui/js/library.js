@@ -181,13 +181,14 @@ function renderPlatforms(items) {
     : `<div class="grid">${ordered.map(platformCard).join("")}</div>`;
 
   into.querySelectorAll(".card, .prow").forEach((c) => {
-    // The console under the pointer goes in the preview before it is opened,
-    // so hovering the list is a way to read what each console has.
-    c.addEventListener("mouseenter", () => {
-      if (state.view === "platforms") showPlatformInfo(c.dataset.slug);
-    });
+    // Selection, not hover. The preview follows the cursor here exactly as it
+    // does inside a console — a pane that changes as the pointer crosses the
+    // list is a pane you cannot read, because reaching for it changes it.
     c.addEventListener("click", () => {
-      if (shellMode() === "columns") markPlatform(c.dataset.slug);
+      if (shellMode() === "columns") {
+        markPlatform(c.dataset.slug);
+        showPlatformInfo(c.dataset.slug);
+      }
       openPlatform(c.dataset.slug, c);
     });
   });

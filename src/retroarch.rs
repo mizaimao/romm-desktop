@@ -763,6 +763,13 @@ input_player2_gun_start_mbtn = \"3\"
              # held, RetroPad B — the fire button in every arcade core —\n\
              # repeats at the rate set here. Let go and it stops.\n\
              #\n\
+             # Hold it *on its own*. RetroArch reports the repeat only on\n\
+             # frames where the button is not physically pressed — the real\n\
+             # press wins — so holding the modifier and the fire button\n\
+             # together gives one continuous shot and no repeat at all. That\n\
+             # is why every arrangement that put the repeat on the fire button\n\
+             # itself was unplayable, and it is not something a config can fix.\n\
+             #\n\
              # Not mode 0. RetroArch calls that one \"classic\" and its own\n\
              # documentation describes holding the modifier and a face button\n\
              # together, but what it actually does is *latch*: the face button\n\

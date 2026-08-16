@@ -63,12 +63,21 @@ export async function showPlatformInfo(slug) {
   const logo = p.logo
     ? `<img class="pcover${p.logo_wordmark ? " wordmark" : ""}" src="${convertFileSrc(p.logo)}" alt="" />`
     : "";
+  // The same four things ES-DE's themes put on a system: who made it, when it
+  // arrived, what kind of machine it was, and a line about what it was for.
+  const facts = [
+    p.manufacturer ? row("Made by", p.manufacturer) : "",
+    p.released ? row("Released", String(p.released)) : "",
+    p.hardware ? row("Type", p.hardware) : "",
+  ].join("");
   el.detail.innerHTML = `
     <div class="scroll">
       ${logo}
       <h2>${escapeHtml(p.name)}</h2>
       <div class="sub">${escapeHtml(p.slug)}</div>
+      ${p.blurb ? `<p class="summary">${escapeHtml(p.blurb)}</p>` : ""}
       <dl>
+        ${facts}
         <dt>Games</dt><dd>${p.rom_count}</dd>
         <dt>Emulator</dt><dd class="pf-core">${p.playable ? "…" : "none installed"}</dd>
         <dt>Shader</dt><dd class="pf-shader">…</dd>
@@ -333,7 +342,7 @@ function autofireRow(d) {
     <div class="autofire-row" title="Applies to every arcade shooter, not only this game">
       <span class="af-label">Rapid fire</span>
       ${opt("off", "Off", "The buttons behave as the cabinet did")}
-      ${opt("lb", "Hold LB", "While LB is held, fire repeats at this rate. Let go and it stops.")}
+      ${opt("lb", "Hold LB", "Hold LB on its own and the game fires at this rate. Do not hold the fire button as well — a real press overrides the repeat.")}
       ${opt("rb", "Hold RB", "The same on the other shoulder, for when your left hand is busy")}
       ${rate}
     </div>`;

@@ -43,7 +43,27 @@ function measureRefresh(frames = 24) {
   });
 }
 
+/// True from the moment a launch starts until the emulator has exited and the
+/// pad has settled.
+///
+/// `launch_rom` does not return until the game quits, so a second press in the
+/// meantime used to start a second copy — two RetroArch windows over each
+/// other, both holding the same save. A held A repeats slowly enough that it
+/// took a deliberate double press, which is exactly what a controller invites.
+let launching = false;
+
+export function launchInFlight() {
+  return launching;
+}
+
 export async function launch(id, { resolving = false, skipSync = false, entrySlot = null } = {}) {
+  // The retry paths below call back into this function on purpose, so they
+  // pass through the guard rather than being stopped by it.
+  if (launching && !resolving && !skipSync) return;
+  launching = true;
+  // And the pad goes quiet immediately, before anything is awaited: the press
+  // that started this is still down, and the poll runs sixty times a second.
+  suspendPad();
   // Declared out here so the error paths can drop the listener too: `const`
   // inside the try block is not in scope in the catch.
   let stop;
@@ -54,7 +74,8 @@ export async function launch(id, { resolving = false, skipSync = false, entrySlo
     // and per OS, so guessing them is how "hold Select" ended up as "hold B".
     // The pad is very likely still held: this call does not return until the
     // emulator exits, and the way out of a game is a button combination.
-    // Whatever is down belongs to that, not to us.
+    // Whatever is down belongs to that, not to us. (Suspended above as well,
+    // before the first await — this one is the one that survives a retry.)
     suspendPad();
     stop = await listen("launch-progress", ({ payload }) => {
       toast(String(payload), 30_000);
@@ -93,6 +114,11 @@ export async function launch(id, { resolving = false, skipSync = false, entrySlo
 
     toast(`Launch failed — ${e}`, 8000);
   } finally {
+    // Whatever happened — played, cancelled, failed — the pad is locked for a
+    // moment on the way out. It is the same lock the emulator's own exit
+    // combination needs: the buttons that quit the game are still down when
+    // this window gets them back.
+    launching = false;
     // In `finally`, not after the await: a launch that throws — a save
     // conflict, a missing core, an unreachable server — would otherwise leave
     // the controller ignored for good, with no way back but restarting.

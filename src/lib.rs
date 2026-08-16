@@ -20,6 +20,7 @@ pub mod launch;
 pub mod lightgun;
 pub mod macdisplay;
 pub mod media;
+pub mod platformfacts;
 pub mod padprofile;
 pub mod platformicon;
 pub mod players;

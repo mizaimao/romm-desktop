@@ -96,15 +96,18 @@ games you played most, and the ones you kept opening and putting down — from
 sessions this app started, since nothing else can be known.
 
 Arcade games where a single shot needs the button pressed repeatedly (Metal
-Slug and its relatives) can hold the fire down for you: hold **LB** — or RB — and fire
-repeats at the rate in Hz set beside the control on the game's page. Held, not
-toggled: it stops the moment the shoulder is released, and nothing is
-remapped. The choice applies across the whole
+Slug and its relatives) can hold the fire down for you: hold **LB** — or RB — on its own and
+the game fires at the rate in Hz set beside the control on the game's page.
+It stops the moment the shoulder is released, and nothing is remapped. Do not
+hold the fire button as well: RetroArch reports a real press in place of the
+repeat, so holding both gives one continuous shot. The choice applies across the whole
 arcade system, and the control is absent for games where it would mean
 nothing.
 
-Selecting a console shows the console in the preview — its game count, the
-emulator and shader it will use, and whether that emulator is installed at all.
+Selecting a console shows it in the preview, the way an ES-DE theme does: who
+made it, when it arrived, whether it is a console, a handheld or a cabinet, a
+line about what it was, and then the game count, the emulator and shader it
+will use, and whether that emulator is installed at all.
 The top-right tag says which server it is talking to, with a coloured dot for
 whether it is reachable; hovering gives the game count, the cores, the disk
 usage and the folders everything lives in. **Settings → About**, and the macOS

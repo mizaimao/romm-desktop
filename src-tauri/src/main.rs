@@ -86,6 +86,14 @@ struct PlatformView {
     /// Typical cover aspect (w/h) for this platform, so the grid can shape its
     /// cards instead of cropping. Null until enough covers are cached.
     cover_aspect: Option<f32>,
+    /// What the machine was: maker, year, kind, and a line about it. The same
+    /// four things ES-DE's themes show when you pick a system. Null for a
+    /// platform we have nothing to say about, so the pane can leave it out
+    /// rather than print blanks.
+    manufacturer: Option<&'static str>,
+    released: Option<u16>,
+    hardware: Option<&'static str>,
+    blurb: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -973,6 +981,10 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
                 .is_some()
                 && current_style(&state) == theme::IconStyle::Logo,
             cover_aspect: media::cover_aspect(&state.media_dir, &p.fs_slug),
+            manufacturer: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.manufacturer),
+            released: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.released),
+            hardware: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.hardware),
+            blurb: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.blurb),
             slug: p.fs_slug,
             name: p.display_name,
             rom_count: p.rom_count,
