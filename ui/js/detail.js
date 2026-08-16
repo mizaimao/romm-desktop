@@ -217,21 +217,55 @@ function wireShelf(d) {
 /// reason.
 ///
 /// Absent entirely for games it does not apply to, which is most of them.
+/// The three the backend knows. Anything else — a value from a newer build, a
+/// hand-edited config, a field that arrived as something unexpected — draws no
+/// row at all rather than an empty one, because a control with nothing
+/// selected is worse than no control.
+const AUTOFIRE_MODES = ["off", "a", "y"];
+
 function autofireRow(d) {
-  if (!d.autofire) return "";
+  // Games this does not apply to get nothing: it is only the arcade and Neo
+  // Geo shooters, which is 879 of 2,668 arcade games and none of the consoles.
+  if (!AUTOFIRE_MODES.includes(d.autofire)) return "";
   const opt = (key, label, title) =>
     `<button class="af ${d.autofire === key ? "on" : ""}" data-af="${key}"
        title="${escapeHtml(title)}">${escapeHtml(label)}</button>`;
+  // The rate only means anything when it is on, so it goes away when it is
+  // not — a stepper next to "Off" is a control for nothing.
+  const rate =
+    d.autofire === "off"
+      ? ""
+      : `<span class="af-rate">
+           <button class="af-step" data-hz="-1" title="Slower">−</button>
+           <span class="af-hz">${d.autofire_hz ?? 5} Hz</span>
+           <button class="af-step" data-hz="1" title="Faster">+</button>
+         </span>`;
   return `
     <div class="autofire-row" title="Applies to every arcade shooter, not only this game">
       <span class="af-label">Rapid fire</span>
       ${opt("off", "Off", "The buttons behave as the cabinet did")}
       ${opt("a", "A", "The bottom button repeats; single shots move to Y")}
       ${opt("y", "Y", "The top button repeats; A is untouched")}
+      ${rate}
     </div>`;
 }
 
 function wireAutofire(d) {
+  for (const step of document.querySelectorAll(".autofire-row .af-step")) {
+    step.addEventListener("click", async () => {
+      // Clamped here as well as in the backend, so the number on screen never
+      // shows something that was not stored.
+      const want = Math.min(30, Math.max(1, (d.autofire_hz ?? 5) + Number(step.dataset.hz)));
+      if (want === d.autofire_hz) return;
+      try {
+        await invoke("set_config_field", { field: "autofire_hz", value: String(want) });
+      } catch (e) {
+        return toast(`Could not save — ${e}`, 8000);
+      }
+      await selectRom(d.id);
+    });
+  }
+
   for (const btn of document.querySelectorAll(".autofire-row .af")) {
     btn.addEventListener("click", async () => {
       try {

@@ -138,6 +138,7 @@ async fn cmd_launch(rom: &Path, go: bool, core_override: Option<&str>, fullscree
     let achievements = cfg.achievements.settings();
     let req = launch::Request {
         autofire: romm_desktop::tweaks::AutoFire::Off,
+        autofire_hz: 5,
         window_decorations: true,
         fit_window: true,
         mirror_players: true,

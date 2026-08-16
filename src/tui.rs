@@ -266,6 +266,7 @@ impl App {
         let cfg_core_overrides = self.core_overrides.clone();
         let req = crate::launch::Request {
             autofire: crate::tweaks::AutoFire::Off,
+            autofire_hz: 5,
             window_decorations: true,
             fit_window: true,
             mirror_players: true,

@@ -166,6 +166,33 @@ fn binary_candidates(root: &Path) -> Vec<(PathBuf, PathBuf)> {
 /// behind it.
 const SCREEN_FILL: f32 = 0.94;
 
+/// Everything about the controllers, for one launch.
+///
+/// One struct because they always travel together and there is nothing to be
+/// gained from passing four things four times — the linter is right that eight
+/// positional arguments is a signature nobody reads correctly.
+#[derive(Debug, Clone, Copy)]
+pub struct Input<'a> {
+    /// The connected pad's reported name, which picks the autoconfig profile.
+    pub pad: Option<&'a str>,
+    /// Bind players 2-4 like player 1.
+    pub mirror_players: bool,
+    pub autofire: crate::tweaks::AutoFire,
+    /// Shots a second, when auto-fire is on.
+    pub autofire_hz: u32,
+}
+
+impl Default for Input<'_> {
+    fn default() -> Self {
+        Self {
+            pad: None,
+            mirror_players: true,
+            autofire: crate::tweaks::AutoFire::Off,
+            autofire_hz: 5,
+        }
+    }
+}
+
 /// Where the game window should go: the monitor's own origin and size, in the
 /// units the desktop uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -580,7 +607,7 @@ input_player2_gun_start_mbtn = \"3\"
         dir: &Path,
         user_config: Option<&Path>,
     ) -> Result<PathBuf> {
-        self.write_overrides_full(dir, user_config, "", None, true, crate::tweaks::AutoFire::Off)
+        self.write_overrides_full(dir, user_config, "", Input::default())
     }
 
     /// As above, with `extra` (per-platform shader settings) inserted before
@@ -590,17 +617,16 @@ input_player2_gun_start_mbtn = \"3\"
         dir: &Path,
         user_config: Option<&Path>,
         extra: &str,
-        pad: Option<&str>,
-        mirror_players: bool,
-        autofire: crate::tweaks::AutoFire,
+        input: Input<'_>,
     ) -> Result<PathBuf> {
+        let Input { pad, mirror_players, autofire, autofire_hz } = input;
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
         body.push_str(Self::OVERRIDES_OS);
         body.push_str(&self.hotkeys(pad));
         body.push_str(&self.players(pad, mirror_players));
-        body.push_str(&self.autofire(pad, autofire));
+        body.push_str(&self.autofire(pad, autofire, autofire_hz));
         body.push_str(extra);
 
         if let Some(user) = user_config {
@@ -682,7 +708,7 @@ input_player2_gun_start_mbtn = \"3\"
     /// repeating: it pulses `input_turbo_default_button` — RetroPad B, which
     /// every arcade core maps to the primary fire — while the turbo button is
     /// held.
-    pub fn autofire(&self, device: Option<&str>, on: crate::tweaks::AutoFire) -> String {
+    pub fn autofire(&self, device: Option<&str>, on: crate::tweaks::AutoFire, hz: u32) -> String {
         use crate::tweaks::AutoFire;
         if on == AutoFire::Off {
             return String::new();
@@ -711,6 +737,14 @@ input_player2_gun_start_mbtn = \"3\"
             return String::new();
         };
 
+        // 60fps content, so a period of 12 frames is five presses a second.
+        // Clamped rather than trusted: a period of zero is a division by zero
+        // inside the emulator, and anything above about 30 shots a second is
+        // faster than the game can read.
+        let hz = hz.clamp(1, 30);
+        let period = (60 / hz).max(2);
+        let duty = (period / 2).max(1);
+
         format!(
             "\n# ---- Auto-fire ----\n\
              # Mode 3 is \"single button (hold)\": the button below pulses the\n\
@@ -724,10 +758,13 @@ input_player2_gun_start_mbtn = \"3\"
              # afterwards. Turbo survives because no autoconfig file sets it.\n\
              # The single-shot button is moved with an input remap instead,\n\
              # which is applied last and is what remaps are for.\n\
+             # The rate is a period in frames — how long one press-release\n\
+             # cycle lasts — so it runs backwards from shots per second and\n\
+             # the conversion happens here rather than in anyone's head.\n\
              input_turbo_mode = \"3\"\n\
              input_turbo_default_button = \"0\"\n\
-             input_turbo_period = \"8\"\n\
-             input_turbo_duty_cycle = \"4\"\n\
+             input_turbo_period = \"{period}\"\n\
+             input_turbo_duty_cycle = \"{duty}\"\n\
              {}\n",
             hold.line("player1_turbo"),
         )
@@ -1299,7 +1336,7 @@ input_r2_axis = "+5"
     fn autofire_moves_the_shot_to_the_top_button_and_repeats_the_bottom_one() {
         let dir = scratch("autofire");
         with_autoconfig(&dir);
-        let out = fake(&dir).autofire(Some("Xbox Wireless Controller"), crate::tweaks::AutoFire::BottomFace);
+        let out = fake(&dir).autofire(Some("Xbox Wireless Controller"), crate::tweaks::AutoFire::BottomFace, 5);
 
         // RetroPad B is the primary fire in every arcade core, and mode 3 is
         // "single button (hold)" — pulse it while the turbo button is down.
@@ -1327,7 +1364,7 @@ input_r2_axis = "+5"
     fn autofire_writes_nothing_for_a_pad_with_no_profile() {
         let dir = scratch("autofire-unknown");
         assert_eq!(
-            fake(&dir).autofire(Some("Some Unheard-of Pad"), crate::tweaks::AutoFire::BottomFace),
+            fake(&dir).autofire(Some("Some Unheard-of Pad"), crate::tweaks::AutoFire::BottomFace, 5),
             ""
         );
     }
@@ -1349,7 +1386,7 @@ input_r2_axis = "+5"
         std::fs::write(&user, "video_driver = \"vulkan\"\n").unwrap();
 
         let path = fake(&dir)
-            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", None, true, crate::tweaks::AutoFire::Off)
+            .write_overrides_full(&dir, Some(&user), "video_smooth = \"true\"\n", Input::default())
             .unwrap();
         let body = std::fs::read_to_string(path).unwrap();
 
@@ -1367,7 +1404,7 @@ input_r2_axis = "+5"
         let dir = scratch("missing-user");
         with_autoconfig(&dir);
         let path = fake(&dir)
-            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", None, true, crate::tweaks::AutoFire::Off)
+            .write_overrides_full(&dir, Some(&dir.join("nope.cfg")), "", Input::default())
             .unwrap();
         assert!(std::fs::read_to_string(path).unwrap().contains("input_enable_hotkey_btn"));
     }
@@ -1386,7 +1423,7 @@ input_r2_axis = "+5"
         let dir = scratch("hotkeys");
         with_autoconfig(&dir);
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None, true, crate::tweaks::AutoFire::Off).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", Input::default()).unwrap(),
         )
         .unwrap();
 
@@ -1423,7 +1460,7 @@ input_r2_axis = "+5"
         let dir = scratch("quit-safety");
         with_autoconfig(&dir);
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None, true, crate::tweaks::AutoFire::Off).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", Input::default()).unwrap(),
         )
         .unwrap();
 
@@ -1448,7 +1485,7 @@ input_r2_axis = "+5"
     #[test]
     fn every_emitted_line_parses_as_a_setting() {
         let dir = scratch("well-formed");
-        let path = fake(&dir).write_overrides_full(&dir, None, "", None, true, crate::tweaks::AutoFire::Off).unwrap();
+        let path = fake(&dir).write_overrides_full(&dir, None, "", Input::default()).unwrap();
         for line in std::fs::read_to_string(path).unwrap().lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -1497,7 +1534,7 @@ input_r2_axis = "+5"
     fn no_profile_means_no_hotkeys_rather_than_a_guess() {
         let dir = scratch("no-profile");
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", Some("Some Unusual Pad"), true, crate::tweaks::AutoFire::Off).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", Input { pad: Some("Some Unusual Pad"), ..Input::default() }).unwrap(),
         )
         .unwrap();
 
@@ -1520,7 +1557,7 @@ input_r2_axis = "+5"
     fn the_no_profile_note_binds_nothing() {
         let dir = scratch("no-profile-lines");
         let body = std::fs::read_to_string(
-            fake(&dir).write_overrides_full(&dir, None, "", None, true, crate::tweaks::AutoFire::Off).unwrap(),
+            fake(&dir).write_overrides_full(&dir, None, "", Input::default()).unwrap(),
         )
         .unwrap();
         // Only the hotkey keys: `input_overlay_enable` and friends are ordinary

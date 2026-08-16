@@ -42,8 +42,6 @@ struct AppState {
     fit_window: bool,
     /// Keep the game window's title bar.
     window_decorations: bool,
-    /// Auto-fire in arcade shooters: "off", "a" or "y".
-    autofire: String,
     /// Behind mutexes so a choice made in the UI takes effect on the next
     /// launch rather than the next restart. `config.toml` stays the source of
     /// truth; these are the live copy.
@@ -127,6 +125,8 @@ struct RomDetail {
     /// turned it down — which is the difference between showing no control and
     /// showing one with nothing selected.
     autofire: Option<String>,
+    /// Shots a second, shown beside the three modes.
+    autofire_hz: u32,
     size_bytes: i64,
     downloaded: bool,
     core: Option<String>,
@@ -357,11 +357,21 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "fit_window" => ("retroarch", "fit_window"),
         "window_decorations" => ("retroarch", "window_decorations"),
         "autofire" => ("retroarch", "autofire"),
+        "autofire_hz" => ("retroarch", "autofire_hz"),
         other => return Err(format!("unknown setting {other}")),
     };
 
     // Booleans are TOML literals, not strings, so they cannot go through the
     // quoted-string writer.
+    // Numbers, like booleans, are bare TOML literals: a quoted "5" is a string
+    // and fails to deserialise into a number.
+    if field == "autofire_hz" {
+        let n: i64 = value.trim().parse().map_err(|_| format!("{value} is not a number"))?;
+        romm_desktop::config::set_table_number("config.toml", table, key, n.clamp(1, 30))
+            .map_err(err)?;
+        return Ok(format!("{n} shots a second"));
+    }
+
     let boolean = matches!(
         field.as_str(),
         "achievements_enabled"
@@ -1187,7 +1197,8 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
         autofire: autofire_possible(&row)
-            .then(|| romm_desktop::tweaks::AutoFire::parse(&state.autofire).key().to_owned()),
+            .then(|| romm_desktop::tweaks::AutoFire::parse(&stored_autofire()).key().to_owned()),
+        autofire_hz: Config::load().map(|c| c.retroarch.autofire_hz).unwrap_or(5),
         platform_slug: row.platform_slug.clone(),
         id: row.id,
         name: row.name,
@@ -1517,12 +1528,22 @@ fn work_area(app: &tauri::AppHandle) -> Option<romm_desktop::retroarch::Screen> 
 /// One function so the badge in the info pane and the config written at launch
 /// cannot drift: a cue that says a game has auto-fire when it does not is worse
 /// than no cue.
-fn autofire_for(state: &State<'_, AppState>, row: &cache::RomRow) -> romm_desktop::tweaks::AutoFire {
+fn autofire_for(row: &cache::RomRow) -> romm_desktop::tweaks::AutoFire {
     use romm_desktop::tweaks::AutoFire;
     if !autofire_possible(row) {
         return AutoFire::Off;
     }
-    AutoFire::parse(&state.autofire)
+    AutoFire::parse(&stored_autofire())
+}
+
+/// The setting as it is on disk, not as it was when the window opened.
+///
+/// It was read once at startup and kept in AppState. Changing it from the info
+/// pane wrote config.toml and then asked the backend what the setting was — and
+/// got the old answer, so the highlight never moved and the choice looked like
+/// it had not registered. The launch was using the stale value too.
+fn stored_autofire() -> String {
+    Config::load().unwrap_or_default().retroarch.autofire
 }
 
 /// Whether this game is one auto-fire applies to at all.
@@ -1620,7 +1641,8 @@ async fn launch_rom(
         // Only where the metadata says shooter, and only on the platforms
         // whose cabinets had a fire button: a "shooter" on the Mega Drive is
         // as likely to be a light-gun game or a shmup with its own auto-fire.
-        autofire: autofire_for(&state, &row),
+        autofire: autofire_for(&row),
+        autofire_hz: Config::load().map(|c| c.retroarch.autofire_hz).unwrap_or(5),
         mirror_players: state.mirror_players,
         entry_slot,
         rom: &path,
@@ -2662,7 +2684,6 @@ fn main() {
             mirror_players: cfg.controllers.mirror_player_one,
             fit_window: cfg.retroarch.fit_window,
             window_decorations: cfg.retroarch.window_decorations,
-            autofire: cfg.retroarch.autofire.clone(),
             core_overrides: Mutex::new(cfg.cores.overrides.clone()),
             core_per_game: Mutex::new(cfg.cores.per_game.clone()),
             user_retroarch_cfg: cfg.user_retroarch_config(),

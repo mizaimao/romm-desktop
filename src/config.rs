@@ -374,8 +374,24 @@ pub struct RetroArchCfg {
     /// them here. These were built around a cabinet button you hammered, and
     /// a run of Metal Slug is a few thousand presses. Off for anything where
     /// single shots matter more than volume.
+    /// How many shots a second auto-fire produces.
+    ///
+    /// In hertz rather than RetroArch's own unit, which is the number of frames
+    /// in one press-release cycle — a number that means nothing to anyone and
+    /// runs the wrong way, where larger is slower. The conversion is one line
+    /// and it happens once, here, rather than in everybody's head.
+    #[serde(default = "default_autofire_hz")]
+    pub autofire_hz: u32,
+
     /// `off`, `a` (bottom face repeats), or `y` (top face repeats).
-    #[serde(default = "default_autofire")]
+    ///
+    /// Reads an old `true`/`false` as well, because this was a toggle first and
+    /// the app itself wrote that boolean into people's files. Changing the type
+    /// without accepting the old one did not produce a wrong setting — it made
+    /// the whole config fail to parse, so every other value in it silently fell
+    /// back to a default: no server, no library path, nothing. A setting that
+    /// can break the file it lives in is worse than the setting being wrong.
+    #[serde(default = "default_autofire", deserialize_with = "autofire_from_toml")]
     pub autofire: String,
 
     /// Keep the game window's title bar.
@@ -396,8 +412,33 @@ pub struct RetroArchCfg {
 /// original hardware. A window of the right shape has nothing left to put a bar
 /// in. Turn it off to have the window fill the screen and let the emulator
 /// letterbox inside it.
+fn default_autofire_hz() -> u32 {
+    5
+}
+
 fn default_autofire() -> String {
     "y".to_owned()
+}
+
+/// Accept the string this setting is now, or the boolean it used to be.
+fn autofire_from_toml<'de, D>(d: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Text(String),
+        // `true` meant the old arrangement, which put the repeat on the bottom
+        // face button.
+        Flag(bool),
+    }
+    Ok(match Either::deserialize(d)? {
+        Either::Text(s) => s,
+        Either::Flag(true) => "a".to_owned(),
+        Either::Flag(false) => "off".to_owned(),
+    })
 }
 
 fn default_game_display() -> String {
@@ -511,6 +552,12 @@ pub fn set_table_bool(path: &str, table: &str, key: &str, value: bool) -> Result
     write_raw(path, table, key, Some(if value { "true" } else { "false" }))
 }
 
+/// Set a number, for the same reason booleans need their own writer: a
+/// quoted "5" is a TOML string and fails to deserialise into a number.
+pub fn set_table_number(path: &str, table: &str, key: &str, value: i64) -> Result<()> {
+    write_raw(path, table, key, Some(&value.to_string()))
+}
+
 /// Remove `key` from `[table]` if present.
 pub fn clear_table_entry(path: &str, table: &str, key: &str) -> Result<()> {
     write_entry(path, table, key, None)
@@ -605,6 +652,39 @@ fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Resu
 
 #[cfg(test)]
 mod tests {
+
+    /// The app wrote `autofire = false` into people's config files while this
+    /// was a toggle. Changing the field to a string without accepting that did
+    /// not merely lose the setting — the whole file failed to parse, so every
+    /// other value in it fell back to a default: no server, no library path.
+    /// A setting that can break the file it lives in is worse than one that is
+    /// wrong.
+    #[test]
+    fn an_old_boolean_autofire_still_loads_the_rest_of_the_file() {
+        let dir = std::env::temp_dir().join("romm-cfg-autofire");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[server]\nurl = \"http://dev.lan\"\n\n[retroarch]\nautofire = false\n",
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&path).expect("an old config still has to load");
+        assert_eq!(cfg.server.url, "http://dev.lan", "the rest of the file was lost");
+        assert_eq!(cfg.retroarch.autofire, "off");
+
+        // And true meant the arrangement that is now "a".
+        std::fs::write(&path, "[retroarch]\nautofire = true\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "a");
+
+        // The current form still works, and an absent one is the default.
+        std::fs::write(&path, "[retroarch]\nautofire = \"y\"\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "y");
+        std::fs::write(&path, "[retroarch]\n").unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "y");
+    }
     use super::*;
 
     /// The boot order is the point: a portable build can shadow a system one

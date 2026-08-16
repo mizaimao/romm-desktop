@@ -49,6 +49,8 @@ pub struct Request<'a> {
     pub window_decorations: bool,
     /// Where auto-fire lives, if anywhere. See RetroArch::autofire.
     pub autofire: crate::tweaks::AutoFire,
+    /// Shots a second, when it is on.
+    pub autofire_hz: u32,
     /// Bind players 2-4 like player 1. On by default: the second pad on a desk
     /// is usually the same model as the first, and a pad RetroArch has no
     /// profile for is otherwise a port that does nothing.
@@ -255,9 +257,12 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
             req.library_root,
             Some(req.user_cfg),
             &extra,
-            req.pad,
-            req.mirror_players,
-            req.autofire,
+            crate::retroarch::Input {
+                pad: req.pad,
+                mirror_players: req.mirror_players,
+                autofire: req.autofire,
+                autofire_hz: req.autofire_hz,
+            },
         )
         .ok();
 

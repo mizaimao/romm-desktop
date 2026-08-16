@@ -2042,6 +2042,32 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   cursor: pointer;
 }
 .autofire-row .af:hover { color: var(--text); border-color: var(--accent); }
+.af-rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+}
+.af-hz {
+  min-width: 44px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.af-step {
+  width: 20px;
+  padding: 2px 0;
+  border-radius: calc(5px * 1);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.af-step:hover { color: var(--text); border-color: var(--accent); }
+
 .autofire-row .af.on {
   background: var(--accent);
   border-color: var(--accent);

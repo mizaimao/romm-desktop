@@ -484,10 +484,19 @@ describe("rapid fire, above the Play button", () => {
   });
 
   test("games it does not apply to get nothing at all", async () => {
-    Object.assign(DETAIL, { autofire: null });
-    await detail.selectRom(7);
-    await settle();
-    assert.equal(document.querySelector(".autofire-row"), null);
+    // Every shape "not applicable" can arrive in. A console game, a game with
+    // no metadata, an older backend that does not send the field: all of them
+    // must draw nothing rather than a row with no selection.
+    for (const value of [null, undefined, "", "maybe", 0]) {
+      Object.assign(DETAIL, { autofire: value });
+      await detail.selectRom(7);
+      await settle();
+      assert.equal(
+        document.querySelector(".autofire-row"),
+        null,
+        `a rapid-fire row appeared for autofire=${JSON.stringify(value)}`
+      );
+    }
   });
 
   /// "Off" and "not applicable" are different answers: one shows a control
@@ -511,5 +520,47 @@ describe("rapid fire, above the Play button", () => {
     assert.equal(saved.args.field, "autofire");
     assert.equal(saved.args.value, "a");
     Object.assign(DETAIL, { autofire: null });
+  });
+});
+
+describe("how fast the rapid fire goes", () => {
+  test("the rate shows and steps by one", async () => {
+    Object.assign(DETAIL, { autofire: "y", autofire_hz: 5 });
+    await detail.selectRom(7);
+    await settle();
+
+    assert.match(document.querySelector(".af-hz").textContent, /5 Hz/);
+    document.querySelector('.af-step[data-hz="1"]').click();
+    await settle();
+
+    const saved = invoked.filter((c) => c.cmd === "set_config_field").at(-1);
+    assert.equal(saved.args.field, "autofire_hz");
+    assert.equal(saved.args.value, "6");
+  });
+
+  /// A stepper beside "Off" is a control for nothing.
+  test("there is no rate to set when it is off", async () => {
+    Object.assign(DETAIL, { autofire: "off", autofire_hz: 5 });
+    await detail.selectRom(7);
+    await settle();
+    assert.ok(document.querySelector(".autofire-row"), "the row should still be there");
+    assert.equal(document.querySelector(".af-rate"), null, "a rate with nothing to apply to");
+  });
+
+  /// Below one it would divide by zero inside the emulator, and above thirty
+  /// it is faster than the game can read.
+  test("it does not step past its limits", async () => {
+    Object.assign(DETAIL, { autofire: "a", autofire_hz: 1 });
+    await detail.selectRom(7);
+    await settle();
+    invoked.length = 0;
+    document.querySelector('.af-step[data-hz="-1"]').click();
+    await settle();
+    assert.equal(
+      invoked.some((c) => c.cmd === "set_config_field"),
+      false,
+      "it saved a rate below one"
+    );
+    Object.assign(DETAIL, { autofire: null, autofire_hz: 5 });
   });
 });
