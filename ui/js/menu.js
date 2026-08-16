@@ -63,7 +63,3 @@ export function closeMenu() {
   open?.remove();
   open = null;
 }
-
-export function menuOpen() {
-  return !!open?.isConnected;
-}

@@ -328,10 +328,6 @@ export function stopBackdrop() {
   if (running) running();
 }
 
-/// Is the backdrop currently on screen?
-export function backdropRunning() {
-  return running !== null;
-}
 
 /// Whether this machine can run it at all, without starting anything.
 ///
