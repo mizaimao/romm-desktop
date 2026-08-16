@@ -278,3 +278,21 @@ body.settings-window {
   margin-left: 10px;
   vertical-align: middle;
 }
+
+/* The links on the About tab.
+   Plain <a> without an href, because an href in a webview is a navigation and
+   these have to leave for the browser instead. So they are given the look
+   themselves rather than inheriting a link's. */
+#pane .link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+#pane .link:hover { border-bottom-color: var(--accent); }
+/* A hint's 0.6 opacity applied to a link inside it makes it unreadable, and
+   the sentence around it is the part meant to be quiet. */
+#pane .hint .link { opacity: 1; }
+/* The one paragraph on the tab that is prose rather than a note about the row
+   above it. */
+#pane .about-what { margin-bottom: 18px; opacity: 0.75; }

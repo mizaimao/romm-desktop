@@ -888,9 +888,17 @@ Not filed: `gh` is not authenticated here, and posting is Frank's call.
 ## 17. Settings — what is done and what is not
 
 The Settings panel is now its own resizable window with a tab rail on the left:
-General, Appearance, Control. It replaced a single scrolling column that put
-emulator paths, sync buttons and both binding tables in one list, so the two
-longest things in the app sat between the user and everything else.
+General, Appearance, Control, Library, Emulators, About. It replaced a single
+scrolling column that put emulator paths, sync buttons and both binding tables
+in one list, so the two longest things in the app sat between the user and
+everything else.
+
+Library and Emulators were split out later, for the same reason and one level
+down: the things that go and fetch something need to report while they work,
+and at the bottom of General under six unrelated headings the BIOS control was
+simply never found. "Systems" was renamed to Emulators because every tab in
+there is about systems of one kind or another and the word gave no clue that
+this is where you choose which core runs a console.
 
 ### Stretch goal: a controller picture
 
@@ -941,3 +949,86 @@ Related: the app already fetches art lazily and caches by kind, so a bulk
 download is a warm-up of that same cache, not a second mechanism. Whatever it
 fetches, browsing later finds locally.
 
+## 19. The window — one pane, or three columns
+
+The app drew one pane at a time: consoles, then that console's games, with a
+detail panel that slid over the list and a Back button to undo each step. Every
+screen set the top bar itself — hide Back, show Grid, show the zoom slider
+unless we are in list mode, set the title — six or seven imperative lines
+repeated in each of six functions. That is not just repetitive. Each copy
+states, in code, that this is a single-pane app with a back button, so changing
+the shape of the window meant editing every view that had an opinion about it,
+and they all did.
+
+`ui/js/shell.js` is the seam. A view now *describes* what it wants — a title,
+which buttons, whether the zoom slider means anything here — and hands over its
+content by role rather than by element:
+
+* `picker` — the list you choose from. Consoles in Library, collections in the
+  others. Its own column when there is one, the main pane when there is not.
+* `games` / `primary` — the games.
+* `aside` — the detail beside them.
+
+Nothing in `shell.js` knows what a console is, and no view knows what a column
+is. That split is what made the second layout an implementation of `enter` and
+`paint` rather than a change to any view.
+
+Three columns is the default. In one pane, choosing a console replaces the
+screen and Back brings it back; in three columns the consoles stay on the left,
+choosing one fills the middle, and there is nothing to go back to — so no Back
+button, and the preview is a column rather than something to toggle. Both
+columns are draggable and remember their widths. The arrangement is kept in
+`localStorage` rather than `config.toml`: it is about this window rather than
+about the library, and the settings window has to be able to read it too.
+
+### What the left column costs
+
+It is a list, not a grid, and it took eight reports to actually be one. The
+collections are drawn as `.card`, which is right for a page of them and wrong
+for a 240px column, and twice the "fix" rearranged the *contents* of the box
+while `.card` went on drawing the box itself — background, border, 12px radius,
+14px padding, and a hover that lifts it off the page. The third attempt turned
+all of that off and set `display: flex` without `flex-direction: row`, which
+inherits `column` from `.card`, so the rows were still two lines high. The
+lesson is in the tests: assert the box is gone and the line runs across,
+against the real stylesheet, rather than describing the arrangement inside it.
+
+### Ordering
+
+Consoles are alphabetical and stay that way — thirty-five of them that never
+change is a column you learn the shape of. Collections get an order button
+(name, most games, fewest, most downloaded) because they arrive from the server
+in size order, there are twenty-seven, and which you want at the top depends on
+what you are doing. That order is remembered, unlike the game sort in
+`sort.js`, which is deliberately forgotten: the order of a game list is a
+question you asked about one console and stop caring about when you leave it.
+
+### Still rough
+
+* Coming back up from a collection's games still uses the one-pane trail.
+* Continue playing appears in one pane only.
+* The middle column inserts every row: 2,506 for the arcade list. Per-row
+  listeners were the first cost and are gone — one delegated listener on the
+  container serves all of them and survives a redraw — but the nodes themselves
+  remain, and windowing them is the next real step.
+
+## 20. Menus
+
+`ui/js/menu.js` is the app's own right-click menu, because this is an
+application and WebKit's offers "Open Image in New Window" for a console icon.
+
+It is worth its own section for one line of it. The menu closed on the next
+`pointerdown` anywhere on the window — and pressing a menu item *is* a
+pointerdown, so the menu came off the page between the press and the release
+and the click was retargeted to whatever was left. Every item in every menu did
+nothing: the orders in the column, and Delete on a save state, which is why
+that one was reported four times as "not right". Each of those fixes made the
+menu *appear* correctly; none of them made choosing from it work.
+
+Two things follow from it. `closeMenu` runs before the chosen item's action, so
+anything that can throw in there takes the action with it — its cleanup is a
+held function rather than a DOM event for exactly that reason. And a test must
+press the way a mouse does, down then up then click, and check the menu
+survived the press: jsdom will deliver a click to a node that has been removed
+from the document and a browser will not, so `.click()` on its own passes
+against an app in which every menu is dead.

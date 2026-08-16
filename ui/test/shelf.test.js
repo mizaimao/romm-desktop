@@ -17,6 +17,24 @@ import { JSDOM } from "jsdom";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+/// Press a menu item the way a mouse presses it, and check the menu survived
+/// the press.
+///
+/// `.click()` skips pointerdown, which is where this was broken for months:
+/// the menu closed on the next pointerdown anywhere, so it came off the page
+/// between the press and the release and no click ever reached the button.
+/// jsdom will still deliver a click to a node that has been removed from the
+/// document, so a test that only calls `.click()` passes against an app in
+/// which every menu is dead — which is how "delete a save state" was reported
+/// four times.
+function pressItem(node) {
+  node.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true }));
+  assert.ok(node.isConnected, "the press itself dismissed the menu");
+  for (const type of ["pointerup", "click"]) {
+    node.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true }));
+  }
+}
+
 let dom, detail, history, invoked, states, historyData;
 
 /// Enough of a detail for the pane to render without reaching for something
@@ -200,7 +218,7 @@ describe("the save-state shelf", () => {
     const menu = document.querySelector(".ctx-menu");
     assert.ok(menu, "no menu on the one state that can only be deleted");
     assert.match(menu.textContent, /Delete/);
-    menu.querySelector("button").click();
+    pressItem(menu.querySelector("button"));
     await settle();
     assert.equal(
       invoked.find((c) => c.cmd === "delete_state")?.args.slot,
@@ -448,7 +466,7 @@ describe("the right-click menu", () => {
       new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })
     );
     await settle();
-    document.querySelector(".ctx-menu button").click();
+    pressItem(document.querySelector(".ctx-menu button"));
     await settle();
 
     const call = invoked.find((c) => c.cmd === "delete_state");

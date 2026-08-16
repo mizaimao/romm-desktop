@@ -53,6 +53,7 @@ before(async () => {
         if (cmd === "config_fields") return { config_exists: true, library_root: "./library" };
         if (cmd === "motion_options") return { current: null, options: [] };
         if (cmd === "bios_status") return [0, 0, 0];
+        if (cmd === "versions") return ["0.1.87", "3.4.0"];
         return [];
       },
       convertFileSrc: (p) => p,
@@ -64,7 +65,7 @@ before(async () => {
 });
 
 describe("every tab renders and wires", () => {
-  for (const id of ["general", "appearance", "control", "library", "systems"]) {
+  for (const id of ["general", "appearance", "control", "library", "systems", "about"]) {
     test(`${id} wires without throwing`, async () => {
       const box = dom.window.document.createElement("div");
       box.innerHTML = panes.paneHtml(id);
@@ -109,5 +110,57 @@ describe("every tab renders and wires", () => {
     assert.equal(typeof panes.isCapturing, "function");
     assert.equal(typeof panes.captureKey, "function");
     assert.equal(panes.isCapturing(), false);
+  });
+});
+
+describe("the About tab", () => {
+  /// The version numbers were already at the foot of the rail, which answers
+  /// "are these two machines running the same thing" and nothing else. Who
+  /// wrote it and where the source is were written down nowhere the app could
+  /// show you.
+  let box;
+
+  before(async () => {
+    box = dom.window.document.createElement("div");
+    box.innerHTML = panes.paneHtml("about");
+    dom.window.document.body.appendChild(box);
+    await panes.wirePane("about", box);
+  });
+
+  test("it says who wrote it and where the source is", () => {
+    const links = [...box.querySelectorAll(".link")].map((a) => a.dataset.href);
+    assert.ok(
+      links.includes("https://github.com/mizaimao"),
+      "there is no link to the author"
+    );
+    assert.ok(
+      links.includes("https://github.com/mizaimao/romm-desktop"),
+      "there is no link to the source"
+    );
+    assert.match(box.textContent, /mizaimao/);
+  });
+
+  test("it shows the version it is, and the server's", () => {
+    assert.match(box.querySelector(".about-version").textContent, /0\.1\.87/);
+    assert.match(box.querySelector(".about-version").textContent, /server 3\.4\.0/);
+  });
+
+  /// A webview follows a link in place, which would leave the settings window
+  /// showing GitHub with no address bar, no back button and the app gone from
+  /// underneath it. So none of them is a navigation: they are handed to the
+  /// browser through a command that only accepts web links.
+  test("no link navigates the window", () => {
+    for (const a of box.querySelectorAll(".link")) {
+      assert.equal(a.getAttribute("href"), null, `${a.textContent} navigates in place`);
+      assert.match(a.dataset.href, /^https:\/\//);
+    }
+  });
+
+  test("clicking one hands it to the browser", () => {
+    asked.length = 0;
+    box.querySelector(".link").dispatchEvent(
+      new dom.window.MouseEvent("click", { bubbles: true })
+    );
+    assert.ok(asked.includes("open_link"), "the link was not opened anywhere");
   });
 });

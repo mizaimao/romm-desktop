@@ -513,6 +513,37 @@ fn versions(state: State<'_, AppState>) -> CmdResult<(String, Option<String>)> {
     Ok((env!("CARGO_PKG_VERSION").to_owned(), server))
 }
 
+/// Whether this is something a browser should be handed.
+///
+/// Separate from the command so the rule can be tested without opening
+/// anything. Deliberately a whitelist: `file:`, `javascript:` and every other
+/// scheme a webview knows about are not links to a website.
+fn is_web_link(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+/// Hand a web link to the browser.
+///
+/// The About tab has four of them and a webview follows a link in place, which
+/// would turn the settings window into a browser with no address bar, no back
+/// button and the app gone from underneath it.
+///
+/// Only http(s), and the URL is passed as an argument rather than through a
+/// shell, so there is nothing here that can be talked into opening a file, a
+/// script, or anything else with a scheme in front of it.
+#[tauri::command]
+fn open_link(url: String) -> CmdResult<()> {
+    if !is_web_link(&url) {
+        return Err("only web links can be opened".into());
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(not(target_os = "macos"))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(&url).spawn().map_err(err)?;
+    Ok(())
+}
+
 /// One save state, as the shelf in the info pane shows it.
 #[derive(Serialize)]
 struct StateView {
@@ -2719,6 +2750,7 @@ fn main() {
             set_list_art,
             game_video,
             versions,
+            open_link,
             platforms,
             roms,
             search,
@@ -2756,6 +2788,24 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    /// The About tab hands these to the system browser. A webview understands
+    /// a great many schemes that are not websites, and this is the only thing
+    /// standing between a link in the page and one of them.
+    #[test]
+    fn only_web_links_are_opened() {
+        assert!(super::is_web_link("https://github.com/mizaimao/romm-desktop"));
+        assert!(super::is_web_link("http://192.168.1.2:8080"));
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "romm-desktop://x",
+            "  https://example.com",
+            "",
+        ] {
+            assert!(!super::is_web_link(bad), "{bad} was treated as a web link");
+        }
+    }
     use super::*;
 
     /// On macOS the executable is buried inside the signed bundle. Writing

@@ -6,8 +6,10 @@ them.
 ## 1. Push a Windows build and find out what is broken
 
 Everything since 0.1.12 has run only on macOS: save states, play history,
-sorting, four controllers, the shader fix, the window placement. Four rounds of
-fixes have accumulated blind.
+sorting, four controllers, the shader fix, the window placement, the whole
+three-column window, and the About tab's `open_link`, which shells out to
+`open` on macOS and `xdg-open` everywhere else and has never been run on
+Windows — where neither exists.
 
 One of them is a known gap rather than a guess. `src/macdisplay.rs` is
 `#[cfg(target_os = "macos")]`, so the screen geometry on Windows still comes
@@ -54,3 +56,23 @@ keyboard.
 ## 8. ScreenScraper developer ID
 
 Requested, never arrived. Scraping still goes through the server's own account.
+
+## 9. Windowing the middle column
+
+The arcade list is 2,506 games and every one of them is inserted into the
+document on each platform switch. The per-row listeners are gone — one
+delegated listener on the container serves them all and survives a redraw,
+which took the redraw from 53ms to 34ms in jsdom — but the nodes themselves are
+the remaining cost and no amount of listener work touches them.
+
+Drawing only the rows on screen and filling in as you scroll is the fix. It is
+a real change: the cursor, the "remember where this tab was" scroll position,
+the pad navigation and the lazy cover observer all currently assume every row
+exists.
+
+## 10. The two rough edges left in three columns
+
+Coming back up from a collection's games still uses the one-pane trail, and
+Continue playing is only drawn in one of the two panes. Neither is wrong on
+screen often enough to have been worth stopping for, and both want the same
+answer: what "back" means in a window where nothing is ever replaced.

@@ -8,7 +8,7 @@
   "app": {
     "windows": [
       {
-        "title": "RomM",
+        "title": "RomM Desktop",
         "width": 1500,
         "height": 950,
         "minWidth": 1100,

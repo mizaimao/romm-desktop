@@ -59,9 +59,40 @@ first launch of a game that needs them.
 
 ## Using it
 
+The window is three columns — what you are picking from, the games, and a
+preview of the one selected — with four tabs across the top: **Library**, **My
+collections**, **History** and **RomM browse**. The left and right columns can
+be dragged and remember their widths. A single-pane layout, where choosing a
+console replaces the screen and Back undoes it, is still there and switchable
+in Settings.
+
+Consoles are listed alphabetically; collections have an order button above them
+(name, most games, fewest, most downloaded) because the server returns them by
+size. Within a console, games sort by name, rating, year, size or recently
+played — that one is per-console and deliberately forgotten when the app closes.
+
 Arrows or the left stick move, Enter or the bottom face button opens and plays,
-Esc or the right face button goes back, `/` searches, `?` lists every binding.
-Keyboard and controller are rebound separately in Settings; both persist.
+Esc or the right face button goes back, `/` searches, `?` lists every binding,
+`Cmd+,` opens Settings. The shoulder buttons move between tabs and the triggers
+scroll the game list — how hard you pull decides how fast. Keyboard and
+controller are rebound separately in Settings; both persist. Dialogs are
+driveable from the pad, so a sync question mid-launch does not send you back to
+the mouse.
+
+A game's page carries its save states, each with the picture RetroArch saved
+beside it, and starting from one enters that slot directly. Right-click deletes
+one. **History** counts what you have actually played — hours per console, the
+games you played most, and the ones you kept opening and putting down — from
+sessions this app started, since nothing else can be known.
+
+Arcade games where a single shot needs the button pressed repeatedly (Metal
+Slug and its relatives) can hold the fire down for you: the game's page offers
+off, rapid fire on the bottom face button, or on the top one, with the rate in
+Hz beside it. The choice applies across the whole arcade system, and the row is
+greyed out for games where it would mean nothing.
+
+**Settings → About** has the version this build is, the version of the server it
+has spoken to, and links to the source.
 
 Launching writes a temporary config that RetroArch layers on top of its own, so
 **your `retroarch.cfg` is never modified**. That layer carries a consistent
@@ -103,10 +134,19 @@ src/            core library — api, cache, download, media, theme, retroarch
 src/main.rs     CLI (clap) and TUI
 src-tauri/      Tauri GUI shell, thin: it delegates to the library
 ui/             static ES modules and CSS, no bundler
+ui/js/shell.js  where a view is drawn and what the window looks like while it is
+ui/js/settings/ one file per Settings tab: markup and wiring, nothing shared
 ui/icons/       Lucide (ISC), vendored — see ui/icons/README.md
+ui/test/        jsdom suites, run against the real index.html and stylesheet
 tools/          one-shot Python for DAT analysis, BIOS sets, server sync
 data/           generated reference data (core map, arcade names, catver)
+docs/           arcade and BIOS coverage, and docs/parked.md — what is not built
 ```
+
+Views describe what they need and hand content to `shell.js` by role — the list
+you pick from, the games, the preview — rather than reaching for elements.
+Which is why the same view code draws both the one-pane and the three-column
+window. `PLAN.md` section 19 has the reasoning.
 
 The GUI, TUI and CLI share one launch planner. Adding an emulator quirk in one
 place fixes it in all three — which is the point, because it did not used to.
