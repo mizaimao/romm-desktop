@@ -2619,16 +2619,18 @@ code {
 .mark.away { color: color-mix(in srgb, var(--text) 32%, transparent); }
 .star { cursor: help; }
 
-/* Solid, not the see-through field it inherits from the search box. In the tab
-   row it sits over the seam between two panes, and a translucent box there
-   picks up whatever happens to be behind it. */
+/* The same field as the search box above it, exactly.
+   Two boxes that take typed text, one above the other, reading as two
+   different kinds of control was the wrong answer — the base `.filter` style
+   is a solid panel meant for a box drawn into a list, and this one is not in a
+   list any more. Faint recess, no border until focus. */
 #tabbar #page-filter .filter {
-  background: var(--panel);
-  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid transparent;
 }
 #tabbar #page-filter .filter:focus {
-  background: var(--panel-2);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  border-color: color-mix(in srgb, var(--glass) 55%, transparent);
 }
 
 /* The legend on the help page. Narrow first column: it holds one mark. */

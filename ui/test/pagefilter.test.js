@@ -199,13 +199,23 @@ describe("pages with nothing to search", () => {
     assert.equal(el.pageFilterBar.hidden, false);
   });
 
-  /// It sits over the seam between two panes, so a translucent box picks up
-  /// whatever is behind it.
-  test("the box is solid", () => {
+  /// The same field as the search box above it. Two boxes that take typed
+  /// text, one above the other, should not read as two different kinds of
+  /// control — and the base `.filter` style is a solid panel meant for a box
+  /// drawn into a list, which this one no longer is.
+  test("the box matches the search box", () => {
     const css = readFileSync(join(uiDir, "style.css"), "utf8");
-    const at = css.lastIndexOf("#tabbar #page-filter .filter {");
-    assert.ok(at >= 0, "the box has no background of its own");
-    assert.match(css.slice(at, css.indexOf("}", at)), /background:\s*var\(--panel\)/);
+    const rule = (sel, last = false) => {
+      const at = last ? css.lastIndexOf(sel + " {") : css.indexOf(sel + " {");
+      assert.ok(at >= 0, `no rule for ${sel}`);
+      return css.slice(at, css.indexOf("}", at));
+    };
+    const bg = (block) => /background:\s*([^;]+)/.exec(block)?.[1]?.trim();
+    assert.equal(
+      bg(rule("#tabbar #page-filter .filter", true)),
+      bg(rule("#search")),
+      "the two text boxes are painted differently"
+    );
   });
 });
 
