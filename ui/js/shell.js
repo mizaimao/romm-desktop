@@ -18,7 +18,7 @@
 // column is. That is the whole point of the split.
 
 import { el } from "./state.js";
-import { clearPageFilter, layoutPageFilter, setPageFilterExtra } from "./pagefilter.js";
+import { clearPageFilter, setPageFilterExtra } from "./pagefilter.js";
 
 /// Where content goes, by role rather than by element.
 ///
@@ -174,7 +174,6 @@ export function enter({ title = "", zoom = false, gridLayout = true, picker = tr
   // reason. The button beside it belongs to the view too.
   clearPageFilter();
   setPageFilterExtra(null);
-  layoutPageFilter();
   if (el.title) {
     el.title.textContent = title;
     // It has a fixed share of the bar now, so a long console name ellipsises.

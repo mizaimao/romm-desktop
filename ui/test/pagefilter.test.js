@@ -119,34 +119,31 @@ describe("where the box sits", () => {
     );
   });
 
-  /// jsdom has no layout, so the widths are stubbed: what is under test is the
-  /// arithmetic — the preview's width, less the two small buttons that stay at
-  /// the very end.
-  test("it stops short of the preview column", () => {
-    tabs.installTabs();
-    const bar = dom.window.document.getElementById("page-filter");
-    const end = dom.window.document.querySelector(".tabbar-end");
-    el.detail.hidden = false;
-    el.detail.getBoundingClientRect = () => ({ width: 420 });
-    end.getBoundingClientRect = () => ({ width: 120 });
-
-    assert.equal(pf.layoutPageFilter(), 300, "the box is not held clear of the preview");
-    assert.equal(bar.style.marginRight, "300px");
-
-    // With the preview closed there is nothing to stay clear of.
-    el.detail.hidden = true;
-    assert.equal(pf.layoutPageFilter(), 0);
-    assert.equal(bar.style.marginRight, "0px");
+  /// All the slack in the row is the box's left margin, so the box and the two
+  /// buttons travel together against the right-hand edge. An auto margin on
+  /// the buttons as well would split the slack between them and leave the box
+  /// stranded in the middle of the row, which is where it was.
+  test("the slack is in front of it, not between it and the buttons", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const rule = (sel) => {
+      const at = css.indexOf(sel + " {");
+      assert.ok(at >= 0, `no rule for ${sel}`);
+      return css.slice(at, css.indexOf("}", at));
+    };
+    assert.match(rule("#tabbar #page-filter"), /margin-left:\s*auto/);
+    assert.doesNotMatch(
+      rule("#tabbar .tabbar-end"),
+      /margin-left:\s*auto/,
+      "the buttons take half the slack, which strands the box mid-row"
+    );
   });
 
-  /// Never negative: a preview narrower than the buttons beside it would
-  /// otherwise pull the box off the right-hand edge.
-  test("a preview narrower than the buttons does not push it off the edge", () => {
+  /// It does not dodge the preview column any more — that was the previous
+  /// arrangement, and it put the box a long way from the edge on a wide
+  /// window.
+  test("nothing sets a right margin on it", () => {
     tabs.installTabs();
-    const end = dom.window.document.querySelector(".tabbar-end");
-    el.detail.hidden = false;
-    el.detail.getBoundingClientRect = () => ({ width: 60 });
-    end.getBoundingClientRect = () => ({ width: 120 });
-    assert.equal(pf.layoutPageFilter(), 0);
+    const bar = dom.window.document.getElementById("page-filter");
+    assert.equal(bar.style.marginRight, "", "something is still holding it off the edge");
   });
 });

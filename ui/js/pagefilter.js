@@ -113,22 +113,3 @@ export function installPageFilter() {
     ev.stopPropagation();
   });
 }
-
-/// Keep the box clear of the preview column.
-///
-/// The tab row runs the full width of the window; the preview is a column
-/// under its right-hand end. Left alone, the filter box sits over the top of
-/// that column — text on one side of the seam, artwork on the other, with
-/// nothing to say they are separate things. The two buttons at the very right
-/// stay where they are: they are small, and they belong to the row rather than
-/// to either column.
-export function layoutPageFilter() {
-  const bar = el.pageFilterBar;
-  if (!bar) return 0;
-  const preview = el.detail && !el.detail.hidden ? el.detail.getBoundingClientRect().width : 0;
-  const end = bar.parentElement?.querySelector(".tabbar-end");
-  const endWidth = end ? end.getBoundingClientRect().width : 0;
-  const inset = Math.max(0, Math.round(preview - endWidth));
-  bar.style.marginRight = `${inset}px`;
-  return inset;
-}

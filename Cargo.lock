@@ -3566,7 +3566,7 @@ dependencies = [
 
 [[package]]
 name = "romm-desktop"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -3591,7 +3591,7 @@ dependencies = [
 
 [[package]]
 name = "romm-gui"
-version = "0.1.150"
+version = "0.1.151"
 dependencies = [
  "romm-desktop",
  "serde",

@@ -2517,7 +2517,6 @@ code {
    disappears along with the button whenever there is nothing to take offline,
    which left the preview toggle stranded in the middle of the row. */
 #tabbar .tabbar-end {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2564,9 +2563,11 @@ code {
 }
 
 /* Search inside the page, in the tab row.
-   Pushed right, but stopping short of the preview column beneath it — the
-   inset is measured in `layoutPageFilter`, because it is that column's width
-   less the two small buttons that stay at the very end. */
+   As far right as it goes, and always in front of the two buttons at the end.
+   The slack in the row is this element's left margin, so the filter and the
+   two buttons travel together against the right-hand edge — a margin on the
+   buttons as well would split the slack between them and leave the box
+   stranded in the middle. */
 #tabbar #page-filter {
   margin-left: auto;
   display: flex;
@@ -2582,6 +2583,8 @@ code {
   margin: 0;
 }
 #page-filter-extra:empty { display: none; }
+/* If the box is ever taken away, the buttons still need pushing. */
+#tabbar #page-filter[hidden] + .tabbar-end { margin-left: auto; }
 /* The order button beside it, sized for this row rather than for a list. */
 #tabbar #page-filter .pickbar {
   margin: 0;
