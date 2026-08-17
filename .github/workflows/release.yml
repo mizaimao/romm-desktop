@@ -38,16 +38,21 @@ jobs:
           - os: windows-latest
             label: Windows
             target: x86_64-pc-windows-msvc
-          # Apple silicon. Unsigned, so it arrives quarantined and needs one
-          # xattr call before it opens — the release notes say so. That is a
-          # worse first run than a signed build and a better one than no build
-          # at all, which is what a Mac user without this repo checked out had.
+          # Apple silicon only. Unsigned, so it arrives quarantined and needs
+          # one xattr call before it opens — the release notes say so. That is
+          # a worse first run than a signed build and a better one than no
+          # build at all, which is what a Mac user without this repo checked
+          # out had.
+          #
+          # Intel is deliberately absent, and it was tried: the macos-13
+          # runners are being retired, and a dispatched build sat queued for
+          # twenty-two minutes without ever starting while every other job
+          # finished. `release` waits on all of `build`, so one runner nobody
+          # can get hold of holds up the whole publish. Anyone on an Intel Mac
+          # can still build it: scripts/build-macos.sh takes about a minute.
           - os: macos-14
             label: macOS (Apple silicon)
             target: aarch64-apple-darwin
-          - os: macos-13
-            label: macOS (Intel)
-            target: x86_64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -163,8 +168,8 @@ jobs:
             `*.AppImage` and `*.deb` are the packaged forms.
 
             **macOS** — `*.dmg`, or the `.app.tar.gz` if you would rather not
-            mount anything. `aarch64` is Apple silicon, `x86_64` is Intel.
-            These are unsigned, so macOS quarantines them: after moving the app
+            mount anything. Apple silicon only; on an Intel Mac, build it with
+            `scripts/build-macos.sh`. These are unsigned, so macOS quarantines them: after moving the app
             to /Applications, run
 
                 xattr -dr com.apple.quarantine /Applications/RomM-Desktop.app
