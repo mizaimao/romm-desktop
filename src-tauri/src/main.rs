@@ -593,7 +593,7 @@ fn game_states(state: State<'_, AppState>, id: i64) -> CmdResult<Vec<StateView>>
         .map(|s| StateView {
             resumable: s.entry_slot().is_some(),
             when: s.modified.map(|t| romm_desktop::states::ago(t, now)),
-            thumb: s.thumb.map(|p| p.display().to_string()),
+            thumb: s.thumb.as_deref().map(romm_desktop::util::webview_path),
             slot: s.slot,
             label: s.label,
             size_bytes: s.size,
@@ -984,7 +984,7 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             // choice and this is the fallback that means nobody has to.
             logo: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
                 .or_else(|| romm_desktop::platformicon::installed(&state.media_dir, &p.fs_slug))
-                .map(|p| p.display().to_string()),
+                .map(|p| romm_desktop::util::webview_path(&p)),
             logo_wordmark: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
                 .is_some()
                 && current_style(&state) == theme::IconStyle::Logo,
@@ -1183,7 +1183,8 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     } else {
         client
     };
-    let as_url = |p: Option<std::path::PathBuf>| p.map(|p| p.display().to_string());
+    let as_url =
+        |p: Option<std::path::PathBuf>| p.map(|p| romm_desktop::util::webview_path(&p));
 
     // ES-DE's own art, picked the way its Canvas theme picks it. RomM's cover
     // is no longer consulted: it is a second scrape from a different source,
@@ -1219,7 +1220,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         )
         .await
         {
-            art.insert((*kind).to_owned(), p.display().to_string());
+            art.insert((*kind).to_owned(), romm_desktop::util::webview_path(&p));
         }
     }
 
@@ -1243,7 +1244,10 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         cover: as_url(cover),
         video: as_url(video),
         has_video,
-        screenshots: screenshots.into_iter().map(|p| p.display().to_string()).collect(),
+        screenshots: screenshots
+            .into_iter()
+            .map(|p| romm_desktop::util::webview_path(&p))
+            .collect(),
         art,
         downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
         autofire: autofire_possible(&row)
@@ -1274,7 +1278,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
         release_year,
         alt_names: json_list(&row.alt_names_json),
         regions: json_list(&row.regions_json),
-        manual: manual.map(|p| p.display().to_string()),
+        manual: manual.map(|p| romm_desktop::util::webview_path(&p)),
         youtube_id: row.youtube_id.clone().filter(|s| !s.is_empty()),
     })
 }
@@ -1319,7 +1323,7 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
                 let cover =
                     media::ensure_art(client.as_deref(), &media_root, &platform, &stem, &art)
                         .await;
-                CoverView { id, cover: cover.map(|p| p.display().to_string()) }
+                CoverView { id, cover: cover.map(|p| romm_desktop::util::webview_path(&p)) }
             });
         }
         while let Some(res) = set.join_next().await {
@@ -1501,7 +1505,7 @@ async fn game_video(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
 
     media::ensure_esde(client.as_deref(), &media_root, &media_key, &stem, media::VIDEOS)
         .await
-        .map(|p| p.display().to_string())
+        .map(|p| romm_desktop::util::webview_path(&p))
         .ok_or_else(|| format!("no video for {}", row.name))
 }
 
@@ -2539,7 +2543,10 @@ fn neighbours() -> usize {
 }
 
 fn abs(p: &Path) -> String {
-    p.canonicalize().unwrap_or_else(|_| p.to_path_buf()).display().to_string()
+    // Through the same helper the pictures use: on Windows `canonicalize`
+    // hands back \\?\C:\... and the status card would print that at somebody
+    // as the answer to "where is my config".
+    romm_desktop::util::webview_path(&p.canonicalize().unwrap_or_else(|_| p.to_path_buf()))
 }
 
 

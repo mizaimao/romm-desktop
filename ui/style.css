@@ -630,7 +630,15 @@ body.has-pad #tabbar .bumper { display: inline; }
   max-width: 70vw;
   flex-shrink: 0;
   border-left: 1px solid var(--line);
-  background: var(--panel);
+  /* Glass, like everything else in the window.
+     This was the last solid surface left: every card, the header and the tab
+     row sit over whatever is behind them, and then a 460-pixel slab of flat
+     panel down the right-hand side. `--pane-solid` is how much of it stays
+     opaque, which Appearance drives from the other end — "how much shows
+     through" is the question somebody moving that slider is asking. */
+  background: color-mix(in srgb, var(--panel) var(--pane-solid, 45%), transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
   padding: 16px;
   /* Media scrolls; the buttons stay pinned so they are never below the fold,
      which was the complaint about the old fixed-height layout. */

@@ -180,3 +180,66 @@ mod tests {
         assert_eq!(spell_duration(7_500), "2 h 05 m");
     }
 }
+
+/// A path the webview can load.
+///
+/// `canonicalize` on Windows returns a *verbatim* path — `\\?\C:\Users\...` —
+/// which is a perfectly good path for the Windows API and not one that
+/// survives being put through a URL, a scope match and a decode on the way to
+/// an <img>. Every picture in this app arrives that way: covers, screenshots,
+/// save-state thumbnails, and the console art the Appearance tab cycles
+/// through. On macOS and Linux there is no such prefix and this returns what
+/// it was given.
+///
+/// Kept as string surgery rather than a dependency: the prefix is four
+/// characters, the UNC form is one more case, and both are stable parts of the
+/// platform.
+pub fn webview_path(path: &Path) -> String {
+    let shown = path.display().to_string();
+    if let Some(rest) = shown.strip_prefix(r"\\?\UNC\") {
+        // \\?\UNC\server\share -> \\server\share
+        return format!(r"\\{rest}");
+    }
+    match shown.strip_prefix(r"\\?\") {
+        // Only a drive path: \\?\C:\x -> C:\x. Anything else keeps the prefix,
+        // because without it that path does not name the same file.
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_owned(),
+        _ => shown,
+    }
+}
+
+#[cfg(test)]
+mod webview_path_tests {
+    use super::*;
+
+    /// The Windows form. `canonicalize` returns it, an <img> cannot use it, and
+    /// the app has no way to notice from any other platform — which is exactly
+    /// the shape of bug that gets reported as "the console pictures do not
+    /// change on Windows" and reproduces nowhere.
+    #[test]
+    fn a_verbatim_drive_path_loses_its_prefix() {
+        assert_eq!(webview_path(Path::new(r"\\?\C:\media\_platforms\snes.png")), r"C:\media\_platforms\snes.png");
+        assert_eq!(webview_path(Path::new(r"\\?\D:\x.png")), r"D:\x.png");
+    }
+
+    /// A network path keeps being a network path.
+    #[test]
+    fn a_verbatim_unc_path_becomes_an_ordinary_one() {
+        assert_eq!(webview_path(Path::new(r"\\?\UNC\nas\roms\x.png")), r"\\nas\roms\x.png");
+    }
+
+    /// Anything else is handed back as it came: a prefix that is not a drive
+    /// and not UNC names a device, and dropping it would name a different file
+    /// or nothing at all.
+    #[test]
+    fn everything_else_is_left_alone() {
+        for p in [
+            "/Users/frank/media/_platforms/snes.png",
+            "./library/media/covers/1.png",
+            r"C:\media\snes.png",
+            r"\\?\Volume{2eca078d}\x.png",
+        ] {
+            assert_eq!(webview_path(Path::new(p)), p);
+        }
+    }
+}

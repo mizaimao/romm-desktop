@@ -7,6 +7,7 @@ import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, SCHEMES,
   glassTint, setGlassTint, glassStrength, setGlassStrength,
+  paneClarity, setPaneClarity,
 } from "../backdrop.js";
 
 export const html = `      <h4>Layout</h4>
@@ -66,6 +67,16 @@ export const html = `      <h4>Layout</h4>
       </div>
       <p class="hint">How much of that color the glass carries. At 0 the glass
         is clear and only the blur remains.</p>
+      <div class="srow">
+        <label>Preview pane</label>
+        <div class="ctl"><input class="pane-clarity" type="range" min="0" max="80" step="5" />
+          <span class="pane-clarity-val"></span></div>
+      </div>
+      <p class="hint">How much of the window behind the preview shows through
+        it. The pane was the last solid surface in here — everything else is
+        glass over what is behind it. It stops at 80: past that the text has
+        nothing to sit on, and a preview you cannot read is not a preview.</p>
+
       <div class="srow bd-custom">
         <label>Glass color</label>
         <div class="ctl"><input class="glass-custom" type="color" /></div>
@@ -211,6 +222,16 @@ export function wire(box) {
   const strengthEl = box.querySelector(".glass-strength");
   const strengthOut = box.querySelector(".glass-strength-val");
 
+  const clarityEl = box.querySelector(".pane-clarity");
+  const clarityOut = box.querySelector(".pane-clarity-val");
+  if (clarityEl) {
+    clarityEl.value = String(paneClarity());
+    clarityOut.textContent = `${paneClarity()}%`;
+    clarityEl.addEventListener("input", () => {
+      clarityOut.textContent = `${setPaneClarity(clarityEl.value)}%`;
+    });
+  }
+
   if (strengthEl) {
     strengthEl.value = String(glassStrength());
     strengthOut.textContent = `${glassStrength()}%`;
@@ -317,6 +338,18 @@ async function wireIconStyles(box) {
       return;
     }
     if (!box.isConnected) return;
+    // Nothing installed at all is a different answer from "this style has
+    // none", and it looked identical: every button greyed out, no explanation,
+    // and a Get button below that nobody connects to the row above. Reported
+    // from Windows as not being able to cycle them at all, which is exactly
+    // what a row of disabled buttons is.
+    if (styles.length && styles.every((s) => !s.available)) {
+      holder.innerHTML = `<p class="hint" style="margin:0">No console pictures have been
+        fetched yet, so there is nothing to choose between. Press
+        <strong>Get console pictures</strong> below — it takes a few hundred
+        kilobytes from four ES-DE themes and then this row fills in.</p>`;
+      return;
+    }
     holder.innerHTML = styles
       .map(
         (s) =>

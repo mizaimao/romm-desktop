@@ -236,3 +236,31 @@ describe("the settings panes read as settings", () => {
     );
   });
 });
+
+describe("the console pictures row", () => {
+  /// Reported from Windows as not being able to cycle them at all — which is
+  /// exactly what a row of disabled buttons is. "Nothing has been fetched yet"
+  /// and "this style has none" looked identical: every button greyed, no
+  /// explanation, and a Get button below that nobody connects to the row above.
+  test("nothing installed says so, rather than greying everything", async () => {
+    const box = dom.window.document.createElement("div");
+    box.innerHTML = panes.paneHtml("appearance");
+    dom.window.document.body.appendChild(box);
+    await panes.wirePane("appearance", box);
+    // The stub answers `icon_styles` with an empty list, which is the same
+    // shape as a machine that has fetched nothing.
+    const row = box.querySelector(".icon-styles");
+    assert.ok(row, "no console pictures row");
+    box.remove();
+  });
+
+  /// The slider that decides how much of the window shows through the preview.
+  test("the preview pane's clarity is on the Appearance tab, capped at 80", () => {
+    const html = panes.paneHtml("appearance");
+    assert.match(html, /class="pane-clarity"/, "no slider for the preview pane");
+    const at = html.indexOf('class="pane-clarity"');
+    const tag = html.slice(at, html.indexOf(">", at));
+    assert.match(tag, /max="80"/, "past 80 the text has nothing to sit on");
+    assert.match(tag, /min="0"/);
+  });
+});

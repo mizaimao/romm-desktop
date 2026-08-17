@@ -376,6 +376,7 @@ export const SCHEMES = [
 
 const GLASS_KEY = "glassTint";
 const TINT_KEY = "glassStrength";
+const CLEAR_KEY = "paneClarity";
 
 /// How much of the tint shows through the glass, as a percentage.
 export function glassStrength() {
@@ -420,4 +421,29 @@ export function setGlassTint(colour, { announce = true } = {}) {
 export function applyStoredGlassTint() {
   setGlassTint(glassTint(), { announce: false });
   setGlassStrength(glassStrength(), { announce: false });
+}
+
+/// How much of what is behind the preview pane shows through it, 0–80%.
+///
+/// The pane was the last solid surface in the window: every card, the header
+/// and the tab row are glass over whatever is behind them, and then a
+/// 460-pixel slab of flat panel down the right-hand side. Capped at 80 because
+/// past that the text has nothing to sit on — a preview you cannot read is not
+/// a preview, and the artwork behind it is not what you opened it for.
+export function paneClarity() {
+  const n = Number(localStorage.getItem(CLEAR_KEY));
+  return Number.isFinite(n) && n >= 0 ? Math.min(80, n) : 55;
+}
+
+export function setPaneClarity(pct, { announce = true } = {}) {
+  const value = Math.max(0, Math.min(80, Math.round(Number(pct) || 0)));
+  // Stored as clarity and used as opacity: "how much shows through" is the
+  // question somebody moving a slider is asking, and the stylesheet wants the
+  // other end of it.
+  document.documentElement.style.setProperty("--pane-solid", `${100 - value}%`);
+  if (announce) {
+    localStorage.setItem(CLEAR_KEY, String(value));
+    window.__TAURI__?.event?.emit?.("pane-clarity", value);
+  }
+  return value;
 }
