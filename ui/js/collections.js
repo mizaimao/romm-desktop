@@ -30,7 +30,10 @@ function markOpen(grid, cid) {
 }
 
 /// The top bar both collection-browsing levels want.
-function topBar(title) {
+///
+/// `filter` is off for the top of Browse: five groups you can read at a glance
+/// are not a list anybody needs to search.
+function topBar(title, { filter = true } = {}) {
   state.view = "collections";
   state.platform = null;
   state.selected = null;
@@ -38,12 +41,12 @@ function topBar(title) {
   el.search.value = "";
   // The zoom slider stays: these are cards too, and sizing them is the same
   // want as sizing covers.
-  enterView({ title, back: true, zoom: true });
+  enterView({ title, back: true, zoom: true, filter });
 }
 
 export async function showCollectionGroups({ exclude = [] } = {}) {
   trail.length = 0;
-  topBar("RomM browse");
+  topBar("RomM browse", { filter: false });
   resetGames("Pick a group on the left.");
 
   // `user` lives in its own tab now, so showing it here too would be the same

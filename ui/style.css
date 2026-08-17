@@ -1253,6 +1253,8 @@ button:has(> .icon + span) {
 .icon-sort      { --icon: url("icons/arrow-down-narrow-wide.svg"); }
 .icon-filter    { --icon: url("icons/funnel.svg"); }
 .icon-dice      { --icon: url("icons/dice-5.svg"); }
+.icon-disk      { --icon: url("icons/hard-drive-download.svg"); }
+.icon-cloud     { --icon: url("icons/cloud.svg"); }
 .icon-pane      { --icon: url("icons/square.svg"); }
 .icon-book      { --icon: url("icons/book-open.svg"); }
 .icon-columns   { --icon: url("icons/columns-2.svg"); }
@@ -2597,3 +2599,47 @@ code {
 
 /* What the filter hid. */
 .filtered-out { display: none !important; }
+
+/* Is this game on the machine, or still on the server.
+   It was a bare "▣" on the ones that were here and nothing at all on the ones
+   that were not, which is a symbol that explains itself nowhere and an absence
+   that reads as no information. Both states are drawn now, and both carry a
+   sentence in their tooltip. */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -2px;
+  margin-right: 5px;
+  cursor: help;
+}
+.mark .icon { width: 12px; height: 12px; }
+.mark.here { color: color-mix(in srgb, #43c76a 80%, var(--text)); }
+/* Quieter than the one beside it: not being downloaded yet is the ordinary
+   state of a library that lives on a server, not a warning. */
+.mark.away { color: color-mix(in srgb, var(--text) 32%, transparent); }
+.star { cursor: help; }
+
+/* Solid, not the see-through field it inherits from the search box. In the tab
+   row it sits over the seam between two panes, and a translucent box there
+   picks up whatever happens to be behind it. */
+#tabbar #page-filter .filter {
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+}
+#tabbar #page-filter .filter:focus {
+  background: var(--panel-2);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* The legend on the help page. Narrow first column: it holds one mark. */
+.sc-marks td:first-child {
+  width: 34px;
+  text-align: center;
+  white-space: nowrap;
+}
+.sc-marks .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}

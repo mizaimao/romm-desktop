@@ -31,8 +31,41 @@ before(async () => {
   global.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   global.requestAnimationFrame = (f) => f();
   Object.defineProperty(global, "navigator", { value: dom.window.navigator, configurable: true });
+  dom.window.Element.prototype.scrollIntoView = function () {};
+  class FakeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  dom.window.IntersectionObserver = FakeObserver;
+  global.IntersectionObserver = FakeObserver;
   dom.window.__TAURI__ = {
-    core: { invoke: async () => [], convertFileSrc: (p) => p },
+    core: {
+      // Drawing a list selects a row, which paints the preview — and that
+      // joins several of these arrays. A thinner stub throws after the test
+      // has finished, as an unhandled rejection rather than a failure.
+      invoke: async (cmd, args) =>
+        cmd === "rom_detail"
+          ? {
+              id: args.id,
+              name: `Game ${args.id}`,
+              fs_name: "g.zip",
+              platform: "gba",
+              platform_slug: "gba",
+              size_bytes: 1,
+              downloaded: true,
+              screenshots: [],
+              genres: [],
+              companies: [],
+              franchises: [],
+              game_modes: [],
+              regions: [],
+              alt_names: [],
+              art: {},
+            }
+          : [],
+      convertFileSrc: (p) => p,
+    },
     event: { listen: async () => () => {}, emit: () => {} },
   };
   pf = await import("../js/pagefilter.js");
@@ -145,5 +178,75 @@ describe("where the box sits", () => {
     tabs.installTabs();
     const bar = dom.window.document.getElementById("page-filter");
     assert.equal(bar.style.marginRight, "", "something is still holding it off the edge");
+  });
+});
+
+describe("pages with nothing to search", () => {
+  /// History is three charts and the top of RomM browse is five groups you can
+  /// read at a glance. A search box over either is a control that does
+  /// nothing, which is worse than no control.
+  let shell;
+
+  before(async () => (shell = await import("../js/shell.js")));
+
+  test("History has no filter box", () => {
+    shell.enter({ title: "History", filter: false });
+    assert.equal(el.pageFilterBar.hidden, true);
+  });
+
+  test("and a list brings it back", () => {
+    shell.enter({ title: "Arcade", sort: true });
+    assert.equal(el.pageFilterBar.hidden, false);
+  });
+
+  /// It sits over the seam between two panes, so a translucent box picks up
+  /// whatever is behind it.
+  test("the box is solid", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const at = css.lastIndexOf("#tabbar #page-filter .filter {");
+    assert.ok(at >= 0, "the box has no background of its own");
+    assert.match(css.slice(at, css.indexOf("}", at)), /background:\s*var\(--panel\)/);
+  });
+});
+
+describe("what the marks mean", () => {
+  /// A symbol that appears on some cards and not others, and explains itself
+  /// nowhere, is a symbol that makes people guess. Every mark the lists draw
+  /// is named where it is drawn and listed on the help page.
+  let library, state, keys;
+
+  before(async () => {
+    library = await import("../js/library.js");
+    keys = await import("../js/keys.js");
+    ({ state } = await import("../js/state.js"));
+  });
+
+  test("both states are drawn, and both say what they are", () => {
+    state.layout = "grid";
+    state.view = "roms";
+    state.rows = [];
+    library.renderRows(
+      [
+        { id: 1, name: "Here", size_bytes: 1, downloaded: true, platform: "gba" },
+        { id: 2, name: "There", size_bytes: 1, downloaded: false, platform: "gba" },
+      ],
+      false
+    );
+    const marks = [...el.list.querySelectorAll(".mark")];
+    assert.equal(marks.length, 2, "a game with no mark is a game with no answer");
+    assert.match(marks[0].title, /On this machine/);
+    assert.match(marks[1].title, /On the server/);
+  });
+
+  test("the help page lists them", () => {
+    document.getElementById("shortcuts")?.remove();
+    keys.runAction("help");
+    const help = document.getElementById("shortcuts");
+    assert.ok(help, "no help page");
+    const text = help.textContent;
+    for (const line of ["On this machine", "On the server", "Starred", "emulator"]) {
+      assert.match(text, new RegExp(line), `the legend does not explain "${line}"`);
+    }
+    help.remove();
   });
 });

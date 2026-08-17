@@ -204,6 +204,25 @@ function toggleHelp() {
         .join("")}</tbody>
     </table>
     <p class="pad-readout">No controller detected.</p>
+
+    <h3>What the marks mean</h3>
+    <table class="sc-table sc-marks">
+      <tbody>
+        <tr><td><span class="mark here"><span class="icon icon-disk"></span></span></td>
+            <td>On this machine — ready to play with the server off</td></tr>
+        <tr><td><span class="mark away"><span class="icon icon-cloud"></span></span></td>
+            <td>On the server — downloads when you play it</td></tr>
+        <tr><td><span class="star">★</span></td>
+            <td>Starred, in one of your starred collections</td></tr>
+        <tr><td><span class="dot on"></span></td>
+            <td>An emulator for this console is installed</td></tr>
+        <tr><td><span class="dot"></span></td>
+            <td>No emulator — games on this console will not start</td></tr>
+        <tr><td><span class="bumper">LB</span></td>
+            <td>The shoulder buttons move between these tabs</td></tr>
+      </tbody>
+    </table>
+
     <p>Rebind these in Settings · Esc to close</p></div>`;
   box.addEventListener("click", () => box.remove());
   document.body.appendChild(box);

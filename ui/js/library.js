@@ -108,7 +108,7 @@ async function showRecent() {
        <div class="gcard" data-id="${r.id}">
          <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
          <div class="gname">${escapeHtml(r.name)}</div>
-         <div class="gmeta">${r.downloaded ? "▣ " : ""}${r.platform}</div>
+         <div class="gmeta">${here(r)}${escapeHtml(r.platform)}</div>
        </div>`).join("")}</div>`;
   el.list.prepend(strip);
   strip.querySelectorAll(".gcard").forEach((c) => wireGame(c, Number(c.dataset.id)));
@@ -257,7 +257,9 @@ function platformCard(p) {
         }</div>
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="meta">
-          <span class="dot ${p.playable ? "on" : ""}"></span>
+          <span class="dot ${p.playable ? "on" : ""}" title="${
+            p.playable ? "An emulator for this console is installed" : "No emulator installed — games here will not start"
+          }"></span>
           ${p.rom_count} games${p.playable ? "" : " · no core"}
         </div>
       </div>`;
@@ -276,7 +278,9 @@ function platformRow(p) {
         title="${escapeHtml(p.name)} — ${p.rom_count} games${
           p.playable ? "" : ", but no emulator installed for it"
         }">
-        <span class="have"><span class="dot ${p.playable ? "on" : ""}"></span></span>
+        <span class="have"><span class="dot ${p.playable ? "on" : ""}" title="${
+          p.playable ? "An emulator for this console is installed" : "No emulator installed — games here will not start"
+        }"></span></span>
         <span class="nm">${escapeHtml(p.name)}</span>
         <span class="pf">${escapeHtml(p.slug)}</span>
         <span class="sz">${p.rom_count} games${p.playable ? "" : " · no core"}</span>
@@ -570,13 +574,27 @@ function listMarkup(rows, showPlatform) {
     .map(
       (r) => `
       <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}">
-        <span class="have">${r.downloaded ? "▣" : ""}</span>
-        <span class="nm">${r.favourite ? `<span class="star">★</span>` : ""}${escapeHtml(r.name)}</span>
+        <span class="have">${here(r)}</span>
+        <span class="nm">${r.favourite ? `<span class="star" title="Starred — in one of your starred collections">★</span>` : ""}${escapeHtml(r.name)}</span>
         ${showPlatform ? `<span class="pf">${r.platform}</span>` : ""}
         <span class="sz">${human(r.size_bytes)}</span>
       </div>`
     )
     .join("")}</div>`;
+}
+
+/// The mark that says a game is on this machine.
+///
+/// It was a bare "▣" with nothing to say what it meant — a symbol that appears
+/// on some cards and not others and explains itself nowhere is a symbol that
+/// makes people guess. It is a labelled icon now, and the games that are *not*
+/// here say so too: "no mark" is not an answer anybody can read, especially on
+/// a console where everything happens to be downloaded and the mark is on
+/// every card.
+function here(r) {
+  return r.downloaded
+    ? `<span class="mark here" title="On this machine — ready to play offline"><span class="icon icon-disk"></span></span>`
+    : `<span class="mark away" title="On the server — downloads when you play it"><span class="icon icon-cloud"></span></span>`;
 }
 
 function gridMarkup(rows, platform) {
@@ -594,10 +612,12 @@ function gridMarkup(rows, platform) {
           : ""
       }>
         <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span>${
-          r.favourite ? `<span class="star">★</span>` : ""
+          r.favourite
+            ? `<span class="star" title="Starred — in one of your starred collections">★</span>`
+            : ""
         }</div>
         <div class="gname">${escapeHtml(r.name)}</div>
-        <div class="gmeta">${r.downloaded ? "▣ " : ""}${human(r.size_bytes)}</div>
+        <div class="gmeta">${here(r)}${human(r.size_bytes)}</div>
       </div>`
     )
     .join("")}</div>`;

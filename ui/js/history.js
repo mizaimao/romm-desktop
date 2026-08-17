@@ -55,7 +55,7 @@ export async function showHistory() {
   // No column: this is a page, not a list with something to pick from beside
   // it. Emptying the column left a 240px strip of nothing down the left with a
   // drag handle on it, which reads as a list that failed to load.
-  enter({ title: "History", picker: false });
+  enter({ title: "History", picker: false, filter: false });
 
   let h;
   try {
