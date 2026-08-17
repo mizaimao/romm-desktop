@@ -38,10 +38,12 @@ only shows up here.
 On Linux the GUI additionally needs `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `librsvg2-dev`, `libayatana-appindicator3-dev` and `patchelf`.
 
-Linux and Windows binaries come from CI — tag a commit `v*`. **macOS is
-deliberately absent from CI**: an unsigned bundle arrives quarantined and needs
-mounting, dragging and an `xattr` call before it will open, so build it on the
-machine that runs it.
+Binaries come from CI — tag a commit `v*`. That includes macOS now, for both
+Apple silicon and Intel, as a `.dmg` and a `.app.tar.gz`. They are unsigned, so
+macOS quarantines them and one `xattr -dr com.apple.quarantine` is needed after
+the first move to /Applications. Building locally with `scripts/build-macos.sh`
+skips that entirely — a bundle that never came through a browser is never
+marked — so that is still the better route on the machine you develop on.
 
 ## Configuring
 

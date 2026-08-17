@@ -261,23 +261,44 @@ describe("what the marks mean", () => {
   });
 });
 
-describe("group headings sit in the list", () => {
-  /// Sticky, they rode over the artwork as you scrolled — a console name
-  /// across the middle of a game's cover, with a blurred panel behind it to
-  /// keep the text readable, which is a lot of machinery for making one
-  /// problem hide another.
-  test("nothing about them floats", () => {
+describe("group headings", () => {
+  /// Two complaints, one fix. Frosted — translucent with a blur behind it — a
+  /// console name sat in the middle of a game's cover looking like something
+  /// had come loose. Unsticking it fixed that and lost the heading entirely on
+  /// any console with more than a screenful of games. So: stick it, and paint
+  /// it solid. A band across the full width reads as a section header; a
+  /// see-through one reads as a mistake.
+  test("they stay with their section, and they are solid while they do", () => {
     const css = readFileSync(join(uiDir, "style.css"), "utf8");
     const at = css.indexOf(".ghead {");
     assert.ok(at >= 0, "no rule for the group heading");
     const rule = css.slice(at, css.indexOf("}", at));
-    assert.doesNotMatch(rule, /position:\s*sticky/, "the heading still floats over the list");
-    // And the machinery that existed only to survive floating is gone with it.
-    assert.doesNotMatch(rule, /background:/, "it still paints over what is behind it");
+    assert.match(rule, /position:\s*sticky/, "the heading is lost on a long console");
+    assert.match(rule, /background:\s*var\(--bg\)/, "a see-through heading over the artwork");
     assert.ok(
       !css.includes("html.backdrop-on .ghead"),
-      "the frosted variant is still there, for a heading that no longer floats"
+      "the frosted variant is back, which is what made it look loose"
     );
+  });
+
+  /// It is the only thing on a long page saying which console you are looking
+  /// at, and it was the quietest thing on it.
+  test("they are louder than the rest of the page", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const size = (sel) => {
+      const at = css.indexOf(sel + " {");
+      return Number(/font-size:\s*([\d.]+)px/.exec(css.slice(at, css.indexOf("}", at)))?.[1]);
+    };
+    assert.ok(size(".ghead") >= 13, `the heading is ${size(".ghead")}px`);
+    const at = css.indexOf(".ghead {");
+    assert.match(css.slice(at, css.indexOf("}", at)), /color:\s*color-mix\(in srgb, var\(--text\)/);
+  });
+
+  /// The row under a sticky header has to clear it when jumped to, or the
+  /// cursor lands on a card that is half behind the heading.
+  test("the first row of a section clears the header", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    assert.match(css, /\.pgroup \.row \{ scroll-margin-top/);
   });
 
   /// Continue playing is one of these headings, so it moved with them.
@@ -285,6 +306,16 @@ describe("group headings sit in the list", () => {
     const css = readFileSync(join(uiDir, "style.css"), "utf8");
     const at = css.indexOf(".recent .ghead {");
     assert.ok(at >= 0);
-    assert.doesNotMatch(css.slice(at, css.indexOf("}", at)), /position:\s*sticky/);
+    assert.doesNotMatch(css.slice(at, css.indexOf("}", at)), /position:\s*static/);
+  });
+});
+
+describe("the tab bar", () => {
+  /// A tenth taller, which is the difference between a row of labels and a row
+  /// you aim at.
+  test("it is 42px", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const at = css.indexOf("#tabbar {");
+    assert.match(css.slice(at, css.indexOf("}", at)), /height:\s*42px/);
   });
 });

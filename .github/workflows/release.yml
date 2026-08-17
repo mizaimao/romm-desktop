@@ -38,6 +38,16 @@ jobs:
           - os: windows-latest
             label: Windows
             target: x86_64-pc-windows-msvc
+          # Apple silicon. Unsigned, so it arrives quarantined and needs one
+          # xattr call before it opens — the release notes say so. That is a
+          # worse first run than a signed build and a better one than no build
+          # at all, which is what a Mac user without this repo checked out had.
+          - os: macos-14
+            label: macOS (Apple silicon)
+            target: aarch64-apple-darwin
+          - os: macos-13
+            label: macOS (Intel)
+            target: x86_64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +82,7 @@ jobs:
 
       # The desktop app. `bundle.targets` in tauri.conf.json picks the right
       # format per platform: NSIS installer on Windows, .deb and AppImage on
-      # Linux. macOS is built locally instead — see scripts/build-macos.sh.
+      # Linux, .app and .dmg on macOS.
       - name: Build desktop app
         run: npx tauri build --target ${{ matrix.target }}
 
@@ -100,8 +110,16 @@ jobs:
           B=target/${{ matrix.target }}/release/bundle
           find "$B" -maxdepth 3 \
             \( -name '*.deb' -o -name '*.AppImage' \
-               -o -name '*-setup.exe' -o -name '*.msi' \) \
+               -o -name '*-setup.exe' -o -name '*.msi' -o -name '*.dmg' \) \
             -exec cp {} dist/ \; 2>/dev/null || true
+          # The .app is a directory, so it travels as a tarball. Zip would lose
+          # the executable bit on the binary inside and the bundle would not
+          # open at all.
+          APP=$(find "$B" -maxdepth 3 -name '*.app' -print -quit 2>/dev/null || true)
+          if [ -n "$APP" ]; then
+            tar -czf "dist/RomM-Desktop-${{ matrix.target }}.app.tar.gz" \
+              -C "$(dirname "$APP")" "$(basename "$APP")"
+          fi
           ls -la dist
 
       - uses: actions/upload-artifact@v4
@@ -144,9 +162,16 @@ jobs:
             **Linux** — `romm-desktop-x86_64-unknown-linux-gnu` is the app;
             `*.AppImage` and `*.deb` are the packaged forms.
 
-            **macOS** is not built here on purpose: an unsigned bundle arrives
-            quarantined and needs an `xattr` call before it will open. Build it
-            on the Mac with `scripts/build-macos.sh`.
+            **macOS** — `*.dmg`, or the `.app.tar.gz` if you would rather not
+            mount anything. `aarch64` is Apple silicon, `x86_64` is Intel.
+            These are unsigned, so macOS quarantines them: after moving the app
+            to /Applications, run
+
+                xattr -dr com.apple.quarantine /Applications/RomM-Desktop.app
+
+            once, and it opens normally from then on. Building it yourself with
+            `scripts/build-macos.sh` avoids the quarantine entirely, since a
+            bundle that never came through a browser is never marked.
 
             Copy `config.example.toml` to `config.toml` and set `[server]`
             before first run.
