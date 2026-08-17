@@ -5,7 +5,8 @@ your library, download ROMs on demand, and launch them in RetroArch — with a
 gamepad, from the sofa, without a browser.
 
 `PLAN.md` holds the design notes and the reasoning behind specific decisions;
-this file is how to run it.
+this file is how to run it. `docs/handover.md` is for whoever picks the work
+up next — how it is done here, and what has already been learned expensively.
 
 ## Why not the web UI
 

@@ -1,7 +1,7 @@
 # Parked
 
 Still worth doing, deliberately not being done now. In the order I would take
-them.
+them. `handover.md` is the wider brief; this is just the queue.
 
 ## 1. Push a Windows build and find out what is broken
 
