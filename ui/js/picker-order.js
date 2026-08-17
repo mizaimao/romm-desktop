@@ -82,17 +82,14 @@ export function sortPicker(kind, items) {
   });
 }
 
-/// The bar that sits above the column: a filter box when there is something
-/// worth filtering, and the order button.
+/// The button that says how a list is ordered.
 ///
-/// It is one element rather than a loose input because it has to be opaque and
-/// stick to the top of a list that scrolls under it. The filter box alone was
-/// sticky and see-through, so console names slid through the middle of it.
-export function pickerBar({ kind, filter = null }) {
-  const box = filter
-    ? `<input id="cfilter" class="filter" type="search" placeholder="${escapeHtml(filter)}" />`
-    : "";
-  return `<div class="pickbar">${box}
+/// It used to come with a filter box beside it, drawn into the top of the
+/// list. The filter is furniture of the tab row now — one box for every page
+/// rather than one for the only page that had it — so this is the button
+/// alone, and it goes in the slot next to that box.
+export function pickerBar({ kind }) {
+  return `<div class="pickbar">
     <button class="pick-sort" type="button" title="Change the order of this list">
       <span>${escapeHtml(pickerOrder(kind)?.label ?? "Name")}</span>
     </button>

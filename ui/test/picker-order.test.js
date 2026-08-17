@@ -108,26 +108,14 @@ describe("the column is ordered by something someone chose", () => {
 });
 
 describe("the bar above the column", () => {
-  /// The filter box was the sticky element itself — an input with a
-  /// see-through background — so collection names scrolled visibly through the
-  /// middle of it.
-  test("the filter sits inside an opaque strip, not on its own", () => {
+  /// The filter that used to sit beside this button is furniture of the tab
+  /// row now — one box for every page rather than one for the only page that
+  /// had it — so what is left here is the button alone.
+  test("it is the order button, and nothing else", () => {
     const doc = dom.window.document;
-    doc.body.className = "columns";
-    doc.body.innerHTML = `<nav id="consoles">${order.pickerBar({
-      kind: "collections",
-      filter: "Filter 27 collections…",
-    })}</nav>`;
-    const bar = doc.querySelector("#consoles .pickbar");
-    assert.ok(bar, "there is no strip");
-    assert.ok(bar.querySelector("#cfilter"), "the filter box is not in it");
-    const style = dom.window.getComputedStyle(bar);
-    assert.equal(style.position, "sticky", "the strip does not stay put");
-    // jsdom does not resolve var(), so the colour is checked in the source.
-    const css = readFileSync(join(uiDir, "style.css"), "utf8");
-    const at = css.indexOf("\nbody.columns #consoles .pickbar {");
-    const block = css.slice(at, css.indexOf("}", at));
-    assert.match(block, /background:\s*var\(--bg\)/, "the strip is see-through");
+    doc.body.innerHTML = order.pickerBar({ kind: "collections" });
+    assert.ok(doc.querySelector(".pick-sort"), "the order button is gone");
+    assert.equal(doc.querySelector("input"), null, "it still draws a filter box of its own");
   });
 
   test("the order button says which order it is in", () => {

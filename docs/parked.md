@@ -76,3 +76,23 @@ Coming back up from a collection's games still uses the one-pane trail, and
 Continue playing is only drawn in one of the two panes. Neither is wrong on
 screen often enough to have been worth stopping for, and both want the same
 answer: what "back" means in a window where nothing is ever replaced.
+
+## 11. RetroArch's per-core overrides, at the source
+
+`config/<Core>/<Core>.cfg` is loaded after everything passed with
+`--appendconfig`, so anything in there wins over what a launch was asked for.
+Three of those files — Geolith, FinalBurn Neo, MAME 2003-Plus — held four lines
+each of turbo settings and cost ten rounds of chasing rapid fire that was being
+replaced on every launch.
+
+The app detects the collision now, names the keys in the launch notes, and
+switches override loading off for that run. What it does not do is offer to
+clean them up: they are the user's files, in the user's RetroArch directory,
+and a frontend that edits those has broken the promise the README makes. A
+"three files are fighting your settings — remove them?" prompt would be the
+honest version, and it is not built.
+
+## 12. Windowing the middle column, still
+
+Unchanged from 9 and now the oldest performance item: 2,506 rows are still
+inserted on every platform switch.

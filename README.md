@@ -222,6 +222,15 @@ romm-desktop sync-saves --dry-run  # what would be offered, writing nothing
 
 `--dry-run` is the way to check the ROM matching before anything moves.
 
+## What the marks mean
+
+A game carries one of two: a **disk** if it is on this machine and will play
+with the server off, a **cloud** if it is still on the server and will be
+fetched when you play it. A **star** means it is in one of your starred
+collections. Beside a console, a **green dot** means an emulator for it is
+installed and a grey one means nothing there will start. `?` shows the same
+list, so nothing here has to be remembered.
+
 ## Status
 
 Browsing, downloading, launching and save sync all work. Windows has had far

@@ -260,3 +260,31 @@ describe("what the marks mean", () => {
     help.remove();
   });
 });
+
+describe("group headings sit in the list", () => {
+  /// Sticky, they rode over the artwork as you scrolled — a console name
+  /// across the middle of a game's cover, with a blurred panel behind it to
+  /// keep the text readable, which is a lot of machinery for making one
+  /// problem hide another.
+  test("nothing about them floats", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const at = css.indexOf(".ghead {");
+    assert.ok(at >= 0, "no rule for the group heading");
+    const rule = css.slice(at, css.indexOf("}", at));
+    assert.doesNotMatch(rule, /position:\s*sticky/, "the heading still floats over the list");
+    // And the machinery that existed only to survive floating is gone with it.
+    assert.doesNotMatch(rule, /background:/, "it still paints over what is behind it");
+    assert.ok(
+      !css.includes("html.backdrop-on .ghead"),
+      "the frosted variant is still there, for a heading that no longer floats"
+    );
+  });
+
+  /// Continue playing is one of these headings, so it moved with them.
+  test("the Continue playing heading is one of them", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const at = css.indexOf(".recent .ghead {");
+    assert.ok(at >= 0);
+    assert.doesNotMatch(css.slice(at, css.indexOf("}", at)), /position:\s*sticky/);
+  });
+});
