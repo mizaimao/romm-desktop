@@ -10,6 +10,7 @@ import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
 import { byName } from "./picker-order.js";
 import { setPageFilterLabel, refreshPageFilter } from "./pagefilter.js";
+import { followSections } from "./sections.js";
 import { selectRom, play, withTransition, showPlatformInfo } from "./detail.js";
 import { download } from "./actions.js";
 
@@ -488,6 +489,7 @@ export function renderRows(unsorted, showPlatform) {
   delegateGames(region("games"));
   setPageFilterLabel(`${rows.length} games`);
   refreshPageFilter();
+  followSections();
 
   if (state.layout === "grid") observeCovers();
   // Put the cursor back where it was in this list, falling back to the top.

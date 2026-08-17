@@ -261,52 +261,70 @@ describe("what the marks mean", () => {
   });
 });
 
-describe("group headings", () => {
-  /// Two complaints, one fix. Frosted — translucent with a blur behind it — a
-  /// console name sat in the middle of a game's cover looking like something
-  /// had come loose. Unsticking it fixed that and lost the heading entirely on
-  /// any console with more than a screenful of games. So: stick it, and paint
-  /// it solid. A band across the full width reads as a section header; a
-  /// see-through one reads as a mistake.
-  test("they stay with their section, and they are solid while they do", () => {
+describe("which section you are in", () => {
+  /// Two attempts got this wrong the same way. Sticky and frosted, the heading
+  /// floated over a game's cover; sticky and opaque, it still covered the row
+  /// above it — a sticky heading is over the content by construction, and
+  /// paint does not change that. Not sticky at all, and a console with more
+  /// than a screenful of games loses its name entirely.
+  ///
+  /// The third way is to give it its own space: a strip above the list, out of
+  /// the part that scrolls, with nothing underneath it to cover.
+  test("the heading in the list does not float", () => {
     const css = readFileSync(join(uiDir, "style.css"), "utf8");
     const at = css.indexOf(".ghead {");
-    assert.ok(at >= 0, "no rule for the group heading");
     const rule = css.slice(at, css.indexOf("}", at));
-    assert.match(rule, /position:\s*sticky/, "the heading is lost on a long console");
-    assert.match(rule, /background:\s*var\(--bg\)/, "a see-through heading over the artwork");
+    assert.doesNotMatch(rule, /position:\s*sticky/, "it is over the content again");
+    assert.doesNotMatch(rule, /background:/, "it is painting over what is behind it");
+  });
+
+  test("the strip is outside the list, with room of its own", () => {
+    const css = readFileSync(join(uiDir, "style.css"), "utf8");
+    const at = css.indexOf("#section-strip {");
+    assert.ok(at >= 0, "there is no strip");
+    const rule = css.slice(at, css.indexOf("}", at));
+    assert.match(rule, /height:\s*\d+px/, "with no height of its own it would overlay again");
+    assert.doesNotMatch(rule, /position:\s*(sticky|absolute|fixed)/);
+    // In the page's own column, above <main>, so the list starts below it.
+    const html = readFileSync(join(uiDir, "index.html"), "utf8");
     assert.ok(
-      !css.includes("html.backdrop-on .ghead"),
-      "the frosted variant is back, which is what made it look loose"
+      html.indexOf('id="section-strip"') < html.indexOf("<main>"),
+      "the strip is inside the scrolling part"
     );
   });
 
-  /// It is the only thing on a long page saying which console you are looking
-  /// at, and it was the quietest thing on it.
-  test("they are louder than the rest of the page", () => {
-    const css = readFileSync(join(uiDir, "style.css"), "utf8");
-    const size = (sel) => {
-      const at = css.indexOf(sel + " {");
-      return Number(/font-size:\s*([\d.]+)px/.exec(css.slice(at, css.indexOf("}", at)))?.[1]);
-    };
-    assert.ok(size(".ghead") >= 13, `the heading is ${size(".ghead")}px`);
-    const at = css.indexOf(".ghead {");
-    assert.match(css.slice(at, css.indexOf("}", at)), /color:\s*color-mix\(in srgb, var\(--text\)/);
+  test("it names the section that has scrolled past, and nothing before that", async () => {
+    const sections = await import("../js/sections.js");
+    el.list.innerHTML = `
+      <section class="pgroup"><div class="ghead">SNES <span class="gcount">4</span></div></section>
+      <section class="pgroup"><div class="ghead">NES <span class="gcount">9</span></div></section>`;
+    const heads = [...el.list.querySelectorAll(".ghead")];
+    el.list.getBoundingClientRect = () => ({ top: 100 });
+    // Both below the top of the list: nothing has been passed yet.
+    heads[0].getBoundingClientRect = () => ({ top: 140 });
+    heads[1].getBoundingClientRect = () => ({ top: 600 });
+    sections.followSections();
+    assert.equal(el.sectionStrip.textContent, "", "it named a section still on screen");
+    assert.equal(el.sectionStrip.hidden, false, "the room for it should be kept");
+
+    // Scrolled into the first section.
+    heads[0].getBoundingClientRect = () => ({ top: 40 });
+    el.list.dispatchEvent(new dom.window.Event("scroll"));
+    assert.match(el.sectionStrip.textContent, /SNES/);
+
+    // And into the second.
+    heads[1].getBoundingClientRect = () => ({ top: 60 });
+    el.list.dispatchEvent(new dom.window.Event("scroll"));
+    assert.match(el.sectionStrip.textContent, /NES/);
   });
 
-  /// The row under a sticky header has to clear it when jumped to, or the
-  /// cursor lands on a card that is half behind the heading.
-  test("the first row of a section clears the header", () => {
-    const css = readFileSync(join(uiDir, "style.css"), "utf8");
-    assert.match(css, /\.pgroup \.row \{ scroll-margin-top/);
-  });
-
-  /// Continue playing is one of these headings, so it moved with them.
-  test("the Continue playing heading is one of them", () => {
-    const css = readFileSync(join(uiDir, "style.css"), "utf8");
-    const at = css.indexOf(".recent .ghead {");
-    assert.ok(at >= 0);
-    assert.doesNotMatch(css.slice(at, css.indexOf("}", at)), /position:\s*static/);
+  /// A console's own game list is one section, and a strip naming it would say
+  /// what the title bar already says.
+  test("a list with one section has no strip", async () => {
+    const sections = await import("../js/sections.js");
+    el.list.innerHTML = `<div class="ghead">SNES</div>`;
+    sections.followSections();
+    assert.equal(el.sectionStrip.hidden, true);
   });
 });
 

@@ -19,6 +19,7 @@
 
 import { el } from "./state.js";
 import { clearPageFilter, setPageFilterExtra } from "./pagefilter.js";
+import { followSections } from "./sections.js";
 
 /// Where content goes, by role rather than by element.
 ///
@@ -186,6 +187,9 @@ export function enter({
   // reason. The button beside it belongs to the view too.
   clearPageFilter();
   setPageFilterExtra(null);
+  // The strip belongs to the list that was on screen; the next view brings its
+  // own, or none.
+  followSections();
   if (el.title) {
     el.title.textContent = title;
     // It has a fixed share of the bar now, so a long console name ellipsises.

@@ -60,6 +60,7 @@ export const el = {
   viewSwitch: document.getElementById("view-switch"),
   pageFilter: document.getElementById("pfilter"),
   pageFilterBar: document.getElementById("page-filter"),
+  sectionStrip: document.getElementById("section-strip"),
 };
 
 // Tauri globals, exposed once so modules do not each reach into window.
