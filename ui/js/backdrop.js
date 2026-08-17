@@ -30,7 +30,14 @@ void main() { gl_Position = vec4(pos, 0.0, 1.0); }`;
 
 // Two layers of drifting value-noise, tinted between the theme's own two
 // colours, plus a vignette so the edges fall away and the grid stays readable.
-const FRAGMENT = `#version 300 es
+/// What every style shares: the uniforms, the noise, and the vignette.
+///
+/// One program per style would mean five compilations at startup and five
+/// times the code that reads a colour scheme. Instead each style is a body
+/// that fills `base`, spliced into this frame — so they cannot drift apart on
+/// how they read `u_strength`, how they darken at the edges, or how they take
+/// the two scheme colours.
+const SHADER_HEAD = `#version 300 es
 precision mediump float;
 out vec4 colour;
 
@@ -53,19 +60,20 @@ float noise(vec2 p) {
              mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
 
+// Two octaves is enough for a backdrop and half the cost of four. This is
+// drawn behind a library, not in a demo.
+float fbm(vec2 p) {
+  return noise(p) * 0.65 + noise(p * 2.1 + 4.7) * 0.35;
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_size;
   vec2 aspect = vec2(u_size.x / u_size.y, 1.0);
-
-  // Two layers at different scales and speeds, so the motion never reads as one
-  // repeating shape.
   float t = u_time * u_speed;
-  float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
-  float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
-  float n = a * 0.65 + b * 0.35;
+  vec3 base;
+`;
 
-  vec3 base = mix(u_low, u_high, smoothstep(0.30, 0.85, n));
-
+const SHADER_TAIL = `
   // Darker towards the edges, and never fully bright in the middle either. The
   // grid sits on top of all of it and text has to stay readable over the
   // brightest pixel this can produce, not the average one.
@@ -74,6 +82,82 @@ void main() {
 
   colour = vec4(base * u_strength, 1.0);
 }`;
+
+/// The styles, as the body each one contributes.
+///
+/// There was one. "Blobs" is a fair description of it and a poor choice of
+/// only option: the whole point of a backdrop is that it suits the room, and
+/// one shape suits one room. Each of these takes the same two scheme colours
+/// so switching style does not also change the palette.
+export const BACKDROPS = [
+  {
+    id: "blobs",
+    label: "Blobs",
+    hint: "Soft clouds drifting at two scales. The original, and the quietest.",
+    body: `
+      float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
+      float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
+      base = mix(u_low, u_high, smoothstep(0.30, 0.85, a * 0.65 + b * 0.35));`,
+  },
+  {
+    id: "aurora",
+    label: "Aurora",
+    hint: "Slow vertical curtains, brighter where they fold over each other.",
+    body: `
+      float band = uv.y * 2.2 + fbm(vec2(uv.x * 2.0, t * 0.05)) * 1.6;
+      float curtain = sin(band * 3.14159) * 0.5 + 0.5;
+      curtain *= smoothstep(1.0, 0.15, uv.y);
+      base = mix(u_low, u_high, pow(curtain, 1.6));`,
+  },
+  {
+    id: "plasma",
+    label: "Plasma",
+    hint: "Interfering sine waves. The oldest trick on this list, and the one "
+      + "that looks most like a demo from 1993.",
+    body: `
+      vec2 p = (uv - 0.5) * aspect * 4.0;
+      float v = sin(p.x + t * 0.35)
+              + sin(p.y * 1.3 - t * 0.28)
+              + sin((p.x + p.y) * 0.7 + t * 0.2)
+              + sin(length(p) * 1.6 - t * 0.4);
+      base = mix(u_low, u_high, smoothstep(-1.2, 2.4, v));`,
+  },
+  {
+    id: "grid",
+    label: "Grid",
+    hint: "A horizon and a grid running to it. Steadier than the rest: the "
+      + "lines do not move, only the light on them.",
+    body: `
+      vec2 p = (uv - vec2(0.5, 0.18)) * aspect;
+      float horizon = smoothstep(0.0, 0.55, p.y);
+      vec2 g = vec2(p.x / max(p.y, 0.04), 1.0 / max(p.y, 0.04) + t * 0.25);
+      vec2 line = abs(fract(g * 2.0) - 0.5) / fwidth(g * 2.0);
+      float mesh = 1.0 - min(min(line.x, line.y), 1.0);
+      base = mix(u_low, u_high, mesh * 0.8 * (1.0 - horizon) + (1.0 - horizon) * 0.12);`,
+  },
+  {
+    id: "stars",
+    label: "Drift",
+    hint: "Points of light, sparse and slow. Almost nothing on screen, which "
+      + "on an OLED is almost nothing lit.",
+    body: `
+      vec2 p = uv * aspect * 18.0 + vec2(0.0, t * 0.08);
+      vec2 cell = floor(p);
+      float star = hash(cell);
+      vec2 pos = fract(p) - vec2(hash(cell + 3.1), hash(cell + 7.7));
+      float glow = smoothstep(0.42, 0.0, length(pos)) * step(0.955, star);
+      float twinkle = 0.6 + 0.4 * sin(t * 1.6 + star * 40.0);
+      base = mix(u_low, u_high, glow * twinkle);`,
+  },
+];
+
+export function backdropStyle(id) {
+  return BACKDROPS.find((b) => b.id === id) ?? BACKDROPS[0];
+}
+
+function fragmentFor(id) {
+  return SHADER_HEAD + backdropStyle(id).body + SHADER_TAIL;
+}
 
 function compile(gl, type, src) {
   const sh = gl.createShader(type);
@@ -96,7 +180,14 @@ let running = null;
 // Strength well below 1. At full it is a bright glow across the middle of the
 // screen that the cover art has to compete with — the backdrop's whole job is
 // to sit behind the artwork, not next to it.
-const DEFAULTS = { speed: 4, strength: 0.32, low: "", high: "", preset: "midnight" };
+const DEFAULTS = {
+  speed: 4,
+  strength: 0.32,
+  low: "",
+  high: "",
+  preset: "midnight",
+  style: "blobs",
+};
 
 /// Dark palettes, because this sits behind cover art at night on a television.
 ///
@@ -213,18 +304,32 @@ export function startBackdrop() {
   });
   if (!gl) return null;
 
+  // One program per style, built when that style is first asked for and kept:
+  // switching back and forth in Settings should not recompile a shader every
+  // time, and five of them is a few kilobytes of driver state.
+  const programs = new Map();
   const vs = compile(gl, gl.VERTEX_SHADER, VERTEX);
-  const fs = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT);
-  if (!vs || !fs) return null;
+  if (!vs) return null;
 
-  const prog = gl.createProgram();
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    console.warn("backdrop link failed:", gl.getProgramInfoLog(prog));
-    return null;
-  }
+  const programFor = (id) => {
+    if (programs.has(id)) return programs.get(id);
+    const fs = compile(gl, gl.FRAGMENT_SHADER, fragmentFor(id));
+    if (!fs) return programs.get("blobs") ?? null;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      console.warn("backdrop link failed:", gl.getProgramInfoLog(p));
+      return null;
+    }
+    programs.set(id, p);
+    return p;
+  };
+
+  let styleId = backdropSettings().style ?? "blobs";
+  const prog = programFor(styleId);
+  if (!prog) return null;
   gl.useProgram(prog);
 
   // One triangle covering the viewport. A triangle rather than two for a quad:
@@ -232,28 +337,50 @@ export function startBackdrop() {
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, "pos");
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-
-  const uSize = gl.getUniformLocation(prog, "u_size");
-  const uTime = gl.getUniformLocation(prog, "u_time");
-  const uLow = gl.getUniformLocation(prog, "u_low");
-  const uHigh = gl.getUniformLocation(prog, "u_high");
-  const uStrength = gl.getUniformLocation(prog, "u_strength");
-  const uSpeed = gl.getUniformLocation(prog, "u_speed");
+  // Uniform locations belong to a program, so they are looked up per program
+  // rather than once: a location from one is meaningless in another, and the
+  // symptom of getting that wrong is a backdrop that goes black on the second
+  // style you try.
+  let active = prog;
+  const bind = (p) => {
+    gl.useProgram(p);
+    const loc = gl.getAttribLocation(p, "pos");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    return {
+      size: gl.getUniformLocation(p, "u_size"),
+      time: gl.getUniformLocation(p, "u_time"),
+      low: gl.getUniformLocation(p, "u_low"),
+      high: gl.getUniformLocation(p, "u_high"),
+      strength: gl.getUniformLocation(p, "u_strength"),
+      speed: gl.getUniformLocation(p, "u_speed"),
+    };
+  };
+  let u = bind(prog);
 
   const apply = (cfg) => {
+    const want = cfg.style ?? "blobs";
+    if (want !== styleId) {
+      const next = programFor(want);
+      if (next) {
+        styleId = want;
+        active = next;
+        u = bind(next);
+        sized = false;
+      }
+    }
     // A preset supplies the pair; "custom" falls through to the user's own, and
     // an unset custom colour falls through again to the theme's — so the
     // default follows the palette rather than being a second place to maintain.
     const { low, high } = presetColours(cfg);
-    gl.useProgram(prog);
-    gl.uniform3fv(uLow, rgb(low, "--bg", [0.05, 0.05, 0.07]));
-    gl.uniform3fv(uHigh, rgb(high, "--accent", [0.18, 0.2, 0.36]));
-    gl.uniform1f(uStrength, cfg.strength);
-    gl.uniform1f(uSpeed, cfg.speed);
+    gl.useProgram(active);
+    gl.uniform3fv(u.low, rgb(low, "--bg", [0.05, 0.05, 0.07]));
+    gl.uniform3fv(u.high, rgb(high, "--accent", [0.18, 0.2, 0.36]));
+    gl.uniform1f(u.strength, cfg.strength);
+    gl.uniform1f(u.speed, cfg.speed);
+    if (!sized) resize();
   };
+  let sized = false;
   apply(backdropSettings());
   live = apply;
 
@@ -264,7 +391,9 @@ export function startBackdrop() {
     canvas.width = Math.max(2, Math.floor(window.innerWidth * scale));
     canvas.height = Math.max(2, Math.floor(window.innerHeight * scale));
     gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.uniform2f(uSize, canvas.width, canvas.height);
+    gl.useProgram(active);
+    gl.uniform2f(u.size, canvas.width, canvas.height);
+    sized = true;
   };
   resize();
   window.addEventListener("resize", resize);
@@ -285,7 +414,8 @@ export function startBackdrop() {
     frame = requestAnimationFrame(draw);
     if (now - lastDraw < MIN_GAP_MS) return;
     lastDraw = now;
-    gl.uniform1f(uTime, (now - start) / 1000);
+    gl.useProgram(active);
+    gl.uniform1f(u.time, (now - start) / 1000);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 

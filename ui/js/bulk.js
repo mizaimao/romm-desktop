@@ -37,34 +37,54 @@ export async function askDownload(what = {}) {
   let picker = "";
   if (!what.collection) {
     let list = [];
+    let mine = [];
     try {
-      list = await invoke("platforms");
+      // Both lists up front: the tabs switch between two things that are
+      // already here, rather than fetching on the first click and leaving an
+      // empty pane while it does.
+      [list, mine] = await Promise.all([
+        invoke("platforms"),
+        invoke("collections_in", { group: "user" }).catch(() => []),
+      ]);
     } catch {
       return toast("Could not read the platform list");
     }
     if (!list.length) return toast("Nothing to download yet — sync first");
+    const tick = (cls, value, label, count, checked) => `
+      <label class="bulk-sys">
+        <input type="checkbox" class="${cls}" value="${escapeHtml(String(value))}"
+          ${checked ? "checked" : ""} />
+        <span>${escapeHtml(label)}</span>
+        <em>${count}</em>
+      </label>`;
     picker = `
       <div class="bulk-systems">
         <div class="bulk-systems-head">
-          <span>Systems</span>
+          <span class="bulk-tabs">
+            <button type="button" class="bulk-tab on" data-tab="systems">Systems</button>
+            ${mine.length ? `<button type="button" class="bulk-tab" data-tab="mine">My collections</button>` : ""}
+          </span>
           <span class="bulk-pick">
             <button type="button" class="link bulk-all">All</button>
             <button type="button" class="link bulk-none">None</button>
           </span>
         </div>
-        <div class="bulk-list">
+        <div class="bulk-list" data-tab="systems">
           ${list
-            .map(
-              (p) => `
-            <label class="bulk-sys">
-              <input type="checkbox" class="bulk-plat" value="${escapeHtml(p.slug)}"
-                ${p.slug === what.platform ? "checked" : ""} />
-              <span>${escapeHtml(p.name)}</span>
-              <em>${p.rom_count}</em>
-            </label>`
-            )
+            .map((p) => tick("bulk-plat", p.slug, p.name, p.rom_count, p.slug === what.platform))
             .join("")}
         </div>
+        ${
+          mine.length
+            ? `<div class="bulk-list" data-tab="mine" hidden>
+                 ${mine
+                   .map((c) =>
+                     tick("bulk-coll", c.id, c.name, `${c.rom_count - (c.local_count ?? 0)} to get`, false)
+                   )
+                   .join("")}
+               </div>`
+            : ""
+        }
       </div>`;
   }
   const title = what.name ?? "your library";
@@ -117,6 +137,7 @@ export async function askDownload(what = {}) {
   const all = (s) => [...box.querySelectorAll(s)];
   const choice = () => ({
     platforms: all(".bulk-plat:checked").map((c) => c.value),
+    collections: all(".bulk-coll:checked").map((c) => c.value),
     collection: what.collection ?? null,
     art: q(".bulk-art").value,
     videos: q(".bulk-videos").checked,
@@ -160,12 +181,24 @@ export async function askDownload(what = {}) {
   // Counting what is already on disk means one filesystem call per game, and
   // doing that on every tick of a checkbox stalled the window for seconds.
   box.addEventListener("change", stale);
+  // The tabs, and which list All/None act on: the one you are looking at.
+  // Ticking every collection because you pressed All on the systems tab is a
+  // download nobody asked for.
+  const shownTab = () => box.querySelector(".bulk-tab.on")?.dataset.tab ?? "systems";
+  const boxesHere = () => all(`.bulk-list[data-tab="${shownTab()}"] input`);
+  for (const tab of all(".bulk-tab")) {
+    tab.addEventListener("click", () => {
+      all(".bulk-tab").forEach((t) => t.classList.toggle("on", t === tab));
+      for (const list of all(".bulk-list")) list.hidden = list.dataset.tab !== tab.dataset.tab;
+    });
+  }
+
   q(".bulk-all")?.addEventListener("click", () => {
-    all(".bulk-plat").forEach((c) => (c.checked = true));
+    boxesHere().forEach((c) => (c.checked = true));
     stale();
   });
   q(".bulk-none")?.addEventListener("click", () => {
-    all(".bulk-plat").forEach((c) => (c.checked = false));
+    boxesHere().forEach((c) => (c.checked = false));
     stale();
   });
   q(".bulk-size").addEventListener("click", refresh);

@@ -7,7 +7,7 @@ import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, SCHEMES,
   glassTint, setGlassTint, glassStrength, setGlassStrength,
-  paneClarity, setPaneClarity,
+  paneClarity, setPaneClarity, BACKDROPS,
 } from "../backdrop.js";
 
 export const html = `      <h4>Layout</h4>
@@ -72,10 +72,11 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><input class="pane-clarity" type="range" min="0" max="80" step="5" />
           <span class="pane-clarity-val"></span></div>
       </div>
-      <p class="hint">How much of the window behind the preview shows through
-        it. The pane was the last solid surface in here — everything else is
-        glass over what is behind it. It stops at 80: past that the text has
-        nothing to sit on, and a preview you cannot read is not a preview.</p>
+      <p class="hint">How much of what is behind the preview shows through it.
+        Stops at 80: past that the text has nothing to sit on.</p>
+      <p class="hint clarity-needs-backdrop">Glass shows what is behind it, and
+        with the shader backdrop off the answer is a flat colour — so this
+        slider will look like it does nothing. Turn the backdrop on to see it.</p>
 
       <div class="srow bd-custom">
         <label>Glass color</label>
@@ -87,6 +88,11 @@ export const html = `      <h4>Layout</h4>
         <label>Enabled</label>
         <div class="ctl"><button class="set-backdrop">Shader backdrop: off</button></div>
       </div>
+      <div class="srow">
+        <label>Style</label>
+        <div class="ctl"><select class="bd-style"></select></div>
+      </div>
+      <p class="hint bd-style-hint"></p>
       <div class="srow">
         <label>Motion</label>
         <div class="ctl"><input class="bd-speed" type="range" min="300" max="700" step="25" />
@@ -201,6 +207,8 @@ export function wire(box) {
       const on = setBackdropWanted(!backdropWanted());
       bdStatus.textContent = on ? "On in the library window." : "";
       paintBackdropButton();
+      // The preview pane's slider only means something with this on.
+      box.querySelector(".clarity-needs-backdrop").hidden = on;
     });
   }
 
@@ -222,8 +230,36 @@ export function wire(box) {
   const strengthEl = box.querySelector(".glass-strength");
   const strengthOut = box.querySelector(".glass-strength-val");
 
+  // The styles, and what each one is. Switching applies to the library window
+  // immediately, which is the only way to judge one.
+  const styleEl = box.querySelector(".bd-style");
+  const styleHint = box.querySelector(".bd-style-hint");
+  if (styleEl) {
+    const cfg = backdropSettings();
+    styleEl.innerHTML = BACKDROPS.map(
+      (b) =>
+        `<option value="${escapeHtml(b.id)}" ${b.id === (cfg.style ?? "blobs") ? "selected" : ""}>${escapeHtml(b.label)}</option>`
+    ).join("");
+    const sayHint = () => {
+      styleHint.textContent = BACKDROPS.find((b) => b.id === styleEl.value)?.hint ?? "";
+    };
+    sayHint();
+    styleEl.addEventListener("change", () => {
+      saveBackdropSettings({ style: styleEl.value });
+      sayHint();
+    });
+  }
+
   const clarityEl = box.querySelector(".pane-clarity");
   const clarityOut = box.querySelector(".pane-clarity-val");
+  // Said out loud rather than left to be discovered: a slider whose effect
+  // depends on another setting, with nothing saying so, reads as a slider that
+  // does not work — which is exactly how it was reported.
+  const sayBackdrop = () => {
+    const note = box.querySelector(".clarity-needs-backdrop");
+    if (note) note.hidden = backdropWanted();
+  };
+  sayBackdrop();
   if (clarityEl) {
     clarityEl.value = String(paneClarity());
     clarityOut.textContent = `${paneClarity()}%`;

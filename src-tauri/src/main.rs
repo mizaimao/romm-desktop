@@ -752,6 +752,11 @@ struct DownloadChoice {
     platforms: Vec<String>,
     #[serde(default)]
     collection: Option<String>,
+    /// Ticked in the pane's own list. `collection` is the single one you
+    /// pointed at before opening it; both are honoured, and a game in two of
+    /// them is still one download.
+    #[serde(default)]
+    collections: Vec<String>,
     art: String,
     videos: bool,
     manuals: bool,
@@ -784,10 +789,11 @@ fn rows_for_choice(
     state: &State<'_, AppState>,
     platforms: &[String],
     collection: &Option<String>,
+    collections: &[String],
 ) -> Result<Vec<cache::RomRow>, String> {
     let cache = state.cache.lock().map_err(err)?;
     let mut rows = Vec::new();
-    if let Some(id) = collection {
+    for id in collection.iter().chain(collections.iter()) {
         rows.extend(cache.roms_in_collection(id).map_err(err)?);
     }
     for p in platforms {
@@ -817,7 +823,7 @@ async fn download_estimate(
 ) -> CmdResult<(String, bool, String)> {
     use romm_desktop::{bulk, diskspace};
 
-    let rows = rows_for_choice(&state, &choice.platforms, &choice.collection)?;
+    let rows = rows_for_choice(&state, &choice.platforms, &choice.collection, &choice.collections)?;
     let want = choice.want();
     let mut est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
     // Asked of the server rather than averaged, because unlike artwork there is
@@ -871,7 +877,7 @@ async fn download_set(
     use romm_desktop::{bulk, diskspace};
 
     let client = state.client.clone().ok_or("no server configured")?;
-    let rows = rows_for_choice(&state, &choice.platforms, &choice.collection)?;
+    let rows = rows_for_choice(&state, &choice.platforms, &choice.collection, &choice.collections)?;
     let want = choice.want();
     let est = bulk::estimate(&rows, want, |r| row_path(&state, r).is_some());
     if let diskspace::Fit::No { short, .. } = diskspace::fits(&state.roms_dir, est.total()) {

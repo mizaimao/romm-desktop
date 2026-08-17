@@ -210,13 +210,16 @@ export async function showCollectionRoms(id, name) {
 /// Fill collection cards with a member's cover, through the same local cache
 /// the game grids use — so this works offline and needs no server request.
 async function loadMosaics(list, into) {
-  const ids = list.flatMap((c) => c.sample_ids.slice(0, 1));
+  // A collection with no sample ids — an older backend, or one the server has
+  // not filled in — is a collection with no cover, not a crash halfway through
+  // drawing the list.
+  const ids = list.flatMap((c) => (c.sample_ids ?? []).slice(0, 1));
   if (!ids.length) return;
   try {
     const covers = await invoke("rom_covers", { ids });
     const byId = new Map(covers.map((c) => [c.id, c.cover]));
     for (const c of list) {
-      const cover = byId.get(c.sample_ids[0]);
+      const cover = byId.get((c.sample_ids ?? [])[0]);
       if (!cover) continue;
       // The grid the cards were actually drawn into, passed in.
       //

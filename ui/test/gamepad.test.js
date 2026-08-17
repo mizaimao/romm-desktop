@@ -59,6 +59,11 @@ function reply(cmd, args) {
   if (cmd === "recent_games") return recentGames;
   if (cmd === "download_estimate") return [estimateSummary, estimateFits, "note"];
   if (cmd === "game_states") return stateList;
+  if (cmd === "collections_in")
+    return [
+      { id: "c1", name: "Best of snes", rom_count: 50, local_count: 20, sample_ids: [] },
+      { id: "c2", name: "Arcade Fighting", rom_count: 322, local_count: 322, sample_ids: [] },
+    ];
   if (cmd === "platforms")
     return [
       { slug: "snes", name: "Super Nintendo", rom_count: 12 },
@@ -1310,5 +1315,51 @@ describe("the settings shortcut", () => {
     invoked.length = 0;
     press({ key: "," });
     assert.equal(invoked.some((c) => c.cmd === "open_settings"), false);
+  });
+});
+
+describe("take offline: collections as well as systems", () => {
+  /// The pane could take whole systems, or the one collection you had open —
+  /// and nothing in between. Picking four of your own collections for a trip
+  /// meant opening the pane four times.
+  test("there is a tab for them, listing what is not here yet", async () => {
+    ui.askDownload({});
+    await settle();
+    const tabs = [...document.querySelectorAll(".bulk-tab")].map((t) => t.dataset.tab);
+    assert.deepEqual(tabs, ["systems", "mine"]);
+    const boxes = [...document.querySelectorAll(".bulk-coll")].map((c) => c.value);
+    assert.deepEqual(boxes, ["c1", "c2"]);
+    // 50 in it, 20 already here: what this costs is the other 30.
+    assert.match(document.querySelector(".bulk-list[data-tab='mine']").textContent, /30 to get/);
+  });
+
+  test("ticking them sends them, alongside any systems", async () => {
+    ui.askDownload({});
+    await settle();
+    document.querySelector('.bulk-plat[value="snes"]').checked = true;
+    document.querySelector('.bulk-coll[value="c2"]').checked = true;
+    invoked.length = 0;
+    document.querySelector(".bulk-size").click();
+    await settle();
+    const est = invoked.find((c) => c.cmd === "download_estimate");
+    assert.ok(est, "nothing was estimated");
+    assert.deepEqual(est.args.choice.platforms, ["snes"]);
+    assert.deepEqual(est.args.choice.collections, ["c2"]);
+  });
+
+  /// All and None act on the list you are looking at. Ticking every collection
+  /// because you pressed All on the systems tab is a download nobody asked
+  /// for.
+  test("All only fills the tab you are on", async () => {
+    ui.askDownload({});
+    await settle();
+    document.querySelector(".bulk-all").click();
+    assert.equal(document.querySelectorAll(".bulk-plat:checked").length, 3);
+    assert.equal(document.querySelectorAll(".bulk-coll:checked").length, 0);
+
+    document.querySelector('.bulk-tab[data-tab="mine"]').click();
+    document.querySelector(".bulk-all").click();
+    assert.equal(document.querySelectorAll(".bulk-coll:checked").length, 2);
+    document.getElementById("bulk-overlay")?.remove();
   });
 });
