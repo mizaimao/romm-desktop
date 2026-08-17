@@ -291,6 +291,20 @@ function rgb(hex, fallbackVar, fallbackRgb) {
 /// an old driver, a software renderer, a webview with WebGL switched off. The
 /// app is fully usable without it, so every failure here is silent.
 export function startBackdrop() {
+  try {
+    return build();
+  } catch (e) {
+    // The module says every failure in here is silent, and for one version it
+    // was not: a reference error thrown out of this function escaped into the
+    // init that called it and took the tab row, the settings button and the
+    // page background with it. Decoration cannot be allowed to do that,
+    // whatever mistake is in it.
+    console.warn("backdrop failed to start:", e);
+    return null;
+  }
+}
+
+function build() {
   if (running) return running;
 
   const canvas = document.createElement("canvas");
@@ -358,6 +372,26 @@ export function startBackdrop() {
   };
   let u = bind(prog);
 
+  // Declared before `apply`, which calls it.
+  //
+  // It was the other way round for one version, and `const` bindings are in
+  // the dead zone until their line runs — so the first call threw
+  // ReferenceError, out of startBackdrop, out of the init that called it, and
+  // took the tab row, the settings button and everything else after it with
+  // it. A backdrop is decoration; it managed to be fatal.
+  let sized = false;
+  const resize = () => {
+    // Half resolution: this is out-of-focus noise, and full-resolution costs
+    // four times the pixels for something nobody is looking directly at.
+    const scale = 0.5;
+    canvas.width = Math.max(2, Math.floor(window.innerWidth * scale));
+    canvas.height = Math.max(2, Math.floor(window.innerHeight * scale));
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(active);
+    gl.uniform2f(u.size, canvas.width, canvas.height);
+    sized = true;
+  };
+
   const apply = (cfg) => {
     const want = cfg.style ?? "blobs";
     if (want !== styleId) {
@@ -380,21 +414,9 @@ export function startBackdrop() {
     gl.uniform1f(u.speed, cfg.speed);
     if (!sized) resize();
   };
-  let sized = false;
   apply(backdropSettings());
   live = apply;
 
-  const resize = () => {
-    // Half resolution: this is out-of-focus noise, and full-resolution costs
-    // four times the pixels for something nobody is looking directly at.
-    const scale = 0.5;
-    canvas.width = Math.max(2, Math.floor(window.innerWidth * scale));
-    canvas.height = Math.max(2, Math.floor(window.innerHeight * scale));
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.useProgram(active);
-    gl.uniform2f(u.size, canvas.width, canvas.height);
-    sized = true;
-  };
   resize();
   window.addEventListener("resize", resize);
 
