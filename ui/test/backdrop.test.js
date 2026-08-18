@@ -54,7 +54,7 @@ function fakeGl() {
     enableVertexAttribArray: () => {},
     vertexAttribPointer: () => {},
     getUniformLocation: (_p, n) => handle(n),
-    uniform1f: () => {},
+    uniform1f: (loc, v) => calls.push(["uniform1f", loc?.name, v]),
     uniform2f: () => {},
     uniform3fv: () => {},
     viewport: () => {},
@@ -151,5 +151,126 @@ describe("the styles", () => {
     }
     // Back to the first one, which is already compiled.
     assert.doesNotThrow(() => backdrop.applyBackdropSettings({ style: backdrop.BACKDROPS[0].id }));
+  });
+});
+
+/// The glass, which is one number and used to be two.
+///
+/// The preview pane had its own tint and its own slider, so the surface you
+/// read from was the one surface that matched nothing around it — and the
+/// slider that was supposed to fix that was a second control over an idea the
+/// stylesheet only has one of. `--tint` is the opacity every sheet of glass
+/// mixes its colour in at; the pane is a large card and takes the same one.
+describe("the glass", () => {
+  const css = () =>
+    readFileSync(join(uiDir, "style.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const ruleFor = (sel) =>
+    new RegExp(`${sel}\\s*\\{[^}]*\\}`).exec(css())?.[0] ?? "";
+  const backgroundOf = (sel) =>
+    /background:\s*([^;]+);/.exec(ruleFor(sel))?.[1].replace(/\s+/g, " ").trim();
+
+  /// The whole of items 1 and 2, as one assertion: give the pane a tint or an
+  /// opacity of its own and these two stop matching.
+  test("the preview pane is glazed exactly like a card", () => {
+    const card = backgroundOf("\\.card");
+    assert.ok(card, "the card lost its glass");
+    assert.equal(backgroundOf("#detail"), card);
+  });
+
+  test("every glass surface takes its opacity from the one variable", () => {
+    const surfaces = ["\\.card", "#detail", "\\.card:hover", "\\.card\\.sel"];
+    for (const sel of surfaces) {
+      assert.match(
+        backgroundOf(sel) ?? "",
+        /var\(--tint\)/,
+        `${sel} has an opacity of its own again`
+      );
+    }
+  });
+
+  /// There is one slider for this, and Appearance is where a second one would
+  /// reappear.
+  test("Appearance offers one control for it, not two", () => {
+    const pane = readFileSync(join(uiDir, "js/settings/appearance.js"), "utf8");
+    const sliders = pane.match(/class="(glass-strength|pane-clarity)"/g) ?? [];
+    assert.deepEqual(sliders, ['class="glass-strength"']);
+  });
+
+  /// The bug that made the pane solid, and it is worth stating on its own
+  /// because it is invisible at the call site: `Number(null)` is `0`, `0` is
+  /// finite and not negative, so a guard written as `n >= 0` accepts the
+  /// absence of a setting as the setting `0`. Restore
+  /// `Number(localStorage.getItem())` without the presence check and this fails.
+  test("nothing stored means the default, not zero", () => {
+    dom.window.localStorage.clear();
+    assert.equal(backdrop.glassStrength(), 18, "an unset glass strength read as none");
+  });
+
+  /// The other half of the same guard: a zero somebody chose is not the same
+  /// as a zero that fell out of an empty key, and it has to survive a restart.
+  test("a zero that was chosen is kept", () => {
+    dom.window.localStorage.setItem("glassStrength", "0");
+    assert.equal(backdrop.glassStrength(), 0, "the glass slider snapped back off zero");
+  });
+
+  test("it is applied as a percentage the stylesheet can use", () => {
+    backdrop.setGlassStrength(24);
+    assert.equal(
+      dom.window.document.documentElement.style.getPropertyValue("--tint"),
+      "24%"
+    );
+  });
+});
+
+/// The three complaints about the shapes themselves, each with the arithmetic
+/// that caused it.
+///
+/// jsdom has no GPU, so none of this can be checked by rendering it — these
+/// read the shader source and assert the property that was wrong. That is
+/// weaker than a picture and it is what is available; the failures they guard
+/// are all "somebody edited the body back".
+describe("the shapes", () => {
+  test("every style says how fast it should run", () => {
+    for (const b of backdrop.BACKDROPS) {
+      assert.equal(typeof b.pace, "number", `${b.id} has no pace`);
+      assert.ok(b.pace > 0, `${b.id} would never move`);
+    }
+  });
+
+  /// Blobs drifts at 0.015 of `t` and Plasma sweeps at 0.31, so one number on
+  /// the Motion slider meant twenty times the movement depending on which
+  /// shape was drawing. Whatever the paces are tuned to, these two cannot end
+  /// up being handed the same speed.
+  test("the same Motion setting is not the same speed for every shape", () => {
+    const speedFor = (style) => {
+      backdrop.applyBackdropSettings({ style, speed: 5 });
+      const seen = calls.filter((c) => c[0] === "uniform1f" && c[1] === "u_speed");
+      return seen[seen.length - 1]?.[2];
+    };
+    backdrop.startBackdrop();
+    const blobs = speedFor("blobs");
+    const plasma = speedFor("plasma");
+    assert.ok(blobs > 0 && plasma > 0, "no speed reached the shader");
+    assert.ok(plasma < blobs, "Plasma is still being run as fast as Blobs");
+  });
+
+  /// Drift: a star's glow has a radius of 0.42 of a cell, so any star nearer
+  /// than that to a cell edge had the rest of it drawn by a neighbouring cell
+  /// that was never asked. What showed was points sliced flat along the same
+  /// straight lines every frame. It has to look at the eight neighbours.
+  test("Drift asks the cells around it, not only its own", () => {
+    const body = backdrop.backdropStyle("stars").body;
+    assert.match(body, /for\s*\(int/, "Drift is back to sampling one cell");
+    assert.match(body, /cell \+ o/, "the neighbouring cell is not being hashed");
+  });
+
+  /// Grid: `max(p.y, 0.04)` froze the perspective divide across the bottom of
+  /// the screen, so the lines stopped converging at a fixed height and ran
+  /// straight down from it — and `fwidth` of a frozen coordinate is zero, so
+  /// the same seam was also a divide by zero.
+  test("Grid guards its divide instead of clamping what goes into it", () => {
+    const body = backdrop.backdropStyle("grid").body;
+    assert.doesNotMatch(body, /max\(p\.y,/, "the perspective input is clamped again");
+    assert.match(body, /max\(fwidth\([^)]*\), *1e-4\)/, "fwidth can still be zero here");
   });
 });

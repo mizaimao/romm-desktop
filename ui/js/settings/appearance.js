@@ -7,7 +7,7 @@ import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, SCHEMES,
   glassTint, setGlassTint, glassStrength, setGlassStrength,
-  paneClarity, setPaneClarity, BACKDROPS,
+  BACKDROPS,
 } from "../backdrop.js";
 
 export const html = `      <h4>Layout</h4>
@@ -61,22 +61,17 @@ export const html = `      <h4>Layout</h4>
         used to be two dropdowns, and every combination worth having was a
         matching pair. Custom sets all three colors separately.</p>
       <div class="srow">
-        <label>Tint strength</label>
+        <label>Glass</label>
         <div class="ctl"><input class="glass-strength" type="range" min="0" max="60" step="2" />
           <span class="glass-strength-val"></span></div>
       </div>
-      <p class="hint">How much of that color the glass carries. At 0 the glass
-        is clear and only the blur remains.</p>
-      <div class="srow">
-        <label>Preview pane</label>
-        <div class="ctl"><input class="pane-clarity" type="range" min="0" max="80" step="5" />
-          <span class="pane-clarity-val"></span></div>
-      </div>
-      <p class="hint">How much of what is behind the preview shows through it.
-        Stops at 80: past that the text has nothing to sit on.</p>
+      <p class="hint">How solid every sheet of glass in the window is — the
+        cards, the selected row, the cover art, and the preview pane, which is
+        one of them. At 0 they are clear and only the blur remains.</p>
       <p class="hint clarity-needs-backdrop">Glass shows what is behind it, and
         with the shader backdrop off the answer is a flat colour — so this
-        slider will look like it does nothing. Turn the backdrop on to see it.</p>
+        slider will look like it does less than it does. Turn the backdrop on to
+        see it.</p>
 
       <div class="srow bd-custom">
         <label>Glass color</label>
@@ -250,8 +245,6 @@ export function wire(box) {
     });
   }
 
-  const clarityEl = box.querySelector(".pane-clarity");
-  const clarityOut = box.querySelector(".pane-clarity-val");
   // Said out loud rather than left to be discovered: a slider whose effect
   // depends on another setting, with nothing saying so, reads as a slider that
   // does not work — which is exactly how it was reported.
@@ -260,13 +253,6 @@ export function wire(box) {
     if (note) note.hidden = backdropWanted();
   };
   sayBackdrop();
-  if (clarityEl) {
-    clarityEl.value = String(paneClarity());
-    clarityOut.textContent = `${paneClarity()}%`;
-    clarityEl.addEventListener("input", () => {
-      clarityOut.textContent = `${setPaneClarity(clarityEl.value)}%`;
-    });
-  }
 
   if (strengthEl) {
     strengthEl.value = String(glassStrength());

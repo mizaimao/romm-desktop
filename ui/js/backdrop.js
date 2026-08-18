@@ -89,11 +89,22 @@ const SHADER_TAIL = `
 /// only option: the whole point of a backdrop is that it suits the room, and
 /// one shape suits one room. Each of these takes the same two scheme colours
 /// so switching style does not also change the palette.
+///
+/// `pace` is what the Motion slider means for this style, and it exists
+/// because the slider was a lie shared between five shapes. Every body writes
+/// its own multipliers on `t`, and they are two decades apart: Blobs drifts at
+/// 0.015 of it and Plasma sweeps at 0.31, twenty times faster for the same
+/// number on the slider. Setting it where Plasma was watchable left Blobs and
+/// Aurora looking like still images. The slider now says how fast *this*
+/// backdrop should go, and each style carries the factor that makes that true
+/// — so the setting survives switching style, which is the whole point of one
+/// slider rather than five.
 export const BACKDROPS = [
   {
     id: "blobs",
     label: "Blobs",
     hint: "Soft clouds drifting at two scales. The original, and the quietest.",
+    pace: 1.7,
     body: `
       float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
       float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
@@ -103,6 +114,7 @@ export const BACKDROPS = [
     id: "aurora",
     label: "Aurora",
     hint: "Slow vertical curtains, brighter where they fold over each other.",
+    pace: 1.4,
     body: `
       float band = uv.y * 2.2 + fbm(vec2(uv.x * 2.0, t * 0.05)) * 1.6;
       float curtain = sin(band * 3.14159) * 0.5 + 0.5;
@@ -114,6 +126,9 @@ export const BACKDROPS = [
     label: "Plasma",
     hint: "Interfering sine waves. The oldest trick on this list, and the one "
       + "that looks most like a demo from 1993.",
+    // The one that made the slider a lie: four sines at 0.2–0.4 of `t`, where
+    // Blobs drifts at 0.015 of it.
+    pace: 0.1,
     body: `
       vec2 p = (uv - 0.5) * aspect * 4.0;
       float v = sin(p.x + t * 0.35)
@@ -127,27 +142,57 @@ export const BACKDROPS = [
     label: "Grid",
     hint: "A horizon and a grid running to it. Steadier than the rest: the "
       + "lines do not move, only the light on them.",
+    // `gl_FragCoord.y` counts from the bottom, so the floor is where `uv.y` is
+    // *small* — and the old horizon at 0.18 put it below the bottom of the
+    // screen. Everything actually on show was the clamp: `max(p.y, 0.04)`
+    // froze the perspective divide across the whole lower fifth, so the lines
+    // stopped converging at a fixed height and ran straight down from it, and
+    // `fwidth` of a frozen coordinate is zero — a divide by zero smeared along
+    // that same seam. Horizon in the upper half, depth measured downwards from
+    // it, and the divide guarded rather than the input clamped.
+    pace: 0.7,
     body: `
-      vec2 p = (uv - vec2(0.5, 0.18)) * aspect;
-      float horizon = smoothstep(0.0, 0.55, p.y);
-      vec2 g = vec2(p.x / max(p.y, 0.04), 1.0 / max(p.y, 0.04) + t * 0.25);
-      vec2 line = abs(fract(g * 2.0) - 0.5) / fwidth(g * 2.0);
+      vec2 q = (uv - vec2(0.5, 0.55)) * aspect;
+      float depth = max(-q.y, 1e-3);
+      vec2 g = vec2(q.x / depth, 1.0 / depth + t * 0.25);
+      vec2 w = max(fwidth(g * 2.0), 1e-4);
+      vec2 line = abs(fract(g * 2.0) - 0.5) / w;
       float mesh = 1.0 - min(min(line.x, line.y), 1.0);
-      base = mix(u_low, u_high, mesh * 0.8 * (1.0 - horizon) + (1.0 - horizon) * 0.12);`,
+      // Nothing above the horizon but a glow, and the mesh fades in below it:
+      // the lines converge faster than the pixels can hold them right at the
+      // vanishing line, and drawn hard that reads as noise rather than as
+      // distance.
+      float floorMask = step(0.0, -q.y) * smoothstep(0.0, 0.06, depth);
+      float sky = 1.0 - smoothstep(0.0, 0.30, max(q.y, 0.0));
+      base = mix(u_low, u_high, mesh * 0.8 * floorMask + sky * 0.12);`,
   },
   {
     id: "stars",
     label: "Drift",
     hint: "Points of light, sparse and slow. Almost nothing on screen, which "
       + "on an OLED is almost nothing lit.",
+    // A star is scattered inside a cell of an invisible grid, and its glow has
+    // a radius of 0.42 of a cell — so any star sitting nearer than that to a
+    // cell edge had the rest of its glow drawn by the neighbouring cell, which
+    // was not asking about it. What showed was a field of points sliced flat
+    // along straight lines, always the same lines, because the grid does not
+    // move with the drift. Every point has to ask its eight neighbours too.
+    pace: 1,
     body: `
       vec2 p = uv * aspect * 18.0 + vec2(0.0, t * 0.08);
-      vec2 cell = floor(p);
-      float star = hash(cell);
-      vec2 pos = fract(p) - vec2(hash(cell + 3.1), hash(cell + 7.7));
-      float glow = smoothstep(0.42, 0.0, length(pos)) * step(0.955, star);
-      float twinkle = 0.6 + 0.4 * sin(t * 1.6 + star * 40.0);
-      base = mix(u_low, u_high, glow * twinkle);`,
+      vec2 cell = floor(p), f = fract(p);
+      float glow = 0.0;
+      for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+          vec2 o = vec2(float(i), float(j));
+          vec2 c = cell + o;
+          float star = hash(c);
+          vec2 pos = f - o - vec2(hash(c + 3.1), hash(c + 7.7));
+          float twinkle = 0.6 + 0.4 * sin(t * 1.6 + star * 40.0);
+          glow += smoothstep(0.42, 0.0, length(pos)) * step(0.955, star) * twinkle;
+        }
+      }
+      base = mix(u_low, u_high, min(glow, 1.0));`,
   },
 ];
 
@@ -411,7 +456,9 @@ function build() {
     gl.uniform3fv(u.low, rgb(low, "--bg", [0.05, 0.05, 0.07]));
     gl.uniform3fv(u.high, rgb(high, "--accent", [0.18, 0.2, 0.36]));
     gl.uniform1f(u.strength, cfg.strength);
-    gl.uniform1f(u.speed, cfg.speed);
+    // Scaled by the style's own pace, not handed over raw: one number on the
+    // slider has to mean the same amount of movement whichever shape is drawing.
+    gl.uniform1f(u.speed, cfg.speed * (backdropStyle(styleId).pace ?? 1));
     if (!sized) resize();
   };
   apply(backdropSettings());
@@ -528,12 +575,27 @@ export const SCHEMES = [
 
 const GLASS_KEY = "glassTint";
 const TINT_KEY = "glassStrength";
-const CLEAR_KEY = "paneClarity";
 
-/// How much of the tint shows through the glass, as a percentage.
+/// How opaque the glass is, as a percentage — every card, the selected row,
+/// the cover art behind a game, and the preview pane, which is one of them.
+///
+/// This is the transparency control, and calling it "tint strength" was the
+/// reason nobody could find it. `--tint` is the *opacity* the surfaces mix
+/// their colour in at and it has never been anything else: there are five
+/// `var(--tint)` in the stylesheet and all five are the percentage in a
+/// `color-mix` against `transparent`. So the preview pane's own second slider
+/// was a second control over one idea, which is how the two surfaces came to
+/// disagree. One number, every sheet of glass in the window.
+///
+/// Read by asking whether the key is there rather than what it coerces to:
+/// `n > 0` kept an unset key from reading as zero, but it also threw away a
+/// deliberate zero, so dragging the glass to clear put it back to 18 on the
+/// next start.
 export function glassStrength() {
-  const n = Number(localStorage.getItem(TINT_KEY));
-  return Number.isFinite(n) && n > 0 ? n : 18;
+  const raw = localStorage.getItem(TINT_KEY);
+  if (raw === null) return 18;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.min(60, n) : 18;
 }
 
 export function setGlassStrength(pct, { announce = true } = {}) {
@@ -575,27 +637,3 @@ export function applyStoredGlassTint() {
   setGlassStrength(glassStrength(), { announce: false });
 }
 
-/// How much of what is behind the preview pane shows through it, 0–80%.
-///
-/// The pane was the last solid surface in the window: every card, the header
-/// and the tab row are glass over whatever is behind them, and then a
-/// 460-pixel slab of flat panel down the right-hand side. Capped at 80 because
-/// past that the text has nothing to sit on — a preview you cannot read is not
-/// a preview, and the artwork behind it is not what you opened it for.
-export function paneClarity() {
-  const n = Number(localStorage.getItem(CLEAR_KEY));
-  return Number.isFinite(n) && n >= 0 ? Math.min(80, n) : 55;
-}
-
-export function setPaneClarity(pct, { announce = true } = {}) {
-  const value = Math.max(0, Math.min(80, Math.round(Number(pct) || 0)));
-  // Stored as clarity and used as opacity: "how much shows through" is the
-  // question somebody moving a slider is asking, and the stylesheet wants the
-  // other end of it.
-  document.documentElement.style.setProperty("--pane-solid", `${100 - value}%`);
-  if (announce) {
-    localStorage.setItem(CLEAR_KEY, String(value));
-    window.__TAURI__?.event?.emit?.("pane-clarity", value);
-  }
-  return value;
-}

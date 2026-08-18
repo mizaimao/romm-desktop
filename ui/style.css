@@ -630,13 +630,14 @@ body.has-pad #tabbar .bumper { display: inline; }
   max-width: 70vw;
   flex-shrink: 0;
   border-left: 1px solid var(--line);
-  /* Glass, like everything else in the window.
-     This was the last solid surface left: every card, the header and the tab
-     row sit over whatever is behind them, and then a 460-pixel slab of flat
-     panel down the right-hand side. `--pane-solid` is how much of it stays
-     opaque, which Appearance drives from the other end — "how much shows
-     through" is the question somebody moving that slider is asking. */
-  background: color-mix(in srgb, var(--panel) var(--pane-solid, 45%), transparent);
+  /* The same glass as a card, deliberately the same declaration.
+     It had a tint and an opacity of its own, and a second slider in Appearance
+     to drive them, which made the one surface you look at while reading also
+     the one surface that never matched anything around it. There is nothing
+     special about this pane: it is a large card. Anything that changes how
+     glass looks belongs in `.card` and arrives here for free — and if these
+     two ever drift apart again, the slider that was deleted comes back. */
+  background: color-mix(in srgb, var(--glass) calc(var(--tint) * 0.5), transparent);
   backdrop-filter: blur(18px) saturate(150%);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
   padding: 16px;

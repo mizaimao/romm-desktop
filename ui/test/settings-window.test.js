@@ -255,12 +255,16 @@ describe("the console pictures row", () => {
   });
 
   /// The slider that decides how much of the window shows through the preview.
-  test("the preview pane's clarity is on the Appearance tab, capped at 80", () => {
+  /// One slider for the glass, and it says so. It was two — "Tint strength"
+  /// for the cards and "Preview pane" for the pane — which is how the two
+  /// surfaces came to disagree about how transparent they were.
+  test("the glass is one slider on the Appearance tab", () => {
     const html = panes.paneHtml("appearance");
-    assert.match(html, /class="pane-clarity"/, "no slider for the preview pane");
-    const at = html.indexOf('class="pane-clarity"');
+    assert.match(html, /class="glass-strength"/, "no slider for the glass");
+    assert.doesNotMatch(html, /class="pane-clarity"/, "the preview pane got its own again");
+    const at = html.indexOf('class="glass-strength"');
     const tag = html.slice(at, html.indexOf(">", at));
-    assert.match(tag, /max="80"/, "past 80 the text has nothing to sit on");
-    assert.match(tag, /min="0"/);
+    assert.match(tag, /max="60"/);
+    assert.match(tag, /min="0"/, "at 0 the glass is clear, and that has to be reachable");
   });
 });

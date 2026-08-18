@@ -15,7 +15,7 @@ import { installGamepad } from "./gamepad.js";
 import { warmRefresh } from "./actions.js";
 import {
   startBackdrop, stopBackdrop, applyBackdropSettings,
-  applyStoredGlassTint, setGlassTint, setGlassStrength, paneClarity, setPaneClarity,
+  applyStoredGlassTint, setGlassTint, setGlassStrength,
 } from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
@@ -107,7 +107,6 @@ el.search.addEventListener("input", (e) => {
 // the settings panel and left the library untouched.
 listen("glass-tint", ({ payload }) => setGlassTint(payload, { announce: false }));
 listen("glass-strength", ({ payload }) => setGlassStrength(payload, { announce: false }));
-listen("pane-clarity", ({ payload }) => setPaneClarity(payload, { announce: false }));
 
 listen("backdrop-toggle", ({ payload }) => {
   if (payload) startBackdrop();
@@ -274,9 +273,8 @@ function statusCard(s) {
   // Before anything is drawn: which arrangement decides where things go.
   chooseMode(storedMode(), { announce: false });
   if (localStorage.getItem("backdrop") === "on") startBackdrop();
+  // Covers the preview pane too: it is a card, and takes the same --tint.
   applyStoredGlassTint();
-  // The preview pane's glass, from the same place the tint comes from.
-  setPaneClarity(paneClarity(), { announce: false });
   setZoom(state.zoom);
   setLayout(state.layout);
   setSidebar(state.sidebar);
