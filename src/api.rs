@@ -114,6 +114,15 @@ pub struct Rom {
     #[serde(default)]
     pub name: Option<String>,
     pub fs_name: String,
+    /// The server scanned and could not find this file on disk.
+    ///
+    /// RomM does not delete the row when a ROM disappears — it keeps the entry
+    /// and its metadata and raises this flag, which is the right call for a
+    /// library you might restore from backup. It does mean a plain sync pulls
+    /// in games that cannot be launched: 84 of them here after a cleanup, each
+    /// of which would sit in the grid looking playable and fail at launch.
+    #[serde(default)]
+    pub missing_from_fs: bool,
     #[serde(default)]
     pub fs_size_bytes: Option<i64>,
     #[serde(default)]

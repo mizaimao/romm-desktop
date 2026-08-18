@@ -87,3 +87,10 @@ backups/
 !/drive-manifest/manifest.jsonl.gz
 !/drive-manifest/summary.json
 !/drive-manifest/README.md
+
+# One-off cleanup script generated for the romM library. Local, not ours to ship.
+/romm-remove.sh
+/remove-what-claude-added.sh
+/remove-your-old-games.sh
+/remove-junk.sh
+/remove-veronica.sh

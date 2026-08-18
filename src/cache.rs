@@ -814,6 +814,18 @@ impl Cache {
                     {
                         high = ts.clone();
                     }
+                    // The server keeps the row when a file disappears and
+                    // raises `missing_from_fs` instead of deleting it, which is
+                    // right for the server and wrong for this cache: a cached
+                    // game is one the grid offers and the launcher will try to
+                    // open. Drop it here so a game that is gone stops being
+                    // offered — and drop any row we already had, because a file
+                    // deleted after the last sync arrives as an *update*, not as
+                    // an absence.
+                    if rom.missing_from_fs {
+                        tx.execute("DELETE FROM roms WHERE id = ?1", params![rom.id])?;
+                        continue;
+                    }
                     tx.execute(
                         "INSERT INTO roms(id, platform_slug, name, fs_name,
                                           fs_size_bytes, md5_hash, sha1_hash,
