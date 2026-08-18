@@ -26,12 +26,17 @@ CHUNK = 8 * 1024 * 1024
 
 
 class Api:
-    def __init__(self, url, user, password):
+    def __init__(self, url, user=None, password=None, token=None):
         self.url = url.rstrip("/")
-        self.auth = base64.b64encode(f"{user}:{password}".encode()).decode()
+        # A token is what `config.toml` actually holds; basic auth stays for
+        # the case where only a password is to hand.
+        if token:
+            self.header = f"Bearer {token}"
+        else:
+            self.header = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
 
     def _req(self, method, path, *, data=None, headers=None):
-        h = {"Authorization": f"Basic {self.auth}"}
+        h = {"Authorization": self.header}
         h.update(headers or {})
         req = urllib.request.Request(f"{self.url}{path}", method=method, data=data, headers=h)
         with urllib.request.urlopen(req, timeout=300) as r:
@@ -69,13 +74,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="+")
     ap.add_argument("--url", default="http://dev.lan")
-    ap.add_argument("--user", required=True)
-    ap.add_argument("--password", required=True)
+    ap.add_argument("--user")
+    ap.add_argument("--password")
+    ap.add_argument("--token", help="bearer token; overrides --user/--password")
     ap.add_argument("--platform", required=True, help="platform slug, e.g. neogeoaes")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    api = Api(args.url, args.user, args.password)
+    if not args.token and not (args.user and args.password):
+        sys.exit("need --token, or both --user and --password")
+    api = Api(args.url, args.user, args.password, args.token)
     plats = {p["fs_slug"]: p for p in api.platforms()}
     target = plats.get(args.platform)
     if not target:

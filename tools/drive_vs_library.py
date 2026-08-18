@@ -44,18 +44,13 @@ PLATFORM_MAP = {
     "gamegear": "gamegear",
     "gb": "gb",
     "gba": "gba",
-    "gbah": "gba",
     "gbc": "gbc",
     "genesis": "megadrive",
-    "genesish": "megadrive",
     "megadrive": "megadrive",
-    "megadriveh": "megadrive",
     "mastersystem": "mastersystem",
-    "mastersystemh": "mastersystem",
     "n64": "n64",
     "nds": "nds",
     "nes": "nes",
-    "nesh": "nes",
     "ngp": "neo-geo-pocket",
     "ngpc": "neo-geo-pocket",
     "pcengine": "pcengine",
@@ -68,10 +63,26 @@ PLATFORM_MAP = {
     "sfc": "sfc",
     "satellaview": "sfc",
     "snes": "snes",
-    "snes-msu": "snes",
     "sgb": "gb",
     "wswanc": "wonderswancolor",
+    # Consoles the drive carries that the library has no games for at all.
+    # Mapping them is what lets a "best of" list say "all 16 of these are on
+    # the drive" rather than "all 16 are missing" — the difference between a
+    # copy job and a shopping list.
+    "saturn": "saturn",
 }
+
+# Folders that hold *versions* of games rather than the games. Mapping them in
+# made the planner prefer an 981 MB MSU-1 audio hack of Super Mario RPG over
+# the 4 MB cartridge, because it picks the largest file per title and an MSU
+# build is two hundred times the size. Four of them reached the server before
+# the sizes looked wrong. The `-h` folders are hack collections; `snes-msu`
+# needs core support and extra PCM tracks and is not what a "best of" list
+# means when it says Kirby Super Star.
+VARIANT_FOLDERS = {
+    "snes-msu", "nesh", "gbah", "genesish", "megadriveh", "mastersystemh",
+}
+
 
 
 def open_manifest(path):
