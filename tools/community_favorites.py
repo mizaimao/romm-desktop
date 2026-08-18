@@ -28,16 +28,32 @@ import re
 import sqlite3
 import urllib.error
 import urllib.request
+import unicodedata
 import uuid
 
 PREFIX = "★ Best of "
 
 
 def norm(s):
-    s = s.lower()
+    """Match key for a game title, in any script.
+
+    `[^a-z0-9]` used to do the stripping, which quietly deleted every
+    non-Latin character: `クロノ・トリガー` normalised to the empty string and
+    `スーパーマリオブラザーズ3` to `"3"`. Every Japanese title therefore
+    collapsed onto the same key -- and because the library's own Japanese
+    romsets collapsed there too, an empty key *matched an empty key* and the
+    Super Famicom and Famicom lists scored 84-90% against a pool they had
+    nothing in common with. A source can be checked, voted on, and completely
+    imaginary.
+
+    NFKC first, so full-width and half-width forms of the same character agree
+    (`Ｓｕｐｅｒ` vs `Super`, `Ⅶ` vs `V`), then keep whatever is alphanumeric in
+    any script. ASCII behaviour is unchanged: NFKC is the identity on it.
+    """
+    s = unicodedata.normalize("NFKC", s).lower()
     s = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", s)
     s = re.sub(r"\b(the|a|an)\b", " ", s)
-    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = "".join(ch if ch.isalnum() else " " for ch in s)
     return " ".join(s.split())
 
 

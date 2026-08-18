@@ -77,3 +77,13 @@ backups/
 # Backups of files taken from outside the project. Personal config, not
 # ours to publish — kept on disk, out of the history.
 backups/
+
+# Inventory of the external game drive. The gzipped manifest and the summary
+# are kept, because regenerating them needs the 12 TB drive physically plugged
+# in and everything downstream — what is missing, what to fetch, what to copy —
+# is answerable without it. The 8.8 MB expanded copy and the derived reports are
+# not kept; `gunzip -k` and the tools rebuild them.
+/drive-manifest/*
+!/drive-manifest/manifest.jsonl.gz
+!/drive-manifest/summary.json
+!/drive-manifest/README.md
