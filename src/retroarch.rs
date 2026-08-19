@@ -732,11 +732,7 @@ input_player2_gun_start_mbtn = \"3\"
         };
         // The modifier, and only the modifier. Nothing else is bound, moved
         // or cleared: that is the whole point of this arrangement.
-        let which = match on {
-            AutoFire::LeftBumper => padprofile::Physical::LB,
-            AutoFire::RightBumper => padprofile::Physical::RB,
-            AutoFire::Off => unreachable!("returned above"),
-        };
+        let Some(which) = on.physical() else { unreachable!("Off returned above") };
         let Some(hold) = profile.get(which) else {
             eprintln!("rapid fire: this pad's profile has no {which:?} button");
             return String::new();
@@ -809,7 +805,7 @@ input_player2_gun_start_mbtn = \"3\"
              input_turbo_mode = \"3\"\n\
              input_turbo_default_button = \"0\"\n\
              input_turbo_period = \"{period}\"\n\
-             input_turbo_duty_cycle = \"{duty}\"\n\
+             input_duty_cycle = \"{duty}\"\n\
              {}\n",
             hold.line("player1_turbo"),
         )
@@ -1029,13 +1025,14 @@ input_player2_gun_start_mbtn = \"3\"
     ) -> String {
         let opts = crate::tweaks::core_options(platform, core);
         let remap = crate::tweaks::remap_with(platform, core, autofire);
-        if opts.is_empty() && remap.is_empty() {
-            return String::new();
-        }
-
         let Some(label) = crate::tweaks::core_dir_name(core) else {
             return String::new();
         };
+        // Note the order: a core with neither options nor a remap still has to
+        // reach the cleanup below, because "nothing to write" is exactly the
+        // case where a file from an older version is left applying itself.
+        // Returning early here is what let the arcade remap survive.
+        let nothing_to_write = opts.is_empty() && remap.is_empty();
         let dir = library_root.join("retroarch");
         if std::fs::create_dir_all(&dir).is_err() {
             return String::new();
@@ -1060,19 +1057,27 @@ input_player2_gun_start_mbtn = \"3\"
         }
         lines.sort();
         let opts_path = dir.join("core-options.cfg");
-        if std::fs::write(&opts_path, lines.join("\n") + "\n").is_err() {
+        if !opts.is_empty() && std::fs::write(&opts_path, lines.join("\n") + "\n").is_err() {
             return String::new();
         }
 
         let remaps_dir = dir.join("remaps");
-        if !remap.is_empty() {
-            let core_dir = remaps_dir.join(label);
-            if std::fs::create_dir_all(&core_dir).is_ok() {
-                let _ = std::fs::write(
-                    core_dir.join(format!("{label}.rmp")),
-                    remap.join("\n") + "\n",
-                );
-            }
+        let core_dir = remaps_dir.join(label);
+        let rmp = core_dir.join(format!("{label}.rmp"));
+        if remap.is_empty() {
+            // Deleted, not merely skipped. Writing nothing leaves whatever was
+            // written last time, and RetroArch keeps applying it: an arcade
+            // remap from a superseded design — `input_player1_btn_b = "-1"`,
+            // `input_player1_btn_x = "0"` — outlived the code that made it and
+            // moved the fire button from A to Y on every launch for weeks.
+            // Nothing in the app wrote those lines any more, which is exactly
+            // why nobody found them by reading it.
+            let _ = std::fs::remove_file(&rmp);
+        } else if std::fs::create_dir_all(&core_dir).is_ok() {
+            let _ = std::fs::write(&rmp, remap.join("\n") + "\n");
+        }
+        if nothing_to_write {
+            return String::new();
         }
 
         [
@@ -1421,6 +1426,96 @@ input_r2_axis = "+5"
 
     /// Auto-fire moves two buttons and nothing else. Getting only half of it
     /// written would be worse than none: a shot button that repeats, with
+    /// The bug that put the fire button on Y for weeks.
+    ///
+    /// A remap written by a superseded design outlived the code that made it.
+    /// `prepare_tweaks` only ever *wrote* remaps, so a core it no longer has
+    /// anything to say about kept whatever was on disk — and RetroArch went on
+    /// applying `input_player1_btn_b = "-1"` on every launch. Nothing in the
+    /// app wrote that line any more, which is exactly why reading the app
+    /// never found it.
+    ///
+    /// Put the bug back — make the `remap.is_empty()` branch do nothing
+    /// instead of deleting — and this fails.
+    #[test]
+    fn a_remap_the_app_no_longer_wants_is_deleted_not_left_behind() {
+        let dir = scratch("stale-remap");
+        let ra = fake(&dir);
+        let lib = dir.join("lib");
+
+        // An arcade remap from the old arrangement, exactly as found on disk.
+        let stale = lib.join("retroarch/remaps/FinalBurn Neo/FinalBurn Neo.rmp");
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::fs::write(
+            &stale,
+            "input_player1_btn_b = \"-1\"\ninput_player1_btn_x = \"0\"\n",
+        )
+        .unwrap();
+        assert!(stale.exists());
+
+        // fbneo has core options but no remap, so this is the "nothing to
+        // write" path that used to return early.
+        ra.prepare_tweaks(&lib, "arcade", "fbneo", crate::tweaks::AutoFire::LeftBumper);
+
+        assert!(
+            !stale.exists(),
+            "the stale arcade remap survived, so fire stays on the wrong button"
+        );
+    }
+
+    /// A core that still wants a remap keeps it — the cleanup must not be a
+    /// blanket delete.
+    #[test]
+    fn a_remap_the_app_still_wants_is_written() {
+        let dir = scratch("live-remap");
+        let lib = dir.join("lib");
+        fake(&dir).prepare_tweaks(&lib, "nes", "fceumm", crate::tweaks::AutoFire::Off);
+        let rmp = lib.join("retroarch/remaps/FCEUmm/FCEUmm.rmp");
+        let body = std::fs::read_to_string(&rmp).expect("FCEUmm still wants its X/Y swap");
+        assert!(body.contains("input_player1_btn_x"), "the swap was not written: {body}");
+    }
+
+    /// RetroArch 1.20.0 calls this `input_duty_cycle`. The *variable* behind it
+    /// is `input_turbo_duty_cycle`, which is what the previous reading latched
+    /// onto — so the app wrote a key RetroArch has never had and the duty
+    /// cycle silently never applied. From `configuration.c`:
+    ///
+    ///     SETTING_UINT("input_duty_cycle", &settings->uints.input_turbo_duty_cycle, ...)
+    #[test]
+    fn the_duty_cycle_uses_the_key_retroarch_actually_reads() {
+        let dir = scratch("duty-key");
+        with_autoconfig(&dir);
+        let out = fake(&dir).autofire(
+            Some("Xbox Wireless Controller"),
+            crate::tweaks::AutoFire::LeftBumper,
+            5,
+        );
+        assert!(
+            out.lines().any(|l| l.starts_with("input_duty_cycle")),
+            "the duty cycle is on a key RetroArch ignores: {out}"
+        );
+        assert!(
+            !out.contains("input_turbo_duty_cycle"),
+            "the key that does nothing is back: {out}"
+        );
+    }
+
+
+
+    /// Y as the modifier is a real arrangement, not a fallback to a shoulder.
+    #[test]
+    fn the_top_button_can_be_the_modifier() {
+        let dir = scratch("top-modifier");
+        with_autoconfig(&dir);
+        let out = fake(&dir).autofire(
+            Some("Xbox Wireless Controller"),
+            crate::tweaks::AutoFire::Top,
+            5,
+        );
+        assert!(out.contains("input_player1_turbo"), "no modifier bound: {out}");
+        assert!(out.contains("input_turbo_mode = \"3\""), "not the hold mode: {out}");
+    }
+
     /// nowhere left to fire a single shot from, is a game you cannot aim in.
     #[test]
     fn autofire_rate_is_the_nearest_whole_frame_to_what_was_asked() {
@@ -1538,14 +1633,14 @@ input_r2_axis = "+5"
         };
         for hz in 1..=30 {
             let period = field(hz, "input_turbo_period");
-            let duty = field(hz, "input_turbo_duty_cycle");
+            let duty = field(hz, "input_duty_cycle");
             assert!(duty >= 1, "{hz} Hz never presses the button");
             assert!(duty <= 4, "{hz} Hz holds it for {duty} frames, which reads as held");
             assert!(period > duty, "{hz} Hz never lets the button go: {duty}/{period}");
         }
         // The fast end is unchanged: one frame down, one up.
         assert_eq!(field(30, "input_turbo_period"), 2);
-        assert_eq!(field(30, "input_turbo_duty_cycle"), 1);
+        assert_eq!(field(30, "input_duty_cycle"), 1);
     }
 
     /// Held, not latched.

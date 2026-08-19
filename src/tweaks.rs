@@ -37,6 +37,24 @@ pub type Opt = (&'static str, &'static str);
 /// changes nothing about the pad until you ask: hold LB and *then* hold A, and
 /// A repeats for as long as both are down. Let go of LB and A is one press,
 /// one shot, with nothing remapped and nothing to undo.
+///
+/// # Why this is one button and not several
+///
+/// RetroArch 1.20.0 declares the modifier as a single bind —
+/// `DECLARE_BIND(turbo, RARCH_TURBO_ENABLE, …)`, written to the config as
+/// `input_playerN_turbo{,_btn,_axis,_mbtn}`, which is one *action* offered in
+/// four input kinds rather than four buttons. The button it repeats is
+/// likewise singular, `input_turbo_default_button`, and the single-button
+/// modes enforce that in code with `if (id != remap_button) break;`.
+///
+/// Several buttons at once is possible in only one place: classic mode, which
+/// keeps a bitmask (`turbo_btns.enable[port] |= (1 << id)`) of every button
+/// pressed while the modifier is down. That mode is rejected — the bit clears
+/// when the *face* button is released rather than the modifier, so letting go
+/// of the modifier leaves the game firing, which is the latch this arrangement
+/// exists to avoid.
+///
+/// So: one modifier, chosen from several, rather than several at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AutoFire {
     #[default]
@@ -45,6 +63,13 @@ pub enum AutoFire {
     LeftBumper,
     /// The same on RB, for anyone whose left hand is busy.
     RightBumper,
+    /// The top face button.
+    ///
+    /// Unlike the shoulders this one is *not* free: arcade cores map it
+    /// (RetroPad X, Neo Geo button D), so holding it sends that button
+    /// continuously underneath the repeat. Harmless in Metal Slug, which does
+    /// not use D; not harmless in a game that uses all four.
+    Top,
 }
 
 impl AutoFire {
@@ -52,10 +77,11 @@ impl AutoFire {
         match s {
             "lb" | "l" => Self::LeftBumper,
             "rb" | "r" => Self::RightBumper,
+            "y" | "top" => Self::Top,
             // The old face-button arrangement. Anyone who had it on wanted
             // rapid fire, so they keep it — on the modifier, which is the one
             // that works.
-            "a" | "y" | "bottom" | "top" => Self::LeftBumper,
+            "a" | "bottom" => Self::LeftBumper,
             _ => Self::Off,
         }
     }
@@ -65,9 +91,30 @@ impl AutoFire {
             Self::Off => "off",
             Self::LeftBumper => "lb",
             Self::RightBumper => "rb",
+            Self::Top => "y",
         }
     }
+
+    /// The physical button this modifier is held on, if any.
+    pub fn physical(self) -> Option<crate::padprofile::Physical> {
+        use crate::padprofile::Physical;
+        match self {
+            Self::Off => None,
+            Self::LeftBumper => Some(Physical::LB),
+            Self::RightBumper => Some(Physical::RB),
+            Self::Top => Some(Physical::Y),
+        }
+    }
+
+    /// Every choice the UI can offer, with the label it shows.
+    pub const CHOICES: &'static [(&'static str, &'static str)] = &[
+        ("off", "Off"),
+        ("lb", "Hold LB"),
+        ("rb", "Hold RB"),
+        ("y", "Hold Y (sends button D as well)"),
+    ];
 }
+
 
 /// Core options to force for a platform, if any.
 ///
@@ -411,4 +458,41 @@ mod tests {
         assert_eq!(core_dir_name("swanstation"), Some("SwanStation"));
     }
 
+}
+
+#[cfg(test)]
+mod rapidfire_tests {
+    use super::*;
+
+
+
+    /// Y is a real choice now, and the shoulders still round-trip.
+    #[test]
+    fn every_modifier_survives_a_round_trip_through_its_key() {
+        for on in [AutoFire::Off, AutoFire::LeftBumper, AutoFire::RightBumper, AutoFire::Top] {
+            assert_eq!(AutoFire::parse(on.key()), on, "{on:?} did not survive its own key");
+        }
+        // Anything unrecognised is off rather than a guess, and an unknown
+        // fire button is the primary one rather than a random face button.
+        assert_eq!(AutoFire::parse("banana"), AutoFire::Off);
+    }
+
+    /// The UI offers exactly what the enum can parse. A choice in the dropdown
+    /// that parses to something else is a setting that silently does nothing.
+    #[test]
+    fn the_offered_choices_all_parse_back_to_themselves() {
+        for (key, label) in AutoFire::CHOICES {
+            assert_eq!(AutoFire::parse(key).key(), *key, "{label} is not a real choice");
+        }
+        assert_eq!(AutoFire::CHOICES.len(), 4, "off, two shoulders and the top button");
+    }
+
+    /// Only the shoulders are free. Arcade cores map the top face button, so
+    /// holding it as a modifier sends that button too — worth saying in the
+    /// label rather than discovering in a game that uses all four.
+    #[test]
+    fn the_top_button_choice_warns_that_it_is_not_free() {
+        let (_, label) = AutoFire::CHOICES.iter().find(|(k, _)| *k == "y").expect("Y is offered");
+        assert!(label.contains("D"), "the Y choice does not mention what else it sends: {label}");
+    }
 }

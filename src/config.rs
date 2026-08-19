@@ -683,15 +683,29 @@ mod tests {
         std::fs::write(&path, "[retroarch]\nautofire = true\n").unwrap();
         assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "lb");
 
-        // The face-button arrangement is gone. Anyone who had it on asked for
-        // rapid fire and still gets it, rather than finding it silently off.
-        for old in ["a", "y", "bottom", "top"] {
+        // The old face-button arrangement. Anyone who had it on asked for rapid
+        // fire and still gets it, rather than finding it silently off.
+        //
+        // "a" and "bottom" go to the left bumper because the bottom face
+        // button is the *fire* button — a modifier sitting on it cancels the
+        // repeat outright, so there is nowhere for it to go but a shoulder.
+        // "y" and "top" now mean what they say: the top face button is a
+        // modifier the pad can actually hold, so the button they picked is the
+        // button they keep.
+        for old in ["a", "bottom"] {
             std::fs::write(&path, format!("[retroarch]\nautofire = \"{old}\"\n")).unwrap();
-            let cfg = Config::load_from(&path).unwrap();
             assert_eq!(
-                crate::tweaks::AutoFire::parse(&cfg.retroarch.autofire),
+                crate::tweaks::AutoFire::parse(&Config::load_from(&path).unwrap().retroarch.autofire),
                 crate::tweaks::AutoFire::LeftBumper,
                 "{old} lost its rapid fire"
+            );
+        }
+        for old in ["y", "top"] {
+            std::fs::write(&path, format!("[retroarch]\nautofire = \"{old}\"\n")).unwrap();
+            assert_eq!(
+                crate::tweaks::AutoFire::parse(&Config::load_from(&path).unwrap().retroarch.autofire),
+                crate::tweaks::AutoFire::Top,
+                "{old} did not keep the button it named"
             );
         }
 

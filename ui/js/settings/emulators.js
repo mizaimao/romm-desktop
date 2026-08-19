@@ -35,17 +35,23 @@ export const html = `      <h4>Game window</h4>
             <option value="off">Off</option>
             <option value="lb">Hold LB — fire repeats while it is held</option>
             <option value="rb">Hold RB — the same on the other shoulder</option>
+            <option value="y">Hold Y — sends button D as well</option>
           </select>
         </div>
       </div>
       <p class="hint">Arcade shooters only — 879 games here. A run of Metal Slug
         is a few thousand presses of a button the cabinet expected you to
         hammer.</p>
-      <p class="hint">Hold the shoulder on its own and the game fires at the
+      <p class="hint">Hold the modifier on its own and the game fires at the
         rate beside it; let go and it stops. Do not hold the fire button as
         well — RetroArch reports a real press instead of the repeat, so holding
         both gives one continuous shot, which is what made the earlier
         arrangements unplayable. Nothing is remapped either way.</p>
+      <p class="hint">Only one button can be the modifier: RetroArch binds it
+        once per player and repeats one button, so this is a choice from
+        several rather than several at once. LB and RB are unbound in arcade
+        cores, so nothing is sent underneath them; Y is button D, which Metal
+        Slug does not use and a four-button game does.</p>
 
       <h4>Emulators</h4>
       <p class="hint">Which emulator runs each console, its shader, and whether
@@ -233,3 +239,4 @@ function systemRow(s) {
     <td>${gun}</td>
   </tr>`;
 }
+
