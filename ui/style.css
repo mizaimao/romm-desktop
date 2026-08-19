@@ -48,7 +48,7 @@ header {
   padding: 10px 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--glass) 20%, transparent);
   /* Translucent rather than solid. `color-mix` keeps this tied to the theme
-     colour instead of a second hardcoded value that drifts from it. */
+     color instead of a second hardcoded value that drifts from it. */
   /* Aero glass.
      Vista's look was never just blur. Four things did the work, and leaving any
      one out gives you a grey bar:
@@ -354,9 +354,9 @@ main {
   /* The second sheet: less tint and a weaker highlight, so it reads as glass
      behind glass rather than one thick slab. */
   background: transparent;
-  /* The line under the tabs takes the theme colour rather than a neutral grey,
+  /* The line under the tabs takes the theme color rather than a neutral grey,
      so changing the tint in Appearance moves the whole bar together instead of
-     leaving a grey rule across the top of a coloured window. */
+     leaving a grey rule across the top of a colored window. */
   border-bottom: 1px solid color-mix(in srgb, var(--glass) 28%, transparent);
 }
 #tabbar .stab {
@@ -453,7 +453,7 @@ body.has-pad #tabbar .bumper { display: inline; }
   object-fit: contain;
 }
 /* Wordmark art is white-on-transparent and vanishes on a light page, so it is
-   inverted there. Hardware and console art is full colour — inverting that
+   inverted there. Hardware and console art is full color — inverting that
    turns a grey SNES pad into a photographic negative. */
 @media (prefers-color-scheme: light) {
   .card .logo img.wordmark { filter: invert(1) brightness(.55); }
@@ -1540,7 +1540,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 }
 
 /* ---- Controls ------------------------------------------------------------
-   Modern flat: no fill at rest, no gloss, no bevel. Weight and colour carry the
+   Modern flat: no fill at rest, no gloss, no bevel. Weight and color carry the
    state instead of a raised surface, which is the thing that dates an interface
    fastest — a button that looks pressable in three dimensions belongs to a
    decade that had window frames to match. */
@@ -1570,7 +1570,7 @@ header button:focus-visible {
 }
 
 /* The tab strip: no surface at all. The active tab is the one that is lit —
-   full-strength text, the tint colour, and a glow under it. Everything else is
+   full-strength text, the tint color, and a glow under it. Everything else is
    dimmed, which is a stronger signal than a box around one of them. */
 #tabbar .stab {
   border: 0;
@@ -1734,7 +1734,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
    ES-DE's "logo" images are the system's name drawn as a picture — a wordmark,
    not a photograph of hardware — so downloading a theme to get them buys a
    worse version of text the app already has: it cannot be selected, does not
-   scale cleanly, needs a network round trip, and arrives in whatever colour the
+   scale cleanly, needs a network round trip, and arrives in whatever color the
    theme author chose. The hardware renders would have been worth having; the
    wordmarks are not.
 
@@ -1773,7 +1773,7 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
    "★ Best of …" collections on this library are. A game in one of those sorts
    to the top of its console page and is marked here.
 
-   Gold, and only on the star: colouring the whole title would make a favourite
+   Gold, and only on the star: coloring the whole title would make a favourite
    harder to read than an ordinary game, which is backwards. */
 .star {
   color: #f5c451;
@@ -1811,20 +1811,20 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
 .prow .pf { opacity: 0.55; }
 .prow .sz { min-width: 12ch; text-align: right; }
 
-/* ---- The selected game's own colour --------------------------------------
-   `--pick` is the dominant colour of that game's box art, set on the selected
+/* ---- The selected game's own color --------------------------------------
+   `--pick` is the dominant color of that game's box art, set on the selected
    card and on the detail pane once it has been measured. Everything falls back
-   to the theme colour, so a game with no cover, a cover with no usable colour,
+   to the theme color, so a game with no cover, a cover with no usable color,
    or a browser that will not let the pixels be read all look exactly as they
    did before this existed.
 
    Only the glow and the edge take it. Tinting the surface as well would make
-   the list flicker through a different colour on every row as you scroll. */
+   the list flicker through a different color on every row as you scroll. */
 /* Matched on the inline property rather than on `--pick` having a value,
    because `rgb(var(--pick) / .5)` with no `--pick` set is invalid at
    computed-value time — which does not fall back to the theme rule above, it
    drops the border entirely. This way the tinted rule simply does not apply
-   until there is a colour, and until then the rules above stand. */
+   until there is a color, and until then the rules above stand. */
 .gcard.sel[style*="--pick"] .art {
   border-color: rgb(var(--pick) / 0.75);
   box-shadow: 0 0 26px rgb(var(--pick) / 0.5);
@@ -2267,7 +2267,7 @@ body.columns #consoles .prow {
   font-size: 13px;
 }
 /* The console's name, at full strength. In a column it is the only thing worth
-   reading at a glance, and it was inheriting the same muted colour as the
+   reading at a glance, and it was inheriting the same muted color as the
    count beside it. */
 body.columns #consoles .prow .nm {
   flex: 1;

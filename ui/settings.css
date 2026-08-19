@@ -1,6 +1,6 @@
 /* The Settings window.
  *
- * Loaded on top of style.css so the colours, fonts and control styling match
+ * Loaded on top of style.css so the colors, fonts and control styling match
  * the main window exactly — this is the same app, in a second window, not a
  * separate thing that happens to look similar.
  */
@@ -70,7 +70,7 @@ body.settings-window {
   font-weight: 600;
   color: color-mix(in srgb, var(--glass) 55%, white 45%);
   text-shadow: 0 0 16px color-mix(in srgb, var(--glass) 80%, transparent);
-  /* One marker, in the theme colour, instead of a raised panel. */
+  /* One marker, in the theme color, instead of a raised panel. */
   border-left-color: color-mix(in srgb, var(--glass) 70%, white 30%);
 }
 
@@ -318,6 +318,56 @@ body.settings-window {
   padding: 6px 12px;
   font-size: 13px;
 }
+
+/* ---- One button, everywhere in this window -------------------------------
+   Every button here was falling through to the browser's own: a solid grey
+   slab with a hard border, in a window whose every other surface is glass over
+   a backdrop. There are twenty of them across six tabs and no two agreed,
+   because none of them had been given a look at all — `#pane button` above set
+   only the size.
+
+   Semi-transparent, never solid. The tint is the same `--glass` the library's
+   cards use, so this window belongs to the same app as that one, and the
+   border is a color-mix of it rather than a fixed grey that drifts from the
+   theme. */
+#pane button {
+  background: color-mix(in srgb, var(--glass) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background .13s, border-color .13s, color .13s;
+}
+#pane button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--glass) 22%, transparent);
+  border-color: color-mix(in srgb, var(--glass) 48%, transparent);
+}
+#pane button:active:not(:disabled) {
+  background: color-mix(in srgb, var(--glass) 32%, transparent);
+  transform: translateY(1px);
+}
+/* Dimmed rather than greyed: a disabled control still has to read as the same
+   object, or the row looks like it lost a button. */
+#pane button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+/* A toggle that is on is lit, not filled — the same signal the library's tab
+   strip uses, so the two windows behave alike. */
+#pane button.active {
+  background: color-mix(in srgb, var(--glass) 30%, transparent);
+  border-color: color-mix(in srgb, var(--glass) 70%, transparent);
+  color: color-mix(in srgb, var(--glass) 25%, white 75%);
+}
+/* The one action that destroys something says so in its color, and only on
+   hover — a red button sitting in a settings row invites the accident it is
+   warning about. */
+#pane button.set-reset:hover:not(:disabled) {
+  background: color-mix(in srgb, #d8483f 22%, transparent);
+  border-color: color-mix(in srgb, #d8483f 60%, transparent);
+}
 #pane .srow { min-height: 38px; }
 
 .set-bios-bar {
@@ -354,3 +404,21 @@ body.settings-window {
   -webkit-mask: url("icons/gamepad-2.svg") center / contain no-repeat;
   mask: url("icons/gamepad-2.svg") center / contain no-repeat;
 }
+
+
+/* A slider and a number that mean the same thing, side by side. The slider is
+   for sweeping, the field for saying exactly — and the field takes values past
+   the slider end, because a ceiling that suits twelve backdrops suits none of
+   them exactly. */
+#pane .ctl input.num {
+  width: 72px;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 13px;
+  text-align: right;
+  background: color-mix(in srgb, var(--glass) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--glass) 26%, transparent);
+  border-radius: 8px;
+  color: var(--text);
+}
+#pane .ctl .pct { color: var(--dim); font-size: 12px; margin-left: 2px; }

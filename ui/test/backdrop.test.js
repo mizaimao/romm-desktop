@@ -286,3 +286,56 @@ describe("the shapes", () => {
     assert.match(body, /max\(fwidth\([^)]*\), *1e-4\)/, "fwidth can still be zero here");
   });
 });
+
+/// A backtick inside the shader source ends the JS template literal that holds
+/// it, and the module then fails to *parse* — so every backdrop test goes red
+/// at once and the message points at prose rather than at code. It has now
+/// happened three times: in comments quoting a mix() call, a plus sign, and a
+/// variable name.
+///
+/// Read as text, never through an import. The failure this guards against
+/// stops the module loading at all, so a test that imports it cannot run to
+/// report anything — it just dies with the rest.
+describe("the shader source", () => {
+  test("has no backtick inside a template literal", () => {
+    const src = readFileSync(join(uiDir, "js/backdrop.js"), "utf8");
+    // Every template literal in the file, and whether it holds a stray
+    // backtick that would have closed it early. An unbalanced count is the
+    // symptom: the parser sees the string end where the comment meant a quote.
+    const bodies = [...src.matchAll(/body:\s*`([\s\S]*?)`,\n/g)].map((m) => m[1]);
+    assert.ok(bodies.length >= 8, `only found ${bodies.length} shader bodies`);
+    for (const b of bodies) {
+      assert.ok(!b.includes("`"), "a shader body contains a backtick");
+    }
+    const head = /const SHADER_HEAD = `([\s\S]*?)`;/.exec(src)?.[1] ?? "";
+    const tail = /const SHADER_TAIL = `([\s\S]*?)`;/.exec(src)?.[1] ?? "";
+    assert.ok(head.length > 100 && tail.length > 50, "the shared frame was not found");
+  });
+
+  /// The shared tail declares its own names for the vignette, so a body that
+  /// declares one too fails to compile and the style silently never switches.
+  /// That is exactly how Sweep and Starfield both shipped broken — both used
+  /// `d`, and nothing said a word.
+  ///
+  /// Comments are stripped first. GLSL is not the only thing in these strings:
+  /// the comment explaining this very rule contains the words "float d", and
+  /// scanning the raw text flagged the explanation as the offence.
+  test("no body redeclares a name the shared frame already uses", () => {
+    const src = readFileSync(join(uiDir, "js/backdrop.js"), "utf8");
+    const strip = (glsl) => glsl.replace(/\/\/[^\n]*/g, "");
+    const tail = strip(/const SHADER_TAIL = `([\s\S]*?)`;/.exec(src)?.[1] ?? "");
+    const decls = (glsl) =>
+      [...glsl.matchAll(/\b(?:float|vec2|vec3|int)\s+(\w+)/g)].map((m) => m[1]);
+    const taken = new Set(decls(tail));
+    assert.ok(taken.size, "the shared tail declares nothing, which cannot be right");
+    assert.ok(taken.has("d"), "the tail's vignette variable is gone; update this test");
+    for (const b of backdrop.BACKDROPS) {
+      for (const name of decls(strip(b.body))) {
+        assert.ok(
+          !taken.has(name),
+          `${b.id} redeclares "${name}", which the shared tail already declares`
+        );
+      }
+    }
+  });
+});

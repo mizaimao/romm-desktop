@@ -13,10 +13,10 @@
 // on, so it moves slowly and stays dark. A backdrop that competes with the
 // artwork is worse than no backdrop.
 
-/// Colours are read from the stylesheet rather than hardcoded, so the shader
-/// follows whatever theme is in force instead of being a second place colours
+/// Colors are read from the stylesheet rather than hardcoded, so the shader
+/// follows whatever theme is in force instead of being a second place colors
 /// have to be kept in sync.
-function themeColour(name, fallback) {
+function themeColor(name, fallback) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const m = raw.match(/^#?([0-9a-f]{6})$/i);
   if (!m) return fallback;
@@ -29,17 +29,27 @@ in vec2 pos;
 void main() { gl_Position = vec4(pos, 0.0, 1.0); }`;
 
 // Two layers of drifting value-noise, tinted between the theme's own two
-// colours, plus a vignette so the edges fall away and the grid stays readable.
+// colors, plus a vignette so the edges fall away and the grid stays readable.
 /// What every style shares: the uniforms, the noise, and the vignette.
 ///
 /// One program per style would mean five compilations at startup and five
-/// times the code that reads a colour scheme. Instead each style is a body
+/// times the code that reads a color scheme. Instead each style is a body
 /// that fills `base`, spliced into this frame — so they cannot drift apart on
 /// how they read `u_strength`, how they darken at the edges, or how they take
-/// the two scheme colours.
+/// the two scheme colors.
 const SHADER_HEAD = `#version 300 es
-precision mediump float;
-out vec4 colour;
+precision highp float;
+
+// highp, not mediump, and this is the whole reason Static and Rain looked like
+// they repeated every few frames.
+//
+// hash() below is sin(dot(p, k)) * 43758.5453 taken fract. Static feeds it
+// coordinates in the hundreds plus a time term that grows without bound, and
+// mediump carries about three decimal digits — so sin of a large argument
+// loses every bit that mattered, fract of the result lands on a handful of
+// values, and the "noise" becomes a visible band pattern marching across the
+// screen. It was never the shape of the effect; it was the arithmetic.
+out vec4 color;
 
 uniform vec2  u_size;
 uniform float u_time;
@@ -50,6 +60,12 @@ uniform float u_strength;
 uniform float u_speed;
 
 float hash(vec2 p) {
+  // Wrapped before the sine so the argument stays small however far the
+  // coordinate has drifted. Time is unbounded here — Static adds t * 37 — and
+  // without the wrap the sine is being asked for a value it cannot resolve
+  // even at highp after a few minutes of running.
+  p = fract(p * vec2(0.3183099, 0.3678794));
+  p += dot(p, p + 19.19);
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
@@ -67,10 +83,10 @@ float fbm(vec2 p) {
   return noise(p) * 0.65 + noise(p * 2.1 + 4.7) * 0.35;
 }
 
-// Low -> mid -> high, so a scheme can be three colours rather than two.
+// Low -> mid -> high, so a scheme can be three colors rather than two.
 //
-// Every style already blends between two colours; this is the same call with
-// a stop in the middle, so a two-colour scheme sets the middle halfway and
+// Every style already blends between two colors; this is the same call with
+// a stop in the middle, so a two-color scheme sets the middle halfway and
 // nothing changes for it. No backticks in here: this whole block is inside a
 // JS template literal, and one would end the string.
 vec3 ramp(float k) {
@@ -92,14 +108,14 @@ const SHADER_TAIL = `
   float d = distance(uv, vec2(0.5)) * 1.15;
   base *= 1.0 - smoothstep(0.15, 1.0, d) * 0.75;
 
-  colour = vec4(base * u_strength, 1.0);
+  color = vec4(base * u_strength, 1.0);
 }`;
 
 /// The styles, as the body each one contributes.
 ///
 /// There was one. "Blobs" is a fair description of it and a poor choice of
 /// only option: the whole point of a backdrop is that it suits the room, and
-/// one shape suits one room. Each of these takes the same two scheme colours
+/// one shape suits one room. Each of these takes the same two scheme colors
 /// so switching style does not also change the palette.
 ///
 /// `pace` is what the Motion slider means for this style, and it exists
@@ -117,6 +133,7 @@ export const BACKDROPS = [
     label: "Blobs",
     hint: "Soft clouds drifting at two scales. The original, and the quietest.",
     pace: 1.7,
+    defaults: { strength: 0.3 },
     body: `
       float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
       float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
@@ -127,6 +144,7 @@ export const BACKDROPS = [
     label: "Aurora",
     hint: "Slow vertical curtains, brighter where they fold over each other.",
     pace: 1.4,
+    defaults: { strength: 0.4 },
     body: `
       float band = uv.y * 2.2 + fbm(vec2(uv.x * 2.0, t * 0.05)) * 1.6;
       float curtain = sin(band * 3.14159) * 0.5 + 0.5;
@@ -141,6 +159,7 @@ export const BACKDROPS = [
     // The one that made the slider a lie: four sines at 0.2–0.4 of `t`, where
     // Blobs drifts at 0.015 of it.
     pace: 0.1,
+    defaults: { strength: 0.6 },
     body: `
       vec2 p = (uv - 0.5) * aspect * 4.0;
       float v = sin(p.x + t * 0.35)
@@ -163,6 +182,7 @@ export const BACKDROPS = [
     // that same seam. Horizon in the upper half, depth measured downwards from
     // it, and the divide guarded rather than the input clamped.
     pace: 0.7,
+    defaults: { strength: 1.0 },
     body: `
       vec2 q = (uv - vec2(0.5, 0.55)) * aspect;
       float depth = max(-q.y, 1e-3);
@@ -190,6 +210,7 @@ export const BACKDROPS = [
     // along straight lines, always the same lines, because the grid does not
     // move with the drift. Every point has to ask its eight neighbours too.
     pace: 1,
+    defaults: { speed: 3.0, strength: 1.0 },
     body: `
       vec2 p = uv * aspect * 18.0 + vec2(0.0, t * 0.08);
       vec2 cell = floor(p), f = fract(p);
@@ -212,6 +233,7 @@ export const BACKDROPS = [
     hint: "Three layers of stars at different speeds. The attract-mode look, "
       + "and the one that reads as depth without moving much.",
     pace: 1.1,
+    defaults: { speed: 3.0, strength: 1.0 },
     body: `
       base = u_low;
       for (int L = 0; L < 3; L++) {
@@ -220,10 +242,21 @@ export const BACKDROPS = [
         float speed = (f + 1.0) * 0.06;
         vec2 p = uv * aspect * scale + vec2(t * speed, 0.0);
         vec2 cell = floor(p), fr = fract(p);
-        float star = hash(cell + f * 17.0);
-        vec2 d = fr - vec2(hash(cell + 3.1), hash(cell + 7.7));
-        float glow = smoothstep(0.30, 0.0, length(d)) * step(0.972, star);
-        base = mix(base, u_high, glow * (0.35 + f * 0.32));
+        // The neighbours too. A star is scattered anywhere in its cell and its
+        // glow has a radius, so one near an edge had the rest of it drawn by a
+        // cell that was never asked — the same bug Drift had, and it looks the
+        // same: points sliced flat along invisible straight lines.
+        float glow = 0.0;
+        for (int j = -1; j <= 1; j++) {
+          for (int i = -1; i <= 1; i++) {
+            vec2 o = vec2(float(i), float(j));
+            vec2 c = cell + o;
+            float star = hash(c + f * 17.0);
+            vec2 off = fr - o - vec2(hash(c + 3.1), hash(c + 7.7));
+            glow += smoothstep(0.30, 0.0, length(off)) * step(0.972, star);
+          }
+        }
+        base = mix(base, u_high, min(glow, 1.0) * (0.35 + f * 0.32));
       }`,
   },
   {
@@ -232,6 +265,7 @@ export const BACKDROPS = [
     hint: "Rings running away from the middle. The oldest perspective trick "
       + "there is, and still the most hypnotic.",
     pace: 0.35,
+    defaults: { strength: 0.5 },
     body: `
       vec2 q = (uv - 0.5) * aspect;
       float r = max(length(q), 0.02);
@@ -247,6 +281,7 @@ export const BACKDROPS = [
     label: "Waves",
     hint: "Ridges seen at a low angle, rolling towards you.",
     pace: 0.5,
+    defaults: { strength: 0.5 },
     body: `
       vec2 q = (uv - vec2(0.5, 0.35)) * aspect;
       float depth = max(0.75 - uv.y, 0.05);
@@ -257,31 +292,43 @@ export const BACKDROPS = [
       base = ramp(ridge * 0.8 * smoothstep(0.95, 0.25, uv.y));`,
   },
   {
-    id: "rain",
-    label: "Rain",
-    hint: "Streaks down a window. Quiet, and it suits the frosted panes.",
-    pace: 1.5,
+    id: "sweep",
+    label: "Sweep",
+    hint: "A slow diagonal wash. The cheapest thing here — two sines and no "
+      + "noise at all — and the quietest behind artwork.",
+    pace: 0.9,
+    defaults: { speed: 2.0, strength: 0.5 },
     body: `
-      vec2 p = uv * aspect * vec2(22.0, 3.0);
-      vec2 cell = floor(p), fr = fract(p);
-      float lane = hash(vec2(cell.x, 0.0));
-      // Each column falls at its own speed and starts at its own offset, or
-      // the whole screen rains in step.
-      float y = fract(fr.y - t * (0.25 + lane * 0.5) - lane * 10.0);
-      float drop = smoothstep(0.06, 0.0, abs(fr.x - 0.5)) * smoothstep(0.55, 0.0, y);
-      base = ramp(drop * step(0.55, lane) * 0.75);`,
+      // Named band, not d: SHADER_TAIL declares its own float d for the
+      // vignette, and a body declaring one too is a redeclaration — the shader
+      // fails to compile, programFor returns null, and the style simply never
+      // switches, with nothing on screen to say why.
+      // (No backticks anywhere in here: this is inside a JS template literal.)
+      float band = (uv.x * aspect.x + uv.y) * 0.7;
+      base = ramp(0.5 + 0.5 * sin(band * 2.2 - t * 0.5));`,
   },
   {
-    id: "scanlines",
-    label: "Scanlines",
-    hint: "A CRT with the brightness up and a slow roll. The only one that "
-      + "looks like the hardware rather than like a screensaver.",
-    pace: 0.4,
+    id: "static",
+    label: "Static",
+    hint: "Untuned television. One hash per pixel, so it costs almost nothing "
+      + "— and on an OLED it is the busiest thing on this list.",
+    pace: 2.0,
+    defaults: { speed: 6.0, strength: 1.0 },
     body: `
-      float roll = fract(uv.y + t * 0.03);
-      float lines = 0.5 + 0.5 * sin(uv.y * u_size.y * 0.55);
-      float band = smoothstep(0.0, 0.18, roll) * smoothstep(0.30, 0.12, roll);
-      base = ramp(lines * 0.35 + band * 0.45);`,
+      // Three fields at incommensurable scales, each drifting on its own
+      // irrational-ish vector, plus a slow wander of the sampling grid itself.
+      //
+      // Two fields on whole-number scales still shared a period: 3 and 7 line
+      // up every 21 pixels and the eye finds that. These are 3.0, 5.7 and
+      // 11.3, and the drift vectors are picked so no two are rational
+      // multiples of each other — the combined pattern has no repeat short
+      // enough to see. The last term moves the whole lattice, so even a static
+      // pixel is sampling somewhere new each frame.
+      vec2 wander = vec2(sin(t * 0.13), cos(t * 0.17)) * 40.0;
+      float g1 = hash(floor((uv * u_size + wander) / 3.0)  + vec2(t * 37.7, t * 11.3));
+      float g2 = hash(floor((uv * u_size + wander) / 5.7)  - vec2(t * 19.1, t * 43.9));
+      float g3 = hash(floor((uv * u_size - wander) / 11.3) + vec2(t * 29.3, t * 7.1));
+      base = ramp(g1 * 0.34 + g2 * 0.20 + g3 * 0.16 + 0.08);`,
   },
 ];
 
@@ -331,11 +378,15 @@ const DEFAULTS = {
 /// what the brightness slider says.
 /// The gradient a scheme resolves to, or the user's own on "custom".
 ///
-/// An unknown id falls through to the stored colours as well: schemes can be
+/// An unknown id falls through to the stored colors as well: schemes can be
 /// renamed or dropped, and a settings file naming one that no longer exists
 /// should leave the window looking like something rather than nothing.
-export function presetColours(cfg) {
-  const p = SCHEMES.find((x) => x.id === cfg.preset);
+export function presetColors(cfg) {
+  // Every scheme, not just the two-color pairs. This searched `SCHEMES`, so a
+  // single color or a spectrum found nothing, returned the config's own empty
+  // strings, and fell back to the theme — which is why all eighteen of them
+  // rendered identically and looked like the mono scheme.
+  const p = ALL_SCHEMES.filter(Boolean).find((x) => x.id === cfg.preset);
   if (!p || p.id === "custom") return { low: cfg.low, mid: cfg.mid, high: cfg.high };
   return { low: p.low, mid: p.mid, high: p.high };
 }
@@ -345,7 +396,7 @@ export function presetColours(cfg) {
 /// Below about 3 the drift is too slow to read as movement at all — it looks
 /// like a still image with a rendering cost. The slider covers the range that
 /// actually differs.
-export const SPEED_MIN = 3;
+export const SPEED_MIN = 0;
 export const SPEED_MAX = 7;
 
 /// Settings for one style, layered over the shared ones.
@@ -381,10 +432,32 @@ export function styleSettings(style) {
   return perStyle()[style] || {};
 }
 
-/// Forget one style's overrides, putting it back on the shared settings.
+/// What a style starts at, before anyone touches it.
+///
+/// Some shapes are wrong at the shared numbers and always will be: Scanlines
+/// at 32% brightness is a lit grey screen, Static at 32% is a snowstorm over
+/// the artwork. The style carries its own answer and the shared settings are
+/// the fallback for everything that has no opinion.
+export function styleDefaults(style) {
+  const own = BACKDROPS.find((b) => b.id === style)?.defaults || {};
+  let shared;
+  try {
+    shared = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("backdropSettings") || "{}") };
+  } catch {
+    shared = { ...DEFAULTS };
+  }
+  return { speed: shared.speed, strength: shared.strength, ...own };
+}
+
+/// Forget one style's overrides, putting it back on its own defaults.
 export function clearStyleSettings(style) {
   const all = perStyle();
-  delete all[style];
+  // Back to the style's own defaults rather than to nothing: dropping the
+  // overrides entirely would leave Scanlines on the shared brightness, which
+  // is the setting it exists to disagree with.
+  const own = BACKDROPS.find((b) => b.id === style)?.defaults;
+  if (own) all[style] = { ...own };
+  else delete all[style];
   localStorage.setItem("backdropPerStyle", JSON.stringify(all));
   const merged = backdropSettings();
   if (live) live(merged);
@@ -399,12 +472,15 @@ export function backdropSettings() {
   } catch {
     stored = { ...DEFAULTS };
   }
-  // The style's own answers win over the shared ones.
-  stored = { ...stored, ...(perStyle()[stored.style] || {}) };
-  // Settings saved before the scale changed hold values below the new floor,
-  // which would leave the slider pinned at one end showing a speed it cannot
-  // express.
-  stored.speed = Math.min(SPEED_MAX, Math.max(SPEED_MIN, Number(stored.speed) || DEFAULTS.speed));
+  // The style's own defaults sit under its overrides, and both over the
+  // shared settings.
+  const own = BACKDROPS.find((b) => b.id === stored.style)?.defaults || {};
+  stored = { ...stored, ...own, ...(perStyle()[stored.style] || {}) };
+  // Only a ceiling now. The floor was 3 — 300% — which is why the motion
+  // slider refused to go below that however far it was dragged, and why a
+  // style whose default is slower could not keep it.
+  const raw = Number(stored.speed);
+  stored.speed = Number.isFinite(raw) ? Math.max(0, raw) : DEFAULTS.speed;
   return stored;
 }
 
@@ -413,23 +489,36 @@ export function backdropSettings() {
 /// The receiving end of the event, and separate from `saveBackdropSettings` for
 /// exactly that reason: the listener used to call the saving version, which
 /// emitted again, which the emitting window also received. Every drag of a
-/// colour slider fed itself back round and the backdrop flickered.
+/// color slider fed itself back round and the backdrop flickered.
 export function applyBackdropSettings(cfg) {
   if (live) live({ ...backdropSettings(), ...(cfg || {}) });
 }
 
 export function saveBackdropSettings(next) {
-  const merged = { ...backdropSettings(), ...next };
+  // Built from the *shared* settings, never from `backdropSettings()`: that
+  // one layers the current style's overrides on top, so saving anything would
+  // copy those overrides into the shared values and every later style would
+  // inherit them. Switching from Tunnel to Rain carried Tunnel's brightness
+  // across and then kept it for good.
+  let shared;
+  try {
+    shared = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("backdropSettings") || "{}") };
+  } catch {
+    shared = { ...DEFAULTS };
+  }
+  const merged = { ...shared, ...next };
   localStorage.setItem("backdropSettings", JSON.stringify(merged));
-  // Applied live rather than on restart: a colour picker you cannot see the
-  // result of is a colour picker nobody can use.
-  if (live) live(merged);
+  // What the shader is given still includes the chosen style's overrides.
+  const effective = backdropSettings();
+  // Applied live rather than on restart: a color picker you cannot see the
+  // result of is a color picker nobody can use.
+  if (live) live(effective);
   // ...and told to the other window, because the controls live in Settings and
   // the shader lives in the library. Calling startBackdrop from the settings
   // window put the canvas in *that* document, so changing the app's background
   // changed the background of the settings panel and nothing else.
-  window.__TAURI__?.event?.emit?.("backdrop-settings", merged);
-  return merged;
+  window.__TAURI__?.event?.emit?.("backdrop-settings", effective);
+  return effective;
 }
 
 /// Whether the library window is showing a backdrop.
@@ -464,7 +553,7 @@ function rgb(hex, fallbackVar, fallbackRgb) {
     const n = parseInt(m[1], 16);
     return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
   }
-  return themeColour(fallbackVar, fallbackRgb);
+  return themeColor(fallbackVar, fallbackRgb);
 }
 
 /// Start the backdrop. Returns a stop function, or null when it could not run —
@@ -585,11 +674,11 @@ function build() {
       }
     }
     // A preset supplies the pair; "custom" falls through to the user's own, and
-    // an unset custom colour falls through again to the theme's — so the
+    // an unset custom color falls through again to the theme's — so the
     // default follows the palette rather than being a second place to maintain.
-    const { low, mid, high } = presetColours(cfg);
+    const { low, mid, high } = presetColors(cfg);
     gl.useProgram(active);
-    // A two-colour scheme has no middle, so the midpoint of the pair stands in
+    // A two-color scheme has no middle, so the midpoint of the pair stands in
     // and the ramp behaves exactly as the old two-stop mix did.
     const lo = rgb(low, "--bg", [0.05, 0.05, 0.07]);
     const hi = rgb(high, "--accent", [0.18, 0.2, 0.36]);
@@ -684,15 +773,15 @@ export function backdropSupported() {
 
 // ---- Glass tint -----------------------------------------------------------
 //
-// Vista's "Window Color and Appearance" let you pick the colour of the glass,
+// Vista's "Window Color and Appearance" let you pick the color of the glass,
 // and that choice is most of why two Vista machines looked different from each
-// other. Same idea: one colour drives the bars, the button gel, the hover glow
+// other. Same idea: one color drives the bars, the button gel, the hover glow
 // and the focus ring, because in Aero they were all the same light.
 
 /// One palette for both surfaces.
 ///
 /// The glass tint and the shader backdrop were two dropdowns of seven and eight
-/// colours, chosen separately, and every sensible combination was a pair that
+/// colors, chosen separately, and every sensible combination was a pair that
 /// already matched — "Aero blue" glass over the "Midnight" backdrop, "Jade"
 /// over "Moss". Two controls whose only correct settings are a diagonal of the
 /// grid they span is one control.
@@ -714,9 +803,9 @@ export const SCHEMES = [
   { id: "custom",   label: "Custom",   glass: null,      low: null,      high: null },
 ];
 
-/// Three-colour schemes, kept apart from the pairs above.
+/// Three-color schemes, kept apart from the pairs above.
 ///
-/// A gradient through a third colour is a different thing from a tint between
+/// A gradient through a third color is a different thing from a tint between
 /// two: `sunset` is not "orange with more orange", it is red through orange to
 /// yellow, and the middle is what makes it read as a sweep. Named after what
 /// they look like rather than after a vendor's lighting preset.
@@ -731,9 +820,36 @@ export const TRIPLES = [
   { id: "toxic",    label: "Toxic",    glass: "#9ee84a", low: "#07110a", mid: "#2f6b17", high: "#d4ff5c" },
 ];
 
+/// Full-spectrum sweeps, the kind RGB lighting software ships as presets.
+///
+/// These run right round the hue circle rather than between two ends of it,
+/// which the three-stop ramp can only approximate — low, mid and high are
+/// picked so the two halves of the ramp cover opposite sides of the wheel and
+/// the result reads as a rainbow rather than as a gradient.
+export const RAINBOWS = [
+  { id: "rgb",      label: "RGB",        glass: "#4d8fd6", low: "#e02020", mid: "#20c040", high: "#2060e0" },
+  { id: "prism",    label: "Prism",      glass: "#8f5fd8", low: "#c01ad0", mid: "#20b0e0", high: "#e8d020" },
+  { id: "neon",     label: "Neon",       glass: "#ff4fd8", low: "#ff2bd6", mid: "#00e5ff", high: "#b026ff" },
+  { id: "candy",    label: "Candy",      glass: "#ff7ab8", low: "#ff5fa2", mid: "#ffd166", high: "#5fd3ff" },
+  { id: "heat",     label: "Heat map",   glass: "#ff9a3c", low: "#1020a0", mid: "#20c060", high: "#ff3020" },
+  { id: "pastel",   label: "Pastel",     glass: "#b8a6e8", low: "#f2a6c2", mid: "#a6e8c8", high: "#a6c2f2" },
+];
+
 /// Every scheme the dropdown offers, pairs first.
-export const ALL_SCHEMES = [...SCHEMES.filter((s) => s.id !== "custom"), ...TRIPLES,
-                            SCHEMES.find((s) => s.id === "custom")];
+export const ALL_SCHEMES = [
+  ...SCHEMES.filter((s) => s.id !== "custom"),
+  ...TRIPLES,
+  ...RAINBOWS,
+  SCHEMES.find((s) => s.id === "custom"),
+];
+
+/// The groups the dropdown draws, so the list of forty is browsable.
+export const SCHEME_GROUPS = [
+  ["Pairs", SCHEMES.filter((s) => s.id !== "custom")],
+  ["Spectrums", TRIPLES],
+  ["Rainbows", RAINBOWS],
+  ["Your own", [SCHEMES.find((s) => s.id === "custom")]],
+];
 
 
 const GLASS_KEY = "glassTint";
@@ -744,7 +860,7 @@ const TINT_KEY = "glassStrength";
 ///
 /// This is the transparency control, and calling it "tint strength" was the
 /// reason nobody could find it. `--tint` is the *opacity* the surfaces mix
-/// their colour in at and it has never been anything else: there are five
+/// their color in at and it has never been anything else: there are five
 /// `var(--tint)` in the stylesheet and all five are the percentage in a
 /// `color-mix` against `transparent`. So the preview pane's own second slider
 /// was a second control over one idea, which is how the two surfaces came to
@@ -773,7 +889,7 @@ export function setGlassStrength(pct, { announce = true } = {}) {
 
 export function glassTint() {
   // The first scheme's glass when nothing has been chosen. This read
-  // GLASS_PRESETS, which was deleted when the two colour dropdowns were merged
+  // GLASS_PRESETS, which was deleted when the two color dropdowns were merged
   // — so on a machine with no stored tint, which is every new install, the
   // first call threw before anything had been painted.
   return localStorage.getItem(GLASS_KEY) || SCHEMES[0].glass;
@@ -784,8 +900,8 @@ export function glassTint() {
 /// Both windows want it: the library has the cards, Settings has its own
 /// controls. A tint applied in one and not the other is worse than no tint,
 /// because it looks like a bug.
-export function setGlassTint(colour, { announce = true } = {}) {
-  const value = /^#[0-9a-f]{6}$/i.test(colour) ? colour : SCHEMES[0].glass;
+export function setGlassTint(color, { announce = true } = {}) {
+  const value = /^#[0-9a-f]{6}$/i.test(color) ? color : SCHEMES[0].glass;
   document.documentElement.style.setProperty("--glass", value);
   if (announce) {
     localStorage.setItem(GLASS_KEY, value);

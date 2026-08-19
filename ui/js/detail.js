@@ -236,9 +236,9 @@ export async function selectRom(id) {
   const video = badges ? `<div class="badges">${badges}</div>` : "";
 
   el.detail.hidden = !state.sidebar;
-  // The glow around the selection takes the cover's own colour. Started here
+  // The glow around the selection takes the cover's own color. Started here
   // rather than awaited: the pane must not wait on a canvas read, so the
-  // colour arrives a frame or two later and simply transitions in.
+  // color arrives a frame or two later and simply transitions in.
   applyTint(id, d.cover ? convertFileSrc(d.cover) : null);
   // Wrapped so the browser can match the tagged card art to the pane's cover
   // and move one into the other, instead of replacing the pane wholesale.
@@ -748,23 +748,23 @@ function applyWidth(px) {
   document.documentElement.style.setProperty("--detail-w", `${clamped}px`);
 }
 
-/// Paint the selection in the colours of the game's own box art.
+/// Paint the selection in the colors of the game's own box art.
 ///
 /// Set on the two elements that show a selection — the pane and the selected
 /// card or row — rather than on the document, so nothing else in the window
-/// shifts colour and there is nothing to unset when the selection moves.
+/// shifts color and there is nothing to unset when the selection moves.
 ///
 /// Guarded by the id: a fast scroll starts one of these per game and they can
 /// finish out of order, so a slow read for a game you have already scrolled
 /// past must not repaint the one you are now on.
 async function applyTint(id, url) {
-  const colour = await tintFor(url);
+  const color = await tintFor(url);
   if (state.selected !== id) return;
 
   const targets = [el.detail, el.list.querySelector(`[data-id="${id}"]`)];
   for (const node of targets) {
     if (!node) continue;
-    if (colour) node.style.setProperty("--pick", colour);
+    if (color) node.style.setProperty("--pick", color);
     else node.style.removeProperty("--pick");
   }
 }

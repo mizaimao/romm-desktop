@@ -36,7 +36,7 @@ function show(id) {
   paneEl.innerHTML = paneHtml(id);
   // Wiring happens after the markup is in the document: the panes look their
   // controls up by class, and an element that is not attached yet has no
-  // computed style for the ones that read theme colours.
+  // computed style for the ones that read theme colors.
   wirePane(id, paneEl);
   paneEl.scrollTop = 0;
 }

@@ -1,4 +1,4 @@
-// The colour of a game's box art, for the selection glow.
+// The color of a game's box art, for the selection glow.
 //
 // One number per cover, worked out once and remembered. The cover is drawn
 // into an 8x8 canvas and the 64 pixels are averaged — the browser does the
@@ -6,7 +6,7 @@
 // bytes read back, not a walk over a 500x700 image. On this library that is
 // under a millisecond per cover and never happens twice for the same game.
 //
-// Why a colour rather than a border: a highlight in the game's own colours
+// Why a color rather than a border: a highlight in the game's own colors
 // tells you which game is selected *and* something about the game, from the
 // corner of your eye, without adding a single button or bar.
 //
@@ -21,10 +21,10 @@
 //
 // That is a promise about someone else's code, so it is not assumed: the first
 // SecurityError switches the whole feature off for the session rather than
-// throwing once per cover. The interface falls back to the theme colour, which
+// throwing once per cover. The interface falls back to the theme color, which
 // is what it used before this existed.
 
-/// url -> "r g b", or null for covers with no usable colour.
+/// url -> "r g b", or null for covers with no usable color.
 const cache = new Map();
 
 /// Cleared on the first sign that pixels cannot be read here.
@@ -48,10 +48,10 @@ function context() {
   return canvas.getContext("2d", { willReadFrequently: true });
 }
 
-/// The dominant colour of `url`, as an `"r g b"` triple, or null.
+/// The dominant color of `url`, as an `"r g b"` triple, or null.
 ///
-/// Never rejects. A cover that fails to load, or a colour not worth using, is
-/// null and the caller keeps the theme colour.
+/// Never rejects. A cover that fails to load, or a color not worth using, is
+/// null and the caller keeps the theme color.
 export async function tintFor(url) {
   if (!url || !readable) return null;
   if (cache.has(url)) return cache.get(url);
@@ -86,11 +86,11 @@ function measure(url) {
   });
 }
 
-/// Average the pixels, weighted towards the colourful ones.
+/// Average the pixels, weighted towards the colorful ones.
 ///
 /// A flat average of box art is nearly always a muddy brown: most covers are
 /// mostly background, and averaging a bright logo with a dark border gives
-/// neither. Weighting by how far a pixel is from grey lets the colour that
+/// neither. Weighting by how far a pixel is from grey lets the color that
 /// makes the cover recognisable win, which is the one worth showing.
 export function pick(data) {
   let r = 0;
@@ -117,10 +117,10 @@ export function pick(data) {
   return normalise(r / weight, g / weight, b / weight);
 }
 
-/// Lift the colour to something that reads as light on a dark interface.
+/// Lift the color to something that reads as light on a dark interface.
 ///
 /// Hue is what identifies the game; brightness is what makes it visible. So the
-/// colour is taken apart, the hue kept exactly as measured, and only saturation
+/// color is taken apart, the hue kept exactly as measured, and only saturation
 /// and lightness moved into a band that works as a glow.
 ///
 /// Scaling the channels instead — the obvious version — cannot do this. A cover
@@ -131,7 +131,7 @@ function normalise(r, g, b) {
   const [h, s, l] = toHsl(r / 255, g / 255, b / 255);
 
   // Nearly grey. There is no hue here to borrow, and stretching what little
-  // there is would invent a colour the cover does not have.
+  // there is would invent a color the cover does not have.
   if (s < 0.15) return null;
 
   return toRgb(h, clamp(s, 0.45, 0.9), clamp(l, 0.55, 0.72))

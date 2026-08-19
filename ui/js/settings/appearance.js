@@ -1,12 +1,12 @@
 // The Appearance tab: the pictures the lists draw, the console pictures, the
 // glass, and the shader backdrop.
 import { invoke, listen } from "../state.js";
-import { toast, escapeHtml, cssColour } from "../util.js";
+import { toast, escapeHtml, cssColor } from "../util.js";
 import { padFor, padLabel, keyFor, keyLabel, ACTIONS } from "../bindings.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
-  backdropWanted, setBackdropWanted, SCHEMES, ALL_SCHEMES,
-  saveStyleSettings, styleSettings, clearStyleSettings,
+  backdropWanted, setBackdropWanted, SCHEMES, ALL_SCHEMES, SCHEME_GROUPS,
+  saveStyleSettings, styleSettings, clearStyleSettings, styleDefaults,
   glassTint, setGlassTint, glassStrength, setGlassStrength,
   BACKDROPS,
 } from "../backdrop.js";
@@ -77,7 +77,7 @@ export const html = `      <h4>Layout</h4>
         cards, the selected row, the cover art, and the preview pane, which is
         one of them. At 0 they are clear and only the blur remains.</p>
       <p class="hint clarity-needs-backdrop">Glass shows what is behind it, and
-        with the shader backdrop off the answer is a flat colour — so this
+        with the shader backdrop off the answer is a flat color — so this
         slider will look like it does less than it does. Turn the backdrop on to
         see it.</p>
 
@@ -96,7 +96,7 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><select class="bd-style"></select></div>
       </div>
       <p class="hint bd-style-hint"></p>
-      <p class="hint">Motion, brightness and colour below are remembered
+      <p class="hint">Motion, brightness and color below are remembered
         <em>per backdrop</em>. Scanlines at the brightness that suits Drift is a
         white screen, so each shape keeps its own answers; anything you never
         change for a style follows the shared setting.</p>
@@ -107,13 +107,15 @@ export const html = `      <h4>Layout</h4>
       </div>
       <div class="srow">
         <label>Motion</label>
-        <div class="ctl"><input class="bd-speed" type="range" min="300" max="700" step="25" />
-          <span class="bd-speed-val"></span></div>
+        <div class="ctl"><input class="bd-speed" type="range" min="0" max="700" step="5" />
+          <input class="bd-speed-num num" type="number" min="0" step="1" />
+          <span class="pct">%</span></div>
       </div>
       <div class="srow">
         <label>Brightness</label>
-        <div class="ctl"><input class="bd-strength" type="range" min="10" max="200" step="5" />
-          <span class="bd-strength-val"></span></div>
+        <div class="ctl"><input class="bd-strength" type="range" min="0" max="300" step="5" />
+          <input class="bd-strength-num num" type="number" min="0" step="1" />
+          <span class="pct">%</span></div>
       </div>
       <div class="srow bd-custom">
         <label>Dark color</label>
@@ -225,12 +227,12 @@ export function wire(box) {
   }
 
   // Live controls. Every change is applied to the running shader immediately —
-  // a colour picker whose result you cannot see is not usable.
+  // a color picker whose result you cannot see is not usable.
   const cfg = backdropSettings();
   const speed = box.querySelector(".bd-speed");
-  const speedVal = box.querySelector(".bd-speed-val");
+  const speedNum = box.querySelector(".bd-speed-num");
   const strength = box.querySelector(".bd-strength");
-  const strengthVal = box.querySelector(".bd-strength-val");
+  const strengthNum = box.querySelector(".bd-strength-num");
   const low = box.querySelector(".bd-low");
   const high = box.querySelector(".bd-high");
 
@@ -257,8 +259,16 @@ export function wire(box) {
     };
     sayHint();
     styleEl.addEventListener("change", () => {
-      saveBackdropSettings({ style: styleEl.value });
+      // Show the new style's own numbers before anything else happens.
+      //
+      // The sliders were left holding the previous style's values, so the
+      // next nudge of one wrote *that* number onto the style just selected —
+      // settings leaking from one backdrop into the next, and the reason a
+      // newly chosen backdrop seemed to need a slider touched before it
+      // looked right.
+      showValues(saveBackdropSettings({ style: styleEl.value }));
       sayHint();
+      sayStyleState();
     });
   }
 
@@ -278,16 +288,18 @@ export function wire(box) {
   const sayStyleState = () => {
     const cur = backdropSettings().style;
     const own = Object.keys(styleSettings(cur));
+    const d = styleDefaults(cur);
     if (stateNote) {
-      stateNote.textContent = own.length
-        ? `${cur}: own ${own.join(", ")}`
-        : `${cur}: following the shared settings`;
+      stateNote.textContent =
+        `default ${Math.round(d.speed * 100)}% motion, ${Math.round(d.strength * 100)}% brightness`;
     }
-    if (resetBtn) resetBtn.disabled = !own.length;
+    // Always available: it restores this backdrop's own defaults, which is
+    // meaningful even when nothing has been changed yet.
+    if (resetBtn) resetBtn.disabled = false;
   };
   sayStyleState();
   resetBtn?.addEventListener("click", () => {
-    clearStyleSettings(backdropSettings().style);
+    showValues(clearStyleSettings(backdropSettings().style));
     sayStyleState();
   });
 
@@ -325,15 +337,24 @@ export function wire(box) {
     box.querySelectorAll(".bd-custom").forEach((r) => (r.hidden = !on));
   };
 
-  schemeSel.innerHTML = ALL_SCHEMES.filter(Boolean).map(
-    (c) => `<option value="${c.id}">${c.label}</option>`
+  // Grouped: forty schemes in one flat list is a scroll, not a choice.
+  schemeSel.innerHTML = SCHEME_GROUPS.map(
+    ([label, items]) =>
+      `<optgroup label="${escapeHtml(label)}">` +
+      items.filter(Boolean).map((c) => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join("") +
+      `</optgroup>`
   ).join("");
   schemeSel.value = ALL_SCHEMES.filter(Boolean).some((c) => c.id === cfg.preset) ? cfg.preset : "midnight";
   glassCustom.value = glassTint();
   showCustom();
 
   schemeSel.addEventListener("change", () => {
-    const chosen = SCHEMES.find((c) => c.id === schemeSel.value);
+    // Every scheme, not only the two-color ones. This read `SCHEMES`, which
+    // holds the pairs alone — so choosing any single color or spectrum found
+    // nothing, fell into the "custom" branch below, and silently kept the
+    // previous colors. The dropdown offered eighteen new schemes and none of
+    // them did anything.
+    const chosen = ALL_SCHEMES.filter(Boolean).find((c) => c.id === schemeSel.value);
     showCustom();
     if (!chosen || chosen.id === "custom") {
       // Keep whatever the three pickers already hold rather than blanking
@@ -349,33 +370,44 @@ export function wire(box) {
   });
   glassCustom.addEventListener("input", () => setGlassTint(glassCustom.value));
 
+  // The slider and the number field are two views of one value, so each has
+  // to write the other. The field takes anything: the slider's ceiling is where
+  // it stops being useful, not where the shader stops working, and someone who
+  // wants 900% motion on one backdrop should be able to type it.
   const showValues = (c) => {
-    speedVal.textContent = `${Math.round(c.speed * 100)}%`;
-    strengthVal.textContent = `${Math.round(c.strength * 100)}%`;
+    const sp = Math.round(c.speed * 100);
+    const st = Math.round(c.strength * 100);
+    if (document.activeElement !== speedNum) speedNum.value = String(sp);
+    if (document.activeElement !== strengthNum) strengthNum.value = String(st);
+    speed.value = String(Math.min(Number(speed.max), sp));
+    strength.value = String(Math.min(Number(strength.max), st));
   };
-  speed.value = String(Math.round(cfg.speed * 100));
-  strength.value = String(Math.round(cfg.strength * 100));
-  // A colour input cannot show "unset", so an empty value reads back as the
-  // theme's own colour and the reset button is what clears it again.
-  low.value = cfg.low || cssColour("--bg", "#0d0d12");
-  high.value = cfg.high || cssColour("--accent", "#2e3358");
+  // A color input cannot show "unset", so an empty value reads back as the
+  // theme's own color and the reset button is what clears it again.
+  low.value = cfg.low || cssColor("--bg", "#0d0d12");
+  high.value = cfg.high || cssColor("--accent", "#2e3358");
   showValues(cfg);
 
-  speed.addEventListener("input", () =>
-    showValues(saveStyleSettings(backdropSettings().style, { speed: Number(speed.value) / 100 }))
-  );
-  strength.addEventListener("input", () =>
-    showValues(saveStyleSettings(backdropSettings().style, { strength: Number(strength.value) / 100 }))
-  );
+  const setSpeed = (pct) =>
+    showValues(saveStyleSettings(backdropSettings().style, { speed: Math.max(0, pct) / 100 }));
+  const setStrength = (pct) =>
+    showValues(saveStyleSettings(backdropSettings().style, { strength: Math.max(0, pct) / 100 }));
+
+  speed.addEventListener("input", () => setSpeed(Number(speed.value)));
+  strength.addEventListener("input", () => setStrength(Number(strength.value)));
+  // `change`, not `input`: typing "150" passes through 1 and 15 on the way, and
+  // applying each would jerk the backdrop while the number is half-written.
+  speedNum.addEventListener("change", () => setSpeed(Number(speedNum.value) || 0));
+  strengthNum.addEventListener("change", () => setStrength(Number(strengthNum.value) || 0));
   low.addEventListener("input", () => saveBackdropSettings({ low: low.value }));
   high.addEventListener("input", () => saveBackdropSettings({ high: high.value }));
   box.querySelector(".bd-low-reset").addEventListener("click", () => {
     saveBackdropSettings({ low: "" });
-    low.value = cssColour("--bg", "#0d0d12");
+    low.value = cssColor("--bg", "#0d0d12");
   });
   box.querySelector(".bd-high-reset").addEventListener("click", () => {
     saveBackdropSettings({ high: "" });
-    high.value = cssColour("--accent", "#2e3358");
+    high.value = cssColor("--accent", "#2e3358");
   });
 }
 

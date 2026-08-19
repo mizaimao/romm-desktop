@@ -124,7 +124,7 @@ listen("backdrop-toggle", ({ payload }) => {
 listen("backdrop-settings", ({ payload }) => {
   // Apply, never re-save: saving emits, and this window would then answer its
   // own message. That round trip is what made the backdrop flicker while a
-  // colour was being dragged.
+  // color was being dragged.
   applyBackdropSettings(payload);
 });
 
