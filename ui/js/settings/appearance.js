@@ -287,6 +287,19 @@ export function wire(box) {
   const stateNote = box.querySelector(".bd-style-state");
   const sayStyleState = () => {
     const cur = backdropSettings().style;
+    // Some shapes have no use for one of the controls. Static re-hashes its
+    // whole field every frame at any speed, so the motion slider moves a
+    // number and changes nothing you can see — disabled and labelled, rather
+    // than left there looking broken.
+    const shape = BACKDROPS.find((b) => b.id === cur);
+    const noMotion = shape?.motion === false;
+    if (speed) speed.disabled = noMotion;
+    if (speedNum) speedNum.disabled = noMotion;
+    if (speed?.closest(".srow")) {
+      speed.closest(".srow").title = noMotion
+        ? "This backdrop redraws completely every frame, so motion has no effect on it"
+        : "";
+    }
     const own = Object.keys(styleSettings(cur));
     const d = styleDefaults(cur);
     if (stateNote) {

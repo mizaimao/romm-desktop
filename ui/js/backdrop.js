@@ -133,7 +133,7 @@ export const BACKDROPS = [
     label: "Blobs",
     hint: "Soft clouds drifting at two scales. The original, and the quietest.",
     pace: 1.7,
-    defaults: { strength: 0.3 },
+    defaults: { strength: 0.5 },
     body: `
       float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
       float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
@@ -144,7 +144,7 @@ export const BACKDROPS = [
     label: "Aurora",
     hint: "Slow vertical curtains, brighter where they fold over each other.",
     pace: 1.4,
-    defaults: { strength: 0.4 },
+    defaults: { strength: 0.6 },
     body: `
       float band = uv.y * 2.2 + fbm(vec2(uv.x * 2.0, t * 0.05)) * 1.6;
       float curtain = sin(band * 3.14159) * 0.5 + 0.5;
@@ -159,7 +159,7 @@ export const BACKDROPS = [
     // The one that made the slider a lie: four sines at 0.2–0.4 of `t`, where
     // Blobs drifts at 0.015 of it.
     pace: 0.1,
-    defaults: { strength: 0.6 },
+    defaults: { strength: 0.8 },
     body: `
       vec2 p = (uv - 0.5) * aspect * 4.0;
       float v = sin(p.x + t * 0.35)
@@ -265,7 +265,7 @@ export const BACKDROPS = [
     hint: "Rings running away from the middle. The oldest perspective trick "
       + "there is, and still the most hypnotic.",
     pace: 0.35,
-    defaults: { strength: 0.5 },
+    defaults: { strength: 0.7 },
     body: `
       vec2 q = (uv - 0.5) * aspect;
       float r = max(length(q), 0.02);
@@ -281,7 +281,7 @@ export const BACKDROPS = [
     label: "Waves",
     hint: "Ridges seen at a low angle, rolling towards you.",
     pace: 0.5,
-    defaults: { strength: 0.5 },
+    defaults: { strength: 0.7 },
     body: `
       vec2 q = (uv - vec2(0.5, 0.35)) * aspect;
       float depth = max(0.75 - uv.y, 0.05);
@@ -297,7 +297,7 @@ export const BACKDROPS = [
     hint: "A slow diagonal wash. The cheapest thing here — two sines and no "
       + "noise at all — and the quietest behind artwork.",
     pace: 0.9,
-    defaults: { speed: 2.0, strength: 0.5 },
+    defaults: { speed: 2.0, strength: 0.7 },
     body: `
       // Named band, not d: SHADER_TAIL declares its own float d for the
       // vignette, and a body declaring one too is a redeclaration — the shader
@@ -314,6 +314,11 @@ export const BACKDROPS = [
       + "— and on an OLED it is the busiest thing on this list.",
     pace: 2.0,
     defaults: { speed: 6.0, strength: 1.0 },
+    // No motion control. The field is re-hashed from scratch every frame at
+    // any speed, so the slider changes the numbers and nothing you can see —
+    // and a control that does nothing is worse than no control. The default
+    // is the cheapest rate that still looks like static.
+    motion: false,
     body: `
       // Three fields at incommensurable scales, each drifting on its own
       // irrational-ish vector, plus a slow wander of the sampling grid itself.
@@ -827,7 +832,12 @@ export const TRIPLES = [
 /// picked so the two halves of the ramp cover opposite sides of the wheel and
 /// the result reads as a rainbow rather than as a gradient.
 export const RAINBOWS = [
-  { id: "rgb",      label: "RGB",        glass: "#4d8fd6", low: "#e02020", mid: "#20c040", high: "#2060e0" },
+  // Not the three raw primaries. #e02020 / #20c040 / #2060e0 is a television
+  // test card: fully saturated red, green and blue have no common ground, so
+  // the ramp between them passes through mud rather than through a hue sweep.
+  // Pulled off the corners and matched in lightness, which is what makes the
+  // sweep read as one thing.
+  { id: "rgb",      label: "RGB",        glass: "#5f8fe0", low: "#e2445c", mid: "#3fc98a", high: "#5a7fe8" },
   { id: "prism",    label: "Prism",      glass: "#8f5fd8", low: "#c01ad0", mid: "#20b0e0", high: "#e8d020" },
   { id: "neon",     label: "Neon",       glass: "#ff4fd8", low: "#ff2bd6", mid: "#00e5ff", high: "#b026ff" },
   { id: "candy",    label: "Candy",      glass: "#ff7ab8", low: "#ff5fa2", mid: "#ffd166", high: "#5fd3ff" },
