@@ -69,13 +69,50 @@ header {
   background: transparent;
   /* The macOS traffic lights end at about 70px and the window is dragged by
      this bar, so nothing can go left of them. This is as far left as the first
-     control goes without sitting under the close button. */
-  padding-left: 72px;
+     control goes without sitting under the close button.
+     
+     This padding was here long before the lights were: the stylesheet was
+     written for an inset title bar and `tauri.conf.json` never asked for one,
+     so macOS drew its own solid 28px strip *above* the header and this gap sat
+     under an empty bar for nothing. `titleBarStyle: Overlay` is the missing
+     half — it hands that strip back and floats the lights over our content,
+     which is what the 72px was always for. */
+  /* Wider than the lights themselves. 72px put the title flush against the
+     zoom button with nothing between them, which reads as a collision even
+     though it does not overlap. */
+  padding-left: 104px;
   gap: 8px;
   -webkit-app-region: drag;
+  /* Tall enough for the lights and the build number beneath them. */
+  min-height: 52px;
 }
 
+/* The build number, under the traffic lights.
+   Absolutely placed rather than in the flex row: it belongs to the gutter the
+   lights occupy, not to the run of controls, and in the flow it would push
+   everything right by its own width. Quiet on purpose — it is there to be read
+   off a screenshot, not while playing. */
+#build {
+  position: absolute;
+  left: 22px;
+  top: 30px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--text) 38%, transparent);
+  pointer-events: none;
+  white-space: nowrap;
+}
+header { position: relative; }
+
+/* Only the things you can press opt out. The title and the build number are
+   text, and the title is 380px wide by design — a fixed share of the bar so
+   the controls after it do not move between screens — so most of that width is
+   empty space. Excluding every child made that empty space undraggable, which
+   is the widest part of the bar and the obvious place to grab it. */
 header > * { -webkit-app-region: no-drag; }
+header h1,
+header #build { -webkit-app-region: drag; }
 
 header h1 {
   margin: 0;
@@ -376,6 +413,10 @@ body.has-pad #tabbar .bumper { display: inline; }
    the bar's opacity the page would read as frosted rather than as objects made
    of glass. */
 .card {
+  /* The pane and the outline are the card. Taking them away was tried and
+     reverted: without an edge there is nothing to say where one console ends
+     and the next begins, and a grid of logos floating on the backdrop reads as
+     a scatter rather than a list of things you can press. */
   background: color-mix(in srgb, var(--glass) calc(var(--tint) * 0.5), transparent);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
@@ -2633,3 +2674,156 @@ code {
   color: var(--text);
   background: color-mix(in srgb, var(--glass) 34%, transparent);
 }
+
+
+/* ---- Continue playing, flattened ----------------------------------------
+   The one row where the frame earns nothing. These are five wide screenshots
+   in a horizontal strip, not a grid — there is no column to line up with and
+   no neighbour to be told apart from, so the pane and the outline are drawing
+   a box around a picture that already has edges. The grid below keeps both,
+   because there the border is what separates one console from the next.
+
+   The art keeps its dark well so a game with no cover yet is still a tile. */
+.recent .gcard .art {
+  /* Nothing behind the picture at all. A dark well was tried first and it is
+     still a box: against this backdrop a 22% black rectangle reads as an
+     outline even without a border on it. The screenshots in this row are
+     opaque and already rectangular, so they are their own frame. */
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+/* The miximages are PNGs with a real alpha channel — the box stands in front
+   of a screenshot with nothing behind either — so the shadow can follow the
+   artwork's own outline instead of the rectangle containing it. `drop-shadow`
+   reads the alpha; `box-shadow` would draw round the element and give back the
+   box this row just lost. */
+.recent .gcard .art img {
+  filter: drop-shadow(0 6px 10px rgb(0 0 0 / 0.55));
+  transition: transform .22s cubic-bezier(.2, .8, .3, 1), filter .22s ease;
+  transform-origin: 50% 90%;
+  will-change: transform;
+}
+
+/* Lift and grow, no rotation.
+   A fixed tilt was tried and was too subtle to read at under a degree, and
+   anything larger looked broken. The angle now comes from where the pointer
+   is instead — see `.tilt` below — which is legible because it *moves*.
+
+   The lift is 6px rather than 8: with the card turning under the cursor as
+   well, the two together were doing too much. */
+.recent .gcard:hover .art img {
+  transform: translateY(-6px) scale(1.06);
+  filter: drop-shadow(0 16px 22px rgb(0 0 0 / 0.6));
+}
+.recent .gcard:active .art img {
+  transform: translateY(-2px) scale(1.02);
+  transition-duration: .08s;
+}
+
+/* ---- Pointer-driven angle ------------------------------------------------
+   The card turns to face the cursor, the way a page held in one hand does.
+   `--rx` and `--ry` are written by `tilt.js` from the pointer's position over
+   the card; everything here is otherwise static, so a frame that misses simply
+   leaves the last angle rather than jumping.
+
+   The perspective lives on the *container*, not the image: on the image it
+   would be computed per element and every card would face its own vanishing
+   point. `translateZ` is what makes the rotation read as depth rather than as
+   a skew. */
+.recent .gcards { perspective: 900px; }
+.recent .gcard .art img {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+.recent .gcard.tilt .art img {
+  transform: translateY(-6px) scale(1.06)
+             rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  /* No transition while tracking: the pointer *is* the animation, and easing
+     it as well leaves the card lagging behind the cursor. */
+  transition: filter .22s ease;
+}
+.recent .gcard .art {
+  overflow: visible;   /* the lift and the shadow must not be clipped */
+}
+.recent .gcard:hover .art {
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recent .gcard .art img,
+  .recent .gcard:hover .art img { transition: none; transform: none; }
+}
+.recent .gcard.sel .art {
+  border-color: color-mix(in srgb, var(--glass) 85%, white 12%);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--glass) 70%, transparent);
+}
+
+
+/* The platform pane's Take offline, styled as the one in the top bar rather
+   than as a form button. It was a bare `<button>` — a grey slab spanning the
+   pane — while the identical action in the header is a label with an icon and
+   no surface at all. Same control, same look, and left-aligned: a button that
+   fills its container reads as "confirm", which this is not. */
+#detail .pinned .pf-grab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+#detail .pinned .pf-grab:hover {
+  color: color-mix(in srgb, var(--glass) 30%, white 70%);
+  text-shadow:
+    0 0 6px color-mix(in srgb, var(--glass) 90%, transparent),
+    0 0 22px color-mix(in srgb, var(--glass) 65%, transparent);
+}
+
+
+/* ---- Collection card artwork --------------------------------------------
+   Four arrangements of the same member covers. `.logo.mosaic` is the box; the
+   style class on it decides what the images inside do. Each keeps the same
+   height so switching between them never reflows the grid. */
+.card .logo.mosaic.single img { width: 100%; height: 100%; object-fit: contain; }
+
+/* Three covers overlapping, the first in front. `--i` is written per image so
+   the offsets and the stacking come from one number. */
+.card .logo.mosaic.fan { position: relative; }
+.card .logo.mosaic.fan img {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  height: 88%;
+  width: auto;
+  object-fit: contain;
+  transform: translateX(calc(var(--i) * 14px)) rotate(calc(var(--i) * 5deg));
+  transform-origin: 50% 100%;
+  z-index: calc(3 - var(--i));
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.5));
+}
+
+/* A real 2x2, which is what "mosaic" always claimed to be. */
+.card .logo.mosaic.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+}
+.card .logo.mosaic.tiles img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; }
+.card .logo.mosaic.tiles .ph { grid-column: 1 / -1; grid-row: 1 / -1; }
+
+/* Nothing at all: the box collapses so the name moves up rather than sitting
+   under an empty rectangle. */
+.card .logo.mosaic.none { display: none; }

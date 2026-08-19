@@ -2,9 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Commands the window may call. Plugin commands are denied unless listed here; the app's own #[tauri::command] functions are not gated.",
-  "windows": ["main", "settings"],
+  "windows": [
+    "main",
+    "settings"
+  ],
   "permissions": [
     "core:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "core:window:allow-start-dragging"
   ]
 }

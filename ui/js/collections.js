@@ -13,6 +13,8 @@ import {
   setPageFilterLabel, setPageFilterExtra, refreshPageFilter,
 } from "./pagefilter.js";
 import { renderRows } from "./library.js";
+import { restoreSidebar } from "./detail.js";
+import { collectionArt } from "./collection-art.js";
 import { shellMode } from "./shell.js";
 
 function enter(fn) {
@@ -35,6 +37,7 @@ function markOpen(grid, cid) {
 /// are not a list anybody needs to search.
 function topBar(title, { filter = true } = {}) {
   state.view = "collections";
+  restoreSidebar();
   state.platform = null;
   state.selected = null;
   el.detail.hidden = true;
@@ -113,7 +116,20 @@ function markGroup(picker, group) {
   }
 }
 
+/// The last group drawn, so a setting that changes how these look can redraw
+/// the same grid rather than reloading the window.
+let lastDrawn = null;
+
+/// Draw the collections grid again, exactly as it is. Used when the picture
+/// style changes: the cards are rebuilt, nothing else moves.
+export function redrawCollections() {
+  if (!lastDrawn) return;
+  const { group, label, into } = lastDrawn;
+  showCollectionsIn(group, label, { into });
+}
+
 export async function showCollectionsIn(group, label, { into = "picker" } = {}) {
+  lastDrawn = { group, label, into };
   topBar(label || group);
   if (into === "picker") resetGames("Pick a collection on the left.");
   const items = await invoke("collections_in", { group });
@@ -139,7 +155,7 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
       .map(
         (c) => `
         <div class="card" data-cid="${escapeHtml(c.id)}">
-          <div class="logo mosaic"><span class="ph">${escapeHtml(c.name.slice(0, 2))}</span></div>
+          <div class="logo mosaic ${collectionArt()}"><span class="ph">${escapeHtml(c.name.slice(0, 2))}</span></div>
           <div class="name">${c.is_favorite ? "★ " : ""}${escapeHtml(c.name)}</div>
           <div class="meta">${c.rom_count} games${
             c.local_count ? `<span class="here"> · ${c.local_count} here</span>` : ""
@@ -185,6 +201,7 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
 
 export async function showCollectionRoms(id, name) {
   state.view = "collection-roms";
+  restoreSidebar();
   state.collection = id;
   // The collection's own name, kept apart from the rendered title. Restoring a
   // parked section used to hand the title back as the name, so "Arcade Sports —
@@ -213,14 +230,22 @@ async function loadMosaics(list, into) {
   // A collection with no sample ids — an older backend, or one the server has
   // not filled in — is a collection with no cover, not a crash halfway through
   // drawing the list.
-  const ids = list.flatMap((c) => (c.sample_ids ?? []).slice(0, 1));
+  const style = collectionArt();
+  if (style === "none") return;
+  // How many members each card needs art for. One for a single cover, three
+  // for the fan, four for the grid — asked for in one batch either way.
+  const want = style === "fan" ? 3 : style === "tiles" ? 4 : 1;
+  const ids = list.flatMap((c) => (c.sample_ids ?? []).slice(0, want));
   if (!ids.length) return;
   try {
     const covers = await invoke("rom_covers", { ids });
     const byId = new Map(covers.map((c) => [c.id, c.cover]));
     for (const c of list) {
-      const cover = byId.get((c.sample_ids ?? [])[0]);
-      if (!cover) continue;
+      const picks = (c.sample_ids ?? [])
+        .slice(0, want)
+        .map((id) => byId.get(id))
+        .filter(Boolean);
+      if (!picks.length) continue;
       // The grid the cards were actually drawn into, passed in.
       //
       // This read `region(into)`, and `into` is a parameter of the function
@@ -229,7 +254,12 @@ async function loadMosaics(list, into) {
       // swallowed that instead, so every collection in the app drew the
       // two-letter placeholder and nothing ever said why.
       const logo = into.querySelector(`.card[data-cid="${CSS.escape(String(c.id))}"] .logo`);
-      if (logo) logo.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;
+      if (!logo) continue;
+      // The fan and the grid want every cover; a single is the first one.
+      // Rendered back-to-front so the first pick is the one on top.
+      logo.innerHTML = (style === "single" ? picks.slice(0, 1) : picks)
+        .map((src, i) => `<img style="--i:${i}" src="${convertFileSrc(src)}" alt="" />`)
+        .join("");
     }
   } catch {
     // Placeholders are fine; artwork is not worth interrupting browsing for.

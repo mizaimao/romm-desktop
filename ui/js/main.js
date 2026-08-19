@@ -13,6 +13,7 @@ import { installTabs, showSection, resetSection, activeSection } from "./tabs.js
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 import { warmRefresh } from "./actions.js";
+import { redrawCollections } from "./collections.js";
 import {
   startBackdrop, stopBackdrop, applyBackdropSettings,
   applyStoredGlassTint, setGlassTint, setGlassStrength,
@@ -107,6 +108,14 @@ el.search.addEventListener("input", (e) => {
 // the settings panel and left the library untouched.
 listen("glass-tint", ({ payload }) => setGlassTint(payload, { announce: false }));
 listen("glass-strength", ({ payload }) => setGlassStrength(payload, { announce: false }));
+// The collection cards live here; the control is in the other window.
+//
+// Redraw that one grid rather than reloading. `location.reload()` was the first
+// attempt and it threw away the whole session — scroll position, the open
+// console, the cursor — to change a picture.
+listen("collection-art", () => {
+  if (state.view === "collections") redrawCollections();
+});
 
 listen("backdrop-toggle", ({ payload }) => {
   if (payload) startBackdrop();
@@ -274,6 +283,14 @@ function statusCard(s) {
   chooseMode(storedMode(), { announce: false });
   if (localStorage.getItem("backdrop") === "on") startBackdrop();
   // Covers the preview pane too: it is a card, and takes the same --tint.
+  // The build number under the traffic lights. `hiddenTitle` took the window
+  // title away, and with it the one place a screenshot said which build it was.
+  invoke("versions")
+    .then(([client]) => {
+      const el = document.getElementById("build");
+      if (el && client) el.textContent = `v${client}`;
+    })
+    .catch(() => {});
   applyStoredGlassTint();
   setZoom(state.zoom);
   setLayout(state.layout);

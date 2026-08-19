@@ -5,10 +5,12 @@ import { toast, escapeHtml, cssColour } from "../util.js";
 import { padFor, padLabel, keyFor, keyLabel, ACTIONS } from "../bindings.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
-  backdropWanted, setBackdropWanted, SCHEMES,
+  backdropWanted, setBackdropWanted, SCHEMES, ALL_SCHEMES,
+  saveStyleSettings, styleSettings, clearStyleSettings,
   glassTint, setGlassTint, glassStrength, setGlassStrength,
   BACKDROPS,
 } from "../backdrop.js";
+import { COLLECTION_ART, collectionArt, setCollectionArt } from "../collection-art.js";
 
 export const html = `      <h4>Layout</h4>
       <div class="srow">
@@ -51,6 +53,12 @@ export const html = `      <h4>Layout</h4>
           <span class="set-icons-note"></span></div>
       </div>
 
+      <div class="srow">
+        <label>Collection picture</label>
+        <div class="ctl"><select class="collection-art"></select></div>
+      </div>
+      <p class="hint collection-art-hint"></p>
+
       <h4>Color</h4>
       <div class="srow">
         <label>Scheme</label>
@@ -88,6 +96,15 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><select class="bd-style"></select></div>
       </div>
       <p class="hint bd-style-hint"></p>
+      <p class="hint">Motion, brightness and colour below are remembered
+        <em>per backdrop</em>. Scanlines at the brightness that suits Drift is a
+        white screen, so each shape keeps its own answers; anything you never
+        change for a style follows the shared setting.</p>
+      <div class="srow">
+        <label></label>
+        <div class="ctl"><button class="bd-reset-style">Reset this backdrop</button>
+          <span class="bd-style-state dim"></span></div>
+      </div>
       <div class="srow">
         <label>Motion</label>
         <div class="ctl"><input class="bd-speed" type="range" min="300" max="700" step="25" />
@@ -254,6 +271,45 @@ export function wire(box) {
   };
   sayBackdrop();
 
+  // Per-backdrop overrides: say when the style has its own answers, and offer
+  // to put it back on the shared ones.
+  const resetBtn = box.querySelector(".bd-reset-style");
+  const stateNote = box.querySelector(".bd-style-state");
+  const sayStyleState = () => {
+    const cur = backdropSettings().style;
+    const own = Object.keys(styleSettings(cur));
+    if (stateNote) {
+      stateNote.textContent = own.length
+        ? `${cur}: own ${own.join(", ")}`
+        : `${cur}: following the shared settings`;
+    }
+    if (resetBtn) resetBtn.disabled = !own.length;
+  };
+  sayStyleState();
+  resetBtn?.addEventListener("click", () => {
+    clearStyleSettings(backdropSettings().style);
+    sayStyleState();
+  });
+
+  // What a collection card draws for a picture.
+  const artSelEl = box.querySelector(".collection-art");
+  if (artSelEl) {
+    const hint = box.querySelector(".collection-art-hint");
+    artSelEl.innerHTML = COLLECTION_ART
+      .map(([id, label]) => `<option value="${id}">${escapeHtml(label)}</option>`)
+      .join("");
+    const sayArt = () => {
+      const found = COLLECTION_ART.find(([id]) => id === artSelEl.value);
+      if (hint) hint.textContent = found ? found[2] : "";
+    };
+    artSelEl.value = collectionArt();
+    sayArt();
+    artSelEl.addEventListener("change", () => {
+      setCollectionArt(artSelEl.value);
+      sayArt();
+    });
+  }
+
   if (strengthEl) {
     strengthEl.value = String(glassStrength());
     strengthOut.textContent = `${glassStrength()}%`;
@@ -269,10 +325,10 @@ export function wire(box) {
     box.querySelectorAll(".bd-custom").forEach((r) => (r.hidden = !on));
   };
 
-  schemeSel.innerHTML = SCHEMES.map(
+  schemeSel.innerHTML = ALL_SCHEMES.filter(Boolean).map(
     (c) => `<option value="${c.id}">${c.label}</option>`
   ).join("");
-  schemeSel.value = SCHEMES.some((c) => c.id === cfg.preset) ? cfg.preset : "midnight";
+  schemeSel.value = ALL_SCHEMES.filter(Boolean).some((c) => c.id === cfg.preset) ? cfg.preset : "midnight";
   glassCustom.value = glassTint();
   showCustom();
 
@@ -306,10 +362,10 @@ export function wire(box) {
   showValues(cfg);
 
   speed.addEventListener("input", () =>
-    showValues(saveBackdropSettings({ speed: Number(speed.value) / 100 }))
+    showValues(saveStyleSettings(backdropSettings().style, { speed: Number(speed.value) / 100 }))
   );
   strength.addEventListener("input", () =>
-    showValues(saveBackdropSettings({ strength: Number(strength.value) / 100 }))
+    showValues(saveStyleSettings(backdropSettings().style, { strength: Number(strength.value) / 100 }))
   );
   low.addEventListener("input", () => saveBackdropSettings({ low: low.value }));
   high.addEventListener("input", () => saveBackdropSettings({ high: high.value }));

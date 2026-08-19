@@ -167,10 +167,11 @@ export function enter({
     // anywhere is how someone ends up with no preview and no button.
     const wanted = asked || name === "sidebar";
     node.hidden = suppressed || !wanted;
-    // The preview toggle stays put but goes dead on the console list, where
-    // there is nothing to preview. Disabled rather than hidden: a control that
-    // vanishes from a row that never does is one nobody finds again, and this
-    // one has been reported missing three times.
+    // Disabled rather than hidden where a screen genuinely has nothing to
+    // preview: a control that vanishes from a row that never does is one
+    // nobody finds again, and this one has been reported missing three times.
+    // The console list is no longer such a screen — it previews the console
+    // under the cursor — so it asks for the button like everywhere else.
     if (name === "sidebar") {
       const dead = !wants.sidebar && mode !== "columns";
       node.disabled = dead;

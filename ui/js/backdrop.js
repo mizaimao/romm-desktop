@@ -44,6 +44,7 @@ out vec4 colour;
 uniform vec2  u_size;
 uniform float u_time;
 uniform vec3  u_low;
+uniform vec3  u_mid;
 uniform vec3  u_high;
 uniform float u_strength;
 uniform float u_speed;
@@ -64,6 +65,17 @@ float noise(vec2 p) {
 // drawn behind a library, not in a demo.
 float fbm(vec2 p) {
   return noise(p) * 0.65 + noise(p * 2.1 + 4.7) * 0.35;
+}
+
+// Low -> mid -> high, so a scheme can be three colours rather than two.
+//
+// Every style already blends between two colours; this is the same call with
+// a stop in the middle, so a two-colour scheme sets the middle halfway and
+// nothing changes for it. No backticks in here: this whole block is inside a
+// JS template literal, and one would end the string.
+vec3 ramp(float k) {
+  k = clamp(k, 0.0, 1.0);
+  return k < 0.5 ? mix(u_low, u_mid, k * 2.0) : mix(u_mid, u_high, (k - 0.5) * 2.0);
 }
 
 void main() {
@@ -108,7 +120,7 @@ export const BACKDROPS = [
     body: `
       float a = noise(uv * aspect * 3.0 + vec2(t * 0.02, t * 0.013));
       float b = noise(uv * aspect * 6.0 - vec2(t * 0.011, t * 0.017));
-      base = mix(u_low, u_high, smoothstep(0.30, 0.85, a * 0.65 + b * 0.35));`,
+      base = ramp(smoothstep(0.30, 0.85, a * 0.65 + b * 0.35));`,
   },
   {
     id: "aurora",
@@ -119,7 +131,7 @@ export const BACKDROPS = [
       float band = uv.y * 2.2 + fbm(vec2(uv.x * 2.0, t * 0.05)) * 1.6;
       float curtain = sin(band * 3.14159) * 0.5 + 0.5;
       curtain *= smoothstep(1.0, 0.15, uv.y);
-      base = mix(u_low, u_high, pow(curtain, 1.6));`,
+      base = ramp(pow(curtain, 1.6));`,
   },
   {
     id: "plasma",
@@ -135,7 +147,7 @@ export const BACKDROPS = [
               + sin(p.y * 1.3 - t * 0.28)
               + sin((p.x + p.y) * 0.7 + t * 0.2)
               + sin(length(p) * 1.6 - t * 0.4);
-      base = mix(u_low, u_high, smoothstep(-1.2, 2.4, v));`,
+      base = ramp(smoothstep(-1.2, 2.4, v));`,
   },
   {
     id: "grid",
@@ -164,7 +176,7 @@ export const BACKDROPS = [
       // distance.
       float floorMask = step(0.0, -q.y) * smoothstep(0.0, 0.06, depth);
       float sky = 1.0 - smoothstep(0.0, 0.30, max(q.y, 0.0));
-      base = mix(u_low, u_high, mesh * 0.8 * floorMask + sky * 0.12);`,
+      base = ramp(mesh * 0.8 * floorMask + sky * 0.12);`,
   },
   {
     id: "stars",
@@ -192,7 +204,84 @@ export const BACKDROPS = [
           glow += smoothstep(0.42, 0.0, length(pos)) * step(0.955, star) * twinkle;
         }
       }
-      base = mix(u_low, u_high, min(glow, 1.0));`,
+      base = ramp(min(glow, 1.0));`,
+  },
+  {
+    id: "starfield",
+    label: "Starfield",
+    hint: "Three layers of stars at different speeds. The attract-mode look, "
+      + "and the one that reads as depth without moving much.",
+    pace: 1.1,
+    body: `
+      base = u_low;
+      for (int L = 0; L < 3; L++) {
+        float f = float(L);
+        float scale = 10.0 + f * 12.0;
+        float speed = (f + 1.0) * 0.06;
+        vec2 p = uv * aspect * scale + vec2(t * speed, 0.0);
+        vec2 cell = floor(p), fr = fract(p);
+        float star = hash(cell + f * 17.0);
+        vec2 d = fr - vec2(hash(cell + 3.1), hash(cell + 7.7));
+        float glow = smoothstep(0.30, 0.0, length(d)) * step(0.972, star);
+        base = mix(base, u_high, glow * (0.35 + f * 0.32));
+      }`,
+  },
+  {
+    id: "tunnel",
+    label: "Tunnel",
+    hint: "Rings running away from the middle. The oldest perspective trick "
+      + "there is, and still the most hypnotic.",
+    pace: 0.35,
+    body: `
+      vec2 q = (uv - 0.5) * aspect;
+      float r = max(length(q), 0.02);
+      float a = atan(q.y, q.x);
+      // 1/r is the depth: rings bunch towards the centre because that is
+      // where the tunnel is furthest away.
+      float rings = sin(1.0 / r * 3.0 - t * 0.8) * 0.5 + 0.5;
+      float spokes = sin(a * 8.0 + t * 0.15) * 0.5 + 0.5;
+      base = ramp(rings * 0.7 * (0.55 + spokes * 0.45) * smoothstep(0.0, 0.35, r));`,
+  },
+  {
+    id: "waves",
+    label: "Waves",
+    hint: "Ridges seen at a low angle, rolling towards you.",
+    pace: 0.5,
+    body: `
+      vec2 q = (uv - vec2(0.5, 0.35)) * aspect;
+      float depth = max(0.75 - uv.y, 0.05);
+      float w = sin(q.x * 4.0 + t * 0.4) * 0.5
+              + sin(q.x * 7.3 - t * 0.27) * 0.3
+              + sin(q.x * 2.1 + t * 0.13) * 0.2;
+      float ridge = smoothstep(0.05, 0.0, abs(fract((uv.y + w * 0.06) * 9.0) - 0.5) * depth);
+      base = ramp(ridge * 0.8 * smoothstep(0.95, 0.25, uv.y));`,
+  },
+  {
+    id: "rain",
+    label: "Rain",
+    hint: "Streaks down a window. Quiet, and it suits the frosted panes.",
+    pace: 1.5,
+    body: `
+      vec2 p = uv * aspect * vec2(22.0, 3.0);
+      vec2 cell = floor(p), fr = fract(p);
+      float lane = hash(vec2(cell.x, 0.0));
+      // Each column falls at its own speed and starts at its own offset, or
+      // the whole screen rains in step.
+      float y = fract(fr.y - t * (0.25 + lane * 0.5) - lane * 10.0);
+      float drop = smoothstep(0.06, 0.0, abs(fr.x - 0.5)) * smoothstep(0.55, 0.0, y);
+      base = ramp(drop * step(0.55, lane) * 0.75);`,
+  },
+  {
+    id: "scanlines",
+    label: "Scanlines",
+    hint: "A CRT with the brightness up and a slow roll. The only one that "
+      + "looks like the hardware rather than like a screensaver.",
+    pace: 0.4,
+    body: `
+      float roll = fract(uv.y + t * 0.03);
+      float lines = 0.5 + 0.5 * sin(uv.y * u_size.y * 0.55);
+      float band = smoothstep(0.0, 0.18, roll) * smoothstep(0.30, 0.12, roll);
+      base = ramp(lines * 0.35 + band * 0.45);`,
   },
 ];
 
@@ -247,8 +336,8 @@ const DEFAULTS = {
 /// should leave the window looking like something rather than nothing.
 export function presetColours(cfg) {
   const p = SCHEMES.find((x) => x.id === cfg.preset);
-  if (!p || p.id === "custom") return { low: cfg.low, high: cfg.high };
-  return { low: p.low, high: p.high };
+  if (!p || p.id === "custom") return { low: cfg.low, mid: cfg.mid, high: cfg.high };
+  return { low: p.low, mid: p.mid, high: p.high };
 }
 
 /// Motion, as the slider expresses it.
@@ -259,6 +348,50 @@ export function presetColours(cfg) {
 export const SPEED_MIN = 3;
 export const SPEED_MAX = 7;
 
+/// Settings for one style, layered over the shared ones.
+///
+/// Each shape wants different numbers and the single set could not hold them:
+/// Scanlines at the brightness that suits Drift is a white screen, and Tunnel
+/// at Blobs' speed is a migraine. Stored under the style's own id and layered
+/// over the shared values, so anything never touched for a style still follows
+/// the shared setting rather than freezing at whatever it was the first time
+/// that style was opened.
+function perStyle() {
+  try {
+    return JSON.parse(localStorage.getItem("backdropPerStyle") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+/// Store `patch` against `style`, keeping the rest of that style's overrides.
+export function saveStyleSettings(style, patch) {
+  const all = perStyle();
+  all[style] = { ...(all[style] || {}), ...patch };
+  localStorage.setItem("backdropPerStyle", JSON.stringify(all));
+  const merged = backdropSettings();
+  if (live) live(merged);
+  window.__TAURI__?.event?.emit?.("backdrop-settings", merged);
+  return merged;
+}
+
+/// What this style overrides, if anything. Empty object when it follows the
+/// shared settings for everything.
+export function styleSettings(style) {
+  return perStyle()[style] || {};
+}
+
+/// Forget one style's overrides, putting it back on the shared settings.
+export function clearStyleSettings(style) {
+  const all = perStyle();
+  delete all[style];
+  localStorage.setItem("backdropPerStyle", JSON.stringify(all));
+  const merged = backdropSettings();
+  if (live) live(merged);
+  window.__TAURI__?.event?.emit?.("backdrop-settings", merged);
+  return merged;
+}
+
 export function backdropSettings() {
   let stored;
   try {
@@ -266,6 +399,8 @@ export function backdropSettings() {
   } catch {
     stored = { ...DEFAULTS };
   }
+  // The style's own answers win over the shared ones.
+  stored = { ...stored, ...(perStyle()[stored.style] || {}) };
   // Settings saved before the scale changed hold values below the new floor,
   // which would leave the slider pinned at one end showing a speed it cannot
   // express.
@@ -410,6 +545,7 @@ function build() {
       size: gl.getUniformLocation(p, "u_size"),
       time: gl.getUniformLocation(p, "u_time"),
       low: gl.getUniformLocation(p, "u_low"),
+      mid: gl.getUniformLocation(p, "u_mid"),
       high: gl.getUniformLocation(p, "u_high"),
       strength: gl.getUniformLocation(p, "u_strength"),
       speed: gl.getUniformLocation(p, "u_speed"),
@@ -451,10 +587,16 @@ function build() {
     // A preset supplies the pair; "custom" falls through to the user's own, and
     // an unset custom colour falls through again to the theme's — so the
     // default follows the palette rather than being a second place to maintain.
-    const { low, high } = presetColours(cfg);
+    const { low, mid, high } = presetColours(cfg);
     gl.useProgram(active);
-    gl.uniform3fv(u.low, rgb(low, "--bg", [0.05, 0.05, 0.07]));
-    gl.uniform3fv(u.high, rgb(high, "--accent", [0.18, 0.2, 0.36]));
+    // A two-colour scheme has no middle, so the midpoint of the pair stands in
+    // and the ramp behaves exactly as the old two-stop mix did.
+    const lo = rgb(low, "--bg", [0.05, 0.05, 0.07]);
+    const hi = rgb(high, "--accent", [0.18, 0.2, 0.36]);
+    const md = mid ? rgb(mid, "--accent", hi) : lo.map((v, i) => (v + hi[i]) / 2);
+    gl.uniform3fv(u.low, lo);
+    gl.uniform3fv(u.mid, md);
+    gl.uniform3fv(u.high, hi);
     gl.uniform1f(u.strength, cfg.strength);
     // Scaled by the style's own pace, not handed over raw: one number on the
     // slider has to mean the same amount of movement whichever shape is drawing.
@@ -571,6 +713,27 @@ export const SCHEMES = [
   { id: "slate",    label: "Slate",    glass: "#6d7681", low: "#0f1113", high: "#333a42" },
   { id: "custom",   label: "Custom",   glass: null,      low: null,      high: null },
 ];
+
+/// Three-colour schemes, kept apart from the pairs above.
+///
+/// A gradient through a third colour is a different thing from a tint between
+/// two: `sunset` is not "orange with more orange", it is red through orange to
+/// yellow, and the middle is what makes it read as a sweep. Named after what
+/// they look like rather than after a vendor's lighting preset.
+export const TRIPLES = [
+  { id: "sunset",   label: "Sunset",   glass: "#e0794a", low: "#150a12", mid: "#7a2540", high: "#e8a24a" },
+  { id: "vapor",    label: "Vapourwave", glass: "#ff77c8", low: "#160a2a", mid: "#8a2b8f", high: "#39d7e8" },
+  { id: "aurora3",  label: "Aurora",   glass: "#54d6a0", low: "#04120f", mid: "#166b57", high: "#8ef0c0" },
+  { id: "ember3",   label: "Furnace",  glass: "#ff8a3d", low: "#160604", mid: "#8f2a09", high: "#ffc44d" },
+  { id: "ocean",    label: "Deep water", glass: "#3fa9d8", low: "#03080f", mid: "#0d3a5e", high: "#63d0f0" },
+  { id: "spectrum", label: "Spectrum", glass: "#7c8cff", low: "#2a0d4a", mid: "#0d4a86", high: "#3fbf8f" },
+  { id: "magma",    label: "Magma",    glass: "#e8543d", low: "#0a0406", mid: "#5e1020", high: "#ff9a3c" },
+  { id: "toxic",    label: "Toxic",    glass: "#9ee84a", low: "#07110a", mid: "#2f6b17", high: "#d4ff5c" },
+];
+
+/// Every scheme the dropdown offers, pairs first.
+export const ALL_SCHEMES = [...SCHEMES.filter((s) => s.id !== "custom"), ...TRIPLES,
+                            SCHEMES.find((s) => s.id === "custom")];
 
 
 const GLASS_KEY = "glassTint";

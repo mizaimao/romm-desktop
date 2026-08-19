@@ -91,6 +91,8 @@ struct PlatformView {
     /// wordmark and therefore needs inverting on a light page. Hardware and
     /// console art is full colour and must not be touched.
     logo_wordmark: bool,
+    /// A fixed picture of the machine for the info pane; see `portrait` above.
+    portrait: Option<String>,
     /// Typical cover aspect (w/h) for this platform, so the grid can shape its
     /// cards instead of cropping. Null until enough covers are cached.
     cover_aspect: Option<f32>,
@@ -994,6 +996,19 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             logo_wordmark: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
                 .is_some()
                 && current_style(&state) == theme::IconStyle::Logo,
+            // The info pane's picture, which does *not* follow the grid.
+            //
+            // Select cycles the grid's artwork — logo, console, controller —
+            // and the pane was reading the same setting, so the console
+            // portrait changed under you while you were reading about the
+            // console. The pane wants a picture of the machine and always the
+            // same one, so it asks for the hardware render and falls back to
+            // the console-with-a-game before it settles for a wordmark.
+            portrait: theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::SystemArt)
+                .or_else(|| theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::ConsoleGame))
+                .or_else(|| theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::SystemArtLegacy))
+                .or_else(|| theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::Logo))
+                .map(|p| romm_desktop::util::webview_path(&p)),
             cover_aspect: media::cover_aspect(&state.media_dir, &p.fs_slug),
             manufacturer: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.manufacturer),
             released: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.released),

@@ -2,7 +2,7 @@
 
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
 import { resetNav } from "./keys.js";
-import { sorted, refreshSortButton } from "./sort.js";
+import { currentOrder, defaultOrder, refreshSortButton, sorted } from "./sort.js";
 import { filtered, refreshFilterButton, activeFilters, clearFilters } from "./filter.js";
 import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
@@ -11,8 +11,9 @@ import { human, escapeHtml, toast } from "./util.js";
 import { byName } from "./picker-order.js";
 import { setPageFilterLabel, refreshPageFilter } from "./pagefilter.js";
 import { followSections } from "./sections.js";
-import { selectRom, play, withTransition, showPlatformInfo } from "./detail.js";
+import { play, restoreSidebar, selectRom, showPlatformInfo, withTransition } from "./detail.js";
 import { download } from "./actions.js";
+import { installTilt } from "./tilt.js";
 
 export async function showPlatforms() {
   state.view = "platforms";
@@ -25,6 +26,7 @@ export async function showPlatforms() {
   // In three columns the preview is a column rather than something to hide —
   // unless it has been closed, which is a choice that has to survive changing
   // screens or the button that closes it does nothing you can see.
+  restoreSidebar();
   el.detail.hidden = shellMode() === "columns" ? !state.sidebar : true;
   enter({
     title: "Platforms",
@@ -35,6 +37,12 @@ export async function showPlatforms() {
     // Offered here as well as inside a console: burying it one level down
     // means it is only found by someone who already knows it exists.
     grab: true,
+    // The console screen has something to preview — the console under the
+    // cursor — so the toggle belongs here too. Without this the button was
+    // *disabled* on this screen while the pane it controls was still being
+    // opened by every cursor move, so the panel appeared on any D-pad press
+    // and there was no way to shut it.
+    sidebar: true,
     zoom: "grid",
     gridLayout: state.layout === "grid",
   });
@@ -69,6 +77,17 @@ export async function showPlatforms() {
   await showRecent();
 
   restorePlatformCursor();
+  // Fill the pane straight away if it is meant to be open. It only ever got
+  // its contents from a cursor *move*, so on a fresh start with the toggle on
+  // the column sat empty and hidden until the first D-pad press — which read
+  // as the D-pad opening it rather than as it having been open all along.
+  if (state.sidebar && state.view === "platforms") {
+    const pick =
+      state.platformShown
+      ?? items.find((x) => x.slug === state.lastPlatform)?.slug
+      ?? items[0]?.slug;
+    if (pick) showPlatformInfo(pick);
+  }
 }
 
 /// A row of the games you played most recently, above the consoles.
@@ -111,8 +130,16 @@ async function showRecent() {
          <div class="gname">${escapeHtml(r.name)}</div>
          <div class="gmeta">${here(r)}${escapeHtml(r.platform)}</div>
        </div>`).join("")}</div>`;
+  // Replace, never stack. This is prepended whenever the platform screen is
+  // drawn, and drawing it twice — click More, come back, scroll — left two
+  // strips one above the other, their headings running together as
+  // "CONTINUE PLAYINGMORE…".
+  el.list.querySelector(":scope > .recent")?.remove();
   el.list.prepend(strip);
   strip.querySelectorAll(".gcard").forEach((c) => wireGame(c, Number(c.dataset.id)));
+  // One listener on the row rather than one per card: the strip is rebuilt on
+  // every draw of the platform screen.
+  installTilt(strip.querySelector(".gcards"));
   strip.querySelector(".recent-more")?.addEventListener("click", showAllRecent);
   // Re-observe after prepending, so these cards get covers like any others.
   // The observer was set up before this row existed.
@@ -122,6 +149,7 @@ async function showRecent() {
 /// Everything you have played, as a page rather than a strip.
 export async function showAllRecent() {
   state.view = "search";
+  restoreSidebar();
   state.platform = null;
   trail.length = 0;
   trail.push(() => showPlatforms());
@@ -143,9 +171,16 @@ export async function showAllRecent() {
     region("primary").innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
     return;
   }
-  // Grouped by console, like a search: these come from everywhere.
+  // Ungrouped by default. `recent_games` returns them most-recent-first, and
+  // grouping by console threw that ordering away — which is the one thing a
+  // list called "Continue playing" is ordered by. The sort button is offered
+  // (`sort: true` above), so console grouping is still a keystroke away for
+  // anyone who wants it; it is no longer what you get without asking.
   state.rows = rows;
-  renderRows(rows, true);
+  // Most recent first unless this view has already been sorted otherwise, and
+  // grouped by console only when that is what was asked for.
+  defaultOrder("played");
+  renderRows(rows, currentOrder().id === "platform");
 }
 
 /// Draw the consoles, in whichever layout is selected.
@@ -307,6 +342,7 @@ function restorePlatformCursor() {
 
 export async function showRoms(slug) {
   state.view = "roms";
+  restoreSidebar();
   // The console list is a column of its own here and stays where it is; only
   // the middle changes. In one pane it has already been replaced by the time
   // this runs, which is the difference between the two arrangements in one
@@ -337,6 +373,7 @@ export async function runSearch(term) {
     return state.platform ? showRoms(state.platform) : showPlatforms();
   }
   state.view = "search";
+  restoreSidebar();
   state.rows = await invoke("search", { term });
   const consoles = new Set(state.rows.map((r) => r.platform)).size;
   enter({

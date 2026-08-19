@@ -24,6 +24,10 @@ export const ORDERS = [
   { id: "year", label: "Release year", key: (g) => g.year ?? -1, dir: -1 },
   { id: "played", label: "Recently played", key: (g) => g.last_played ?? "", dir: -1 },
   { id: "size", label: "Size", key: (g) => g.size_bytes ?? 0, dir: -1 },
+  // Only meaningful where the rows come from more than one console — a
+  // search, or Continue playing. Inside a console every row has the same key
+  // and this degrades to the name tie-break, which is harmless.
+  { id: "platform", label: "Console", key: (g) => (g.platform ?? "").toLowerCase(), dir: 1 },
 ];
 
 /// Chosen order per view, for this run of the app only.
@@ -43,6 +47,15 @@ export function currentOrder() {
 
 export function setOrder(id) {
   chosen.set(scope(), id);
+}
+
+/// The order a view starts in, if the user has not picked one for it yet.
+///
+/// Continue playing is ordered by *when you played it* or it is not a
+/// continue-playing list — it arrived grouped by console, which threw that
+/// away. Set rather than forced, so choosing something else still sticks.
+export function defaultOrder(id) {
+  if (!chosen.has(scope())) chosen.set(scope(), id);
 }
 
 /// Sort a copy of `rows`. Never in place: `state.rows` is what the page was

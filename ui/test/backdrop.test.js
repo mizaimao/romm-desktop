@@ -169,23 +169,35 @@ describe("the glass", () => {
   const backgroundOf = (sel) =>
     /background:\s*([^;]+);/.exec(ruleFor(sel))?.[1].replace(/\s+/g, " ").trim();
 
-  /// The whole of items 1 and 2, as one assertion: give the pane a tint or an
-  /// opacity of its own and these two stop matching.
-  test("the preview pane is glazed exactly like a card", () => {
-    const card = backgroundOf("\\.card");
-    assert.ok(card, "the card lost its glass");
-    assert.equal(backgroundOf("#detail"), card);
+  /// The pane and the cards no longer look identical, and that is deliberate:
+  /// a grid of forty translucent rectangles competes with the artwork inside
+  /// them, while the pane is a surface you read from and needs something to
+  /// read against. What must not drift is where the opacity comes from — the
+  /// bug this file exists for was the pane having a tint and a slider of its
+  /// own, which is how the two ended up disagreeing.
+  test("the preview pane takes its opacity from the one variable", () => {
+    assert.match(
+      backgroundOf("#detail") ?? "",
+      /var\(--tint\)/,
+      "the preview pane has a private opacity again"
+    );
   });
 
-  test("every glass surface takes its opacity from the one variable", () => {
-    const surfaces = ["\\.card", "#detail", "\\.card:hover", "\\.card\\.sel"];
-    for (const sel of surfaces) {
-      assert.match(
-        backgroundOf(sel) ?? "",
-        /var\(--tint\)/,
-        `${sel} has an opacity of its own again`
-      );
-    }
+  /// Flattening the console grid was tried and reverted: with no pane and no
+  /// outline there is nothing to say where one console ends and the next
+  /// begins, and the grid reads as scattered logos rather than a list of
+  /// things you can press. The Continue playing strip is the opposite case —
+  /// five wide screenshots in a row, no column to align with — so it is the
+  /// one place the frame comes off.
+  test("cards keep their surface; only the recent strip is flat", () => {
+    assert.match(
+      backgroundOf("\\.card") ?? "",
+      /var\(--tint\)/,
+      "the console grid lost the edge that separates one card from the next"
+    );
+    const flat = ruleFor("\\.recent \\.gcard \\.art");
+    assert.match(flat, /backdrop-filter:\s*none/, "the recent strip is not flattened");
+    assert.match(flat, /border-color:\s*transparent/, "the recent strip kept its outline");
   });
 
   /// There is one slider for this, and Appearance is where a second one would

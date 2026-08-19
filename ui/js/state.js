@@ -26,7 +26,10 @@ export const state = {
   /// otherwise means re-finding your place on every single trip in and out.
   lastRom: JSON.parse(localStorage.getItem("lastRom") || "{}"),
   layout: localStorage.getItem("layout") || "grid",
-  sidebar: localStorage.getItem("sidebar") !== "off",
+  // Per level; see `sidebarScope` in detail.js. Seeded from the console
+  // screen because that is what opens first.
+  sidebar: (localStorage.getItem("sidebar.platforms")
+    ?? localStorage.getItem("sidebar") ?? "on") !== "off",
   /// Base card width in px; the grid scales from this.
   zoom: Number(localStorage.getItem("zoom")) || 150,
   gamepad: null,

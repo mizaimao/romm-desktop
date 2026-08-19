@@ -13,13 +13,52 @@ import { askDownload } from "./bulk.js";
 let slideTimer;
 setOpenHook(() => clearInterval(slideTimer));
 
+/// Which pane the toggle is talking about right now.
+///
+/// The console screen and a game list show different things in the same
+/// column — a console's description, or a game's artwork — and they are
+/// separate decisions. One flag for both meant hiding the console panel and
+/// then opening a game turned it back on, because the game screen's own answer
+/// overwrote it and there was nothing left to restore on the way back.
+export function sidebarScope() {
+  return state.view === "platforms" ? "platforms" : "games";
+}
+
+const SIDEBAR_KEY = (scope) => `sidebar.${scope}`;
+
+/// What this level was last left at. Defaults to shown, as before.
+export function sidebarWanted(scope = sidebarScope()) {
+  const v = localStorage.getItem(SIDEBAR_KEY(scope));
+  // Migrate the single old flag the first time each level is asked for, so
+  // nobody's existing preference is silently reset.
+  if (v === null) return localStorage.getItem("sidebar") !== "off";
+  return v !== "off";
+}
+
+/// Re-read the flag for whichever level is on screen, without announcing it.
+///
+/// Called when the view changes: the pane follows the level you moved to
+/// rather than carrying the last level's answer with it.
+export function restoreSidebar() {
+  // Empty it first. The pane keeps whatever was last written into it, so
+  // stepping from a game back to the console list left a game's artwork and
+  // buttons sitting there until something on the new level was selected —
+  // reported as "the platform info tab sometimes retains the game info".
+  // Cheap: whichever level you land on refills it immediately.
+  el.detail.innerHTML = "";
+  state.platformShown = null;
+  setSidebar(sidebarWanted(), { remember: false });
+}
+
 /// Show/hide the pane, honouring both the toggle and the current view.
-export function setSidebar(on) {
+export function setSidebar(on, { remember = true } = {}) {
   state.sidebar = on;
-  localStorage.setItem("sidebar", on ? "on" : "off");
-  // The button now holds an icon plus a label span; writing textContent on
-  // the button itself would wipe the icon out.
-  el.sidebarBtn.querySelector("span:not(.icon)").textContent = on ? "Hide info" : "Show info";
+  if (remember) localStorage.setItem(SIDEBAR_KEY(sidebarScope()), on ? "on" : "off");
+  // Named for what it shows rather than for what pressing it does. "Hide info"
+  // on a screen full of consoles does not say *which* info, and the icon
+  // already carries the on/off state.
+  el.sidebarBtn.querySelector("span:not(.icon)").textContent =
+    sidebarScope() === "platforms" ? "Platform info" : "Game info";
   el.sidebarBtn.querySelector(".icon").className = `icon icon-info-${on ? "on" : "off"}`;
   // In Desk the preview is a column of the layout, so "show it" means show it
   // — on the console list too, where it holds whatever was last selected.
@@ -60,8 +99,11 @@ export async function showPlatformInfo(slug) {
   el.detail.hidden = !state.sidebar;
   if (el.detail.hidden) return;
 
-  const logo = p.logo
-    ? `<img class="pcover${p.logo_wordmark ? " wordmark" : ""}" src="${convertFileSrc(p.logo)}" alt="" />`
+  // `portrait` rather than `logo`: the grid's artwork is cycled by Select and
+  // the pane must not change under you while you are reading it.
+  const pic = p.portrait ?? p.logo;
+  const logo = pic
+    ? `<img class="pcover${p.portrait ? "" : (p.logo_wordmark ? " wordmark" : "")}" src="${convertFileSrc(pic)}" alt="" />`
     : "";
   // The same four things ES-DE's themes put on a system: who made it, when it
   // arrived, what kind of machine it was, and a line about what it was for.
@@ -89,7 +131,7 @@ export async function showPlatformInfo(slug) {
                will start. Settings → Emulators installs one.</p>`
       }
       <div class="pinned">
-        <button class="pf-grab">Take offline</button>
+        <button class="pf-grab"><span class="icon icon-download"></span><span>Take offline</span></button>
       </div>
     </div>`;
   el.detail.querySelector(".pf-grab")?.addEventListener("click", () =>
