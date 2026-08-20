@@ -28,6 +28,12 @@ command -v magick >/dev/null || { echo "needs ImageMagick (brew install imagemag
 BODY_PCT=80.5
 RADIUS_PCT=22.5
 
+# The drop shadow, also measured: 14px of blur at 45% black, sitting 8px below
+# the body on a 1024 canvas.
+SHADOW_SIGMA=14
+SHADOW_DROP=8
+SHADOW_ALPHA=0.45
+
 # How much to zoom into a source before it becomes the tile, per icon.
 #
 # Artwork is framed for its own sake, not for a 40-pixel square: the arcade
@@ -36,7 +42,7 @@ RADIUS_PCT=22.5
 # use the source as it came.
 zoom_for() {
   case "$1" in
-    arcade) echo 124 ;;
+    arcade) echo 100 ;;
     *)      echo 100 ;;
   esac
 }
@@ -67,7 +73,25 @@ for src in "$SRC"/*.png; do
     -draw "roundrectangle 0,0,$((body-1)),$((body-1)),$r,$r" "$work/mask.png"
   magick "$work/full.png" -resize "${body}x${body}" "$work/mask.png" \
     -alpha off -compose CopyOpacity -composite PNG32:"$work/body.png"
-  magick "$work/body.png" -background none -gravity center -extent 1024x1024 \
+  # The shadow Apple's icons carry and ours did not, which is most of why this
+  # one read as smaller than its neighbours: a flat dark tile on a dark Dock has
+  # no edge, so it recedes. Measured off /System/Applications rather than
+  # invented — Music and Calendar are both 206 opaque pixels on a 256 canvas
+  # and 220 once the shadow is counted, which at 1024 is a body of 824 centred
+  # and a total extent of 880 sitting 8px lower. Sigma 14 and 45% reproduce
+  # that to the pixel.
+  #
+  # The body is composited at the exact centre afterwards, so the shadow can
+  # never shift it: an icon that is 2px off-centre is one that looks wrong in a
+  # Dock and gives no clue why.
+  off=$((SHADOW_DROP))
+  magick -size 1024x1024 xc:none "$work/body.png" -geometry "+$(( (1024-body)/2 ))+$(( (1024-body)/2 + off ))" \
+    -composite -alpha extract -blur "0x${SHADOW_SIGMA}" PNG32:"$work/shadow-alpha.png"
+  magick -size 1024x1024 xc:black "$work/shadow-alpha.png" -alpha off \
+    -compose CopyOpacity -composite \
+    -channel A -evaluate multiply "$SHADOW_ALPHA" +channel PNG32:"$work/shadow.png"
+  magick "$work/shadow.png" "$work/body.png" \
+    -geometry "+$(( (1024-body)/2 ))+$(( (1024-body)/2 ))" -composite \
     PNG32:"$work/rounded.png"
 
   # macOS wants ten sizes in an .iconset; iconutil refuses a folder missing any.
@@ -93,7 +117,7 @@ for src in "$SRC"/*.png; do
   # The preview the Settings picker draws.
   magick "$work/rounded.png" -resize 256x256 PNG32:"$work/preview.png"
 
-  rm -f "$work/mask.png" "$work/body.png"
+  rm -f "$work/mask.png" "$work/body.png" "$work/shadow.png" "$work/shadow-alpha.png"
   echo "built $id"
 done
 
