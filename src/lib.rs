@@ -10,6 +10,7 @@ pub mod aspect;
 pub mod bulk;
 pub mod cache;
 pub mod config;
+pub mod configpatch;
 #[cfg(test)]
 mod config_files;
 pub mod coremap;
@@ -44,6 +45,7 @@ pub mod savesync;
 pub mod states;
 pub mod statesync;
 pub mod tui;
+pub mod update;
 pub mod util;
 
 /// RomM release this client's server-specific behaviour was verified against.

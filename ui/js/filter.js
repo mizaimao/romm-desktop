@@ -29,6 +29,13 @@ export const FILTERS = [
   // 8/10 on RomM's scale. A "good games" filter with no number attached is a
   // filter nobody can predict the results of.
   { id: "great", label: "Rated 8 or better", keep: (r) => (r.rating ?? -1) >= 8 },
+  // The first filter here about the *game* rather than about your relationship
+  // to it. "Somebody is coming over" is a real question and the answer was
+  // buried in a metadata blob.
+  //
+  // Unknown is excluded, not assumed: two thirds of this library has no player
+  // count, and treating those as two-player would make the filter meaningless.
+  { id: "twoplayer", label: "Two players or more", keep: (r) => (r.players ?? 0) >= 2 },
 ];
 
 /// Pairs that cannot both be true. Choosing one clears the other rather than

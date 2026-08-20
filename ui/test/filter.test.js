@@ -16,11 +16,14 @@ const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 let dom, filter, library, state, el;
 
+// `players` is the most a game supports, parsed from RomM's free text in Rust.
+// Delta has none on purpose: two thirds of the real library has no player
+// count, and that case decides whether the filter is useful or noise.
 const ROWS = [
-  { id: 1, name: "Alpha", downloaded: true, favourite: false, last_played: null, rating: 9 },
-  { id: 2, name: "Beta", downloaded: false, favourite: true, last_played: "2026-01-01", rating: 4 },
-  { id: 3, name: "Gamma", downloaded: true, favourite: true, last_played: "2026-02-02", rating: 8 },
-  { id: 4, name: "Delta", downloaded: false, favourite: false, last_played: null, rating: null },
+  { id: 1, name: "Alpha", downloaded: true, favourite: false, last_played: null, rating: 9, players: 1 },
+  { id: 2, name: "Beta", downloaded: false, favourite: true, last_played: "2026-01-01", rating: 4, players: 2 },
+  { id: 3, name: "Gamma", downloaded: true, favourite: true, last_played: "2026-02-02", rating: 8, players: 4 },
+  { id: 4, name: "Delta", downloaded: false, favourite: false, last_played: null, rating: null, players: null },
 ];
 
 before(async () => {
@@ -107,6 +110,19 @@ describe("filters", () => {
     filter.clearFilters();
     filter.toggleFilter("great");
     assert.deepEqual(names(ROWS), ["Alpha", "Gamma"], "an unrated game counted as good");
+    filter.clearFilters();
+    filter.toggleFilter("twoplayer");
+    assert.deepEqual(names(ROWS), ["Beta", "Gamma"], "a one-player game got through");
+  });
+
+  /// A game nothing says a player count for is not a two-player game. Assuming
+  /// otherwise would let two thirds of the library through and make the filter
+  /// worthless — it exists to narrow, and the honest answer to "we do not
+  /// know" is to leave it out.
+  test("an unknown player count is not counted as two players", () => {
+    filter.toggleFilter("twoplayer");
+    assert.ok(!names(ROWS).includes("Delta"), "a game with no player count got through");
+    assert.ok(!names(ROWS).includes("Alpha"), "a one-player game got through");
   });
 
   /// The reason several can be on at once: "downloaded and never played" is

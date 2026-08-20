@@ -2,6 +2,7 @@
 
 import { el, state, trail, invoke, listen } from "./state.js";
 import { askDownload } from "./bulk.js";
+import { askConfigPatch } from "./conflicts.js";
 import { openSortMenu } from "./sort.js";
 import { openFilterMenu } from "./filter.js";
 import { installPageFilter } from "./pagefilter.js";
@@ -305,7 +306,31 @@ function statusCard(s) {
   // Measure the display now. It costs 24 animation frames, and taken on demand
   // that wait landed between pressing play and the game being asked for.
   warmRefresh();
+
+  // Last, and only once the library is on screen: the config file still works
+  // whatever it says, so this is never a reason to hold up the app starting.
+  checkConfig();
 })();
+
+/// Offer to bring config.toml up to date.
+///
+/// Every setting this app has renamed still loads through a compatibility path,
+/// which is deliberate and invisible — a config can go on holding a password
+/// that is never sent, and nothing on screen says so. Asked at startup because
+/// that is when the file was read, and only when something can be changed
+/// without a decision.
+async function checkConfig() {
+  try {
+    const findings = await invoke("config_findings");
+    if (!Array.isArray(findings) || !findings.length) return;
+    if (!(await askConfigPatch(findings))) return;
+    toast(await invoke("config_patch"), 12000);
+  } catch (e) {
+    // A config that cannot be read is already reported by the status line.
+    // Failing to *check* it is not worth a dialog of its own.
+    console.warn("config check:", e);
+  }
+}
 
 /// "You have put me somewhere I am going to make a mess of."
 ///

@@ -2744,3 +2744,20 @@ code {
   opacity: 0.7;
   cursor: pointer;
 }
+
+/* The config check's list of findings. Scrolls inside the dialog: a file that
+   has been through several versions can turn up half a dozen, and a dialog
+   that grows past the window has no buttons. */
+#conflict-overlay .cfg-list {
+  margin: 4px 0 12px;
+  padding: 0 0 0 18px;
+  max-height: 34vh;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+#conflict-overlay .cfg-list li { margin-bottom: 8px; opacity: 0.8; }
+#conflict-overlay .cfg-list i { margin-left: 6px; font-style: normal; opacity: 0.6; }
+/* Severity, as a marker rather than a colour wash: the point is which line to
+   read first, not to make the dialog alarming. */
+#conflict-overlay .cfg-wrong b { color: color-mix(in srgb, var(--accent) 70%, white 30%); }

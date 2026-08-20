@@ -56,6 +56,84 @@ fn platform_from_path(rom: &Path) -> Option<String> {
     }
 }
 
+/// Report what in config.toml no longer says what it used to, and with `--fix`,
+/// change the ones that need no judgement.
+///
+/// A backup goes beside the file before anything is written. The config holds a
+/// server token and, on an old enough file, a password: losing it to a bad edit
+/// would cost more than the stale keys ever did.
+fn cmd_config(fix: bool) -> Result<()> {
+    use romm_desktop::configpatch as cp;
+
+    let path = std::path::Path::new("config.toml");
+    if !path.is_file() {
+        println!("no config.toml here — copy config.example.toml to make one");
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(path)?;
+    let found = cp::inspect(&text);
+    let stamped = cp::version_of(&text);
+
+    if found.is_empty() {
+        println!("config.toml is up to date (version {stamped} of {})", cp::CURRENT_VERSION);
+        return Ok(());
+    }
+
+    println!("{} thing(s) worth knowing about config.toml:\n", found.len());
+    for f in &found {
+        println!("  [{}] {}", f.severity, f.what);
+        for line in textwrap(&f.note, 74) {
+            println!("      {line}");
+        }
+        println!("      {}", if f.fix.is_some() { "-> can be updated automatically" } else { "-> left alone: this one is your call" });
+        println!();
+    }
+
+    let can = cp::fixable(&found).len();
+    if !fix {
+        if can > 0 {
+            println!("{can} of these can be updated: romm-desktop config --fix");
+        }
+        return Ok(());
+    }
+    if can == 0 {
+        println!("nothing here can be updated without a decision from you");
+        return Ok(());
+    }
+
+    let backup = path.with_extension("toml.before-patch");
+    std::fs::copy(path, &backup)?;
+    let (patched, applied) = cp::patch(&text);
+    std::fs::write(path, &patched)?;
+    println!("updated {} thing(s); the file as it was is in {}", applied.len(), backup.display());
+    if applied.iter().any(|f| f.what.ends_with("password")) {
+        println!("  note: that backup still has the password in it — delete it when you are happy");
+    }
+    for f in &applied {
+        println!("  {}", f.what);
+    }
+    Ok(())
+}
+
+/// Wrap at a width, without pulling in a dependency for four lines of output.
+fn textwrap(s: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for word in s.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out
+}
+
 fn cmd_doctor() -> Result<()> {
     let cfg = Config::load()?;
     let ra = locate_retroarch(&cfg)?;
@@ -1796,6 +1874,12 @@ enum Command {
     },
     /// Show what is installed and which platforms can launch
     Doctor,
+    /// Check config.toml against what the app reads now, and offer to update it
+    Config {
+        /// Apply the changes that follow from the old values with no guessing
+        #[arg(long)]
+        fix: bool,
+    },
     /// Show or list per-platform video shaders
     Shaders {
         /// Limit to one platform and list its alternatives
@@ -2054,6 +2138,7 @@ async fn main() -> Result<()> {
             _ => cmd_themes(install),
         },
         Command::Doctor => cmd_doctor(),
+        Command::Config { fix } => cmd_config(fix),
         Command::Shaders { platform } => cmd_shaders(platform.as_deref()),
         Command::InstallRetroarch { version } => cmd_install_retroarch(version.as_deref()).await,
         Command::Cores { install, update } => cmd_cores(install, update).await,

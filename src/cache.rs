@@ -903,6 +903,35 @@ impl Cache {
     }
 }
 
+/// The most players a game supports, from RomM's free-text `player_count`.
+///
+/// The field is whatever the metadata source wrote: this library holds `"2"`,
+/// `"1-2"`, `"1-4"`, `"1-8"` and `"8+"`. The useful question is "can someone
+/// else play too", so the answer is the largest number in the string.
+///
+/// `None` for absent or unreadable, and that is not the same as one player:
+/// two thirds of this library has no player count at all, and a filter that
+/// treated unknown as single-player would quietly hide most of it.
+pub fn max_players(raw: &str) -> Option<u8> {
+    let mut best: Option<u8> = None;
+    let mut cur = String::new();
+    // Walk the digits rather than splitting on a separator, because the
+    // separator varies: "1-2", "1 - 4", "2 players", "8+".
+    for c in raw.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_digit() {
+            cur.push(c);
+            continue;
+        }
+        if !cur.is_empty() {
+            if let Ok(n) = cur.parse::<u8>() {
+                best = Some(best.map_or(n, |b: u8| b.max(n)));
+            }
+            cur.clear();
+        }
+    }
+    best.filter(|n| *n > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -930,6 +959,34 @@ mod tests {
     /// The SQL here is the whole feature: a mistake in a JOIN or a GROUP BY
     /// does not fail, it produces a plausible number, and a plausible wrong
     /// number about how you spent a year is worse than no number.
+    /// Every shape this library actually holds, taken from the real column.
+    #[test]
+    fn the_player_count_is_read_as_the_most_it_supports() {
+        for (raw, want) in [
+            ("1", Some(1)),
+            ("2", Some(2)),
+            ("1-2", Some(2)),
+            ("1-4", Some(4)),
+            ("1-8", Some(8)),
+            ("8+", Some(8)),
+            ("4", Some(4)),
+            ("1 - 3", Some(3)),
+            ("2 players", Some(2)),
+        ] {
+            assert_eq!(max_players(raw), want, "{raw:?}");
+        }
+    }
+
+    /// Unknown is not one player. Two thirds of this library has no player
+    /// count, and calling those single-player would hide most of it from a
+    /// filter that is supposed to reveal things.
+    #[test]
+    fn an_absent_or_unreadable_count_is_unknown_not_one() {
+        assert_eq!(max_players(""), None);
+        assert_eq!(max_players("unknown"), None);
+        assert_eq!(max_players("0"), None, "zero players is not a fact about a game");
+    }
+
     #[test]
     fn play_time_adds_up_per_game_and_per_console() {
         let c = cache("plays");

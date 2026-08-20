@@ -240,6 +240,76 @@ export function biosFrom(err) {
 /// does not always need one — several run fine without, and some run with
 /// reduced compatibility rather than not at all. Refusing would stop a game
 /// that would have worked.
+/// Offer to bring config.toml up to date, once per set of findings.
+///
+/// Shown at startup because that is when the file was read, and only when
+/// something in it can be updated without a decision. Everything else the check
+/// found is listed too, so the dialog is a summary of the file rather than a
+/// prompt with hidden context.
+///
+/// Dismissal is remembered against *what was found*, not a flag: fixing one
+/// thing and finding a different one later should ask again, and saying no to
+/// the same list twice should not.
+const CONFIG_SEEN = "configPatchDeclined";
+
+export function askConfigPatch(findings) {
+  const fixable = findings.filter((f) => f.fixable);
+  if (!fixable.length) return Promise.resolve(false);
+  const signature = findings.map((f) => f.what).sort().join("|");
+  if (localStorage.getItem(CONFIG_SEEN) === signature) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "conflict-overlay";
+    const rows = findings
+      .map(
+        (f) => `<li class="cfg-${escape(f.severity)}">
+            <b>${escape(f.what)}</b> — ${escape(f.note)}
+            ${f.fixable ? "" : '<i class="dim">left alone: your call</i>'}
+          </li>`,
+      )
+      .join("");
+    overlay.innerHTML = `<div class="conflict-box">
+        <header><span class="icon icon-info-on"></span><h2>Your config file is out of date</h2></header>
+        <p class="lead">${fixable.length} thing${fixable.length === 1 ? "" : "s"} in
+          <code>config.toml</code> can be brought up to date. Everything still works —
+          old settings are read through compatibility paths — but the file says
+          things that are no longer true.</p>
+        <ul class="cfg-list">${rows}</ul>
+        <p class="note">A copy of the file as it is now goes to
+          <code>config.toml.before-patch</code> first. Comments are kept.</p>
+        <div class="sides">
+          <button class="side" data-go="yes"><span class="who">Update it</span>
+            <span class="when">keeps a backup</span></button>
+          <button class="side" data-go="no"><span class="who">Leave it</span>
+            <span class="when">do not ask about these again</span></button>
+        </div>
+      </div>`;
+
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      if (!ok) localStorage.setItem(CONFIG_SEEN, signature);
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      resolve(ok);
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        finish(false);
+      }
+    };
+    for (const b of overlay.querySelectorAll("[data-go]")) {
+      b.addEventListener("click", () => finish(b.dataset.go === "yes"));
+    }
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-go="yes"]')?.focus();
+  });
+}
+
 /// Remembered dismissal for the light gun notice.
 const GUN_SEEN = "lightgunNoticeSeen";
 

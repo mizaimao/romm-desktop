@@ -127,6 +127,12 @@ struct RomView {
     year: Option<i32>,
     /// ISO timestamp, comparable as text. See util::iso_from_epoch.
     last_played: Option<String>,
+    /// The most players the game supports, or `None` when nothing says.
+    ///
+    /// Parsed here for the same reason as `year` and `rating`: the field is
+    /// free text inside the metadata blob, and the page would otherwise parse
+    /// the same JSON once per game on every redraw.
+    players: Option<u8>,
 }
 
 #[derive(Serialize)]
@@ -1088,6 +1094,11 @@ fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomVie
                     .and_then(|m| m.get("first_release_date"))
                     .and_then(|v| v.as_f64())
                     .map(|ms| 1970 + (ms / 1000.0 / 31_556_952.0) as i32),
+                players: meta
+                    .as_ref()
+                    .and_then(|m| m.get("player_count"))
+                    .and_then(|v| v.as_str())
+                    .and_then(cache::max_players),
                 last_played: r.last_played.clone(),
                 id: r.id,
                 name: r.name,
@@ -2261,6 +2272,78 @@ async fn fetch_icon_set(
     Ok(per_style.iter().map(|(l, n)| format!("{n} {l}")).collect::<Vec<_>>().join(", "))
 }
 
+#[derive(Serialize)]
+struct ConfigFinding {
+    severity: String,
+    what: String,
+    note: String,
+    fixable: bool,
+}
+
+/// A newer published release, or nothing.
+///
+/// Deliberately reports rather than updates: replacing a running binary needs
+/// signing, a rollback and a story for the half-written case. Knowing a new
+/// version exists is the part that was missing.
+#[tauri::command]
+async fn check_update(
+    state: State<'_, AppState>,
+) -> CmdResult<Option<romm_desktop::update::Update>> {
+    let http = state
+        .client
+        .as_ref()
+        .map(|c| c.http().clone())
+        .unwrap_or(util::http_client(None).map_err(err)?);
+    romm_desktop::update::check(&http).await.map_err(err)
+}
+
+/// What in config.toml no longer says what it used to.
+///
+/// Read at startup and offered once, because the file is the one part of this
+/// app nothing else explains: every renamed key still loads through a
+/// compatibility path, so a config can go on carrying a password that is never
+/// sent and a rapid-fire boolean that stopped being a boolean, with nothing on
+/// screen saying so.
+#[tauri::command]
+fn config_findings() -> CmdResult<Vec<ConfigFinding>> {
+    let Ok(text) = std::fs::read_to_string("config.toml") else { return Ok(Vec::new()) };
+    Ok(romm_desktop::configpatch::inspect(&text)
+        .into_iter()
+        .map(|f| ConfigFinding {
+            severity: f.severity.to_string(),
+            what: f.what,
+            note: f.note,
+            fixable: f.fix.is_some(),
+        })
+        .collect())
+}
+
+/// Apply the changes that follow from the old values, keeping a copy first.
+///
+/// The copy is not caution for its own sake: this file holds a server token,
+/// and on an old enough config a RetroAchievements password. Losing either to a
+/// bad edit would cost more than the stale keys ever did.
+#[tauri::command]
+fn config_patch() -> CmdResult<String> {
+    let path = std::path::Path::new("config.toml");
+    let text = std::fs::read_to_string(path).map_err(err)?;
+    let (patched, applied) = romm_desktop::configpatch::patch(&text);
+    if applied.is_empty() {
+        return Ok("Nothing to update".to_owned());
+    }
+    let backup = path.with_extension("toml.before-patch");
+    std::fs::copy(path, &backup).map_err(err)?;
+    std::fs::write(path, &patched).map_err(err)?;
+    let had_password = applied.iter().any(|f| f.what.ends_with("password"));
+    Ok(format!(
+        "Updated {}: {}. The file as it was is in {}{}",
+        applied.len(),
+        applied.iter().map(|f| f.what.clone()).collect::<Vec<_>>().join(", "),
+        backup.display(),
+        if had_password { " — which still has the password in it, so delete it when you are happy" } else { "" }
+    ))
+}
+
 /// The light gun a game's console has, if any, and whether it is switched on.
 ///
 /// Asked once on the way into a launch so the app can say — once — that the
@@ -3237,6 +3320,9 @@ fn main() {
             fetch_icons,
             icon_styles,
             set_icon_style,
+            check_update,
+            config_findings,
+            config_patch,
             game_lightgun,
             icon_sets,
             install_icon_set,
