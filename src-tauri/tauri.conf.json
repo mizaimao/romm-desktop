@@ -49,7 +49,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../data/esde-core-map.json"
+      "../data/esde-core-map.json",
+      "../assets/appicons/built/**/*"
     ],
     "macOS": {
       "minimumSystemVersion": "10.15"

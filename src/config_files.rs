@@ -84,8 +84,8 @@ mod tests {
     fn neither_file_has_a_section_the_app_ignores() {
         const KNOWN: &[&str] = &[
             "server", "library", "retroarch", "saves", "controllers", "theme", "cores",
-            "shaders", "lightgun", "media", "icons", "achievements", "cheevos", "scraper",
-            "esde",
+            "shaders", "lightgun", "media", "icons", "appearance", "achievements", "cheevos",
+            "scraper", "esde",
         ];
         for (name, toml) in both() {
             let doc: toml::Value = toml::from_str(&toml).expect(name);

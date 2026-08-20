@@ -1160,6 +1160,36 @@ footer#toast {
 .icon-style em { font-style: normal; opacity: .6; margin-left: 4px; }
 .set-icons-note { color: var(--dim); font-size: 12px; margin-left: 10px; }
 
+/* App-icon picker. Shows the picture rather than its name, because the whole
+   question is what it looks like — and at the size it will actually be seen,
+   not scaled up to something flattering. The list grows on its own: one button
+   per icon the backend reports. */
+.app-icons { display: flex; gap: 10px; flex-wrap: wrap; }
+.app-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.app-icon img,
+.app-icon-missing {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  display: block;
+}
+.app-icon-missing { background: var(--panel); border: 1px dashed var(--line); }
+.app-icon.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.app-icon-label { opacity: .8; }
+.app-icon.on .app-icon-label { opacity: 1; }
+
 /* Settings: RetroArch path row. The panel was keyboard-only before, so these
    are the first non-binding controls it has needed. */
 .set-panel h4 {

@@ -31,6 +31,8 @@ pub struct Config {
     #[serde(default)]
     pub icons: IconsCfg,
     #[serde(default)]
+    pub appearance: AppearanceCfg,
+    #[serde(default)]
     pub esde: EsdeCfg,
     /// `[achievements]`, with `[cheevos]` still accepted: that is RetroArch's
     /// own name for the feature and what every key it writes is called, so an
@@ -255,6 +257,20 @@ impl EsdeCfg {
         let roms = self.roms.as_deref().map(crate::util::expand_tilde);
         Some(crate::esde::Layout::new(&root, roms.as_deref()))
     }
+}
+
+/// `[appearance]` — how the app itself looks, as opposed to what it draws.
+///
+/// Most of the Appearance pane lives in the browser's own storage, because it
+/// is per-screen and changes as you drag a slider. The app icon does not: it
+/// has to be known before a window exists, so it belongs in the file.
+#[derive(Debug, Default, Deserialize)]
+pub struct AppearanceCfg {
+    /// Which icon the app wears — an id from [`crate::appicon::ICONS`].
+    /// Absent means the default; an id this build no longer ships also means
+    /// the default rather than no icon.
+    #[serde(default)]
+    pub app_icon: Option<String>,
 }
 
 /// Which per-system artwork the platform grid shows.

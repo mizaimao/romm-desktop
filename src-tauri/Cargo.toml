@@ -14,7 +14,9 @@ romm-desktop = { path = ".." }
 
 # protocol-asset lets the webview load local cover art and videos
 # through asset: URLs; it must match assetProtocol in tauri.conf.json.
-tauri = { version = "2", features = ["protocol-asset"] }
+# image-png is what lets set_icon take a PNG at runtime, which is how the
+# app icon changes on Windows and Linux without a rebuild.
+tauri = { version = "2", features = ["protocol-asset", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }

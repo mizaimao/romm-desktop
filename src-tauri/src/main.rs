@@ -2952,6 +2952,139 @@ fn set_icon_style(state: State<'_, AppState>, key: String) -> CmdResult<String> 
     Ok(label)
 }
 
+/// One row in the app-icon picker.
+#[derive(serde::Serialize)]
+struct AppIconView {
+    id: String,
+    label: String,
+    note: String,
+    /// Absolute path to the preview picture, for `convertFileSrc`. Empty when
+    /// the built files are missing, which the picker draws as a gap rather
+    /// than a broken image.
+    preview: String,
+    selected: bool,
+}
+
+/// Where an icon's built files are: the bundle's resources once installed,
+/// `assets/appicons/built` in a checkout.
+///
+/// Both are tried every time rather than deciding once, because a dev build run
+/// from a checkout has a resource directory that exists and does not contain
+/// them — so "which am I" is not a question with a stable answer.
+fn appicon_dir(app: &tauri::AppHandle, id: &str) -> Option<PathBuf> {
+    use tauri::Manager;
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        // Tauri maps `../assets/...` to `_up_/assets/...` inside Resources.
+        roots.push(res.join("_up_").join("assets").join("appicons").join("built"));
+        roots.push(res.join("assets").join("appicons").join("built"));
+    }
+    roots.push(PathBuf::from("assets/appicons/built"));
+    roots.into_iter().map(|r| r.join(id)).find(|d| d.is_dir())
+}
+
+/// Every icon this build ships, with the chosen one marked.
+#[tauri::command]
+fn app_icons(app: tauri::AppHandle) -> CmdResult<Vec<AppIconView>> {
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let chosen = romm_desktop::appicon::chosen(cfg.appearance.app_icon.as_deref());
+    Ok(romm_desktop::appicon::ICONS
+        .iter()
+        .map(|icon| AppIconView {
+            id: icon.id.to_string(),
+            label: icon.label.to_string(),
+            note: icon.note.to_string(),
+            preview: appicon_dir(&app, icon.id)
+                .map(|d| d.join(romm_desktop::appicon::PREVIEW_NAME))
+                .filter(|p| p.is_file())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            selected: icon.id == chosen.id,
+        })
+        .collect())
+}
+
+/// Wear a different icon.
+///
+/// Returns what to tell the user, which is not the same sentence everywhere:
+/// the window icon changes under you on Windows and Linux, whereas macOS reads
+/// the Dock icon out of the bundle once, so there the file is rewritten and the
+/// change lands on the next launch.
+#[tauri::command]
+fn set_app_icon(app: tauri::AppHandle, id: String) -> CmdResult<String> {
+    let icon = romm_desktop::appicon::set(&id).map_err(err)?;
+    let dir = appicon_dir(&app, icon.id)
+        .ok_or_else(|| format!("{} has no built files — run scripts/build-appicons.sh", icon.id))?;
+    Ok(apply_app_icon(&app, icon.id, &dir))
+}
+
+/// Put the icon on, as far as this OS allows, and say what happened.
+fn apply_app_icon(app: &tauri::AppHandle, id: &str, dir: &Path) -> String {
+    let _ = (app, id, dir);
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri::Manager;
+        let png = dir.join(romm_desktop::appicon::WINDOW_NAME);
+        if let Some(win) = app.get_webview_window("main") {
+            match tauri::image::Image::from_path(&png) {
+                Ok(img) => {
+                    if win.set_icon(img).is_ok() {
+                        return "Icon changed.".into();
+                    }
+                }
+                Err(e) => return format!("Saved, but the icon would not load: {e}"),
+            }
+        }
+        "Saved. It will be worn from the next launch.".into()
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // macOS reads Contents/Resources/icon.icns when the bundle is launched
+        // and never again, so the only honest way to change it is to replace
+        // that file. Nothing else in the bundle is touched.
+        match mac_bundle_icns() {
+            Some(dest) => {
+                let src = dir.join(romm_desktop::appicon::icns_name(id));
+                match std::fs::copy(&src, &dest) {
+                    // Finder caches icons by bundle mtime; without this the old
+                    // one can persist in the Dock for a surprisingly long time.
+                    // `touch` rather than a crate: one line, already installed.
+                    Ok(_) => {
+                        if let Some(bundle) = dest.parent().and_then(|p| p.parent()) {
+                            let _ = std::process::Command::new("/usr/bin/touch")
+                                .arg(bundle)
+                                .status();
+                        }
+                        "Icon changed — it will show after the app is restarted.".into()
+                    }
+                    Err(e) => format!(
+                        "Saved, but the app bundle could not be written ({e}). \
+                         The icon will be right in the next build."
+                    ),
+                }
+            }
+            // Running from `cargo run` rather than a bundle: nothing to rewrite.
+            None => "Saved. It will be worn by the next build of the app.".into(),
+        }
+    }
+}
+
+/// `…/RomM-Desktop.app/Contents/Resources/icon.icns` for the running bundle, or
+/// `None` when this is not a bundle at all.
+#[cfg(target_os = "macos")]
+fn mac_bundle_icns() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // Contents/MacOS/<exe> → Contents
+    let contents = exe.parent()?.parent()?;
+    if contents.file_name()? != "Contents" {
+        return None;
+    }
+    let icns = contents.join("Resources").join("icon.icns");
+    icns.is_file().then_some(icns)
+}
+
 /// How many things sit alongside the app, ignoring what the app itself puts
 /// there.
 ///
@@ -3343,6 +3476,8 @@ fn main() {
             open_settings,
             config_fields,
             set_config_field,
+            app_icons,
+            set_app_icon,
             verify_server
         ])
         .setup(|app| {
@@ -3354,6 +3489,16 @@ fn main() {
             // second copy of it in a config file is a copy that goes stale.
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_title(&format!("RomM Desktop v{}", env!("CARGO_PKG_VERSION")));
+            }
+            // Windows and Linux draw a window icon and can be told a new one at
+            // any time, so the chosen icon is put on at every launch. macOS
+            // took it from the bundle before this code ran.
+            {
+                let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+                let icon = romm_desktop::appicon::chosen(cfg.appearance.app_icon.as_deref());
+                if let Some(dir) = appicon_dir(app.handle(), icon.id) {
+                    let _ = apply_app_icon(app.handle(), icon.id, &dir);
+                }
             }
             Ok(())
         })

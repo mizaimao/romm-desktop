@@ -1,6 +1,6 @@
 // The Appearance tab: the pictures the lists draw, the console pictures, the
 // glass, and the shader backdrop.
-import { invoke, listen } from "../state.js";
+import { invoke, listen, convertFileSrc } from "../state.js";
 import { toast, escapeHtml, cssColor } from "../util.js";
 import { padFor, padLabel, keyFor, keyLabel, ACTIONS } from "../bindings.js";
 import {
@@ -53,6 +53,14 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><select class="collection-art"></select></div>
       </div>
       <p class="hint collection-art-hint"></p>
+
+      <h4>App icon</h4>
+      <div class="srow">
+        <label>Icon</label>
+        <div class="ctl"><div class="app-icons"></div></div>
+      </div>
+      <p class="hint app-icons-note">What this app wears in the Dock and the
+        switcher. Not the console pictures above — this is the app itself.</p>
 
       <h4>Color</h4>
       <div class="srow">
@@ -152,6 +160,7 @@ export function wire(box) {
   markPadControls(box);
   wireShellMode(box);
   wireIconStyles(box);
+  wireAppIcons(box);
 
   // What the game lists draw. Populated from the backend rather than listed
   // here, so the names cannot drift from the directories they map to.
@@ -433,6 +442,56 @@ function wireShellMode(box) {
     window.__TAURI__?.event?.emit?.("shell-mode", sel.value);
     toast(sel.value === "columns" ? "Three columns" : "One pane");
   });
+}
+
+/// Which picture the app itself wears.
+///
+/// Drawn from whatever `app_icons` returns rather than from a list here, so
+/// shipping a third icon is a line in `src/appicon.rs` and a PNG — this file
+/// does not learn about it.
+async function wireAppIcons(box) {
+  const holder = box.querySelector(".app-icons");
+  const note = box.querySelector(".app-icons-note");
+  if (!holder) return;
+
+  let icons = [];
+  try {
+    icons = await invoke("app_icons");
+  } catch {
+    holder.textContent = "Could not read the icons this build ships";
+    return;
+  }
+  if (!box.isConnected) return;
+
+  holder.innerHTML = icons
+    .map(
+      (i) =>
+        `<button class="app-icon ${i.selected ? "on" : ""}" data-id="${escapeHtml(i.id)}"
+           title="${escapeHtml(i.note)}">
+           ${i.preview
+             ? `<img src="${convertFileSrc(i.preview)}" alt="" />`
+             : `<span class="app-icon-missing"></span>`}
+           <span class="app-icon-label">${escapeHtml(i.label)}</span>
+         </button>`
+    )
+    .join("");
+
+  for (const b of holder.querySelectorAll(".app-icon")) {
+    b.addEventListener("click", async () => {
+      // Marked before the call rather than after: replacing the bundle's icon
+      // takes a moment on macOS, and a picker that does not move when clicked
+      // reads as broken.
+      holder.querySelectorAll(".app-icon").forEach((x) => x.classList.toggle("on", x === b));
+      try {
+        const said = await invoke("set_app_icon", { id: b.dataset.id });
+        if (note) note.textContent = said;
+        toast(said);
+      } catch (e) {
+        if (note) note.textContent = String(e);
+        toast(String(e));
+      }
+    });
+  }
 }
 
 async function wireIconStyles(box) {

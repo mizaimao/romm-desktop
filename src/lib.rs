@@ -4,6 +4,7 @@
 
 pub mod achievements;
 pub mod api;
+pub mod appicon;
 pub mod bios;
 pub mod arcade;
 pub mod aspect;
