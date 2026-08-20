@@ -25,7 +25,7 @@
 //!   neither differs                    ->  nothing to do.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -374,11 +374,6 @@ async fn server_print(client: &Client, rom_id: i64, file_name: &str) -> Option<S
         .iter()
         .find(|s| s.file_name == file_name)
         .map(fingerprint)
-}
-
-/// Where the ledger lives, for callers that want to report it.
-pub fn ledger_path(data_dir: &Path) -> PathBuf {
-    data_dir.join(LEDGER)
 }
 
 #[cfg(test)]

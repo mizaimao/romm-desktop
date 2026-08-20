@@ -22,7 +22,7 @@ Three front ends over one core library, and that is the point:
     src-tauri/      the window; thin, delegating to the library
     ui/             the front end: static modules and one stylesheet
     ui/test/        jsdom suites, run against the real index.html and CSS
-    data/           generated reference data (core map, arcade names, catver)
+    data/           generated reference data (core map, arcade names, icon sets)
     docs/           coverage reports, and parked.md — what is deliberately not built
 
 Adding an emulator quirk in the library fixes it in all three. Putting one in

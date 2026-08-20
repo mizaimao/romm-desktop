@@ -172,7 +172,7 @@ ui/js/settings/ one file per Settings tab: markup and wiring, nothing shared
 ui/icons/       Lucide (ISC), vendored — see ui/icons/README.md
 ui/test/        jsdom suites, run against the real index.html and stylesheet
 tools/          one-shot Python for DAT analysis, BIOS sets, server sync
-data/           generated reference data (core map, arcade names, catver)
+data/           generated reference data (core map, arcade names, icon sets)
 docs/           arcade and BIOS coverage, handheld card builds, and docs/parked.md
 ```
 
