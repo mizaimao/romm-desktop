@@ -22,10 +22,8 @@ export const html = `      <h4>Layout</h4>
           </select>
         </div>
       </div>
-      <p class="hint">One pane shows a screen at a time and Back returns to the
-        one before. Three columns keeps the consoles on the left, the games in
-        the middle and the preview on the right, so nothing is ever replaced
-        and there is nothing to go back to.</p>
+      <p class="hint">One pane at a time, with Back. Or three columns —
+        consoles, games, preview — where nothing is ever replaced.</p>
 
       <h4>Artwork</h4>
       <div class="srow">
@@ -33,20 +31,17 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><select class="list-art"></select></div>
       </div>
       <p class="hint">What each game shows in the list and grid. Cartridge or
-        disc by default — it is what you recognise a game by, and within one
-        console they are all the same shape, so the grid stays even. Anything a
-        console has no version of falls back to the miximage. The info pane
-        always shows the miximage.</p>
+        disc keeps the grid even; anything missing falls back to the miximage,
+        which is what the info pane always shows.</p>
 
       <h4>Console pictures</h4>
       <div class="srow">
         <label>Show<span class="padmark" data-action="pictures"></span></label>
         <div class="ctl"><div class="icon-styles"></div></div>
       </div>
-      <p class="hint">What the console grid draws for each system. Styles with
-        no pictures yet are greyed out — fetching gets them from four ES-DE
-        themes at once, keeps the artwork, and throws the themes away. A few
-        hundred kilobytes; after that, switching is instant and needs nothing.</p>
+      <p class="hint">What the console grid draws. Only styles with pictures are
+        offered — a set that ships no controllers simply has no controllers to
+        cycle to. Choose whose artwork in <b>Icon sets</b>.</p>
       <div class="srow">
         <label></label>
         <div class="ctl"><button class="set-icons">Get console pictures</button>
@@ -64,22 +59,17 @@ export const html = `      <h4>Layout</h4>
         <label>Scheme</label>
         <div class="ctl"><select class="scheme-preset"></select></div>
       </div>
-      <p class="hint">One palette for the whole window: the glass over the
-        cards and controls, and the gradient the shader draws behind them. These
-        used to be two dropdowns, and every combination worth having was a
-        matching pair. Custom sets all three colors separately.</p>
+      <p class="hint">One palette for the whole window — the glass and the
+        backdrop behind it. Custom sets all three colors separately.</p>
       <div class="srow">
         <label>Glass</label>
         <div class="ctl"><input class="glass-strength" type="range" min="0" max="60" step="2" />
           <span class="glass-strength-val"></span></div>
       </div>
-      <p class="hint">How solid every sheet of glass in the window is — the
-        cards, the selected row, the cover art, and the preview pane, which is
-        one of them. At 0 they are clear and only the blur remains.</p>
-      <p class="hint clarity-needs-backdrop">Glass shows what is behind it, and
-        with the shader backdrop off the answer is a flat color — so this
-        slider will look like it does less than it does. Turn the backdrop on to
-        see it.</p>
+      <p class="hint">How solid every sheet of glass is — cards, selected row,
+        cover art, preview pane. At 0 only the blur remains.</p>
+      <p class="hint clarity-needs-backdrop">With the backdrop off there is nothing behind the glass
+        to show, so this will look like it does little. Turn the backdrop on.</p>
 
       <div class="srow bd-custom">
         <label>Glass color</label>
@@ -96,10 +86,8 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><select class="bd-style"></select></div>
       </div>
       <p class="hint bd-style-hint"></p>
-      <p class="hint">Motion, brightness and color below are remembered
-        <em>per backdrop</em>. Scanlines at the brightness that suits Drift is a
-        white screen, so each shape keeps its own answers; anything you never
-        change for a style follows the shared setting.</p>
+      <p class="hint">Motion, brightness and color are remembered <em>per
+        backdrop</em>. Anything you never change follows the shared setting.</p>
       <div class="srow">
         <label></label>
         <div class="ctl"><button class="bd-reset-style">Reset this backdrop</button>
@@ -510,9 +498,8 @@ async function wireIconStyles(box) {
   box.querySelector(".set-icons")?.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    // Four themes cloned one after another is a minute or so of nothing. It
-    // says which one it is on, because a button that goes quiet for a minute
-    // is a button people press again.
+    // A picture per console per style, so it counts rather than going quiet —
+    // a button that says nothing for a while is a button people press again.
     const stop = await listen("icons-progress", ({ payload }) => {
       note.textContent = String(payload);
     });

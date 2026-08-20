@@ -14,6 +14,7 @@ import * as appearance from "./settings/appearance.js";
 import * as control from "./settings/control.js";
 import * as library from "./settings/library.js";
 import * as emulators from "./settings/emulators.js";
+import * as iconsets from "./settings/iconsets.js";
 import * as about from "./settings/about.js";
 import { stopPadCapture } from "./settings/control.js";
 
@@ -33,6 +34,9 @@ export const TABS = [
   // another, and the word gave no clue that this is where you choose which
   // emulator runs a console. Named for the thing you come here to change.
   { id: "systems", label: "Emulators", pane: emulators },
+  // Its own tab rather than a row in Appearance: the point of it is looking at
+  // nine sets of artwork side by side, which needs the room.
+  { id: "iconsets", label: "Icon sets", pane: iconsets },
   // Last, and the only tab with nothing to change on it.
   { id: "about", label: "About", pane: about },
 ];

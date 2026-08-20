@@ -5,7 +5,7 @@
 // collections in a group → the games. ES-DE shows collections beside systems,
 // so this sits next to the platform grid rather than inside it.
 
-import { el, state, trail, invoke, convertFileSrc } from "./state.js";
+import { el, state, trail, invoke, convertFileSrc, listen } from "./state.js";
 import { enter as enterView, region, resetGames } from "./shell.js";
 import { escapeHtml } from "./util.js";
 import { pickerBar, wirePickerBar, sortPicker } from "./picker-order.js";
@@ -237,8 +237,12 @@ async function loadMosaics(list, into) {
   const want = style === "fan" ? 3 : style === "tiles" ? 4 : 1;
   const ids = list.flatMap((c) => (c.sample_ids ?? []).slice(0, want));
   if (!ids.length) return;
-  try {
-    const covers = await invoke("rom_covers", { ids });
+  // Twice, deliberately. The first call answers from the filesystem alone and
+  // returns in milliseconds, so the grid fills as fast as it can; the second
+  // is allowed to go to the server for whatever was missing. Before this there
+  // was one call that did both, and every card with no cached art held up
+  // every card that had some.
+  const paint = (covers) => {
     const byId = new Map(covers.map((c) => [c.id, c.cover]));
     for (const c of list) {
       const picks = (c.sample_ids ?? [])
@@ -261,7 +265,31 @@ async function loadMosaics(list, into) {
         .map((src, i) => `<img style="--i:${i}" src="${convertFileSrc(src)}" alt="" />`)
         .join("");
     }
+  };
+
+  try {
+    paint(await invoke("rom_covers", { ids, localOnly: true }));
   } catch {
     // Placeholders are fine; artwork is not worth interrupting browsing for.
+  }
+
+  // The slow pass paints as it arrives rather than at the end.
+  //
+  // It fetches eight at a time and used to resolve only once every one of them
+  // was in, so a screen of collections asking for eighty covers held the first
+  // eight — which were ready almost at once — behind the eightieth. Each batch
+  // is drawn as it lands.
+  let stop;
+  try {
+    stop = await listen("covers-ready", ({ payload }) => {
+      if (Array.isArray(payload)) paint(payload);
+    });
+    // If the grid has been left by the time this finishes, the cards it would
+    // write into are gone and the lookups simply miss.
+    paint(await invoke("rom_covers", { ids }));
+  } catch {
+    // As above.
+  } finally {
+    stop?.();
   }
 }

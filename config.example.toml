@@ -1,41 +1,62 @@
-# RomM desktop client configuration.
+# RomM desktop client.
 #
 #   cp config.example.toml config.toml
 #
-# config.toml is gitignored. Grow this file as the client grows.
+# Lines marked REQUIRED are the ones the app cannot start without: a server
+# url and one credential. Everything else already has a working default.
+# config.toml is gitignored; this template is not.
+
+# ---------------------------------------------------------------------------
+# Your details
+# ---------------------------------------------------------------------------
 
 [server]
+# REQUIRED. An empty url, or no credential at all, is refused on startup with
+# a message saying which — not a silent empty library.
 url = "http://dev.lan"
 
-# A client token is preferred and takes precedence over username/password.
-# Create one in RomM under API tokens. The complete set this client uses:
+# REQUIRED: a token, or else username and password below.
 #
-#   me.read           who you are, and the connection check
-#   roms.read         the game list, and downloading a game
-#   platforms.read    the console list
-#   collections.read  your collections and RomM's generated ones
-#   assets.read       reading saves, save states and artwork
-#   assets.write      uploading saves and save states
-#   devices.read      finding this device's sync registration
-#   devices.write     registering it, and the save sync negotiation
-#   firmware.read     BIOS files, which Neo Geo and others cannot run without
+# A client token is preferred and beats username/password. Create one in RomM
+# under API tokens with these nine scopes — nothing here writes to your
+# library, so leave every other box unchecked:
 #
-# Nine of the twenty-one. Leave the rest unchecked: nothing here writes to your
-# library, so every *.write on roms, platforms, firmware, collections, users and
-# tasks stays off, along with users.*, tasks.run, playlists.* and logs.read.
-# A token can also be revoked from the server without changing your password.
+#   me.read  roms.read  platforms.read  collections.read
+#   assets.read  assets.write  devices.read  devices.write  firmware.read
 #
+# A token can be revoked from the server without changing your password.
 # Basic auth still works and is used when no token is set.
 # token = "romm_..."
 username = ""
 password = ""
 
+# Nothing below this point has to be filled in for the app to start.
+
+[achievements]
+# Optional — leave enabled = false to skip it.
+# RetroAchievements. Both fields are needed: a token with no username
+# authenticates nothing, which looks configured and never activates.
+#
+# The token is what RetroArch stores after a successful login — `cheevos_token`
+# in its config. Credentials live here rather than in your retroarch.cfg, so
+# this file behaves the same against any RetroArch install, including a fresh
+# one that has never logged in. [cheevos] is still accepted as the section name.
+enabled = false
+username = ""
+token = ""
+
+# Disables save states, fast-forward and rewind, which are four of the gamepad
+# hotkeys this app binds (Select + LB/RB/RT and the save-slot d-pad).
+hardcore = false
+
+# Unofficial / in-development achievement sets.
+# test_unofficial = false
+
 [library]
-# EVERYTHING this app downloads lives under here — ROMs, cover art, videos.
-# Deliberately a plain folder next to the executable rather than somewhere like
-# ~/Library/Application Support, so it is easy to find, inspect, back up, and
-# delete. Deleting this folder reclaims all the space and loses nothing that
-# cannot be re-downloaded.
+# Optional; the default below works.
+# EVERYTHING this app downloads lives under here — ROMs, cover art, videos. A
+# plain folder rather than ~/Library, so it is easy to find and delete;
+# deleting it reclaims all the space and loses nothing unrecoverable.
 #
 #   <local_root>/roms/<platform>/<game>          downloaded ROMs
 #   <local_root>/downloaded_media/<platform>/    covers, screenshots, videos
@@ -44,24 +65,24 @@ password = ""
 local_root = "./library"
 
 [retroarch]
-# Rapid fire for arcade shooters: "off", "lb" or "rb". Hold that shoulder on
-# its own and the game fires by itself; let go and it stops. Nothing is
-# remapped either way.
-#autofire = "lb"
-# Shots a second. Six is a shade under what a good player sustains by hand, and
-# divides 60 exactly so it is delivered as asked. Ten is the rate most shmup
-# players use. The +/- beside the control on a game's page moves it for the
-# session only — this line is where it starts.
-#autofire_hz = 6
-
-# Where your own RetroArch settings live — button maps, video filters, hotkeys.
-# Appended at launch AFTER our defaults, so anything in it wins. Your real
-# retroarch.cfg is never touched. Created with commented examples on first run.
+# Optional.
+# Your own RetroArch settings — button maps, filters, hotkeys. Appended at
+# launch AFTER our defaults, so anything in it wins. Your real retroarch.cfg is
+# never touched. Created with commented examples on first run.
 user_config = "./library/retroarch-user.cfg"
 
-# Installs are tried top to bottom, like a boot order: the first enabled entry
-# that actually contains RetroArch is used. Disable one without deleting it by
-# setting enabled = false.
+# Rapid fire for arcade shooters: "off", "lb" or "rb". Hold that shoulder on
+# its own and the game fires by itself. Nothing is remapped either way.
+# autofire = "lb"
+# Shots a second. Six divides 60 exactly, so it is delivered as asked; ten is
+# what most shmup players use. The +/- on a game's page moves it for that
+# session only.
+# autofire_hz = 6
+
+# Optional: with no entries at all, the usual install locations are probed.
+# Tried top to bottom like a boot order — the first enabled entry that
+# actually contains RetroArch is used. Set enabled = false to skip one
+# without deleting it.
 [[retroarch.installs]]
 label = "Portable (Data/Games)"
 path = "~/Data/Games/Emulators/RetroArch"
@@ -77,141 +98,109 @@ label = "User Applications"
 path = "~/Applications"
 enabled = true
 
+# ---------------------------------------------------------------------------
+# Defaults — change only if something misbehaves
+# ---------------------------------------------------------------------------
+
 [cores.overrides]
 # Platform slug -> libretro core, overriding the ES-DE default.
 #
-# Arcade romsets are version-locked to a specific MAME release, and no single
-# core runs this whole collection. mame2003_plus matches the romset vintage
-# (the source carried MAME2003PLUS_cache6.db) and is the default.
-#
-# Neo Geo titles need neogeo.zip in RetroArch's system directory; the launcher
-# copies it there automatically when it sits beside the ROMs. Blazing Star runs
-# under fbneo. Use `launch --core <name>` for anything the default refuses.
+# Arcade romsets are version-locked to a MAME release and no single core runs a
+# whole collection, so the default matches the romset vintage. Neo Geo titles
+# need neogeo.zip in the system directory; the launcher copies it there when it
+# sits beside the ROMs. Use `launch --core <name>` for anything a default
+# refuses.
 arcade = "mame2003_plus"
 mame = "mame2003_plus"
 
-# ---------------------------------------------------------------------------
-# Local ES-DE library (optional)
-#
-# Set `root` to index an ES-DE install on a local or external disk instead of a
-# RomM server. Nothing is downloaded — the ROMs and artwork are already there.
-#
-#   romm-desktop scan-esde
+[cores.per_game]
+# "<platform>/<file>" -> core, for a game its platform default cannot run.
+# Written by the game detail pane. The verified arcade table ships separately
+# in data/arcade-core-map.toml; anything set here wins over that.
+
+# Index an ES-DE install on a local or external disk instead of a RomM server.
+# Nothing is downloaded — the ROMs and artwork are already there. Run
+# `romm-desktop scan-esde` after setting it.
 #
 # `root` is the ES-DE data directory, the one holding `gamelists/` and
 # `downloaded_media/`. `roms` is only needed when the ROMs live elsewhere,
-# which is the usual arrangement (ES-DE keeps that path configurable).
+# which is the usual arrangement.
 #
-# What you lose against a RomM server: collections and save sync, both of
-# which are RomM features with no local equivalent.
-# ---------------------------------------------------------------------------
+# What you lose against a RomM server: collections and save sync.
 # [esde]
 # root = "~/ES-DE"
 # roms = "/Volumes/Games/ROMs"
 
-# ---- RetroAchievements ----
-#
-# RetroArch calls the feature "cheevos" and names every one
-# of its config keys that way; [achievements] is the readable spelling, and
-# [cheevos] is still accepted so an older config keeps working.
-#
-# RetroArch implements achievements; this owns the configuration for them.
-# Deliberately self-contained: the credentials live here, not in your
-# retroarch.cfg, so the same config.toml behaves identically against any
-# RetroArch install — including a fresh one that has never been logged in.
-#
-# Both a username and a credential are required. A token with no username
-# authenticates nothing, which is how achievements can look configured and
-# never activate.
-#
-# The token is what RetroArch stores after a successful login; if you have one
-# already it is `cheevos_token` in its config. Otherwise give `password` and
-# RetroArch will exchange it for a token on first use.
-[achievements]
-enabled = false
-username = ""
-token = ""
-# password = ""
-
-# Disables save states, fast-forward and rewind, which are four of the gamepad
-# hotkeys this app binds (Select + LB/RB/RT and the save-slot d-pad). Written
-# on every launch either way, so an install with it switched on cannot take
-# those away without you asking for it.
-hardcore = false
-
-# Unofficial / in-development achievement sets.
-# test_unofficial = false
-
 [icons]
-# Which per-system artwork the platform grid shows:
-#   systemart         hardware renders (default)
-#   systemart_legacy  the older hardware set
-#   consolegame       console with a game
-#   controller        controllers only
-#   logo              ES-DE wordmarks — a picture of the system's NAME, not the
-#                     system itself
-# Changing it in the Themes pane writes here, so it survives a restart.
-style = "systemart"
+# Which look the platform grid draws, from the chosen set's own list — themes
+# offer between one and nine. Common ids: hardware, controller, styled-text.
+# See data/icon-set-art.toml for what each set has.
+# The Appearance pane and the Select button write here.
+style = "hardware"
 
-# ---------------------------------------------------------------------------
-# ScreenScraper (optional)
-#
-# NOT READ BY THE APP YET — kept here so the credentials and the explanation
-# live with the rest of the configuration rather than in someone's notes.
-#
-# Four fields are needed, not two. `ssid`/`sspassword` are your ordinary
-# screenscraper.fr login; `devid`/`devpassword` are separate credentials the
-# ScreenScraper team issues to a registered application after you present it on
-# their forum. A normal user account cannot call the API on its own — every
-# request is rejected without a devid.
-#
-# Without devid/devpassword, scrape through ES-DE instead: it ships with its
-# own approved devid and only asks for the ssid/sspassword pair.
-#
-# ScreenScraper throttles by account tier. Exceeding the allowance returns HTTP
-# 429 rather than data, so a bulk run has to rate-limit itself.
-# ---------------------------------------------------------------------------
-[scraper]
-ssid = ""
-sspassword = ""
-devid = ""
-devpassword = ""
-softname = "romm-desktop"
-max_threads = 1
+# Whose artwork, chosen in Settings -> Icon sets. Empty means the default set,
+# Meringue, which "Get console pictures" fetches and writes here.
+set = ""
+
+[shaders]
+# Black frame insertion, chained on top of each system's own shader. A preset
+# path under shaders_slang/ with no extension, or "none". Needs a display at a
+# fixed refresh that is a multiple of the content rate — on ProMotion
+# (48–120Hz) it flickers rather than sharpening motion.
+#   motion = "subframe-bfi/adaptive_strobe-koko"
+motion = "none"
+
+[media]
+# What each game shows in the list and grid:
+#   physicalmedia     the cartridge or disc
+#   miximages         box, screenshot and logo in one
+#   covers            box art
+#   3dboxes           box art rendered as a box
+#   titlescreens
+#   screenshots
+#   marquees
+list_art = "miximages"
 
 [saves]
 # Where RetroArch keeps saves/ and states/. In a portable install this is the
 # portable root itself.
 root = "./Saves"
 
-# Pull before a game starts and push after it exits, Steam-cloud style.
+# Pull before a game starts and push after it exits, Steam-cloud style. Every
+# overwrite copies the previous file into library/saves-backup/ first — ten per
+# game and slot — so a wrong result is recoverable rather than final. Off means
+# syncing only when you ask, with `romm-desktop sync-saves`.
 #
-# Every overwrite copies the previous file into library/saves-backup/ first --
-# ten per game and slot, oldest dropped -- so a wrong result is recoverable by
-# copying a file back rather than being final. Turn this off to sync only when
-# you ask, with `romm-desktop sync-saves`.
-#
-# A conflict is never resolved automatically either way: if both sides changed
-# since the last sync, both are left alone and it says so.
+# A conflict is never resolved automatically: if both sides changed since the
+# last sync, both are left alone and it says so.
 auto_sync = true
 
-# ---------------------------------------------------------------------------
-# Light gun
-# ---------------------------------------------------------------------------
-#
+[lightgun.by_platform]
 # Systems to play with the mouse as a light gun. Easier to set from
-# Settings -> Systems than by hand, which is where the switch lives.
+# Settings -> Systems, which is where the switch lives.
 #
-# Off everywhere by default, and deliberately: on the NES, SNES and Mega Drive
-# the gun goes in the *second* controller port, so switching one of these on
-# turns player two's pad into a gun and two-player games stop working. Turn it
-# on for a console while you are playing gun games and off again afterwards.
+# Off everywhere, deliberately: on the NES, SNES and Mega Drive the gun goes in
+# the *second* controller port, so switching one on turns player two's pad into
+# a gun and two-player games stop working.
 #
-# The mouse is already bound to the trigger at all times -- left button fires,
-# right button shoots off-screen, which is how most gun games reload. That
-# costs nothing when no gun is in use, so it needs no setting.
+# The mouse is bound to the trigger at all times — left button fires, right
+# shoots off-screen, which is how most gun games reload — so it needs no
+# setting.
 #
 #   nes = "on"
 #   arcade = "on"
 
-[lightgun.by_platform]
+[scraper]
+# ScreenScraper. NOT READ BY THE APP YET — kept so the credentials and the
+# explanation live with the rest of the configuration.
+#
+# Four fields, not two. ssid/sspassword are your ordinary screenscraper.fr
+# login; devid/devpassword are separate credentials issued to a registered
+# application. A normal account cannot call the API on its own. Without a
+# devid, scrape through ES-DE instead — it ships with its own.
+ssid = ""
+sspassword = ""
+devid = ""
+devpassword = ""
+softname = "romm-desktop"
+max_threads = 1

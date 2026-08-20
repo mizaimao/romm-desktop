@@ -42,20 +42,40 @@ export const html = `      <h4>Game window</h4>
       <p class="hint">Arcade shooters only — 879 games here. A run of Metal Slug
         is a few thousand presses of a button the cabinet expected you to
         hammer.</p>
-      <p class="hint">Hold the modifier on its own and the game fires at the
-        rate beside it; let go and it stops. Do not hold the fire button as
-        well — RetroArch reports a real press instead of the repeat, so holding
-        both gives one continuous shot, which is what made the earlier
-        arrangements unplayable. Nothing is remapped either way.</p>
-      <p class="hint">Only one button can be the modifier: RetroArch binds it
-        once per player and repeats one button, so this is a choice from
-        several rather than several at once. LB and RB are unbound in arcade
-        cores, so nothing is sent underneath them; Y is button D, which Metal
-        Slug does not use and a four-button game does.</p>
+      <p class="hint">Hold the modifier on its own; let go and it stops. Do not hold the fire
+      button too — a real press beats the repeat, giving one continuous shot.
+      Nothing is remapped.</p>
+      <p class="hint">One modifier only — RetroArch binds it once per player. LB and RB send
+      nothing underneath them; Y also sends button D.</p>
+
+      <div class="srow">
+        <label>Save state on exit</label>
+        <div class="ctl"><button data-field="save_state_on_exit"></button></div>
+      </div>
+      <p class="hint">Off by default. It writes to the <em>auto</em> slot, which Continue
+      playing resumes from — so a brief look at a game would overwrite where
+      you actually stopped.</p>
 
       <h4>Emulators</h4>
       <p class="hint">Which emulator runs each console, its shader, and whether
         a light gun takes port two. Applies to the next game you launch.</p>
+      <details class="gun-help">
+        <summary>How to play light gun games with the mouse</summary>
+        <div>
+          <p>Tick <b>Light gun</b> beside a console, then launch a gun game.
+            Aim with the mouse; <b>left button</b> fires and <b>right button</b>
+            shoots off-screen, which is how most gun games reload.</p>
+          <p>The mouse is bound to the trigger on every launch, so there is
+            nothing else to set up. What the tick does is tell the emulator a
+            gun is plugged in — until then the game sees a joypad, however the
+            mouse is bound, and shooting does nothing.</p>
+          <p><b>Turn it off again afterwards.</b> On the NES, SNES and Mega
+            Drive the gun goes in the <i>second</i> controller port, so leaving
+            it on turns player two's pad into a gun and two-player games on
+            that console stop working. The PlayStation's GunCon takes a port of
+            its own, and arcade guns do not use a pad port at all.</p>
+        </div>
+      </details>
       <div class="sys-table">Loading…</div>
 
 `;
@@ -97,11 +117,20 @@ export async function wire(box) {
     gun.addEventListener("change", async () => {
       const { slug, field } = gun.dataset;
       try {
-        toast(await invoke("set_system_choice", {
+        const said = await invoke("set_system_choice", {
           slug,
           field,
           value: gun.checked ? "on" : "off",
-        }));
+        });
+        // Switching one on is the moment the explanation is wanted, and the
+        // moment nobody goes looking for it — this is the one thing in the app
+        // that does nothing visible until you know two facts about it.
+        if (gun.checked) {
+          box.querySelector(".gun-help")?.setAttribute("open", "");
+          toast(`${said} — aim with the mouse, left button fires`, 9000);
+        } else {
+          toast(said);
+        }
       } catch (e) {
         toast(String(e), 8000);
       }
@@ -186,12 +215,9 @@ function motionMarkup(motion) {
         </select>
       </div>
     </div>
-    <p class="hint">Reduces the smearing an LCD gives 60fps content by blanking
-      the screen between frames. That is flicker by construction, and it only
-      reads as sharper motion on a display locked to a fixed refresh at an exact
-      multiple of 60 — on a variable-refresh panel such as ProMotion the black
-      frames land unevenly and it simply flickers. Chained on top of each
-      system's own shader rather than replacing it. CRT systems only.</p>`;
+    <p class="hint">Blanks the screen between frames to cut LCD smearing. Needs a fixed
+      refresh at a multiple of 60 — on a variable-refresh panel such as
+      ProMotion it just flickers. CRT systems only.</p>`;
 }
 
 function systemRow(s) {

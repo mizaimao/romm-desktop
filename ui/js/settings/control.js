@@ -26,9 +26,8 @@ export const html = `      <h4>Players</h4>
         <label>Match player 1</label>
         <div class="ctl"><button data-field="mirror_player_one">…</button></div>
       </div>
-      <p class="hint">Binds players 2–4 like player 1. RetroArch gives a pad it
-        has never seen no bindings at all, which reads as a dead port. Turn it
-        off only if your pads are genuinely different models.</p>
+      <p class="hint">Binds players 2–4 like player 1, since RetroArch gives an unknown pad
+      none. Turn off only for genuinely different models.</p>
 
       <h4>Bindings</h4>
       <p class="hint">Click a key or a button to rebind it. Esc leaves it

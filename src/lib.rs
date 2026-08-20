@@ -10,12 +10,15 @@ pub mod aspect;
 pub mod bulk;
 pub mod cache;
 pub mod config;
+#[cfg(test)]
+mod config_files;
 pub mod coremap;
 pub mod coverage;
 pub mod cores;
 pub mod diskspace;
 pub mod download;
 pub mod esde;
+pub mod iconart;
 pub mod launch;
 pub mod lightgun;
 pub mod macdisplay;

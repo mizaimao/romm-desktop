@@ -12,7 +12,7 @@ import { byName } from "./picker-order.js";
 import { setPageFilterLabel, refreshPageFilter } from "./pagefilter.js";
 import { followSections } from "./sections.js";
 import { play, restoreSidebar, selectRom, showPlatformInfo, withTransition } from "./detail.js";
-import { download } from "./actions.js";
+import { download, launch } from "./actions.js";
 import { installTilt } from "./tilt.js";
 
 export async function showPlatforms() {
@@ -136,7 +136,9 @@ async function showRecent() {
   // "CONTINUE PLAYINGMORE…".
   el.list.querySelector(":scope > .recent")?.remove();
   el.list.prepend(strip);
-  strip.querySelectorAll(".gcard").forEach((c) => wireGame(c, Number(c.dataset.id)));
+  strip.querySelectorAll(".gcard").forEach((c) =>
+    wireGame(c, Number(c.dataset.id), { resume: true })
+  );
   // One listener on the row rather than one per card: the strip is rebuilt on
   // every draw of the platform screen.
   installTilt(strip.querySelector(".gcards"));
@@ -436,11 +438,15 @@ export function delegateGames(container) {
 
 /// One game's click, double-click and right-click, for a node that is not
 /// inside a delegated container.
-export function wireGame(node, id) {
+export function wireGame(node, id, { resume = false } = {}) {
   node.addEventListener("click", () => selectRom(id));
   // Double-click is the shortcut for "just play it".
   node.addEventListener("dblclick", async (ev) => {
     ev.preventDefault();
+    // From Continue playing, carry on rather than start over. Everywhere else
+    // a double-click means "play this", and a game you opened deliberately
+    // from its console list is as likely to be a fresh run.
+    if (resume) return launch(id, { resume: true });
     play(await invoke("rom_detail", { id }));
   });
   node.addEventListener("contextmenu", (ev) => {

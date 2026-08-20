@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
 
+mod iconsets;
+
 use romm_desktop::{
     api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
     savesync, shaders, theme, theme_remote, util,
@@ -57,9 +59,12 @@ struct AppState {
     detail_art: String,
     /// Strobe/BFI pass chained onto CRT shaders, if the user enabled one.
     motion_shader: Mutex<Option<String>>,
-    /// Index into `IconStyle::ALL`. Atomic so the UI can switch style without
-    /// taking any lock the render path also needs.
-    icon_style: AtomicU8,
+    /// The look the grid draws — an id from the chosen set's own list, not one
+    /// of three fixed kinds. Themes offer between one and nine.
+    icon_look: Mutex<String>,
+    /// A downloaded ES-DE icon set the grid draws from, or empty for the
+    /// shared pool. Orthogonal to `icon_style`: whose art, versus which kind.
+    icon_set: Mutex<String>,
     /// RetroAchievements, read once at startup from this project's config.toml
     /// — see `romm_desktop::achievements`.
     achievements: romm_desktop::achievements::Settings,
@@ -288,10 +293,10 @@ async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
 
 /// The config.toml values Settings can show and edit.
 ///
-/// Deliberately a fixed list rather than "whatever is in the file". Half of
-/// config.toml is not a setting — `cores.per_game` is 155 rows that belong in
-/// the game detail pane, and `[scraper]` is read by nothing. A field here means
-/// somebody decided it belongs on screen.
+/// Deliberately a fixed list rather than "whatever is in the file". Not all of
+/// config.toml is a setting — `cores.per_game` belongs in the game detail pane
+/// and `[scraper]` is read by nothing. A field here means somebody decided it
+/// belongs on screen.
 #[derive(Serialize)]
 struct ConfigFields {
     library_root: String,
@@ -311,6 +316,7 @@ struct ConfigFields {
     fit_window: bool,
     window_decorations: bool,
     autofire: String,
+    save_state_on_exit: bool,
     /// Present so the UI can say where it is writing, and warn when there is
     /// nothing to write to.
     config_path: String,
@@ -339,6 +345,7 @@ fn config_fields() -> CmdResult<ConfigFields> {
         fit_window: cfg.retroarch.fit_window,
         window_decorations: cfg.retroarch.window_decorations,
         autofire: cfg.retroarch.autofire.clone(),
+        save_state_on_exit: cfg.retroarch.save_state_on_exit,
         config_path: abs(Path::new("config.toml")),
         config_exists: Config::exists("config.toml"),
     })
@@ -375,6 +382,7 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "fit_window" => ("retroarch", "fit_window"),
         "window_decorations" => ("retroarch", "window_decorations"),
         "autofire" => ("retroarch", "autofire"),
+        "save_state_on_exit" => ("retroarch", "save_state_on_exit"),
         "autofire_hz" => ("retroarch", "autofire_hz"),
         other => return Err(format!("unknown setting {other}")),
     };
@@ -576,6 +584,31 @@ struct StateView {
     core: String,
     /// False for the autosave, which has no slot number to enter.
     resumable: bool,
+    when_epoch: Option<u64>,
+}
+
+/// Check the RetroAchievements login.
+///
+/// Username and token only. A password would have to be held somewhere to
+/// check with, and a status light is not worth a second secret — the token is
+/// already stored because RetroArch needs it.
+#[tauri::command]
+async fn verify_achievements() -> CmdResult<romm_desktop::achievements::Verified> {
+    let cfg = Config::load().map_err(err)?;
+    let user = cfg.achievements.username.clone().unwrap_or_default();
+    let token = cfg.achievements.token.clone().unwrap_or_default();
+    if user.trim().is_empty() || token.trim().is_empty() {
+        return Ok(romm_desktop::achievements::Verified {
+            ok: false,
+            user: None,
+            error: Some(if user.trim().is_empty() {
+                "no username set".into()
+            } else {
+                "no token set".to_string()
+            }),
+        });
+    }
+    Ok(romm_desktop::achievements::verify(&user, &token).await)
 }
 
 /// The save states this game has.
@@ -595,6 +628,10 @@ fn game_states(state: State<'_, AppState>, id: i64) -> CmdResult<Vec<StateView>>
         .map(|s| StateView {
             resumable: s.entry_slot().is_some(),
             when: s.modified.map(|t| romm_desktop::states::ago(t, now)),
+            // The raw time as well as the phrase. "3 days ago" cannot be
+            // sorted, and picking the newest state to resume from is exactly
+            // what the front end needs to do.
+            when_epoch: s.modified,
             thumb: s.thumb.as_deref().map(romm_desktop::util::webview_path),
             slot: s.slot,
             label: s.label,
@@ -983,6 +1020,10 @@ async fn download_set(
 fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
     let cache = state.cache.lock().map_err(err)?;
     let rows = cache.platforms().map_err(err)?;
+    // Read once for the whole grid rather than per platform: the lock would
+    // otherwise be taken four times for each of thirty consoles.
+    let set = state.icon_set.lock().map_err(err)?.clone();
+    let look = state.icon_look.lock().map_err(err)?.clone();
     Ok(rows
         .into_iter()
         .map(|p| PlatformView {
@@ -990,12 +1031,11 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             // A theme, if one is installed, then the console picture from the
             // server. The theme wins because installing one is a deliberate
             // choice and this is the fallback that means nobody has to.
-            logo: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
+            logo: theme::look_art(&state.media_dir, &p.fs_slug, &set, &look)
                 .or_else(|| romm_desktop::platformicon::installed(&state.media_dir, &p.fs_slug))
                 .map(|p| romm_desktop::util::webview_path(&p)),
-            logo_wordmark: theme::installed_logo(&state.media_dir, &p.fs_slug, current_style(&state))
-                .is_some()
-                && current_style(&state) == theme::IconStyle::Logo,
+            logo_wordmark: look.starts_with("styled-text")
+                || (set.is_empty() && current_style(&state) == theme::IconStyle::Logo),
             // The info pane's picture, which does *not* follow the grid.
             //
             // Select cycles the grid's artwork — logo, console, controller —
@@ -1004,10 +1044,12 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             // console. The pane wants a picture of the machine and always the
             // same one, so it asks for the hardware render and falls back to
             // the console-with-a-game before it settles for a wordmark.
-            portrait: theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::SystemArt)
-                .or_else(|| theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::ConsoleGame))
-                .or_else(|| theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::SystemArtLegacy))
-                .or_else(|| theme::installed_logo(&state.media_dir, &p.fs_slug, theme::IconStyle::Logo))
+            // The info pane wants a picture of the machine and always the same
+            // one, so it asks for hardware by name rather than following the
+            // grid's look.
+            portrait: theme::look_art(&state.media_dir, &p.fs_slug, &set, "hardware")
+                .or_else(|| theme::look_art(&state.media_dir, &p.fs_slug, &set, "systemart"))
+                .or_else(|| theme::look_art(&state.media_dir, &p.fs_slug, &set, "consolegame"))
                 .map(|p| romm_desktop::util::webview_path(&p)),
             cover_aspect: media::cover_aspect(&state.media_dir, &p.fs_slug),
             manufacturer: romm_desktop::platformfacts::of(&p.fs_slug).map(|f| f.manufacturer),
@@ -1304,7 +1346,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
     })
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct CoverView {
     id: i64,
     cover: Option<String>,
@@ -1316,7 +1358,12 @@ struct CoverView {
 /// fan-out further, so browsing a 2,400-game platform never turns into 2,400
 /// simultaneous requests.
 #[tauri::command]
-async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<CoverView>> {
+async fn rom_covers(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+    local_only: Option<bool>,
+) -> CmdResult<Vec<CoverView>> {
     const CONCURRENCY: usize = 8;
 
     let rows = {
@@ -1327,6 +1374,27 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
     };
 
     let list_art = state.list_art.lock().map_err(err)?.clone();
+    // The cached answer, with no request behind it. A caller that wants the
+    // grid filled *now* asks for this first: everything already on disk comes
+    // back in a few milliseconds, and the misses are fetched by a second call
+    // that can take as long as it likes because there is already something on
+    // screen.
+    if local_only.unwrap_or(false) {
+        return Ok(rows
+            .iter()
+            .map(|row| {
+                let stem = Path::new(&row.fs_name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| row.fs_name.clone());
+                CoverView {
+                    id: row.id,
+                    cover: media::local_art(&state.media_dir, &row.platform_slug, &stem, &list_art)
+                        .map(|p| romm_desktop::util::webview_path(&p)),
+                }
+            })
+            .collect());
+    }
     let mut out = Vec::with_capacity(rows.len());
     for chunk in rows.chunks(CONCURRENCY) {
         let mut set = tokio::task::JoinSet::new();
@@ -1347,11 +1415,22 @@ async fn rom_covers(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<
                 CoverView { id, cover: cover.map(|p| romm_desktop::util::webview_path(&p)) }
             });
         }
+        let mut batch = Vec::with_capacity(chunk.len());
         while let Some(res) = set.join_next().await {
             if let Ok(v) = res {
-                out.push(v);
+                batch.push(v);
             }
         }
+        // Hand each chunk over as it lands rather than holding the lot.
+        //
+        // A screen of collections wants four covers each, so a first visit
+        // asks for eighty and waited for the eightieth before drawing any of
+        // them — a second or two of two-letter placeholders on a page whose
+        // first eight covers were ready almost immediately.
+        if batch.iter().any(|c| c.cover.is_some()) {
+            let _ = app.emit("covers-ready", &batch);
+        }
+        out.extend(batch);
     }
     // Keep what this batch learned, so scrolling back over the same cards — and
     // the next launch — costs nothing.
@@ -1739,6 +1818,9 @@ async fn launch_rom(
         // whose cabinets had a fire button: a "shooter" on the Mega Drive is
         // as likely to be a light-gun game or a shmup with its own auto-fire.
         autofire: autofire_for(&row),
+        save_state_on_exit: Config::load()
+            .map(|c| c.retroarch.save_state_on_exit)
+            .unwrap_or(false),
         autofire_hz: autofire_hz(&state),
         mirror_players: state.mirror_players,
         entry_slot,
@@ -1808,7 +1890,31 @@ async fn launch_rom(
         match romm_desktop::bios::ensure(api, library_root, core, &row.platform_slug).await {
             Ok(0) => {}
             Ok(n) => fetched.push(format!("fetched {n} BIOS file(s)")),
-            Err(e) => fetched.push(format!("could not fetch BIOS: {e}")),
+            Err(e) => {
+                // Refused rather than noted. This used to go into the launch
+                // notes and start the game anyway, which meant the one case
+                // the automatic fetch cannot fix — a file the server has not
+                // got either — arrived as a black screen with the explanation
+                // scrolled past behind it. The front end offers "play anyway",
+                // because a core that wants a BIOS sometimes runs without one.
+                if !skip_sync.unwrap_or(false) {
+                    let want = romm_desktop::bios::required_for(core, &row.platform_slug);
+                    let dest = romm_desktop::bios::system_dir(library_root);
+                    let missing: Vec<String> = want
+                        .into_iter()
+                        .filter(|n| !dest.join(n).is_file())
+                        .collect();
+                    if !missing.is_empty() {
+                        return Err(format!(
+                            "BIOS_MISSING:{} needs {} — {}",
+                            row.platform_slug,
+                            missing.join(", "),
+                            e
+                        ));
+                    }
+                }
+                fetched.push(format!("could not fetch BIOS: {e}"));
+            }
         }
     }
 
@@ -2002,72 +2108,233 @@ async fn resolve_save_conflict(
     Ok(outcome)
 }
 
-/// Themes worth taking console pictures from, in the order they are tried.
-///
-/// Not a browsable gallery any more. The app never rendered a theme — it only
-/// ever read the per-system artwork out of one — so a panel of screenshots and
-/// full downloads offered a choice that changed nothing on screen, and the
-/// hundreds of megabytes it fetched were then deleted or wasted.
-///
-/// Several of them rather than one because they carry different art. No single
-/// theme has all five kinds, and the picker in Appearance can only offer what
-/// has been fetched: taking pictures from four fills styles that any one of
-/// them leaves empty.
-const ICON_THEMES: &[&str] = &["slate-es-de", "modern-es-de", "canvas-es-de", "linear-es-de"];
 
-/// Fetch console pictures from every theme in [`ICON_THEMES`].
+/// Every ES-DE set that carries console art, previewed with its own pictures.
 ///
-/// Each is cloned, stripped of its per-system art, and deleted again. What is
-/// kept is a few hundred kilobytes of SVG per style, under `_platforms/`, which
-/// is what the console grid actually reads — and once it is there, switching
-/// between styles is instant and needs neither a network nor ES-DE.
+/// Driven by the art table rather than by matching names against the themes
+/// list: the table is keyed by the same `reponame` the list uses, so the two
+/// join directly and the prefix-matching that used to sit here — and that had
+/// to special-case "Immersive (Revisited)" — is gone.
+///
+/// The pictures are raw URLs the webview loads itself, so the whole list can be
+/// looked at without this process fetching a thing.
 #[tauri::command]
-async fn fetch_icons(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
-    let available = theme_remote::list_default().await.map_err(err)?;
-    let dir = state.themes_dir.clone();
+async fn icon_sets(state: State<'_, AppState>) -> CmdResult<Vec<iconsets::IconSetView>> {
+    // Names and authors are nice to have, not required: with no network the
+    // tab still lists every set and still shows its pictures, because the
+    // pictures come from the table.
+    let listed = theme_remote::list_default().await.unwrap_or_default();
+    let slugs: Vec<String> = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
+    };
+    let active = state.icon_set.lock().map_err(err)?.clone();
+    // The consoles actually in this library, under the names ES-DE files them
+    // by — a preview of systems the user does not own would be decoration.
+    let systems = theme::preview_systems(&state.map, &slugs, 6);
+
+    Ok(romm_desktop::iconart::ordered()
+        .into_iter()
+        .map(|(dir, art)| {
+            let entry = listed.iter().find(|t| t.dir_name() == dir);
+            let look = art.best_look().map(|l| l.id.as_str()).unwrap_or("");
+            iconsets::IconSetView {
+                name: entry.map(|t| t.name.clone()).unwrap_or_else(|| iconsets::pretty(&dir)),
+                author: entry.map(|t| t.author.clone()).unwrap_or_default(),
+                variants: entry.map(|t| t.variants.len()).unwrap_or(0),
+                icons: systems.iter().filter_map(|s| art.url(look, s)).collect(),
+                kinds: art.looks.iter().map(|l| l.label.clone()).collect(),
+                wordmarks_only: art.wordmarks_only(),
+                installed: if theme::set_mapping(&state.media_dir, &dir).as_deref()
+                    == Some(art.fingerprint().as_str())
+                {
+                    {
+                        let ids: Vec<String> =
+                            art.looks.iter().map(|l| l.id.clone()).collect();
+                        theme::set_counts(&state.media_dir, &dir, &ids, &slugs)
+                            .iter()
+                            .map(|(_, n)| n)
+                            .sum()
+                    }
+                } else {
+                    // Fetched under a mapping since corrected, so the pictures
+                    // are in the wrong folders. Offer it as a download again
+                    // rather than as something already in hand.
+                    0
+                },
+                active: active == dir,
+                // Recorded here but gone from the published list — still
+                // usable, since the pictures are fetched by path.
+                missing: !listed.is_empty() && entry.is_none(),
+                dir,
+            }
+        })
+        .collect())
+}
+
+/// Download one set's console art, from the Icon sets tab.
+#[tauri::command]
+async fn install_icon_set(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    dir: String,
+) -> CmdResult<String> {
+    fetch_icon_set(&app, &state, &dir).await
+}
+
+/// Fetch a set's console pictures — the pictures themselves, not the theme.
+///
+/// One HTTP request per console per style, a few kilobytes each, straight from
+/// the theme's repository over `raw.githubusercontent.com`. Anonymous: no
+/// account, no token, and not the rate-limited API — `gh` is used to *build*
+/// the art table offline, never to read it. Knowing where the files live means
+/// never asking for the rest of the theme at all.
+///
+/// Shared by the Icon sets tab's Download and Appearance's "Get console
+/// pictures", so the two cannot drift into fetching different things.
+async fn fetch_icon_set(
+    app: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    dir: &str,
+) -> CmdResult<String> {
+    let art = romm_desktop::iconart::of(dir)
+        .ok_or_else(|| format!("no artwork recorded for {dir}"))?;
+    let slugs: Vec<String> = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
+    };
     let http = state
         .client
         .as_ref()
         .map(|c| c.http().clone())
         .unwrap_or(util::http_client(None).map_err(err)?);
-    let slugs: Vec<String> = {
-        let cache = state.cache.lock().map_err(err)?;
-        cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
-    };
 
-    let mut notes = Vec::new();
-    for (i, wanted) in ICON_THEMES.iter().enumerate() {
-        let _ = app.emit(
-            "icons-progress",
-            format!("{} of {} — {wanted}…", i + 1, ICON_THEMES.len()),
-        );
-        let Some(entry) = available.iter().find(|t| t.dir_name().eq_ignore_ascii_case(wanted))
-        else {
-            // A theme that has been renamed or withdrawn is not a failure of
-            // the run: the others still carry art, and abandoning the lot
-            // because one moved would leave a smaller set for no reason.
-            notes.push(format!("{wanted}: no longer in the themes list"));
-            continue;
-        };
-        match theme_remote::install(&http, entry, &dir).await {
-            Ok((path, _)) => {
-                let one = vec![theme::Theme { name: entry.dir_name(), path }];
-                let n = theme::install(&one, &state.map, &slugs, &state.media_dir).unwrap_or(0);
-                // The checkout goes straight back out: a theme is hundreds of
-                // megabytes and the part worth keeping is the SVGs.
-                let _ = theme_remote::remove(&entry.dir_name(), &dir);
-                notes.push(format!("{}: {n} pictures", entry.name));
+    // Start from nothing. A set fetched under an older mapping has pictures in
+    // folders this one does not write, and leaving them means "Hardware" goes
+    // on showing whatever the previous table filed there.
+    let _ = theme::remove_set(&state.media_dir, dir);
+
+    let wanted = theme::esde_names_for(&state.map, &slugs);
+    let total: usize = art.looks.len() * wanted.len();
+    let mut done = 0usize;
+    let mut per_style: Vec<(String, usize)> = Vec::new();
+
+    for look in &art.looks {
+        let out = theme::set_dir(&state.media_dir, dir, &look.id);
+        std::fs::create_dir_all(&out).map_err(err)?;
+        let mut written = 0usize;
+        for (slug, names) in &wanted {
+            done += 1;
+            if done % 8 == 0 {
+                let _ = app.emit("icons-progress", format!("{done} of {total}…"));
             }
-            Err(e) => notes.push(format!("{}: {e}", entry.name)),
+            // A theme files a console under whichever ES-DE name it knows, so
+            // try each rather than assuming our slug is it.
+            for name in names {
+                let Some(url) = art.url(&look.id, name) else { continue };
+                let Ok(resp) = http.get(&url).send().await else { continue };
+                if !resp.status().is_success() {
+                    continue;
+                }
+                let Ok(bytes) = resp.bytes().await else { continue };
+                if std::fs::write(out.join(format!("{slug}.{}", look.ext)), &bytes).is_ok() {
+                    written += 1;
+                }
+                break;
+            }
+        }
+        if written == 0 {
+            // A style folder with nothing in it is one the Select button would
+            // land on and show an empty grid. Better it does not exist: the
+            // rotation offers what is there rather than being padded out.
+            let _ = std::fs::remove_dir_all(&out);
+        } else {
+            per_style.push((look.label.to_lowercase(), written));
         }
     }
 
-    let have: Vec<String> = theme::installed_counts(&state.media_dir, &slugs)
-        .into_iter()
-        .filter(|(_, n)| *n > 0)
-        .map(|(style, n)| format!("{n} {}", style.label().to_lowercase()))
-        .collect();
-    Ok(format!("{}\n{}", have.join(", "), notes.join("\n")))
+    if per_style.is_empty() {
+        let _ = theme::remove_set(&state.media_dir, dir);
+        return Err(format!("{dir}: no console pictures could be fetched"));
+    }
+    // Stamp what this was fetched under, so a corrected table can tell.
+    let _ = theme::write_set_mapping(&state.media_dir, dir, &art.fingerprint());
+    Ok(per_style.iter().map(|(l, n)| format!("{n} {l}")).collect::<Vec<_>>().join(", "))
+}
+
+/// The light gun a game's console has, if any, and whether it is switched on.
+///
+/// Asked once on the way into a launch so the app can say — once — that the
+/// mouse is the trigger. Nothing about a gun is visible otherwise: it writes
+/// binds into the launch config and shows up in the notes, which nobody reads
+/// before the game starts.
+#[tauri::command]
+fn game_lightgun(state: State<'_, AppState>, id: i64) -> CmdResult<Option<(String, String)>> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+
+    let Some(name) = romm_desktop::lightgun::label(&row.platform_slug) else {
+        return Ok(None);
+    };
+    let off = state
+        .lightgun
+        .lock()
+        .map_err(err)?
+        .get(&row.platform_slug)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "off" | "false" | "no" | "0"))
+        .unwrap_or(false);
+    Ok((!off).then(|| (row.platform_slug.clone(), name.to_owned())))
+}
+
+/// Draw the console grid from one downloaded set, or from the shared pool when
+/// `dir` is empty.
+#[tauri::command]
+fn set_icon_set(state: State<'_, AppState>, dir: String) -> CmdResult<String> {
+    romm_desktop::config::set_table_entry("config.toml", "icons", "set", &dir).map_err(err)?;
+    *state.icon_set.lock().map_err(err)? = dir.clone();
+    Ok(if dir.is_empty() {
+        "Back to the shared pictures".to_owned()
+    } else {
+        format!("Console pictures from {dir}")
+    })
+}
+
+/// Delete a downloaded set's art, and stop drawing from it if it was active.
+#[tauri::command]
+fn remove_icon_set(state: State<'_, AppState>, dir: String) -> CmdResult<String> {
+    theme::remove_set(&state.media_dir, &dir).map_err(err)?;
+    let mut active = state.icon_set.lock().map_err(err)?;
+    if *active == dir {
+        active.clear();
+        drop(active);
+        romm_desktop::config::set_table_entry("config.toml", "icons", "set", "").map_err(err)?;
+    }
+    Ok(format!("{dir} removed"))
+}
+
+/// Fetch the console pictures for whichever set is selected.
+///
+/// Was: clone four hard-coded themes, strip their per-system art, delete the
+/// checkouts — a minute of waiting and hundreds of megabytes to keep a few
+/// hundred kilobytes, ignoring the set chosen in Icon sets entirely. The button
+/// and the picker disagreed about what the grid should draw.
+#[tauri::command]
+async fn fetch_icons(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+    let chosen = state.icon_set.lock().map_err(err)?.clone();
+    let set = if chosen.is_empty() { romm_desktop::iconart::DEFAULT_SET.to_owned() } else { chosen.clone() };
+    let summary = fetch_icon_set(&app, &state, &set).await?;
+
+    // Choosing it as well as fetching it. Pressing "Get console pictures" and
+    // seeing nothing change, because the grid was still on the shared pool, is
+    // the confusion this answers.
+    if chosen.is_empty() {
+        romm_desktop::config::set_table_entry("config.toml", "icons", "set", &set).map_err(err)?;
+        *state.icon_set.lock().map_err(err)? = set.clone();
+    }
+    Ok(summary)
 }
 
 #[derive(Serialize)]
@@ -2377,6 +2644,16 @@ fn set_game_core(state: State<'_, AppState>, id: i64, core: String) -> CmdResult
     let mut live = state.core_per_game.lock().map_err(err)?;
     if core.is_empty() {
         live.remove(&key);
+        // Clearing removes the hand-picked core, not the shipped one. For the
+        // arcade romsets in the compiled-in table the platform default is a
+        // core that was *measured* not to run them, so dropping all the way
+        // back to it would be a broken state that returned on the next start
+        // anyway, since load folds the table back in.
+        if let Some(shipped) = romm_desktop::config::arcade_core_map().remove(&key) {
+            let msg = format!("{}: back to {shipped}, the core known to run it", row.name);
+            live.insert(key, shipped);
+            return Ok(msg);
+        }
         return Ok(format!("{}: back to the {} default", row.name, row.platform_slug));
     }
     live.insert(key, core.clone());
@@ -2490,9 +2767,20 @@ fn set_retroarch_root(path: String) -> CmdResult<String> {
     ))
 }
 
+/// Which of the shared pool's three kinds best matches the chosen look.
+///
+/// Only for the pool under `_platforms/<kind>/`, which predates looks and still
+/// has exactly hardware, controllers and wordmarks. A downloaded set is asked
+/// for by look id and never comes through here.
 fn current_style(state: &State<'_, AppState>) -> theme::IconStyle {
-    let i = state.icon_style.load(Ordering::Relaxed) as usize;
-    theme::IconStyle::ALL[i.min(theme::IconStyle::ALL.len() - 1)]
+    let look = state.icon_look.lock().map(|l| l.clone()).unwrap_or_default();
+    if look.starts_with("hardware") {
+        theme::IconStyle::SystemArt
+    } else if look.starts_with("controller") {
+        theme::IconStyle::Controller
+    } else {
+        theme::IconStyle::Logo
+    }
 }
 
 #[derive(Serialize)]
@@ -2504,34 +2792,82 @@ struct IconStyleView {
     selected: bool,
 }
 
-/// The per-system art styles ES-DE themes provide, with coverage counts.
+/// Every look available, with how many consoles each covers.
+///
+/// The chosen set's own looks first, then everything in the shared pool that
+/// still holds pictures. Both, not either: the pool is what earlier versions
+/// downloaded and it can hold looks no set offers — a user with `consolegame`
+/// and `systemart_legacy` on disk had 24 pictures in each, and offering only
+/// the set's two took those out of the rotation without deleting the files.
+///
+/// Nothing here is a fixed list. A theme with nine looks contributes nine.
 #[tauri::command]
 fn icon_styles(state: State<'_, AppState>) -> CmdResult<Vec<IconStyleView>> {
     let slugs: Vec<String> = {
         let cache = state.cache.lock().map_err(err)?;
         cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
     };
-    let cur = current_style(&state);
-    Ok(theme::installed_counts(&state.media_dir, &slugs)
-        .into_iter()
-        .map(|(style, available)| IconStyleView {
-            key: style.key().to_owned(),
-            label: style.label().to_owned(),
+    let set = state.icon_set.lock().map_err(err)?.clone();
+    let cur = state.icon_look.lock().map_err(err)?.clone();
+    let mut out: Vec<IconStyleView> = Vec::new();
+
+    if let Some(art) = romm_desktop::iconart::of(&set) {
+        let ids: Vec<String> = art.looks.iter().map(|l| l.id.clone()).collect();
+        for (look, (_, available)) in
+            art.looks.iter().zip(theme::set_counts(&state.media_dir, &set, &ids, &slugs))
+        {
+            out.push(IconStyleView {
+                key: look.id.clone(),
+                label: look.label.clone(),
+                available,
+                selected: look.id == cur,
+            });
+        }
+    }
+
+    for (key, available) in theme::pool_looks(&state.media_dir, &slugs) {
+        // A pool folder whose name matches a look of the chosen set is the same
+        // choice twice; the set's own wins because it is the one being drawn.
+        if out.iter().any(|v| v.key == key) {
+            continue;
+        }
+        out.push(IconStyleView {
+            label: theme::pool_label(&key),
+            selected: key == cur,
+            key,
             available,
-            selected: style == cur,
-        })
-        .collect())
+        });
+    }
+    Ok(out)
 }
 
+/// Draw the grid in one of the chosen set's looks.
 #[tauri::command]
 fn set_icon_style(state: State<'_, AppState>, key: String) -> CmdResult<String> {
-    let style = theme::IconStyle::parse(&key).ok_or_else(|| format!("unknown style {key}"))?;
-    let idx = theme::IconStyle::ALL.iter().position(|s| *s == style).unwrap_or(0);
-    state.icon_style.store(idx as u8, Ordering::Relaxed);
-    // Persist it, or the grid silently reverts to wordmarks on next launch.
-    romm_desktop::config::set_table_entry("config.toml", "icons", "style", style.key())
-        .map_err(err)?;
-    Ok(style.label().to_owned())
+    let set = state.icon_set.lock().map_err(err)?.clone();
+
+    // A look belonging to the chosen set, or a folder in the shared pool that
+    // actually holds pictures. Anything else is refused rather than stored: an
+    // unknown id is a folder that does not exist, and the grid would go blank.
+    let label = match romm_desktop::iconart::of(&set).and_then(|a| a.look(&key).cloned()) {
+        Some(look) => look.label,
+        None => {
+            let slugs: Vec<String> = {
+                let cache = state.cache.lock().map_err(err)?;
+                cache.platforms().map_err(err)?.into_iter().map(|p| p.fs_slug).collect()
+            };
+            if theme::pool_looks(&state.media_dir, &slugs).iter().any(|(k, _)| *k == key) {
+                theme::pool_label(&key)
+            } else {
+                return Err(format!("{key} is not a look anything on this machine has"));
+            }
+        }
+    };
+
+    *state.icon_look.lock().map_err(err)? = key.clone();
+    // Persist it, or the grid silently reverts on next launch.
+    romm_desktop::config::set_table_entry("config.toml", "icons", "style", &key).map_err(err)?;
+    Ok(label)
 }
 
 /// How many things sit alongside the app, ignoring what the app itself puts
@@ -2823,6 +3159,18 @@ fn main() {
         n => eprintln!("cleared {n} cover(s) fetched from RomM; artwork now comes from ES-DE"),
     }
 
+    // Icon sets fetched under a superseded art mapping, for the same reason:
+    // the pictures are on disk in folders the current table does not use, so
+    // the grid keeps drawing a controller where it says "Hardware".
+    let fingerprints: std::collections::BTreeMap<String, String> =
+        romm_desktop::iconart::table()
+            .into_iter()
+            .map(|(name, art)| (name, art.fingerprint()))
+            .collect();
+    for set in theme::drop_stale_sets(&media_dir, &fingerprints) {
+        eprintln!("re-fetch needed for icon set {set}: its pictures predate a corrected mapping");
+    }
+
     tauri::Builder::default()
         // Native folder picker for the RetroArch location setting.
         .plugin(tauri_plugin_dialog::init())
@@ -2851,11 +3199,8 @@ fn main() {
             // From config, not hardcoded: index 0 is `logo`, which is ES-DE's
             // wordmark art — a picture of the system's name. The grid wants
             // hardware, and the user's choice has to survive a restart.
-            icon_style: AtomicU8::new(
-                theme::IconStyle::parse(&cfg.icons.style)
-                    .and_then(|s| theme::IconStyle::ALL.iter().position(|x| *x == s))
-                    .unwrap_or(3) as u8,
-            ),
+            icon_look: Mutex::new(cfg.icons.style.clone()),
+            icon_set: Mutex::new(cfg.icons.set.clone()),
             achievements: cfg.achievements.settings(),
             auto_sync: cfg.saves.auto_sync,
             pending_conflicts: Mutex::new(Vec::new()),
@@ -2867,6 +3212,7 @@ fn main() {
             recent_games,
             game_displays,
             game_states,
+            verify_achievements,
             delete_state,
             confirm_delete_state,
             play_history,
@@ -2892,6 +3238,11 @@ fn main() {
             fetch_icons,
             icon_styles,
             set_icon_style,
+            game_lightgun,
+            icon_sets,
+            install_icon_set,
+            set_icon_set,
+            remove_icon_set,
             set_retroarch_root,
             systems,
             sync_saves,

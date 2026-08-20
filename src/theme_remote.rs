@@ -71,8 +71,17 @@ impl RemoteTheme {
     /// Hosted on gitlab.com, not the RomM server — previewing a theme is
     /// inherently a network operation, since the next step clones it.
     pub fn screenshot_url(&self) -> Option<String> {
-        let s = self.screenshots.first()?;
-        (!s.image.is_empty()).then(|| format!("{SCREENSHOT_BASE}{}", s.image))
+        self.screenshot_urls().into_iter().next()
+    }
+
+    /// Every screenshot the author published, for a preview that shows more
+    /// than one screen of a theme.
+    pub fn screenshot_urls(&self) -> Vec<String> {
+        self.screenshots
+            .iter()
+            .filter(|s| !s.image.is_empty())
+            .map(|s| format!("{SCREENSHOT_BASE}{}", s.image))
+            .collect()
     }
 
     /// Loose match on name or reponame, for CLI lookup.

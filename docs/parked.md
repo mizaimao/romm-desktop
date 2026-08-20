@@ -3,7 +3,62 @@
 Still worth doing, deliberately not being done now. In the order I would take
 them. `handover.md` is the wider brief; this is just the queue.
 
-## 1. Push a Windows build and find out what is broken
+## 1. First-run onboarding
+
+Asked for on 2026-08-19, deliberately deferred:
+
+> I have an idea of app on-boarding, to tell the users what they need to grab
+> and to start using the app. This would be more meaningful if we have more
+> users so deferr this and log it somewhere so we can revisit in the future.
+
+Worth doing when there is a second user. The app currently assumes somebody
+already knows four things that nothing on screen says:
+
+* a `config.toml` with a server url and a token has to exist before anything
+  works — `config.example.toml` documents it, but only if you find the file
+* `Sync library` has to be run once or the grid is empty, which reads as broken
+* console pictures need `Get console pictures` before the grid has any art
+* the light gun is a per-console tick in Emulators, and does nothing until the
+  core is told a gun exists — the one that prompted this, and now at least
+  explained in place
+
+The shape it wants is probably a panel on an empty library rather than a wizard:
+each step says what it is for, and disappears once it is satisfied.
+
+## 2. An ES-DE icon-set preview tab
+
+Asked for on 2026-08-17, in these words:
+
+> Add the following ES-DE icon sets. Actually, create a tab inside settings
+> dedicated for the ES-DE icons set preview. Add these: first CODYWHEEL,
+> DIAMOND, ELEGANCE, ELEMENTERIAL, ICONIC, IMMERSIVE, MERINGUE, RAZOR, RETRO
+> MEGA. Later on we add more and create previews for each of them so that the
+> users can preview before decide which one to download and apply.
+
+Nine sets to start with, a settings tab of their own, and a preview of each one
+*before* downloading — that last part is the point, and it is what the current
+[icons] `style` control does not do: it offers five names and you find out what
+they look like by picking one.
+
+What exists to build on: `src/theme.rs` has `IconStyle` with five variants and
+`src/theme_remote.rs` already fetches artwork out of four ES-DE themes and
+throws the themes away. The fetch machinery is there; the set list, the tab and
+the previews are not.
+
+## 3. Per-backdrop controls
+
+Parked mid-session with "we dedicate a session for controls-per-backdrop".
+Directions for Sweep and the other directional styles, and per-style slider
+ranges — Motion means something different to Static than it does to Blobs, and
+one shared range serves neither well.
+
+## 4. Japanese titles in the voted lists
+
+`sfc` and `famicom` cannot match against the published rankings until the raw
+lists in `data/community/raw/` carry `English Title | 日本語タイトル` pairs.
+`norm()` handles both scripts now; the source lists only carry one.
+
+## 5. Push a Windows build and find out what is broken
 
 Everything since 0.1.12 has run only on macOS: save states, play history,
 sorting, four controllers, the shader fix, the window placement, the whole
@@ -18,49 +73,49 @@ arithmetic that put the game window at the right-hand edge of a scaled macOS
 display. Windows display scaling at 125% or 150% is the same shape of problem
 and is the default on most laptops.
 
-## 2. `install-retroarch` in the GUI
+## 6. `install-retroarch` in the GUI
 
 It exists as a CLI subcommand and has zero references in `src-tauri`. A fresh
 machine cannot set itself up, which is the one step that still assumes someone
 did something by hand first.
 
-## 3. A "what is missing" page, built from data already collected
+## 7. A "what is missing" page, built from data already collected
 
 `docs/` holds 2,504 arcade probe verdicts, the missing-ROM list, label
 mismatches, BIOS coverage and 125 core reassignments. None of it is visible in
 the app. This is a page over files that already exist, not new work.
 
-## 4. Save states from other machines
+## 8. Save states from other machines
 
 States sync with the server, but `states::shelf` reads local directories only.
 A state made on the handheld is not offerable here until something pulls it
 down.
 
-## 5. Per-game shader override
+## 9. Per-game shader override
 
 The core is choosable per game; the shader is per platform only. The machinery
 (`shader_overrides`) is already threaded through the launch path — this is a
 control, not a feature.
 
-## 6. Per-game aspect for vertical arcade games
+## 10. Per-game aspect for vertical arcade games
 
 Arcade gets a 4:3 window and keeps whatever shape the game reports, so a
 vertical shooter is pillarboxed. The probe logs recorded each game's geometry,
 so the real shape could come from data rather than a guess.
 
-## 7. Paging on the controller
+## 11. Paging on the controller
 
 Lost when the stick clicks became sorting. PageUp/PageDown still work on the
 keyboard.
 
-## 8. ScreenScraper developer ID
+## 12. ScreenScraper developer ID
 
 Requested, never arrived. Scraping still goes through the server's own account.
 
-## 9. Windowing the middle column
+## 13. Windowing the middle column
 
 The arcade list is 2,506 games and every one of them is inserted into the
-document on each platform switch. The per-row listeners are gone — one
+document on each platform switch. The oldest performance item here. The per-row listeners are gone — one
 delegated listener on the container serves them all and survives a redraw,
 which took the redraw from 53ms to 34ms in jsdom — but the nodes themselves are
 the remaining cost and no amount of listener work touches them.
@@ -70,14 +125,14 @@ a real change: the cursor, the "remember where this tab was" scroll position,
 the pad navigation and the lazy cover observer all currently assume every row
 exists.
 
-## 10. The two rough edges left in three columns
+## 14. The two rough edges left in three columns
 
 Coming back up from a collection's games still uses the one-pane trail, and
 Continue playing is only drawn in one of the two panes. Neither is wrong on
 screen often enough to have been worth stopping for, and both want the same
 answer: what "back" means in a window where nothing is ever replaced.
 
-## 11. RetroArch's per-core overrides, at the source
+## 15. RetroArch's per-core overrides, at the source
 
 `config/<Core>/<Core>.cfg` is loaded after everything passed with
 `--appendconfig`, so anything in there wins over what a launch was asked for.
@@ -91,8 +146,3 @@ clean them up: they are the user's files, in the user's RetroArch directory,
 and a frontend that edits those has broken the promise the README makes. A
 "three files are fighting your settings — remove them?" prompt would be the
 honest version, and it is not built.
-
-## 12. Windowing the middle column, still
-
-Unchanged from 9 and now the oldest performance item: 2,506 rows are still
-inserted on every platform switch.

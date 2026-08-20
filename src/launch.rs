@@ -49,6 +49,8 @@ pub struct Request<'a> {
     pub window_decorations: bool,
     /// Where auto-fire lives, if anywhere. See RetroArch::autofire.
     pub autofire: crate::tweaks::AutoFire,
+    /// Write a save state when the game exits. Off unless asked for.
+    pub save_state_on_exit: bool,
     /// Shots a second, when it is on.
     pub autofire_hz: u32,
     /// Bind players 2-4 like player 1. On by default: the second pad on a desk
@@ -262,6 +264,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
                 mirror_players: req.mirror_players,
                 autofire: req.autofire,
                 autofire_hz: req.autofire_hz,
+                save_state_on_exit: req.save_state_on_exit,
             },
         )
         .ok();
@@ -346,27 +349,67 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
 /// config table as the core and shader choices, which are strings. Anything
 /// that is not an explicit yes counts as off — a half-written value should
 /// leave port 2 as a pad, not turn it into a gun.
+/// Whether the gun goes in its port for this launch.
+///
+/// On unless explicitly switched off, which is the opposite of how this
+/// started. Off-by-default was the cautious choice — the gun takes player
+/// two's port on the NES, SNES and Mega Drive — but it made the mouse useless
+/// in every gun game until you found a per-console tick in Settings and knew
+/// what it was for. Nobody found it. A console whose gun games do not work is
+/// a worse default than a console whose two-player games need a switch turned
+/// off, because the first looks broken and the second is at least visible: the
+/// launch notes say the port is a gun, and the app says so on first launch.
 fn gun_enabled(map: &BTreeMap<String, String>, platform: &str) -> bool {
-    map.get(platform)
-        .map(|v| matches!(v.trim(), "on" | "true" | "yes" | "1"))
-        .unwrap_or(false)
+    // A console with no gun is never enabled, whatever a stale config says.
+    // `config_lines` guards this too, but a function called `gun_enabled`
+    // answering "yes" for the Game Boy is a trap for the next caller.
+    if !crate::lightgun::supported(platform) {
+        return false;
+    }
+    match map.get(platform).map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) => !matches!(v.as_str(), "off" | "false" | "no" | "0"),
+        None => true,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The gun is in its port unless somebody turned it off. A console with no
+    /// gun is unaffected either way.
     #[test]
-    fn the_light_gun_switch_is_off_unless_it_is_explicitly_on() {
+    fn the_light_gun_is_on_unless_it_is_explicitly_off() {
         let mut map = BTreeMap::new();
-        assert!(!gun_enabled(&map, "nes"));
-        map.insert("nes".to_owned(), "off".to_owned());
-        assert!(!gun_enabled(&map, "nes"));
-        // A value written by an older build, or by hand, that is neither.
-        map.insert("nes".to_owned(), String::new());
-        assert!(!gun_enabled(&map, "nes"));
+        assert!(gun_enabled(&map, "nes"), "unset means on for a console with a gun");
+        assert!(!gun_enabled(&map, "gb"), "and stays off where there is no gun");
+        for off in ["off", "false", "no", "0", "OFF"] {
+            map.insert("nes".to_owned(), off.to_owned());
+            assert!(!gun_enabled(&map, "nes"), "{off} must turn it off");
+        }
         map.insert("nes".to_owned(), "on".to_owned());
         assert!(gun_enabled(&map, "nes"));
+    }
+
+    /// The switch used to be off-by-default and is now on-by-default, so the
+    /// only value that has to keep meaning exactly what it did is `off`. A
+    /// config written by an older build says `on` for the consoles somebody
+    /// chose and nothing for the rest, and both now read as on — which is the
+    /// intended change, not a regression.
+    #[test]
+    fn only_off_survives_from_the_old_switch() {
+        let mut map = BTreeMap::new();
+        map.insert("nes".to_owned(), "off".to_owned());
+        assert!(!gun_enabled(&map, "nes"), "an explicit off is still off");
+
+        // Neither word. Ambiguous, and the safe reading is the default: a gun
+        // that works, with a launch note saying the port is a gun.
+        map.insert("nes".to_owned(), String::new());
+        assert!(gun_enabled(&map, "nes"));
+
+        // A console with no gun ignores the switch whatever it says.
+        map.insert("gb".to_owned(), "on".to_owned());
+        assert!(!gun_enabled(&map, "gb"));
     }
 
     fn scratch(name: &str) -> PathBuf {

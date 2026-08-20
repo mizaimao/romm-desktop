@@ -180,6 +180,8 @@ pub struct Input<'a> {
     pub autofire: crate::tweaks::AutoFire,
     /// Shots a second, when auto-fire is on.
     pub autofire_hz: u32,
+    /// Write a save state when the game exits.
+    pub save_state_on_exit: bool,
 }
 
 impl Default for Input<'_> {
@@ -189,6 +191,7 @@ impl Default for Input<'_> {
             mirror_players: true,
             autofire: crate::tweaks::AutoFire::Off,
             autofire_hz: 5,
+            save_state_on_exit: false,
         }
     }
 }
@@ -619,7 +622,7 @@ input_player2_gun_start_mbtn = \"3\"
         extra: &str,
         input: Input<'_>,
     ) -> Result<PathBuf> {
-        let Input { pad, mirror_players, autofire, autofire_hz } = input;
+        let Input { pad, mirror_players, autofire, autofire_hz, save_state_on_exit } = input;
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
@@ -627,6 +630,14 @@ input_player2_gun_start_mbtn = \"3\"
         body.push_str(&self.hotkeys(pad));
         body.push_str(&self.players(pad, mirror_players));
         body.push_str(&self.autofire(pad, autofire, autofire_hz));
+        // Only ever written when asked for. `savestate_auto_save` is one of
+        // RetroArch's stickier settings — it writes to the *auto* slot, which
+        // is the slot this app resumes from, so leaving it on means a game you
+        // glanced at overwrites where you actually stopped.
+        body.push_str(&format!(
+            "\n# ---- Save state on exit ----\nsavestate_auto_save = \"{}\"\n",
+            if save_state_on_exit { "true" } else { "false" }
+        ));
         body.push_str(extra);
 
         if let Some(user) = user_config {
@@ -1514,6 +1525,36 @@ input_r2_axis = "+5"
         );
         assert!(out.contains("input_player1_turbo"), "no modifier bound: {out}");
         assert!(out.contains("input_turbo_mode = \"3\""), "not the hold mode: {out}");
+    }
+
+    /// Off unless asked for, and written either way.
+    ///
+    /// `savestate_auto_save` writes to RetroArch's *auto* slot, which is the
+    /// slot Continue playing resumes from — so leaving it on means a game you
+    /// glanced at overwrites where you actually stopped. Written explicitly as
+    /// "false" rather than omitted, because the user's own retroarch.cfg may
+    /// have it on and silence would let that through.
+    #[test]
+    fn a_state_on_exit_is_written_only_when_it_was_asked_for() {
+        let dir = scratch("save-on-exit");
+        with_autoconfig(&dir);
+        let line = |on: bool| {
+            fake(&dir)
+                .write_overrides_full(
+                    &dir.join("out"),
+                    None,
+                    "",
+                    crate::retroarch::Input { save_state_on_exit: on, ..Default::default() },
+                )
+                .map(|p| std::fs::read_to_string(p).unwrap())
+                .unwrap()
+                .lines()
+                .find(|l| l.starts_with("savestate_auto_save"))
+                .map(str::to_owned)
+                .expect("the key was not written at all")
+        };
+        assert!(line(true).contains("true"), "asked for and not written");
+        assert!(line(false).contains("false"), "not asked for and not disabled");
     }
 
     /// nowhere left to fire a single shot from, is a game you cannot aim in.

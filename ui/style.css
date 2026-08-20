@@ -179,8 +179,7 @@ header h1 {
 /* Take offline belongs in this list: left out of it, it kept the generic
    button styling — a filled panel with a border — and sat in the tab row
    next to the preview toggle looking like a different application's. */
-#systems-btn, #settings-btn, #sidebar-btn, #layout-btn, #themes-btn, #collections-btn,
-#grab-btn {
+#settings-btn, #sidebar-btn, #layout-btn, #grab-btn {
   background: transparent;
   color: color-mix(in srgb, var(--text) 80%, transparent);
   border: 1px solid transparent;
@@ -196,8 +195,7 @@ header h1 {
 /* Hover lights the label rather than drawing a panel behind it — the same
    signal the tab strip uses, so the two rows behave alike. A fill here was the
    last surface left in the top bar. */
-#systems-btn:hover, #settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #themes-btn:hover,
-#grab-btn:hover {
+#settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #grab-btn:hover {
   background: transparent;
   color: color-mix(in srgb, var(--glass) 30%, white 70%);
   /* Two shadows: a tight bright core and a wide soft halo. One alone reads as
@@ -207,18 +205,6 @@ header h1 {
     0 0 22px color-mix(in srgb, var(--glass) 65%, transparent);
 }
 #settings-btn { padding: 6px 10px; }
-
-/* A button that is on is lit, not filled — the same signal the tab strip uses,
-   so the two rows agree with each other. */
-#systems-btn.active, #themes-btn.active, #collections-btn.active {
-  background: transparent;
-  border-color: transparent;
-  font-weight: 700;
-  color: color-mix(in srgb, var(--glass) 25%, white 75%);
-  text-shadow:
-    0 0 7px color-mix(in srgb, var(--glass) 95%, transparent),
-    0 0 26px color-mix(in srgb, var(--glass) 75%, transparent);
-}
 
 #zoom-wrap { display: flex; align-items: center; }
 #zoom {
@@ -388,7 +374,6 @@ main {
   padding: 0 6px;
 }
 body.has-pad #tabbar .bumper { display: inline; }
-
 
 #list {
   flex: 1;
@@ -925,19 +910,28 @@ progress { width: 100%; height: 6px; margin-top: 10px; }
 .empty { color: var(--dim); padding: 40px; text-align: center; }
 
 footer#toast {
+  /* Bigger, because this is the only thing the app says out loud. It carries
+     launch failures, BIOS warnings, sync results and login answers, and at
+     13px in a 70%-wide strip it read as a status line rather than as a message
+     — the sort of thing the eye skips on a 1500px window. Roughly a third
+     larger in every dimension, and glass rather than a flat panel so it
+     belongs to the same window as everything else. */
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  bottom: 24px;
   transform: translateX(-50%);
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 13px;
-  max-width: 70%;
-  box-shadow: 0 4px 18px rgba(0,0,0,.3);
+  background: color-mix(in srgb, var(--glass) 16%, var(--panel-2));
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid color-mix(in srgb, var(--glass) 30%, transparent);
+  border-radius: 12px;
+  padding: 14px 22px;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 500;
+  max-width: min(760px, 80%);
+  box-shadow: 0 10px 34px rgb(0 0 0 / 0.45);
 }
-
 
 /* ------------------------------------------------------------------ */
 /* Lightbox — full-size artwork over a dimmed backdrop, in-window.     */
@@ -1063,7 +1057,6 @@ footer#toast {
 #detail img.cover,
 #detail video { cursor: zoom-in; }
 
-
 /* Keyboard shortcut sheet (press ?) */
 #shortcuts {
   position: fixed;
@@ -1101,88 +1094,7 @@ footer#toast {
 #shortcuts dd { margin: 0; color: var(--dim); }
 #shortcuts p { margin: 0; color: var(--dim); font-size: 11px; }
 
-
 /* Settings pane */
-#settings {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(10, 12, 15, .7);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-#settings .set-panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  width: 440px;
-  max-height: 78vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
-}
-#settings header {
-  display: flex;
-  align-items: center;
-  padding: 16px 20px 10px;
-}
-#settings h3 { margin: 0; font-size: 15px; flex: 1; }
-#settings .set-close {
-  background: none;
-  border: none;
-  color: var(--dim);
-  font-size: 20px;
-  cursor: pointer;
-  line-height: 1;
-}
-#settings .set-close:hover { color: var(--text); }
-#settings .hint { margin: 0 20px 12px; color: var(--dim); font-size: 11.5px; }
-#settings .set-rows { overflow-y: auto; padding: 0 20px; }
-#settings .set-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 5px 0;
-}
-#settings .set-label { flex: 1; font-size: 13px; }
-#settings .set-key {
-  min-width: 118px;
-  padding: 5px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
-  cursor: pointer;
-}
-#settings .set-key:hover { border-color: var(--accent); }
-#settings .set-key.unset { color: var(--dim); }
-#settings .set-key.capturing {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-#settings footer {
-  padding: 12px 20px 16px;
-  border-top: 1px solid var(--line);
-  margin-top: 10px;
-}
-#settings .set-reset {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-#settings .set-reset:hover { border-color: var(--accent); }
-
-
 /* Systems table */
 .systbl {
   width: 100%;
@@ -1844,9 +1756,6 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   box-shadow: inset 1px 0 0 rgb(var(--pick) / 0.55), inset 6px 0 22px -8px rgb(var(--pick) / 0.35);
 }
 
-
-
-
 /* ---- Take offline -------------------------------------------------------
    The estimate is the reason this dialog exists, so it is the largest thing in
    it and it moves the moment a box is ticked. A person cannot otherwise tell
@@ -2386,9 +2295,6 @@ body.columns #consoles .card.sel {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-
-
-
 /* Outside a column there is no filter and nothing to stick to — just the
    button, sitting above the grid. */
 .pickbar {
@@ -2675,7 +2581,6 @@ code {
   background: color-mix(in srgb, var(--glass) 34%, transparent);
 }
 
-
 /* ---- Continue playing, flattened ----------------------------------------
    The one row where the frame earns nothing. These are five wide screenshots
    in a horizontal strip, not a grid — there is no column to line up with and
@@ -2763,7 +2668,6 @@ code {
   box-shadow: 0 0 24px color-mix(in srgb, var(--glass) 70%, transparent);
 }
 
-
 /* The platform pane's Take offline, styled as the one in the top bar rather
    than as a form button. It was a bare `<button>` — a grey slab spanning the
    pane — while the identical action in the header is a label with an icon and
@@ -2790,7 +2694,6 @@ code {
     0 0 6px color-mix(in srgb, var(--glass) 90%, transparent),
     0 0 22px color-mix(in srgb, var(--glass) 65%, transparent);
 }
-
 
 /* ---- Collection card artwork --------------------------------------------
    Four arrangements of the same member covers. `.logo.mosaic` is the box; the
@@ -2827,3 +2730,17 @@ code {
 /* Nothing at all: the box collapses so the name moves up rather than sitting
    under an empty rectangle. */
 .card .logo.mosaic.none { display: none; }
+
+
+/* The "do not show again" line in the light gun notice. Left-aligned with the
+   text above it rather than centred with the button, so it reads as a choice
+   about the message and not a second action. */
+#conflict-overlay .gun-again {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0 14px;
+  font-size: 12px;
+  opacity: 0.7;
+  cursor: pointer;
+}

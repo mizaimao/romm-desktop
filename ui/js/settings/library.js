@@ -42,11 +42,9 @@ export const html = `      <h4>Library</h4>
         <label>Missing artwork</label>
         <div class="ctl"><button class="set-scrape">Find missing artwork</button></div>
       </div>
-      <p class="hint">For games ES-DE never scraped. Asks your RomM server to
-        identify each one and fetches the box art ScreenScraper has for it —
-        your server already holds the ScreenScraper account, so this needs no
-        login and no SD card. Slow on purpose: it is one game at a time so the
-        server's allowance is not spent in a burst.</p>
+      <p class="hint">For games ES-DE never scraped. Your server identifies each one and
+      fetches its box art, so no login is needed here. One game at a time, so
+      its allowance is not spent in a burst.</p>
       <p class="hint set-scrape-status"></p>`;
 
 /// The tab that fetches things: the game index, BIOS, and artwork the

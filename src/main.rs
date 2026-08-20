@@ -146,6 +146,7 @@ async fn cmd_launch(
         // The same settings the window uses, so a dry run writes the same file
         // a real launch does.
         autofire: romm_desktop::tweaks::AutoFire::parse(&cfg.retroarch.autofire),
+        save_state_on_exit: cfg.retroarch.save_state_on_exit,
         autofire_hz: cfg.retroarch.autofire_hz,
         window_decorations: true,
         fit_window: true,

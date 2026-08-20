@@ -3,7 +3,13 @@
 /library/
 
 # Local credentials and persisted device identity. See config.example.toml.
+# The backups too: swapping the RetroAchievements password for a token left a
+# `config.toml.bak-*` holding the password in plain text, and `/config.toml`
+# alone does not match it. A credential is not safe because the file it usually
+# lives in is ignored.
 /config.toml
+/config.toml.*
+/config.toml.bak*
 /state.json
 # What each save state looked like at the last sync — local bookkeeping.
 /states-seen.json
@@ -94,3 +100,12 @@ backups/
 /remove-your-old-games.sh
 /remove-junk.sh
 /remove-veronica.sh
+
+# Console firmware images downloaded for the handheld work — hundreds of
+# megabytes of somebody else's build, and not ours to redistribute.
+/cfw/
+
+# Working lists for media transfers: generated, consumed, and regenerated.
+/new-media.txt
+/remaining-media.txt
+/remaining-arcade.txt

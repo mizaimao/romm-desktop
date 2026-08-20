@@ -405,6 +405,19 @@ pub fn drop_romm_covers(media_root: &Path) -> usize {
 /// second scrape from a different source, and a library that shows one game's
 /// art from one place and the next game's from another is exactly the
 /// inconsistency this replaces.
+/// Whatever is already on this machine, without asking the server anything.
+///
+/// The network half of `ensure_art` is what makes a grid of collection cards
+/// take a second or two to fill: the cards are drawn at once and then every
+/// one that has no cached art waits on its own request. This answers from the
+/// filesystem alone, so a caller can paint what it has immediately and go back
+/// for the rest afterwards.
+pub fn local_art(media_root: &Path, platform: &str, stem: &str, preferred: &str) -> Option<PathBuf> {
+    art_chain(preferred)
+        .into_iter()
+        .find_map(|kind| find_local(media_root, platform, stem, kind))
+}
+
 pub async fn ensure_art(
     client: Option<&api::Client>,
     media_root: &Path,

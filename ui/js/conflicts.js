@@ -223,3 +223,130 @@ export function askOffline(reason) {
     sides()[1].focus();
   });
 }
+
+
+/// Pull the file list out of a launch refused for a missing BIOS.
+export function biosFrom(err) {
+  const text = typeof err === "string" ? err : String(err?.message ?? err ?? "");
+  const at = text.indexOf("BIOS_MISSING:");
+  return at === -1 ? null : text.slice(at + "BIOS_MISSING:".length).trim() || "unknown file";
+}
+
+/// "This console needs a BIOS you have not got — play anyway?"
+///
+/// The app fetches BIOS files by itself on the way into every game, so this is
+/// only ever the case it cannot fix: a file the server has not got either.
+/// Asked rather than refused outright, because a core that declares a BIOS
+/// does not always need one — several run fine without, and some run with
+/// reduced compatibility rather than not at all. Refusing would stop a game
+/// that would have worked.
+/// Remembered dismissal for the light gun notice.
+const GUN_SEEN = "lightgunNoticeSeen";
+
+/// Say once that the mouse is the gun, and how to stop it being one.
+///
+/// Shown on the first launch of a game on a console that has a gun, because
+/// that is the only moment the information is wanted and the only moment
+/// anybody would read it. The switch is on by default now: a gun game whose
+/// trigger does nothing looks like a broken emulator, and the setting that
+/// fixed it was a tick in a table three tabs away that said nothing about what
+/// it did.
+///
+/// The cost is the other direction — on the NES, SNES and Mega Drive the gun
+/// occupies player two's port — so this names the console it is about and says
+/// where to turn it off. Resolves immediately once dismissed for good.
+export function noteLightGun(platform, gunName) {
+  if (localStorage.getItem(GUN_SEEN) === "yes") return Promise.resolve();
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "conflict-overlay";
+    overlay.innerHTML = `<div class="conflict-box">
+        <header><span class="icon icon-info-on"></span><h2>The mouse is your light gun</h2></header>
+        <p class="lead">${escape(gunName)} games on ${escape(platform)} are ready
+          to play: <b>aim with the mouse</b>, left button fires, right button
+          shoots off-screen to reload.</p>
+        <p class="note">This is on by default so gun games work without setting
+          anything up. The catch: the gun sits in the <b>second controller
+          port</b> on this console, so while it is on, a second pad will not
+          work for two-player games.</p>
+        <p class="why">Turn it off per console in Settings → Emulators, in the
+          Light gun column.</p>
+        <label class="gun-again"><input type="checkbox" /> Do not show this again</label>
+        <div class="sides">
+          <button class="side" data-go="yes"><span class="who">Got it</span>
+            <span class="when">start the game</span></button>
+        </div>
+      </div>`;
+
+    const finish = () => {
+      if (overlay.querySelector(".gun-again input")?.checked) {
+        localStorage.setItem(GUN_SEEN, "yes");
+      }
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      resolve();
+    };
+    const onKey = (ev) => {
+      // Anything that means "go" — this dialog has nothing to decline.
+      if (["Escape", "Enter", " "].includes(ev.key)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        finish();
+      }
+    };
+    overlay.querySelector("[data-go]")?.addEventListener("click", finish);
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    overlay.querySelector("[data-go]")?.focus();
+  });
+}
+
+export function askBios(detail) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.id = "conflict-overlay";
+    overlay.innerHTML = `<div class="conflict-box">
+        <header><span class="icon icon-info-on"></span><h2>A BIOS file is missing</h2></header>
+        <p class="lead">This console needs a BIOS file that is not on this
+          machine, and the server does not have it either.</p>
+        <p class="why">${escape(detail)}</p>
+        <p class="note">Games usually show a black screen without it. Some cores
+          run anyway with reduced compatibility, so this is worth a try before
+          going looking for the file.</p>
+        <div class="sides">
+          <button class="side" data-go="yes"><span class="who">Play anyway</span>
+            <span class="when">may show a black screen</span></button>
+          <button class="side" data-go="no"><span class="who">Cancel</span>
+            <span class="when">do not launch</span></button>
+        </div>
+      </div>`;
+
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      resolve(ok);
+    };
+    const sides = () => [...overlay.querySelectorAll("[data-go]")];
+    let at = 0;
+    const paint = () => sides().forEach((b, i) => b.classList.toggle("sel", i === at));
+    const onKey = (ev) => {
+      if (ev.key === "Escape") return finish(false);
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+        at = at === 0 ? 1 : 0;
+        paint();
+        ev.preventDefault();
+      }
+      if (ev.key === "Enter") finish(sides()[at]?.dataset.go === "yes");
+    };
+    overlay.addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-go]");
+      if (b) finish(b.dataset.go === "yes");
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    paint();
+  });
+}

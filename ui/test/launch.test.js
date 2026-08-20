@@ -83,8 +83,12 @@ beforeEach(() => {
 describe("launching says what it is doing", () => {
   test("the phases the backend reports reach the screen", async () => {
     await mod.launch(7);
-    assert.equal(invoked.length, 1);
-    assert.equal(invoked[0].cmd, "launch_rom");
+    // Two: the gun question, then the launch. A console with a light gun gets
+    // a one-time notice before the game starts, so the launch path asks first.
+    assert.deepEqual(
+      invoked.map((i) => i.cmd),
+      ["game_lightgun", "launch_rom"],
+    );
     assert.match(
       dom.window.document.getElementById("toast").textContent,
       /played for 3 minutes/,

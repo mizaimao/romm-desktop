@@ -51,6 +51,17 @@ export const html = `      <h4>RetroArch</h4>
         </div>
       </div>
       <div class="srow">
+        <label>Login</label>
+        <div class="ctl">
+          <button class="ra-check">Check login</button>
+          <span class="ra-state dim">not checked</span>
+        </div>
+      </div>
+      <p class="hint">Checks the username and token above against
+        RetroAchievements, through the same login RetroArch uses — so a tick
+        means the login the emulator will attempt, not merely that the account
+        exists.</p>
+      <div class="srow">
         <label>Hardcore mode</label>
         <div class="ctl"><button data-field="achievements_hardcore">…</button></div>
       </div>
@@ -62,10 +73,8 @@ export const html = `      <h4>RetroArch</h4>
         <label>Ask before deleting</label>
         <div class="ctl"><button data-field="confirm_delete_state">…</button></div>
       </div>
-      <p class="hint">Off by default. Clearing out old states is done several at
-        a time, and a dialog for each turns a tidy-up into a chore. Either way a
-        copy goes to the backups folder beside the library — a save state cannot
-        be downloaded again, so deleting one is always undoable by hand.</p>
+      <p class="hint">Off by default — clearing old states is done several at a time. A copy
+      always goes to the backups folder, so deleting one is undoable by hand.</p>
 
       <h4>ScreenScraper</h4>
       <div class="srow">
@@ -81,6 +90,7 @@ export const html = `      <h4>RetroArch</h4>
 `;
 
 export function wire(box) {
+  wireAchievementCheck(box);
   // RetroArch location. The backend verifies the path before writing it to
   // config.toml, so an invalid one is reported here rather than failing later
   // at launch time.
@@ -139,4 +149,43 @@ export function wire(box) {
   // config.toml fields. Loaded once and written back on change, through a
   // targeted TOML edit so the hand-written comments in that file survive.
   wireConfigFields(box);
+}
+
+
+/// Ask RetroAchievements whether the login works, and say so plainly.
+///
+/// Three states rather than two. "Not checked" is honest — the app has not
+/// asked — and matters because the other two both make a claim: a tick says
+/// the emulator's own login will succeed, and a cross names the reason the
+/// server gave. Blurring "unknown" into "bad" is how an indicator becomes
+/// something people learn to ignore.
+export function wireAchievementCheck(box) {
+  const btn = box.querySelector(".ra-check");
+  const out = box.querySelector(".ra-state");
+  if (!btn || !out) return;
+
+  const paint = (cls, text) => {
+    out.className = `ra-state ${cls}`;
+    out.textContent = text;
+  };
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    paint("dim", "checking…");
+    try {
+      const v = await invoke("verify_achievements");
+      if (v.ok) {
+        paint("ok", `token accepted for ${v.user}`);
+        toast("RetroAchievements login confirmed");
+      } else {
+        paint("bad", v.error || "rejected");
+        toast(`RetroAchievements: ${v.error || "login rejected"}`, 7000);
+      }
+    } catch (e) {
+      paint("bad", String(e));
+      toast(`Could not check: ${e}`, 7000);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }

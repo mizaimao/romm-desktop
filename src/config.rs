@@ -51,12 +51,9 @@ pub struct AchievementsCfg {
     #[serde(default)]
     pub username: Option<String>,
     /// Login token — what RetroArch stores after a successful login, and what
-    /// it prefers thereafter. Either this or `password`.
+    /// it prefers thereafter. The only credential this app stores.
     #[serde(default)]
     pub token: Option<String>,
-    /// Account password, exchanged for a token by RetroArch on first use.
-    #[serde(default)]
-    pub password: Option<String>,
     /// Disables save states, fast-forward and rewind — four of the gamepad
     /// hotkeys this app binds.
     #[serde(default)]
@@ -71,7 +68,6 @@ impl AchievementsCfg {
             enabled: self.enabled,
             username: self.username.clone(),
             token: self.token.clone(),
-            password: self.password.clone(),
             hardcore: self.hardcore,
             test_unofficial: self.test_unofficial,
         }
@@ -202,8 +198,29 @@ pub struct CoresCfg {
     /// Keyed by path rather than ROM id: ids are reassigned when the server
     /// rescans, and a rebuilt library would silently point these at the wrong
     /// games. The path is also readable, so this table can be hand-edited.
+    ///
+    /// Loaded with [`ARCADE_CORE_MAP`] folded in underneath, so the file only
+    /// ever holds what somebody chose by hand.
     #[serde(default)]
     pub per_game: BTreeMap<String, String>,
+}
+
+/// Arcade romsets their platform default core cannot run.
+///
+/// Compiled in for the same reason as the ES-DE core map: a file beside the
+/// executable is not something a downloaded build can rely on. 6 KB.
+///
+/// It lives here rather than in config.toml because it is measured, not
+/// chosen — every row was produced by probing the romset headless against the
+/// core — and it made two thirds of the user's config file a table no user
+/// should have to read.
+pub const ARCADE_CORE_MAP: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/arcade-core-map.toml"));
+
+/// The compiled-in table. Infallible by construction: a malformed file fails
+/// the test below, which runs at build time, rather than failing a user.
+pub fn arcade_core_map() -> BTreeMap<String, String> {
+    toml::from_str(ARCADE_CORE_MAP).expect("the embedded arcade core map is valid TOML")
 }
 
 /// Config key for a single game's core override.
@@ -243,23 +260,37 @@ impl EsdeCfg {
 /// Which per-system artwork the platform grid shows.
 #[derive(Debug, Deserialize)]
 pub struct IconsCfg {
-    /// One of `logo`, `consolegame`, `controller`, `systemart`,
-    /// `systemart_legacy`.
+    /// Which look the grid draws — an id from the chosen set's own list, such
+    /// as `hardware`, `controller`, `styled-text` or `styled-text-2`.
     ///
-    /// Defaults to hardware renders, not `logo`. ES-DE's "logo" art is the
-    /// system's *name* set as a wordmark — it is a picture of text, which is
-    /// exactly what the grid is supposed to avoid.
+    /// Not one of three fixed kinds any more: themes offer between one and nine
+    /// looks and squeezing them into three meant showing the wrong picture
+    /// under names a theme never filled. `data/icon-set-art.toml` lists what
+    /// each set has. With no set chosen this falls back to the shared pool's
+    /// `logo`, `controller` and `systemart`.
     #[serde(default = "default_icon_style")]
     pub style: String,
+
+    /// Which ES-DE set the grid draws from. Empty until one is fetched, at
+    /// which point "Get console pictures" writes the set it took.
+    ///
+    /// Separate from `style` rather than folded into it: a set and a style are
+    /// different questions — *whose* artwork, and *which kind* of picture — and
+    /// a set ships more than one kind.
+    #[serde(default)]
+    pub set: String,
 }
 
 fn default_icon_style() -> String {
-    "systemart".to_owned()
+    // A look id from the chosen set's own list. "hardware" is first in every
+    // set that has it, and sets are ordered hardware-first, so this lands on a
+    // picture of the console wherever there is one.
+    "hardware".to_owned()
 }
 
 impl Default for IconsCfg {
     fn default() -> Self {
-        Self { style: default_icon_style() }
+        Self { style: default_icon_style(), set: String::new() }
     }
 }
 
@@ -394,6 +425,15 @@ pub struct RetroArchCfg {
     /// can break the file it lives in is worse than the setting being wrong.
     #[serde(default = "default_autofire", deserialize_with = "autofire_from_toml")]
     pub autofire: String,
+    /// Have RetroArch write a save state when the game exits.
+    ///
+    /// Off by default, and deliberately. An automatic state on every exit
+    /// quietly becomes the state you resume from, so a five-minute look at a
+    /// game overwrites the point you actually stopped at — and RetroArch's
+    /// auto slot is the one this app resumes from. Anyone who wants it can
+    /// have it; nobody gets it without asking.
+    #[serde(default)]
+    pub save_state_on_exit: bool,
 
     /// Keep the game window's title bar.
     ///
@@ -499,11 +539,24 @@ impl Config {
     pub fn load_from(path: &Path) -> Result<Self> {
         if !path.is_file() {
             // Absent config is fine for commands that don't touch the server.
-            return Ok(Self::default());
+            return Ok(Self::default().with_shipped_cores());
         }
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading {}", path.display()))?;
-        toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+        let cfg: Self =
+            toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
+        Ok(cfg.with_shipped_cores())
+    }
+
+    /// Fold the compiled-in arcade table in under whatever the file said.
+    ///
+    /// Under, not over: a core picked in the game detail pane is written to
+    /// config.toml, and a shipped row must never quietly replace it.
+    fn with_shipped_cores(mut self) -> Self {
+        for (game, core) in arcade_core_map() {
+            self.cores.per_game.entry(game).or_insert(core);
+        }
+        self
     }
 
     pub fn local_roms_dir(&self) -> PathBuf {
@@ -857,11 +910,21 @@ mod tests {
     fn the_achievements_section_maps_every_field() {
         let cfg: Config = toml::from_str(
             "[achievements]\nenabled = true\nusername = \"frank\"\n\
-             password = \"pw\"\nhardcore = true\ntest_unofficial = true\n",
+             token = \"tok\"\nhardcore = true\ntest_unofficial = true\n",
         )
         .unwrap();
         let s = cfg.achievements.settings();
-        assert_eq!(s.credential(), Some(("cheevos_password", "pw")));
+        assert_eq!(s.credential(), Some(("cheevos_token", "tok")));
+
+        // A config still carrying the old `password` key loads rather than
+        // failing — the field is gone, and an unknown key is not a reason to
+        // refuse someone's whole config file — but it authenticates nothing.
+        let old: Config = toml::from_str(
+            "[achievements]\nenabled = true\nusername = \"frank\"\npassword = \"pw\"\n",
+        )
+        .expect("an older config must still load");
+        assert_eq!(old.achievements.settings().credential(), None);
+        assert!(!old.achievements.settings().usable(), "a password still logs in");
         assert!(s.hardcore);
         assert!(s.test_unofficial);
         let out = crate::achievements::config_lines(&s);
@@ -905,6 +968,49 @@ mod tests {
 
     /// Per-game keys are file paths, which TOML cannot express as bare keys.
     /// Round-tripping through a real parser is the only check that matters.
+    #[test]
+    fn the_shipped_arcade_table_parses_and_is_all_arcade() {
+        let map = arcade_core_map();
+        assert!(map.len() > 100, "only {} rows — did the table lose its contents?", map.len());
+        for (game, core) in &map {
+            assert!(game.starts_with("arcade/"), "{game} is not an arcade path");
+            assert!(game.ends_with(".zip"), "{game} is not a romset");
+            assert!(!core.is_empty(), "{game} has no core");
+        }
+    }
+
+    /// The point of moving the table out of config.toml was that nothing about
+    /// launching a game changed. A config with no `[cores.per_game]` still has
+    /// to resolve the 154 romsets whose platform default cannot run them.
+    #[test]
+    fn a_config_without_the_table_still_gets_it() {
+        let dir = std::env::temp_dir().join("romm-cfg-shipped-only");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[server]\nurl = \"http://x\"\n").unwrap();
+        let cfg = Config::load_from(&path).unwrap();
+        assert_eq!(cfg.cores.per_game.get("arcade/mrdo.zip").map(String::as_str),
+                   Some("mame2003_plus"));
+    }
+
+    /// And a core chosen in the detail pane still wins: the shipped rows go
+    /// underneath the file, never over it.
+    #[test]
+    fn a_hand_picked_core_beats_the_shipped_one() {
+        let dir = std::env::temp_dir().join("romm-cfg-shipped-beaten");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[cores.per_game]\n\"arcade/mrdo.zip\" = \"fbneo\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from(&path).unwrap();
+        assert_eq!(cfg.cores.per_game.get("arcade/mrdo.zip").map(String::as_str), Some("fbneo"));
+        // and the rest of the table is still there beside it
+        assert!(cfg.cores.per_game.len() > 100);
+    }
+
     #[test]
     fn per_game_keys_round_trip() {
         let dir = std::env::temp_dir().join(format!("romm-cfg-{}", std::process::id()));

@@ -41,7 +41,6 @@ pub struct Settings {
     pub token: Option<String>,
     /// Account password. RetroArch exchanges it for a token on first use, so a
     /// token is the better thing to keep here once you have one.
-    pub password: Option<String>,
     /// Disables save states, fast-forward and rewind. Off unless asked for.
     pub hardcore: bool,
     /// Unofficial/test achievement sets.
@@ -55,9 +54,11 @@ fn present(v: &Option<String>) -> Option<&str> {
 impl Settings {
     /// The credential to send, preferring a token over a password.
     pub fn credential(&self) -> Option<(&'static str, &str)> {
-        present(&self.token)
-            .map(|t| ("cheevos_token", t))
-            .or_else(|| present(&self.password).map(|p| ("cheevos_password", p)))
+        // Token only. A password in a launch config is a password written to
+        // disk in plain text on every launch, and RetroArch keeps a token
+        // after its first login anyway — so this app stores what RetroArch
+        // would have stored and never handles the other thing at all.
+        present(&self.token).map(|t| ("cheevos_token", t))
     }
 
     /// True when there is enough to actually authenticate.
@@ -213,22 +214,25 @@ mod tests {
         assert!(out.contains("cheevos_token = \"tok\""), "the credential is ours: {out}");
     }
 
-    /// A password works when there is no token yet — RetroArch exchanges it for
-    /// one. A token is preferred when both are present, since that is what
-    /// RetroArch itself would rather use.
+    /// A token, and nothing else, ever reaches the launch config.
+    ///
+    /// Passwords were supported and are gone: a password in a launch config is
+    /// a password written to disk in plain text on every single launch, and
+    /// RetroArch stores a token after its own first login anyway. Restore the
+    /// `cheevos_password` branch and this fails.
     #[test]
-    fn a_token_is_preferred_over_a_password() {
+    fn only_a_token_is_ever_written() {
         let mut s = on(Some("frank"));
-        s.token = None;
-        s.password = Some("hunter2".to_owned());
-        assert_eq!(s.credential(), Some(("cheevos_password", "hunter2")));
-        assert!(config_lines(&s).contains("cheevos_password = \"hunter2\""));
-
-        s.token = Some("tok".to_owned());
         assert_eq!(s.credential(), Some(("cheevos_token", "tok")));
+
+        // With no token there is no credential at all — not a fallback to
+        // something weaker.
+        s.token = None;
+        assert_eq!(s.credential(), None);
+        assert!(!s.usable(), "usable with no credential");
         let out = config_lines(&s);
-        assert!(out.contains("cheevos_token = \"tok\""));
-        assert!(!out.contains("hunter2"), "the password is not also written: {out}");
+        assert!(!out.contains("cheevos_password"), "a password path came back: {out}");
+        assert!(!out.contains("cheevos_token ="), "a token was written from nothing: {out}");
     }
 
     /// Hardcore is written on every launch whether on or off, because
@@ -278,5 +282,80 @@ mod tests {
                 "key {key:?} has characters RetroArch will not accept"
             );
         }
+    }
+}
+
+/// The result of asking RetroAchievements whether a login works.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Verified {
+    pub ok: bool,
+    pub user: Option<String>,
+    /// Why not, when `ok` is false.
+    pub error: Option<String>,
+}
+
+/// Ask RetroAchievements whether this token still works.
+///
+/// A token rather than a password, deliberately. A password would have to be
+/// held somewhere to be checked with — in a config file, or in a field on
+/// screen — and neither is worth it for a status light. The token is already
+/// stored because RetroArch needs it, so checking it costs no new secret.
+///
+/// `r=patch` is the endpoint RetroArch calls when a game starts: it takes a
+/// username, a token and a game id, and answers 401 when the token is not
+/// good. Any game id does — the answer to "is this token valid" does not
+/// depend on which one, and game 1 is as permanent as they get.
+///
+/// This is the same credential and the same host RetroArch uses, so a tick
+/// here means the login the emulator will attempt. The Web API at
+/// `retroachievements.org/API/` takes a different credential entirely, and
+/// checking that would prove the account exists while RetroArch's own login
+/// stayed broken.
+pub async fn verify(username: &str, token: &str) -> Verified {
+    fn q(s: &str) -> String {
+        s.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect()
+    }
+    let url = format!(
+        "https://retroachievements.org/dorequest.php?r=patch&u={}&t={}&g=1",
+        q(username),
+        q(token)
+    );
+    let Ok(client) = reqwest::Client::builder()
+        .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
+        .build()
+    else {
+        return Verified { ok: false, user: None, error: Some("could not build an HTTP client".into()) };
+    };
+    match client.get(&url).send().await {
+        Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => Verified {
+            ok: false,
+            user: None,
+            error: Some("the server rejected this username and token".into()),
+        },
+        Ok(r) => {
+            let ok = r
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get("Success").and_then(serde_json::Value::as_bool))
+                .unwrap_or(false);
+            Verified {
+                ok,
+                user: ok.then(|| username.to_owned()),
+                error: (!ok).then(|| "the server did not accept the login".to_owned()),
+            }
+        }
+        Err(e) => Verified {
+            ok: false,
+            user: None,
+            error: Some(format!("could not reach retroachievements.org: {e}")),
+        },
     }
 }
