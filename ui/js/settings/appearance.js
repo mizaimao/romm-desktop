@@ -59,8 +59,7 @@ export const html = `      <h4>Layout</h4>
         <label>Icon</label>
         <div class="ctl"><div class="app-icons"></div></div>
       </div>
-      <p class="hint app-icons-note">What this app wears in the Dock and the
-        switcher. Not the console pictures above — this is the app itself.</p>
+      <p class="hint app-icons-note"></p>
 
       <h4>Color</h4>
       <div class="srow">
@@ -467,11 +466,10 @@ async function wireAppIcons(box) {
     .map(
       (i) =>
         `<button class="app-icon ${i.selected ? "on" : ""}" data-id="${escapeHtml(i.id)}"
-           title="${escapeHtml(i.note)}">
+           title="${escapeHtml(i.label)}" aria-label="${escapeHtml(i.label)}">
            ${i.preview
-             ? `<img src="${convertFileSrc(i.preview)}" alt="" />`
+             ? `<img src="${convertFileSrc(i.preview)}" alt="${escapeHtml(i.label)}" />`
              : `<span class="app-icon-missing"></span>`}
-           <span class="app-icon-label">${escapeHtml(i.label)}</span>
          </button>`
     )
     .join("");

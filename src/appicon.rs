@@ -17,10 +17,10 @@ use anyhow::{bail, Result};
 pub struct AppIcon {
     /// Filename stem in `assets/appicons/`, and the value stored in config.
     pub id: &'static str,
-    /// What the picker calls it.
+    /// What the picker calls it. Not drawn — the picker shows the picture,
+    /// since that is the whole question — but it is the button's accessible
+    /// name and its tooltip.
     pub label: &'static str,
-    /// One line under the label, for telling two similar ones apart.
-    pub note: &'static str,
 }
 
 /// Every icon that ships. Order is the order the picker draws them.
@@ -28,12 +28,10 @@ pub const ICONS: &[AppIcon] = &[
     AppIcon {
         id: "arcade",
         label: "Arcade cabinet",
-        note: "A cabinet showing a wall of covers. The current default.",
     },
     AppIcon {
         id: "shelf",
         label: "Shelf of cases",
-        note: "The row of game cases the app shipped with before.",
     },
 ];
 

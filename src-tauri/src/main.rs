@@ -2957,7 +2957,6 @@ fn set_icon_style(state: State<'_, AppState>, key: String) -> CmdResult<String> 
 struct AppIconView {
     id: String,
     label: String,
-    note: String,
     /// Absolute path to the preview picture, for `convertFileSrc`. Empty when
     /// the built files are missing, which the picker draws as a gap rather
     /// than a broken image.
@@ -2993,7 +2992,6 @@ fn app_icons(app: tauri::AppHandle) -> CmdResult<Vec<AppIconView>> {
         .map(|icon| AppIconView {
             id: icon.id.to_string(),
             label: icon.label.to_string(),
-            note: icon.note.to_string(),
             preview: appicon_dir(&app, icon.id)
                 .map(|d| d.join(romm_desktop::appicon::PREVIEW_NAME))
                 .filter(|p| p.is_file())

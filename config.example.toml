@@ -131,14 +131,6 @@ mame = "mame2003_plus"
 # root = "~/ES-DE"
 # roms = "/Volumes/Games/ROMs"
 
-[appearance]
-# Which icon the app wears, in the Dock and the switcher. One of the ids in
-# src/appicon.rs — "arcade" (the default) or "shelf", the row of game cases the
-# app shipped with before. Settings -> Appearance -> App icon writes here.
-# An id this build does not ship falls back to the default rather than to
-# nothing at all.
-app_icon = "arcade"
-
 [icons]
 # Which look the platform grid draws, from the chosen set's own list — themes
 # offer between one and nine. Common ids: hardware, controller, styled-text.
@@ -212,3 +204,13 @@ devid = ""
 devpassword = ""
 softname = "romm-desktop"
 max_threads = 1
+
+# Last in the file because a section the app writes for the first time is
+# appended at the end, and config.toml has to keep diffing against this one.
+[appearance]
+# Which icon the app wears, in the Dock and the switcher. One of the ids in
+# src/appicon.rs — "arcade" (the default) or "shelf", the row of game cases the
+# app shipped with before. Settings -> Appearance -> App icon writes here.
+# An id this build does not ship falls back to the default rather than to
+# nothing at all.
+app_icon = "arcade"

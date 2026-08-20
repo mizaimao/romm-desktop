@@ -5,10 +5,14 @@
 # Adding an icon is dropping a 1024x1024 PNG into assets/appicons/ and naming it
 # in src/appicon.rs. Nothing here is per-icon.
 #
-# macOS masks nothing: whatever is in the .icns is drawn as-is, so a full-bleed
-# square sits in a Dock of rounded squares looking like a mistake. The rounded
-# corner is therefore cut here, into the .icns only — Windows and Linux draw
-# the square themselves.
+# macOS masks nothing: whatever is in the .icns is drawn as-is. So the .icns is
+# cut to Apple's own grid — a rounded square filling 80.5% of the canvas, with
+# the rest transparent. That number is not a guess: every icon in
+# /System/Applications measures 206 opaque pixels across a 256 canvas. Fill the
+# canvas instead and the app sits noticeably larger than its neighbours; the
+# earlier square-cornered icon did both, being full-bleed and unrounded.
+#
+# Windows and Linux draw their own frame, so they get the plain square.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,9 +22,24 @@ OUT=assets/appicons/built
 
 command -v magick >/dev/null || { echo "needs ImageMagick (brew install imagemagick)"; exit 1; }
 
-# The macOS corner radius, as a share of the icon's side. Apple's own icons sit
-# at just under 22.4%; the value is not published, it is measured.
-RADIUS_PCT=22.37
+# Apple's grid, both measured from /System/Applications rather than published:
+# the rounded square covers 80.5% of the canvas, and its corner radius is 22.5%
+# of the square (not of the canvas).
+BODY_PCT=80.5
+RADIUS_PCT=22.5
+
+# How much to zoom into a source before it becomes the tile, per icon.
+#
+# Artwork is framed for its own sake, not for a 40-pixel square: the arcade
+# render leaves a wide margin of background around the cabinet, which reads as
+# a small icon however big the tile is. This crops that margin away. 100 means
+# use the source as it came.
+zoom_for() {
+  case "$1" in
+    arcade) echo 124 ;;
+    *)      echo 100 ;;
+  esac
+}
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -30,18 +49,26 @@ for src in "$SRC"/*.png; do
   work="$OUT/$id"
   mkdir -p "$work"
 
-  # Square, 1024, whatever came in.
+  # Square, 1024, whatever came in, cropped to this icon's framing.
   # PNG32: forces RGBA. Tauri's bundler refuses any icon that is not RGBA,
   # and a plain resize of an opaque JPEG-ish PNG comes out RGB.
-  magick "$src" -resize 1024x1024^ -gravity center -extent 1024x1024 PNG32:"$work/full.png"
+  z=$(zoom_for "$id")
+  side=$(python3 -c "print(round(1024 * $z / 100))")
+  magick "$src" -resize "${side}x${side}^" -gravity center -extent 1024x1024 \
+    PNG32:"$work/full.png"
 
-  # The rounded-corner copy the .icns is cut from.
-  r=$(python3 -c "print(round(1024 * $RADIUS_PCT / 100))")
+  # The macOS body: the rounded square, sized to Apple's grid and centred on a
+  # transparent 1024 canvas.
+  body=$(python3 -c "print(round(1024 * $BODY_PCT / 100))")
+  r=$(python3 -c "print(round($body * $RADIUS_PCT / 100))")
   # -fill white matters: the default fill is black, which composites to a
   # fully transparent icon and looks like the build silently produced nothing.
-  magick -size 1024x1024 xc:black -fill white \
-    -draw "roundrectangle 0,0,1023,1023,$r,$r" "$work/mask.png"
-  magick "$work/full.png" "$work/mask.png" -alpha off -compose CopyOpacity -composite PNG32:"$work/rounded.png"
+  magick -size "${body}x${body}" xc:black -fill white \
+    -draw "roundrectangle 0,0,$((body-1)),$((body-1)),$r,$r" "$work/mask.png"
+  magick "$work/full.png" -resize "${body}x${body}" "$work/mask.png" \
+    -alpha off -compose CopyOpacity -composite PNG32:"$work/body.png"
+  magick "$work/body.png" -background none -gravity center -extent 1024x1024 \
+    PNG32:"$work/rounded.png"
 
   # macOS wants ten sizes in an .iconset; iconutil refuses a folder missing any.
   iconset="$work/$id.iconset"
@@ -66,7 +93,7 @@ for src in "$SRC"/*.png; do
   # The preview the Settings picker draws.
   magick "$work/rounded.png" -resize 256x256 PNG32:"$work/preview.png"
 
-  rm -f "$work/mask.png"
+  rm -f "$work/mask.png" "$work/body.png"
   echo "built $id"
 done
 
