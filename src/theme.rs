@@ -234,18 +234,15 @@ pub fn art_for(theme: &Theme, esde_system: &str, style: IconStyle) -> Option<Pat
     // Hardware renders live in their own top-level directories rather than
     // per-system folders: modern-es-de uses art/ and art_legacy/, linear-es-de
     // uses system/systemart/.
-    match style {
-        IconStyle::SystemArt => {
-            for ext in ICON_EXTENSIONS {
-                candidates.push(theme.path.join("art").join(format!("{esde_system}.{ext}")));
-                candidates
-                    .push(theme.path.join("system").join("systemart").join(format!("{esde_system}.{ext}")));
-                // The older renders, now that they are not a style of their
-                // own: better a classic picture of the console than none.
-                candidates.push(theme.path.join("art_legacy").join(format!("{esde_system}.{ext}")));
-            }
+    if style == IconStyle::SystemArt {
+        for ext in ICON_EXTENSIONS {
+            candidates.push(theme.path.join("art").join(format!("{esde_system}.{ext}")));
+            candidates
+                .push(theme.path.join("system").join("systemart").join(format!("{esde_system}.{ext}")));
+            // The older renders, now that they are not a style of their own:
+            // better a classic picture of the console than none.
+            candidates.push(theme.path.join("art_legacy").join(format!("{esde_system}.{ext}")));
         }
-        _ => {}
     }
     if style == IconStyle::Logo {
         for ext in ICON_EXTENSIONS {
@@ -501,10 +498,10 @@ pub fn drop_stale_sets(media_root: &Path, current: &BTreeMap<String, String>) ->
         // unrecognised, and deleting a user's pictures on that basis would be
         // presumptuous.
         let Some(want) = current.get(&name) else { continue };
-        if set_mapping(media_root, &name).as_deref() != Some(want.as_str()) {
-            if std::fs::remove_dir_all(e.path()).is_ok() {
-                dropped.push(name);
-            }
+        if set_mapping(media_root, &name).as_deref() != Some(want.as_str())
+            && std::fs::remove_dir_all(e.path()).is_ok()
+        {
+            dropped.push(name);
         }
     }
     dropped

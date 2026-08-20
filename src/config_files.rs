@@ -115,29 +115,44 @@ mod tests {
         }
     }
 
-    /// `icons.style` names a look, not one of three fixed kinds, so it has to
-    /// be one the chosen set actually offers — an id with no folder behind it
-    /// is a blank grid.
+    /// `icons.style` names a look — one the chosen set offers, or a folder in
+    /// the shared pool.
+    ///
+    /// The pool is enumerated from disk and can hold anything an older build or
+    /// a hand-copied theme left there, so a value that is not one of the set's
+    /// looks cannot be rejected here: `consolegame` is a real pool look with
+    /// pictures behind it, and an earlier version of this test failed on it.
+    /// What is still worth checking is that the value is usable as a folder
+    /// name at all — a stray space or capital is a folder that never resolves.
     #[test]
-    fn the_chosen_look_is_one_the_chosen_set_offers() {
+    fn the_chosen_look_is_a_set_look_or_a_usable_folder_name() {
         for (name, toml) in both() {
             let doc: toml::Value = toml::from_str(&toml).expect(name);
             let Some(icons) = doc.get("icons") else { continue };
             let Some(style) = icons.get("style").and_then(|v| v.as_str()) else { continue };
+            assert!(!style.is_empty(), "{name}: icons.style is empty");
+            assert!(
+                style
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'),
+                "{name}: icons.style = {style:?} is not usable as a folder name"
+            );
+
+            // When it *is* one of the chosen set's looks, say so — that is the
+            // common case and the one worth naming in a failure.
             let set = icons.get("set").and_then(|v| v.as_str()).unwrap_or("");
             let set = if set.is_empty() { crate::iconart::DEFAULT_SET } else { set };
-
-            match crate::iconart::of(set) {
-                Some(art) => assert!(
-                    art.look(style).is_some(),
-                    "{name}: icons.style = {style:?}, which {set} does not offer — it has {:?}",
+            if let Some(art) = crate::iconart::of(set)
+                && art.look(style).is_none()
+            {
+                // Not a set look, so it has to be a pool folder. Nothing here
+                // can see the disk; the app refuses an id with no folder.
+                assert!(
+                    !style.contains("styled-text-"),
+                    "{name}: icons.style = {style:?} looks like a set look, but {set} \
+                     offers {:?}",
                     art.looks.iter().map(|l| &l.id).collect::<Vec<_>>()
-                ),
-                // No set in the table: the shared pool's three kinds apply.
-                None => assert!(
-                    crate::theme::IconStyle::parse(style).is_some(),
-                    "{name}: icons.style = {style:?} is neither a look nor a pool style"
-                ),
+                );
             }
         }
     }

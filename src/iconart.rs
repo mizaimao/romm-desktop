@@ -201,7 +201,7 @@ mod tests {
     fn sets_offer_as_many_looks_as_they_have() {
         let t = table();
         let counts: Vec<usize> = t.values().map(|a| a.looks.len()).collect();
-        assert!(counts.iter().any(|n| *n == 1), "some sets draw one thing");
+        assert!(counts.contains(&1), "some sets draw one thing");
         assert!(counts.iter().any(|n| *n > 3), "and some draw more than three");
         assert_eq!(t["iconic-es-de"].looks.len(), 2);
         assert!(t["canvas-es-de"].looks.len() >= 8, "Canvas draws nine");

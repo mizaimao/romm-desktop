@@ -8,7 +8,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU8, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, State};
@@ -2225,7 +2224,7 @@ async fn fetch_icon_set(
         let mut written = 0usize;
         for (slug, names) in &wanted {
             done += 1;
-            if done % 8 == 0 {
+            if done.is_multiple_of(8) {
                 let _ = app.emit("icons-progress", format!("{done} of {total}…"));
             }
             // A theme files a console under whichever ES-DE name it knows, so
