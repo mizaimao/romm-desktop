@@ -45,6 +45,30 @@ export async function applyPageFilter(text) {
   current = String(text ?? "").trim().toLowerCase();
   const nodes = targets();
   const heads = [...el.list.querySelectorAll(".ghead")];
+  await sendNames(nodes, heads);
+
+  const { visible, headings, shown } = await invoke("page_filter", { query: current });
+  nodes.forEach((node, i) => node.classList.toggle(OUT, !visible[i]));
+  heads.forEach((head, i) => head.classList.toggle(OUT, !!headings[i]));
+  return shown;
+}
+
+/// What is on the page, sent once per list rather than once per keystroke.
+///
+/// There are 2,506 names on the arcade console, and typing is the one thing
+/// here that happens letter by letter — sending them all again on each one is
+/// the whole page travelling across for a single character.
+let namesFor = null;
+
+/// Forget them. Called when the list is redrawn, since a redraw builds fresh
+/// nodes with fresh names.
+export function forgetPageNames() {
+  namesFor = null;
+}
+
+async function sendNames(nodes, heads) {
+  const now = `${nodes.length}:${heads.length}`;
+  if (namesFor === now) return;
   const at = new Map(nodes.map((n, i) => [n, i]));
   // Which entries sit under each heading, so a heading with nothing left under
   // it can go too: a search that leaves five headings and no games reads as a
@@ -54,21 +78,15 @@ export async function applyPageFilter(text) {
       .map((n) => at.get(n))
       .filter((i) => i !== undefined)
   );
-
-  const { visible, headings, shown } = await invoke("page_filter", {
-    names: nodes.map(nameOf),
-    query: current,
-    groups,
-  });
-  nodes.forEach((node, i) => node.classList.toggle(OUT, !visible[i]));
-  heads.forEach((head, i) => head.classList.toggle(OUT, !!headings[i]));
-  return shown;
+  await invoke("set_page_names", { names: nodes.map(nameOf), groups });
+  namesFor = now;
 }
 
 /// Re-apply after a list is redrawn. A redraw builds fresh nodes, which have
 /// never seen the filter — without this, changing the order or coming back to
 /// a tab quietly undoes the search still sitting in the box.
 export function refreshPageFilter() {
+  forgetPageNames();
   if (current) return applyPageFilter(current);
 }
 
@@ -82,6 +100,7 @@ export function pageFilterText() {
 /// reason.
 export function clearPageFilter() {
   current = "";
+  forgetPageNames();
   if (el.pageFilter) el.pageFilter.value = "";
   for (const node of targets()) node.classList.remove(OUT);
   for (const head of el.list.querySelectorAll(".ghead")) head.classList.remove(OUT);

@@ -13,6 +13,11 @@
 // knows where it drew each card; a TUI has a character grid. None of them has
 // to agree on anything but the arithmetic here.
 
+use serde::Serialize;
+
+/// How many rows a page step moves.
+pub const PAGE: i32 = 3;
+
 /// Where one card sits, in whatever units the caller lays out in.
 ///
 /// Positions relative to the layout rather than the viewport, so the map stays
@@ -52,6 +57,86 @@ fn locate(grid: &[Vec<usize>], selected: usize) -> Option<(usize, usize)> {
         .find_map(|(r, row)| row.iter().position(|&i| i == selected).map(|c| (r, c)))
 }
 
+/// One step sideways from `(r, c)`.
+fn step_x(grid: &[Vec<usize>], (r, c): (usize, usize), step: i32) -> usize {
+    let row = &grid[r];
+    row[(c as i32 + step).clamp(0, row.len() as i32 - 1) as usize]
+}
+
+/// One step up or down from `(r, c)`, or `None` at the edges.
+fn step_y(
+    cards: &[Card],
+    grid: &[Vec<usize>],
+    (r, c): (usize, usize),
+    step: i32,
+) -> Option<usize> {
+    let target = r as i32 + step;
+    if target < 0 || target >= grid.len() as i32 {
+        return None;
+    }
+    let from = cards[grid[r][c]];
+    let want = from.left + from.width / 2.0;
+    grid[target as usize]
+        .iter()
+        .copied()
+        .min_by(|&a, &b| {
+            let d = |i: usize| (cards[i].left + cards[i].width / 2.0 - want).abs();
+            d(a).total_cmp(&d(b))
+        })
+}
+
+/// Where every card's neighbours are, worked out once for a whole page.
+///
+/// A table rather than a question per keypress. Front ends that have to ask
+/// across a boundary — the webview, over Tauri's IPC — cannot afford a round
+/// trip in the middle of a cursor move: a held direction repeats nine times a
+/// second, and a cursor that arrives after the hop reads as an app that is
+/// thinking about it. The geometry still lives here; only the asking moved.
+///
+/// Every entry is the index to land on, or `None` for stay put.
+#[derive(Debug, Default, Serialize)]
+pub struct Moves {
+    pub up: Vec<Option<usize>>,
+    pub down: Vec<Option<usize>>,
+    pub left: Vec<Option<usize>>,
+    pub right: Vec<Option<usize>>,
+    /// [`PAGE`] rows at a time. Not three single steps: each of those would
+    /// re-derive the column from where the last one landed, so a short row on
+    /// the way past would drag the cursor sideways.
+    pub page_up: Vec<Option<usize>>,
+    pub page_down: Vec<Option<usize>>,
+    /// The two ends of the page, for the jump-to-first and jump-to-last keys,
+    /// and for the first press on a grid with nothing selected yet.
+    pub first: Option<usize>,
+    pub last: Option<usize>,
+}
+
+pub fn moves(cards: &[Card]) -> Moves {
+    let grid = rows(cards);
+    let mut at = vec![(0usize, 0usize); cards.len()];
+    for (r, row) in grid.iter().enumerate() {
+        for (c, &i) in row.iter().enumerate() {
+            at[i] = (r, c);
+        }
+    }
+    let sideways = |step: i32| -> Vec<Option<usize>> {
+        (0..cards.len()).map(|i| Some(step_x(&grid, at[i], step))).collect()
+    };
+    let vertical = |step: i32| -> Vec<Option<usize>> {
+        (0..cards.len()).map(|i| step_y(cards, &grid, at[i], step)).collect()
+    };
+    Moves {
+        up: vertical(-1),
+        down: vertical(1),
+        left: sideways(-1),
+        right: sideways(1),
+        page_up: vertical(-PAGE),
+        page_down: vertical(PAGE),
+        first: edge(cards.len(), false),
+        last: edge(cards.len(), true),
+    }
+}
+
 /// Left or right within the current row.
 ///
 /// Stops at the ends rather than spilling into the neighbouring row, which is
@@ -60,12 +145,10 @@ fn locate(grid: &[Vec<usize>], selected: usize) -> Option<(usize, usize)> {
 pub fn move_x(cards: &[Card], selected: Option<usize>, step: i32) -> Option<usize> {
     let grid = rows(cards);
     let first = *grid.first()?.first()?;
-    let Some((r, c)) = selected.and_then(|s| locate(&grid, s)) else {
+    let Some(at) = selected.and_then(|s| locate(&grid, s)) else {
         return Some(first);
     };
-    let row = &grid[r];
-    let want = (c as i32 + step).clamp(0, row.len() as i32 - 1) as usize;
-    Some(row[want])
+    Some(step_x(&grid, at, step))
 }
 
 /// Up or down a row, keeping the column you were in.
@@ -82,22 +165,10 @@ pub fn move_x(cards: &[Card], selected: Option<usize>, step: i32) -> Option<usiz
 pub fn move_y(cards: &[Card], selected: Option<usize>, step: i32) -> Option<usize> {
     let grid = rows(cards);
     let first = *grid.first()?.first()?;
-    let Some((r, c)) = selected.and_then(|s| locate(&grid, s)) else {
+    let Some(at) = selected.and_then(|s| locate(&grid, s)) else {
         return Some(first);
     };
-    let target = r as i32 + step;
-    if target < 0 || target >= grid.len() as i32 {
-        return None;
-    }
-    let from = cards[grid[r][c]];
-    let want = from.left + from.width / 2.0;
-    grid[target as usize]
-        .iter()
-        .copied()
-        .min_by(|&a, &b| {
-            let d = |i: usize| (cards[i].left + cards[i].width / 2.0 - want).abs();
-            d(a).total_cmp(&d(b))
-        })
+    step_y(cards, &grid, at, step)
 }
 
 /// The first or last card on the page, in the order they were handed over.
@@ -207,6 +278,32 @@ mod tests {
         assert_eq!(edge(14, true), Some(13));
     }
 
+    /// The table a front end navigates by has to give the same answers as
+    /// asking one move at a time — it is the same page, worked out in advance.
+    #[test]
+    fn the_table_agrees_with_asking_one_move_at_a_time() {
+        let cards = grid_4x3_plus_2();
+        let table = moves(&cards);
+        for i in 0..cards.len() {
+            assert_eq!(table.left[i], move_x(&cards, Some(i), -1), "left from {i}");
+            assert_eq!(table.right[i], move_x(&cards, Some(i), 1), "right from {i}");
+            assert_eq!(table.up[i], move_y(&cards, Some(i), -1), "up from {i}");
+            assert_eq!(table.down[i], move_y(&cards, Some(i), 1), "down from {i}");
+            assert_eq!(table.page_up[i], move_y(&cards, Some(i), -PAGE), "page up from {i}");
+            assert_eq!(table.page_down[i], move_y(&cards, Some(i), PAGE), "page down from {i}");
+        }
+        assert_eq!(table.first, Some(0));
+        assert_eq!(table.last, Some(cards.len() - 1));
+    }
+
+    #[test]
+    fn an_empty_page_has_an_empty_table() {
+        let table = moves(&[]);
+        assert!(table.up.is_empty());
+        assert_eq!(table.first, None);
+        assert_eq!(table.last, None);
+    }
+
     /// A list is a grid one card wide, and needs no special case.
     #[test]
     fn a_single_column_list_behaves_like_a_grid_one_wide() {
@@ -217,3 +314,4 @@ mod tests {
         assert_eq!(move_x(&cards, Some(2), 1), Some(2), "a one-wide row has nowhere to go sideways");
     }
 }
+

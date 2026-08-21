@@ -38,43 +38,52 @@ function items() {
 // results made it worse, since each console section can have its own card
 // shape and one column count no longer described the page.
 //
-// The geometry goes over once per rebuild, not once per keypress. Reading
-// `offsetTop` out of the page forces a layout, and a held direction repeats
-// nine times a second across 2,506 arcade cards.
+// The whole table of moves comes over once per rebuild, not one question per
+// keypress. Reading `offsetTop` out of the page forces a layout, and a held
+// direction repeats nine times a second across 2,506 arcade cards — a cursor
+// that only moves once a round trip has come back reads as an app thinking
+// about it. Looking a move up in the table is synchronous, which is what a
+// cursor has to be.
 //
 // `offsetTop`/`offsetLeft` rather than getBoundingClientRect: they are
 // relative to the layout, so the map stays valid while scrolling and only
 // needs rebuilding when the list itself changes.
-let sent = null;
+let shape = null;
+let table = null;
 
 export function resetNav() {
-  sent = null;
+  shape = null;
+  table = null;
 }
 window.addEventListener("resize", resetNav);
 
+/// Fetch the table if the page has changed under it.
+///
+/// The one await on this path, and it happens on the first press after a
+/// redraw rather than on every press.
 async function syncGeometry(nodes) {
-  const shape = `${nodes.length}:${el.list.clientWidth}`;
-  if (sent === shape) return;
-  await invoke("set_grid", {
+  const now = `${nodes.length}:${el.list.clientWidth}`;
+  if (shape === now && table) return;
+  table = await invoke("set_grid", {
     cards: nodes.map((n) => [n.offsetTop, n.offsetLeft, n.offsetWidth]),
   });
-  sent = shape;
+  shape = now;
 }
 
-/// Move the cursor, and put it on whatever the backend chose.
+/// Move the cursor.
 ///
-/// A null answer means stay put, which is the whole point of the geometry:
-/// running off the top of a grid leaves you where you were.
-async function step(axis, delta) {
+/// A null entry in the table means stay put, which is the whole point of the
+/// geometry: running off the top of a grid leaves you where you were rather
+/// than jumping to the first card.
+async function step(direction) {
   const nodes = items();
   if (!nodes.length) return;
   await syncGeometry(nodes);
+  if (!table) return;
   const at = nodes.findIndex((n) => n.classList.contains("sel"));
-  const to = await invoke("grid_move", {
-    selected: at < 0 ? null : at,
-    axis,
-    step: delta,
-  });
+  // Nothing selected yet: any direction lands on the first card, so a press on
+  // a freshly drawn grid always does something.
+  const to = at < 0 ? table.first : table[direction]?.[at];
   if (to !== null && to !== undefined) focusNode(nodes[to]);
 }
 
@@ -91,18 +100,20 @@ function focusNode(node) {
   node.scrollIntoView({ block: "nearest" });
 }
 
-/// Left/right within the current row. Stops at the ends rather than spilling
-/// into the neighbouring row, which is what made this feel random.
-const moveX = (delta) => step("x", delta);
+/// Left/right stop at the ends of their row rather than spilling into the
+/// neighbouring one, which is what made this feel random. Up/down keep the
+/// column you were in, matched on horizontal centre rather than index — so a
+/// short last row, a row of differently-shaped cards, or the next console's
+/// section all land somewhere that looks directly above or below where you
+/// were. All of that is decided in `src/gridnav.rs`; this picks a column of
+/// the table it produced.
+const move = (direction) => step(direction);
 
-/// Up/down a row, keeping the column you were in.
-///
-/// Matched on horizontal centre rather than index, so a short last row, a row
-/// of differently-shaped cards, or the next console's section all land
-/// somewhere that looks directly above or below where you were.
-const moveY = (delta) => step("y", delta);
-
-const edge = (last) => step("edge", last ? 1 : -1);
+const edge = (last) => {
+  const nodes = items();
+  if (!nodes.length) return;
+  focusNode(nodes[last ? nodes.length - 1 : 0]);
+};
 
 /// Index of the selected card, or -1. Lost when linear navigation was replaced
 /// with the grid-aware version below, while `activate` kept calling it — so
@@ -249,12 +260,12 @@ function toggleHelp() {
 export const HANDLERS = {
   // Movement is grid-aware now, so none of these need a column count: a list
   // is simply a grid one card wide and behaves correctly without a special case.
-  left: () => moveX(-1),
-  right: () => moveX(1),
-  up: () => moveY(-1),
-  down: () => moveY(1),
-  pageUp: () => moveY(-3),
-  pageDown: () => moveY(3),
+  left: () => move("left"),
+  right: () => move("right"),
+  up: () => move("up"),
+  down: () => move("down"),
+  pageUp: () => move("page_up"),
+  pageDown: () => move("page_down"),
   first: () => edge(false),
   last: () => edge(true),
   activate,

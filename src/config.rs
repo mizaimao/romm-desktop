@@ -688,26 +688,69 @@ fn write_raw(path: &str, table: &str, key: &str, value: Option<&str>) -> Result<
 }
 
 fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Result<()> {
+    write_lines(path, table, &[(key.to_owned(), entry)])
+}
+
+/// Set or clear a whole table's worth of keys in one pass over the file.
+///
+/// One read and one write, whatever the length of the list. The single-key
+/// writer above goes through here too, so there is one implementation of where
+/// a key belongs in a file.
+///
+/// Written for the bindings, which are 29 actions and 16 buttons: doing those
+/// one at a time is forty-five read-modify-writes of config.toml for a single
+/// press of a rebind button, and a file rewritten that often is one that
+/// eventually gets caught half-written.
+pub fn set_table_entries(path: &str, table: &str, entries: &[(String, Option<String>)]) -> Result<()> {
+    let lines: Vec<(String, Option<String>)> = entries
+        .iter()
+        .map(|(key, value)| {
+            let entry = value.as_ref().map(|v| {
+                format!(
+                    "{} = \"{}\"",
+                    toml_key(key),
+                    v.replace('\\', "\\\\").replace('"', "\\\"")
+                )
+            });
+            (key.clone(), entry)
+        })
+        .collect();
+    write_lines(path, table, &lines)
+}
+
+fn write_lines(path: &str, table: &str, entries: &[(String, Option<String>)]) -> Result<()> {
     let file = Path::new(path);
     let original = std::fs::read_to_string(file).unwrap_or_default();
     let header = format!("[{table}]");
 
     let mut lines: Vec<String> = original.lines().map(str::to_owned).collect();
+    let mut touched = false;
+    for (key, entry) in entries {
+        touched |= edit(&mut lines, &header, key, entry.clone());
+    }
+    if !touched {
+        return Ok(());
+    }
+    std::fs::write(file, lines.join("\n") + "\n")
+        .with_context(|| format!("writing {}", file.display()))?;
+    Ok(())
+}
+
+/// Put one key where it belongs in `lines`. Returns whether anything changed.
+fn edit(lines: &mut Vec<String>, header: &str, key: &str, entry: Option<String>) -> bool {
 
     // Locate the table, and the key within it.
     let table_at = lines.iter().position(|l| l.trim() == header);
     let Some(start) = table_at else {
         // Nothing to remove from a table that does not exist.
-        let Some(entry) = entry else { return Ok(()) };
+        let Some(entry) = entry else { return false };
         // No such table yet: append it.
         if !lines.is_empty() && !lines.last().is_some_and(|l| l.trim().is_empty()) {
             lines.push(String::new());
         }
-        lines.push(header);
+        lines.push(header.to_owned());
         lines.push(entry);
-        std::fs::write(file, lines.join("\n") + "\n")
-            .with_context(|| format!("writing {}", file.display()))?;
-        return Ok(());
+        return true;
     };
 
     // The table ends at the next header line.
@@ -723,16 +766,19 @@ fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Resu
         .map(|i| start + 1 + i);
 
     match (existing, entry) {
-        (Some(i), Some(entry)) => lines[i] = entry,
+        (Some(i), Some(entry)) => {
+            if lines[i] == entry {
+                return false;
+            }
+            lines[i] = entry;
+        }
         (Some(i), None) => {
             lines.remove(i);
         }
         (None, Some(entry)) => lines.insert(end, entry),
-        (None, None) => return Ok(()),
+        (None, None) => return false,
     }
-    std::fs::write(file, lines.join("\n") + "\n")
-        .with_context(|| format!("writing {}", file.display()))?;
-    Ok(())
+    true
 }
 
 #[cfg(test)]

@@ -101,11 +101,10 @@ struct AppState {
     /// Which view `list_rows` was filled for, so an arrangement asked for a
     /// different one is refused rather than answered with the wrong list.
     list_scope: Mutex<String>,
-    /// Where every card on the page was drawn, for the cursor to move around.
-    ///
-    /// Sent once per rebuild rather than per keypress: reading it out of the
-    /// page forces a layout, and there are 2,506 cards on the arcade console.
-    grid: Mutex<Vec<gridnav::Card>>,
+    /// The names on the page and the groups they sit under, for the filter box
+    /// above them. Sent once per list rather than once per keystroke: there are
+    /// 2,506 of them on the arcade console.
+    page_names: Mutex<(Vec<String>, Vec<Vec<usize>>)>,
 }
 
 #[derive(Serialize)]
@@ -3520,24 +3519,27 @@ fn bindings_view(b: &binds::Bindings) -> BindingsView {
 /// whichever key or button previously held the action — so a single press
 /// changes two entries, and writing one of them leaves a config where two
 /// things claim the same key.
+///
+/// Two passes over the file, not forty-five: `set_table_entries` takes the
+/// whole table at once. Done a key at a time, one press of a rebind button was
+/// forty-five read-modify-writes of config.toml.
 fn save_bindings(b: &binds::Bindings) -> Result<(), String> {
-    use romm_desktop::config::{clear_table_entry, set_table_entry};
-    for a in binds::ACTIONS {
-        match b.keys.get(a.id) {
-            Some(key) => set_table_entry("config.toml", "bindings.keys", a.id, key),
-            None => clear_table_entry("config.toml", "bindings.keys", a.id),
-        }
-        .map_err(err)?;
-    }
-    for button in binds::PAD_BUTTONS {
-        let index = button.index.to_string();
-        match b.pad.get(&index) {
-            Some(action) => set_table_entry("config.toml", "bindings.pad", &index, action),
-            None => clear_table_entry("config.toml", "bindings.pad", &index),
-        }
-        .map_err(err)?;
-    }
-    Ok(())
+    use romm_desktop::config::set_table_entries;
+    let keys: Vec<(String, Option<String>)> = binds::ACTIONS
+        .iter()
+        .map(|a| (a.id.to_owned(), b.keys.get(a.id).cloned()))
+        .collect();
+    set_table_entries("config.toml", "bindings.keys", &keys).map_err(err)?;
+
+    let pad: Vec<(String, Option<String>)> = binds::PAD_BUTTONS
+        .iter()
+        .map(|p| {
+            let index = p.index.to_string();
+            let held = b.pad.get(&index).cloned();
+            (index, held)
+        })
+        .collect();
+    set_table_entries("config.toml", "bindings.pad", &pad).map_err(err)
 }
 
 #[tauri::command]
@@ -3776,53 +3778,41 @@ struct PageFilterResult {
 }
 
 #[tauri::command]
-fn page_filter(
+fn set_page_names(
+    state: State<'_, AppState>,
     names: Vec<String>,
-    query: String,
     groups: Option<Vec<Vec<usize>>>,
-) -> PageFilterResult {
-    let visible = pagefilter::visible(&names, &query);
-    let groups = groups.unwrap_or_default();
-    PageFilterResult {
-        headings: pagefilter::empty_groups(&groups, &visible, &query),
-        shown: visible.iter().filter(|v| **v).count(),
-        visible,
-    }
-}
-
-/// Hand over where every card on the page was drawn: top, left, width.
-///
-/// Once per rebuild, not once per keypress. Reading these out of the page
-/// forces a layout, and a held direction repeats nine times a second across
-/// 2,506 arcade cards.
-#[tauri::command]
-fn set_grid(state: State<'_, AppState>, cards: Vec<[f64; 3]>) -> CmdResult<()> {
-    *state.grid.lock().map_err(err)? = cards
-        .into_iter()
-        .map(|[top, left, width]| gridnav::Card { top, left, width })
-        .collect();
+) -> CmdResult<()> {
+    *state.page_names.lock().map_err(err)? = (names, groups.unwrap_or_default());
     Ok(())
 }
 
-/// Where the cursor lands next.
-///
-/// `axis` is "x", "y", or anything else for the two ends of the page; `step`
-/// is how many columns or rows, and which end. A null answer means stay put —
-/// running off the top of a grid leaves you where you were rather than jumping
-/// to the first card, which is the bug the geometry-based version replaced.
 #[tauri::command]
-fn grid_move(
-    state: State<'_, AppState>,
-    selected: Option<usize>,
-    axis: String,
-    step: i32,
-) -> CmdResult<Option<usize>> {
-    let cards = state.grid.lock().map_err(err)?;
-    Ok(match axis.as_str() {
-        "x" => gridnav::move_x(&cards, selected, step),
-        "y" => gridnav::move_y(&cards, selected, step),
-        _ => gridnav::edge(cards.len(), step > 0),
+fn page_filter(state: State<'_, AppState>, query: String) -> CmdResult<PageFilterResult> {
+    let held = state.page_names.lock().map_err(err)?;
+    let (names, groups) = &*held;
+    let visible = pagefilter::visible(names, &query);
+    Ok(PageFilterResult {
+        headings: pagefilter::empty_groups(groups, &visible, &query),
+        shown: visible.iter().filter(|v| **v).count(),
+        visible,
     })
+}
+
+/// Hand over where every card on the page was drawn — top, left, width — and
+/// get back where each of them leads.
+///
+/// The whole table, once per rebuild, rather than a question per keypress. A
+/// held direction repeats nine times a second, and a cursor that only moves
+/// after a round trip reads as an app that is thinking about it. The geometry
+/// is still decided in `gridnav`; the page only looks the answer up.
+#[tauri::command]
+fn set_grid(cards: Vec<[f64; 3]>) -> gridnav::Moves {
+    let cards: Vec<gridnav::Card> = cards
+        .into_iter()
+        .map(|[top, left, width]| gridnav::Card { top, left, width })
+        .collect();
+    gridnav::moves(&cards)
 }
 
 fn main() {
@@ -3906,7 +3896,7 @@ fn main() {
             chosen: Mutex::new(Default::default()),
             list_rows: Mutex::new(Vec::new()),
             list_scope: Mutex::new(String::new()),
-            grid: Mutex::new(Vec::new()),
+            page_names: Mutex::new((Vec::new(), Vec::new())),
         })
         .invoke_handler(tauri::generate_handler![
             bios_status,
@@ -3980,9 +3970,9 @@ fn main() {
             sort_picker,
             picker_controls,
             set_picker_order,
+            set_page_names,
             page_filter,
-            set_grid,
-            grid_move
+            set_grid
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

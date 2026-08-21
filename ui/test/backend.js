@@ -35,7 +35,7 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
 /// never reach it, so a test file keeps the stub it already had.
 export function fakeBackend(reply = () => []) {
   let bindings = clone(DEFAULTS);
-  let grid = [];
+  let page = { names: [], groups: [] };
   // Per view, exactly as the real one is scoped: `view:platform:collection`.
   const orders = new Map();
   const filters = new Map();
@@ -194,35 +194,44 @@ export function fakeBackend(reply = () => []) {
       return null;
     },
 
+    set_page_names: ({ names, groups }) => {
+      page = { names, groups: groups ?? [] };
+      return null;
+    },
+
     // The one predicate copied here, because it is one line and several tests
     // about the *box* need it to do something. The rule itself is asserted in
     // `pagefilter::tests`.
-    page_filter: ({ names, query, groups }) => {
+    page_filter: ({ query }) => {
       const want = String(query ?? "").trim().toLowerCase();
-      const visible = names.map((n) => !want || n.toLowerCase().includes(want));
+      const visible = page.names.map((n) => !want || n.toLowerCase().includes(want));
       return {
         visible,
-        headings: (groups ?? []).map(
+        headings: page.groups.map(
           (g) => !!want && g.length > 0 && !g.some((i) => visible[i])
         ),
         shown: visible.filter(Boolean).length,
       };
     },
 
-    set_grid: ({ cards }) => {
-      grid = cards;
-      return null;
-    },
-
     // Linear, on purpose. Which card sits above which is geometry, and
     // `gridnav::tests` is where that is asserted — jsdom has no layout to
     // measure anyway, so every card here reports the same position.
-    grid_move: ({ selected, axis, step }) => {
-      if (!grid.length) return null;
-      if (axis === "edge") return step > 0 ? grid.length - 1 : 0;
-      if (selected === null || selected === undefined) return 0;
-      const to = selected + Math.sign(step);
-      return to < 0 || to >= grid.length ? null : to;
+    set_grid: ({ cards }) => {
+      const n = cards.length;
+      const before = (i) => (i > 0 ? i - 1 : null);
+      const after = (i) => (i < n - 1 ? i + 1 : null);
+      const table = (fn) => Array.from({ length: n }, (_, i) => fn(i));
+      return {
+        up: table(before),
+        down: table(after),
+        left: table(before),
+        right: table(after),
+        page_up: table(before),
+        page_down: table(after),
+        first: n ? 0 : null,
+        last: n ? n - 1 : null,
+      };
     },
   };
 
