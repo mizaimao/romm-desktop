@@ -161,6 +161,11 @@ delegated listener on the container serves them all and survives a redraw,
 which took the redraw from 53ms to 34ms in jsdom — but the nodes themselves are
 the remaining cost and no amount of listener work touches them.
 
+It is also where the memory is. Measured 2026-08-20: the WebKit WebContent
+process sits at 578 MB of a ~671 MB total, because every cover scrolled past
+stays decoded — the observer unobserves once loaded and nothing releases the
+image. Windowing fixes both at once. See `docs/handheld-frontend.md` task 2.
+
 Drawing only the rows on screen and filling in as you scroll is the fix. It is
 a real change: the cursor, the "remember where this tab was" scroll position,
 the pad navigation and the lazy cover observer all currently assume every row
