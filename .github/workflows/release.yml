@@ -3,9 +3,13 @@ name: Release
 # Tag a commit to publish:  git tag v0.1.0 && git push origin v0.1.0
 # Or run manually from the Actions tab to get artifacts without a release.
 #
-# Linux and Windows only. A CI-built macOS bundle would be unsigned, so it
-# arrives quarantined and needs mounting, dragging and an xattr call before it
-# opens. Build it on the Mac instead: scripts/build-macos.sh
+# Three targets: Linux x86_64, Windows x86_64, macOS on Apple silicon. Intel
+# macOS is deliberately absent — see the matrix below for why.
+#
+# The macOS build is unsigned, so it arrives quarantined and needs one xattr
+# call before it opens; the release notes say so. For your own machine, build
+# it locally instead — scripts/build-macos.sh takes about a minute and a
+# locally-produced bundle carries no quarantine attribute at all.
 on:
   push:
     tags: ["v*"]
@@ -38,6 +42,12 @@ jobs:
           - os: windows-latest
             label: Windows
             target: x86_64-pc-windows-msvc
+            # No installer. The app is portable — the UI and the core map are
+            # both compiled into it — so the NSIS setup only ever added a Start
+            # menu entry, and building one every release for a download nobody
+            # took is a slow job to keep. `--no-bundle` rather than editing
+            # `bundle.targets`, which is shared with the local macOS build.
+            no_bundle: true
           # Apple silicon only. Unsigned, so it arrives quarantined and needs
           # one xattr call before it opens — the release notes say so. That is
           # a worse first run than a signed build and a better one than no
@@ -86,14 +96,10 @@ jobs:
       - run: npm ci
 
       # The desktop app. `bundle.targets` in tauri.conf.json picks the right
-      # format per platform: NSIS installer on Windows, .deb and AppImage on
-      # Linux, .app and .dmg on macOS.
+      # format per platform: .deb and AppImage on Linux, .app and .dmg on
+      # macOS. Windows gets the binary alone — see `no_bundle` in the matrix.
       - name: Build desktop app
-        run: npx tauri build --target ${{ matrix.target }}
-
-      # The CLI is a separate binary in the same workspace.
-      - name: Build CLI
-        run: cargo build --release --bin romm-desktop --target ${{ matrix.target }}
+        run: npx tauri build --target ${{ matrix.target }} ${{ matrix.no_bundle && '--no-bundle' || '' }}
 
       - name: Collect artifacts
         shell: bash
@@ -106,16 +112,14 @@ jobs:
           GUI=target/${{ matrix.target }}/release/romm-gui
           [ -f "$GUI.exe" ] && cp "$GUI.exe" "dist/romm-desktop-${{ matrix.target }}.exe" || true
           [ -f "$GUI" ] && cp "$GUI" "dist/romm-desktop-${{ matrix.target }}" || true
-          # The CLI as well. It was never shipped, so a Windows user had no
-          # `sync`, `doctor` or `sync-saves` at all -- and until the GUI grew a
-          # library sync there was no way to fill the cache on that platform.
-          CLI=target/${{ matrix.target }}/release/romm-desktop
-          [ -f "$CLI.exe" ] && cp "$CLI.exe" "dist/romm-cli-${{ matrix.target }}.exe" || true
-          [ -f "$CLI" ] && cp "$CLI" "dist/romm-cli-${{ matrix.target }}" || true
+          # The CLI is not shipped. It is the same subcommands the app has
+          # buttons for, plus a TUI, and it stayed a build-it-yourself tool:
+          # `cargo build --release --bin romm-desktop` from a checkout. It is
+          # still built and tested by CI on all three platforms — this is about
+          # what the release page offers, not about dropping it.
           B=target/${{ matrix.target }}/release/bundle
           find "$B" -maxdepth 3 \
-            \( -name '*.deb' -o -name '*.AppImage' \
-               -o -name '*-setup.exe' -o -name '*.msi' -o -name '*.dmg' \) \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) \
             -exec cp {} dist/ \; 2>/dev/null || true
           # The .app is a directory, so it travels as a tarball. Zip would lose
           # the executable bit on the binary inside and the bundle would not
@@ -160,9 +164,7 @@ jobs:
 
             **Windows** — `romm-desktop-x86_64-pc-windows-msvc.exe` is the
             app, portable: the UI and the core map are both compiled into it,
-            so just run it. `*-setup.exe` is the installer if you would rather
-            have a Start menu entry. `romm-cli-*.exe` is the command line —
-            `doctor`, `sync`, `sync-saves` and the rest.
+            so just run it. There is no installer.
 
             **Linux** — `romm-desktop-x86_64-unknown-linux-gnu` is the app;
             `*.AppImage` and `*.deb` are the packaged forms.
