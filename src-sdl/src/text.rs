@@ -23,11 +23,12 @@
 
 use anyhow::Result;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap};
+use romm_desktop::script::{self, Script};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
 use sdl2::render::{BlendMode, Texture, TextureCreator, WindowCanvas};
 use sdl2::video::WindowContext;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// What a rendered piece of text is asked for.
 ///
@@ -96,6 +97,24 @@ const ELLIPSIS: char = '…';
 pub struct Fonts {
     system: FontSystem,
     swash: SwashCache,
+    /// Which installed family to use for each writing system, worked out once.
+    ///
+    /// Asking the database on every string would be a lookup per label per
+    /// frame for an answer that changes when somebody installs a font.
+    chosen: BTreeMap<&'static str, Option<String>>,
+}
+
+/// Which family to draw this string in, if it is one where that matters.
+///
+/// The whole of the Han unification fix: `script::of` reads the title and says
+/// Japanese, Korean, simplified or traditional, and this asks for the family
+/// that draws those forms. Everything else gets the generic sans-serif,
+/// because covering the script is the whole of the answer for it.
+fn attrs_for<'a>(family: Option<&'a str>) -> Attrs<'a> {
+    match family {
+        Some(name) => Attrs::new().family(Family::Name(name)),
+        None => Attrs::new().family(Family::SansSerif),
+    }
 }
 
 impl Fonts {
@@ -106,11 +125,34 @@ impl Fonts {
     /// docs/handheld-device.md.
     pub fn load() -> Result<Self> {
         let system = FontSystem::new();
-        let fonts = Fonts { system, swash: SwashCache::new() };
+        let mut fonts = Fonts { system, swash: SwashCache::new(), chosen: BTreeMap::new() };
         if fonts.faces() == 0 {
             anyhow::bail!("no fonts on this machine at all");
         }
+        for script in [Script::Japanese, Script::Korean, Script::Simplified, Script::Traditional] {
+            let installed = script
+                .families()
+                .iter()
+                .find(|wanted| fonts.has_family(wanted))
+                .map(|name| (*name).to_owned());
+            fonts.chosen.insert(script.language_tag().unwrap_or("?"), installed);
+        }
         Ok(fonts)
+    }
+
+    fn has_family(&self, name: &str) -> bool {
+        self.system
+            .db()
+            .faces()
+            .any(|face| face.families.iter().any(|(family, _)| family == name))
+    }
+
+    /// The family this string should be drawn in, or `None` for "anything that
+    /// covers it".
+    pub fn family_for(&self, text: &str) -> Option<&str> {
+        let script = script::of(text);
+        let tag = script.language_tag()?;
+        self.chosen.get(tag)?.as_deref()
     }
 
     pub fn faces(&self) -> usize {
@@ -156,9 +198,10 @@ impl Fonts {
         let spec = Spec::new(text, 16.0, 1.0);
         let size = spec.size_px();
         let mut buffer = Buffer::new(&mut self.system, Metrics::new(size, size * 1.3));
+        let family = self.family_for(text).map(str::to_owned);
         let id = {
             let mut buffer = buffer.borrow_with(&mut self.system);
-            buffer.set_text(text, &Attrs::new().family(Family::SansSerif), Shaping::Advanced, None);
+            buffer.set_text(text, &attrs_for(family.as_deref()), Shaping::Advanced, None);
             buffer.shape_until_scroll(false);
             buffer.layout_runs().flat_map(|r| r.glyphs.iter()).map(|g| g.font_id).next()?
         };
@@ -168,6 +211,7 @@ impl Fonts {
     }
 
     fn lay_out(&mut self, spec: &Spec) -> Laid {
+        let family = self.family_for(&spec.text).map(str::to_owned);
         let size = spec.size_px();
         // Line height at 1.3x. Tighter and diacritics collide with the line
         // above; looser and a two-line title reads as two titles.
@@ -177,7 +221,7 @@ impl Fonts {
         buffer.set_size(spec.width_px(), None);
         // `Shaping::Advanced` rather than `Basic`: basic skips the shaper,
         // which is fine for English and wrong for everything else.
-        buffer.set_text(&spec.text, &Attrs::new().family(Family::SansSerif), Shaping::Advanced, None);
+        buffer.set_text(&spec.text, &attrs_for(family.as_deref()), Shaping::Advanced, None);
         buffer.shape_until_scroll(false);
 
         let mut glyphs = 0usize;
@@ -230,13 +274,14 @@ impl Fonts {
     /// one pushes it onto a line of its own — an ellipsis alone on the third
     /// line of a two-line title, which is worse than the overflow.
     fn raster(&mut self, text: &str, spec: &Spec, clipped: bool) -> Raster {
+        let family = self.family_for(text).map(str::to_owned);
         let size = spec.size_px();
         let mut buffer = Buffer::new(&mut self.system, Metrics::new(size, size * 1.3));
         {
             let mut buffer = buffer.borrow_with(&mut self.system);
             buffer.set_wrap(if spec.width_px().is_some() { Wrap::WordOrGlyph } else { Wrap::None });
             buffer.set_size(spec.width_px(), None);
-            buffer.set_text(text, &Attrs::new().family(Family::SansSerif), Shaping::Advanced, None);
+            buffer.set_text(text, &attrs_for(family.as_deref()), Shaping::Advanced, None);
             buffer.shape_until_scroll(false);
         }
 
@@ -392,6 +437,12 @@ impl<'a> Painter<'a> {
     pub fn measure(&mut self, spec: &Spec) -> (u32, u32) {
         let drawn = self.entry(spec);
         (drawn.width, drawn.height)
+    }
+
+    /// The family this string asked for, or `None` where covering the script
+    /// is the whole of the answer.
+    pub fn family_for(&self, text: &str) -> Option<&str> {
+        self.fonts.family_for(text)
     }
 
     /// Which face was chosen to draw this string. See [`Fonts::face_for`] for
@@ -611,11 +662,47 @@ mod scripts {
     /// Which face each script is handed to. Printed, not asserted — the
     /// answer depends on what the machine has installed, and the point is to
     /// be able to see it.
+    /// The point of all of it: the three writing systems that share code
+    /// points are handed to three different faces.
+    ///
+    /// On a machine with only a pan-CJK fallback installed they will be the
+    /// same, and that is the state this exists to make visible rather than to
+    /// fail over — so it asserts what it can: that whatever is chosen, the
+    /// chooser has an opinion.
+    #[test]
+    fn each_of_the_shared_scripts_gets_its_own_answer() {
+        let mut f = Fonts::load().expect("no fonts");
+        let japanese = f.family_for("ゼルダの伝説").map(str::to_owned);
+        let simplified = f.family_for("塞尔达传说").map(str::to_owned);
+        let traditional = f.family_for("薩爾達傳說").map(str::to_owned);
+        let korean = f.family_for("젤다의 전설").map(str::to_owned);
+        println!("ja={japanese:?} sc={simplified:?} tc={traditional:?} ko={korean:?}");
+
+        // Latin needs no decision and must not be given one.
+        assert_eq!(f.family_for("Metroid"), None);
+        assert_eq!(f.family_for("Тетрис"), None);
+
+        // Where the machine has distinct faces, they have to be told apart.
+        // This Mac does; the handheld's Noto CJK does too.
+        if japanese.is_some() && simplified.is_some() {
+            assert_ne!(
+                japanese, simplified,
+                "Japanese and simplified Chinese were handed to the same face"
+            );
+        }
+        // And every one that is drawn is still drawable.
+        for sample in ["ゼルダの伝説", "塞尔达传说", "薩爾達傳說", "젤다의 전설"] {
+            assert!(f.can_draw(sample), "{sample} lost its glyphs to the family choice");
+        }
+    }
+
     #[test]
     fn which_face_draws_what() {
         let mut f = Fonts::load().expect("no fonts");
         for (name, sample) in LIBRARY {
-            println!("{name:<24} {sample:<20} -> {:?}", f.face_for(sample));
+            let asked = f.family_for(sample).unwrap_or("(any)").to_owned();
+            let got = f.face_for(sample);
+            println!("{name:<24} {sample:<20} asked {asked:<18} got {got:?}");
         }
     }
 

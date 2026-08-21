@@ -367,40 +367,34 @@ and getting it up early proves the GL context works on the device.
   So neither is dropped — both are wanted on both, and neither blocks the front
   end. Plan the detail pane so a video frame and a page image are things it can
   be handed, rather than assuming they will never exist.
-* **Which language a title is in, and therefore which shapes to draw it with.**
-  Raised on 2026-08-21 by Frank, who reads Chinese and would notice:
+* ~~Which language a title is in, and therefore which shapes to draw it
+  with.~~ **Answered 2026-08-21, and it needed no metadata.**
 
-  > If we are building an "OS", we would actually want to have multi-language
-  > support, and CJK is just one of them right? … multi-language support. If
-  > not now, later.
+  Han unification is real: Chinese, Japanese and Korean share code points for
+  characters whose correct shapes differ — 直, 骨, 話, 令 — and a reader of one
+  sees the other immediately. EmulationStation's answer, on this very handheld,
+  is `DroidSansFallbackFull.ttf`: Android's single pan-CJK fallback, built on
+  simplified forms, used for all three. That is why Japanese titles look subtly
+  wrong in every one of these front ends.
 
-  Two separate things, and only one of them is done.
+  The first plan here was to take the language from the ROM's region. Frank's
+  objection was the right one — *"don't understand why you need ROM files to
+  implement that"* — and it is not needed. **The title says.** Kana is proof of
+  Japanese; hangul is proof of Korean; Han alone is Chinese, and which Chinese
+  is settled by counting the characters that exist in only one of the two
+  writing systems. `src/script.rs`, eight tests, no metadata and no
+  configuration.
 
-  *Script coverage is general already.* Nothing in `src-sdl/src/text.rs` names
-  a language: fallback is per script, and `text::scripts` tests Japanese,
-  simplified and traditional Chinese, Korean, Cyrillic, Greek, Arabic, Hebrew,
-  Thai and accented Latin, plus a string that spans two scripts, plus a
-  right-to-left one. That last found a real bug the day it was written — with a
-  wrap width set, a right-to-left line is laid out from the *right* edge of the
-  box, so sizing the image to the ink and blitting from zero put every Arabic
-  glyph outside its own bitmap. Twelve glyphs shaped and nothing drawn.
+  In the core rather than the front end because the webview has the same
+  problem and the same fix, spelled differently: `Script::language_tag` gives
+  `zh-Hant`, and a `lang` attribute on the element fixes it in a browser with
+  no font names involved at all.
 
-  *Which shape to draw is not.* Han unification: Chinese, Japanese and Korean
-  share code points for characters whose correct forms differ — 直, 骨, 話, 令
-  — and a reader of one sees the other immediately. Fallback picks a family by
-  the scripts it covers, not by the language the text is in. On this Mac that
-  happens to come out right (Hiragino for Japanese, PingFang SC for Chinese),
-  and even here traditional Chinese is handed to a *simplified* face. On the
-  handheld, where the one installed family is `fonts-noto-cjk` covering all
-  four with variants chosen by language tag, it will come out wrong for one of
-  them and there is nothing to say which.
-
-  cosmic-text 0.19 takes its shaping language from the system locale rather
-  than per string, and `Attrs` has no language. The lever is the family: a
-  title known to be Chinese can ask for `Noto Sans CJK SC` by name. What is
-  missing is knowing that it is Chinese — **the ROM's region is already in the
-  library metadata**, and that is where the answer comes from. Worth doing when
-  the detail pane needs regions anyway.
+  On this Mac all four now land where they should, traditional Chinese
+  included — it was being handed to a *simplified* face before. Startup prints
+  what was asked for beside what the machine gave, so a handheld with only a
+  pan-CJK fallback says so rather than quietly drawing one language in
+  another's forms.
 
 * **The app's own words, in other languages.** Untouched, and a different job
   entirely: every string in the interface is currently an English literal in

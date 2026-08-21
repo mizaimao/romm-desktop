@@ -177,14 +177,22 @@ fn check_fonts(painter: &mut text::Painter) {
             eprintln!("warning: no installed face can draw {probe:?} — it will be drawn as boxes");
         }
     }
-    // Which face each of the shared scripts is handed to. The interesting
-    // answer is not "one was found" — it is *which*: Chinese, Japanese and
-    // Korean share code points whose correct shapes differ, and a face picked
-    // for covering the script rather than for the language draws one of them
-    // in another's forms. Legible, and visibly foreign. See text::Fonts::face_for.
-    for (what, sample) in [("Japanese", "ゼルダの伝説"), ("Chinese", "塞尔达传说"), ("Korean", "젤다의 전설")] {
+    // Which face each of the shared scripts is handed to, and whether it is
+    // the one asked for. Chinese, Japanese and Korean share code points whose
+    // correct shapes differ; `romm_desktop::script` reads the title and names
+    // the family, and this says whether the machine had it. A handheld with
+    // only a pan-CJK fallback installed will say so here rather than quietly
+    // drawing Japanese titles in Chinese forms.
+    for (what, sample) in [
+        ("Japanese", "ゼルダの伝説"),
+        ("Chinese (S)", "塞尔达传说"),
+        ("Chinese (T)", "薩爾達傳說"),
+        ("Korean", "젤다의 전설"),
+    ] {
+        let asked = painter.family_for(sample).unwrap_or("(any)").to_owned();
         if let Some(face) = painter.face_for(sample) {
-            println!("  {what:<9} -> {face}");
+            let note = if face == asked || asked == "(any)" { "" } else { "  <- not what was asked for" };
+            println!("  {what:<12} asked {asked:<20} got {face}{note}");
         }
     }
     let cut = SAMPLE
