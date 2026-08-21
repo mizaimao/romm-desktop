@@ -39,14 +39,23 @@ only shows up here.
 On Linux the GUI additionally needs `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `librsvg2-dev`, `libayatana-appindicator3-dev` and `patchelf`.
 
-Binaries come from CI — tag a commit `v*`. That includes macOS now, on Apple
-silicon, as a `.dmg` and a `.app.tar.gz`. Intel is not built there: the
-macos-13 runners are being retired and a dispatched build sat queued for
-twenty-two minutes without starting, which would hold up every release. They are unsigned, so
-macOS quarantines them and one `xattr -dr com.apple.quarantine` is needed after
-the first move to /Applications. Building locally with `scripts/build-macos.sh`
+Binaries come from CI — tag a commit `v*`. Three targets: Linux x86_64 as a
+binary, an `.AppImage` and a `.deb`; Windows x86_64 as a portable `.exe` with
+no installer, since the UI and the core map are both compiled into it; macOS on
+Apple silicon as a `.dmg` and a `.app.tar.gz`.
+
+Intel macOS is not built there: the macos-13 runners are being retired and a
+dispatched build sat queued for twenty-two minutes without starting, which
+would hold up every release. The macOS builds are unsigned, so macOS
+quarantines them and one `xattr -dr com.apple.quarantine` is needed after the
+first move to /Applications. Building locally with `scripts/build-macos.sh`
 skips that entirely — a bundle that never came through a browser is never
 marked — so that is still the better route on the machine you develop on.
+
+**The CLI is not published.** It is the same things the app has buttons for,
+plus the terminal browser, and it is a build-it-yourself tool: `cargo build
+--release --bin romm-desktop` from a checkout, then `./target/release/romm-desktop
+doctor`. CI still builds and tests it on all three platforms.
 
 ## Configuring
 
