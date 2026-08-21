@@ -125,7 +125,7 @@ async function showRecent() {
     (overflow ? `<button class="link recent-more">More…</button>` : "") +
     `</h2>` +
     `<div class="gcards">${shown.map((r) => `
-       <div class="gcard" data-id="${r.id}">
+       <div class="gcard" data-id="${r.id}" data-name="${escapeHtml(r.name.slice(0, 2))}">
          <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
          <div class="gname">${escapeHtml(r.name)}</div>
          <div class="gmeta">${here(r)}${escapeHtml(r.platform)}</div>
@@ -658,7 +658,9 @@ function gridMarkup(rows, platform) {
   return `<div class="gcards"${style}>${rows
     .map(
       (r) => `
-      <div class="gcard" data-id="${r.id}"${
+      <div class="gcard" data-id="${r.id}" data-name="${escapeHtml(r.name.slice(0, 2))}"${
+        r.favourite ? ` data-fav="1"` : ""
+      }${
         !uniform && state.aspects[r.platform]
           ? ` style="--ar:${state.aspects[r.platform].toFixed(3)}"`
           : ""
@@ -717,21 +719,57 @@ export function setLayout(next) {
 }
 
 // Covers load only for cards near the viewport, batched — opening a
-// 2,400-game platform must not fire 2,400 requests.
+// 2,400-game platform must not fire 2,400 requests — and are let go again
+// once a card is well away from it.
+//
+// The letting go is the whole of the memory problem. A cover is a few tens of
+// kilobytes as a PNG and about 786 KB once decoded into a bitmap, and the
+// version this replaces unobserved a card the moment its cover arrived: every
+// image the list had ever drawn stayed decoded for as long as the list was on
+// screen. Measured on 2026-08-20, the WebKit content process sat at 578 MB of
+// a ~671 MB total, and that was all of it. See docs/handheld-frontend.md.
 let coverObserver;
+/// The second observer, at a much larger margin than the first. Two of them,
+/// not one, because loading and releasing want different distances: a card
+/// just off the top of the screen is one flick of the wheel from being looked
+/// at again, and dropping its cover there would mean fetching and decoding it
+/// again on the way back. The gap between the two margins is the hysteresis.
+let coverReleaser;
 let coverQueue = [];
 let coverTimer;
 
+/// How far off screen a card has to be before its cover is let go. Two
+/// screenfuls at a typical window height — far enough that scrolling back is
+/// deliberate rather than a flick.
+const RELEASE_MARGIN = "1600px";
+
 let coverErrorShown = false;
+
+/// The placeholder a card is drawn with, and goes back to when its cover is
+/// released: the first two letters of its name, and the star if it has one.
+function placeholder(card) {
+  // `data-name` already holds only the two letters the placeholder draws, and
+  // is already escaped — it went through `escapeHtml` on the way into the
+  // attribute. Escaping it again would turn an `&` into `&amp;amp;`.
+  const star = card.dataset.fav === "1"
+    ? `<span class="star" title="Starred — in one of your starred collections">★</span>`
+    : "";
+  return `<span class="ph">${card.dataset.name ?? ""}</span>${star}`;
+}
 
 function observeCovers() {
   coverObserver?.disconnect();
+  coverReleaser?.disconnect();
   coverQueue = [];
   coverObserver = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
-        coverObserver.unobserve(e.target);
+        // Still observed, not unobserved: a card whose cover has been released
+        // has to be able to ask for it again. `loaded` is what stops the same
+        // card being queued twice.
+        if (e.target.dataset.loaded === "1") continue;
+        e.target.dataset.loaded = "1";
         coverQueue.push(Number(e.target.dataset.id));
       }
       clearTimeout(coverTimer);
@@ -739,7 +777,25 @@ function observeCovers() {
     },
     { root: el.list, rootMargin: "300px" }
   );
-  el.list.querySelectorAll(".gcard").forEach((c) => coverObserver.observe(c));
+  coverReleaser = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) continue;
+        const art = e.target.querySelector(".art");
+        // Only if there is something to let go of. Putting the placeholder
+        // back over a placeholder is a write to the page for no reason, and
+        // this runs for every card that leaves the margin.
+        if (!art?.firstElementChild || art.firstElementChild.tagName !== "IMG") continue;
+        art.innerHTML = placeholder(e.target);
+        delete e.target.dataset.loaded;
+      }
+    },
+    { root: el.list, rootMargin: RELEASE_MARGIN }
+  );
+  for (const c of el.list.querySelectorAll(".gcard")) {
+    coverObserver.observe(c);
+    coverReleaser.observe(c);
+  }
 }
 
 async function flushCovers() {
@@ -748,8 +804,17 @@ async function flushCovers() {
   try {
     for (const { id, cover } of await invoke("rom_covers", { ids })) {
       if (!cover) continue;
-      const art = el.list.querySelector(`.gcard[data-id="${id}"] .art`);
-      if (art) art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;
+      const card = el.list.querySelector(`.gcard[data-id="${id}"]`);
+      const art = card?.querySelector(".art");
+      // Gone since the batch was asked for — released again, or the list
+      // redrawn under it. Dropping it is right; the card will ask again.
+      if (!art || card.dataset.loaded !== "1") continue;
+      const star = card.dataset.fav === "1"
+        ? `<span class="star" title="Starred — in one of your starred collections">★</span>`
+        : "";
+      // The star is kept. Replacing the whole of `.art` with the image took it
+      // away, so a starred game lost its star the moment its cover arrived.
+      art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />${star}`;
     }
   } catch (e) {
     // Placeholders stay — a failed batch is not worth interrupting browsing —
