@@ -1,7 +1,7 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
-import { resetNav } from "./keys.js";
+import { resetNav, primeNav } from "./keys.js";
 import { currentOrder, defaultOrder, refreshSortButton, sorted } from "./sort.js";
 import { filtered, refreshFilterButton, activeFilters, clearFilters } from "./filter.js";
 import { arrangeCurrentList, listRef } from "./arrange.js";
@@ -236,6 +236,7 @@ function renderPlatforms(items) {
   });
   if (shellMode() === "columns" && state.platform) markPlatform(state.platform);
   resetNav();
+  primeNav();
 }
 
 /// Open a console, carrying its name up into the title bar.
@@ -531,6 +532,9 @@ export function renderRows(unsorted, showPlatform) {
     : state.layout === "grid"
       ? gridMarkup(rows)
       : listMarkup(rows, showPlatform);
+  // Work out where the cursor can go while nobody is waiting on it, rather
+  // than on the first arrow press after this.
+  primeNav();
 
   delegateGames(region("games"));
   setPageFilterLabel(`${rows.length} games`);

@@ -87,7 +87,14 @@ pub fn filterable(view: &str) -> bool {
 /// not the one a Japanese reader would choose. Left as an approximation
 /// deliberately: the alternative is carrying ICU.
 pub fn name_cmp(a: &str, b: &str) -> Ordering {
-    a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
+    // Folded lazily, character by character. Lowercasing into two Strings is
+    // the obvious way to write this and it allocates twice per comparison —
+    // which, sorting 2,506 arcade games, is a hundred thousand allocations for
+    // one press of the sort button.
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .cmp(b.chars().flat_map(char::to_lowercase))
+        .then_with(|| a.cmp(b))
 }
 
 /// The order and filters chosen per view, for this run of the app only.

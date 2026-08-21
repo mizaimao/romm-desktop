@@ -113,7 +113,7 @@ pub fn sort(rows: &[PickerRow], order_id: Option<&str>) -> Vec<usize> {
         let keyed = match order.id {
             "count" | "fewest" => a.rom_count.cmp(&b.rom_count),
             "here" => a.local_count.cmp(&b.local_count),
-            _ => name_cmp(&a.name.to_lowercase(), &b.name.to_lowercase()),
+            _ => name_cmp(&a.name, &b.name),
         };
         let keyed = if order.dir < 0 { keyed.reverse() } else { keyed };
         // A stable tie-break, or two collections with the same count swap

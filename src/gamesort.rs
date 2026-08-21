@@ -57,7 +57,7 @@ pub fn compare(a: &Row, b: &Row, order_id: &str) -> Ordering {
     }
     let order = by_id(order_id).unwrap_or(&ORDERS[0]);
     let keyed = match order.id {
-        "name" => name_cmp(&a.name.to_lowercase(), &b.name.to_lowercase()),
+        "name" => name_cmp(&a.name, &b.name),
         // `missing` is -1 rather than 0, so an unrated game sorts below a game
         // rated zero rather than alongside it.
         "rating" => cmp_f64(a.rating.unwrap_or(-1.0), b.rating.unwrap_or(-1.0)),
@@ -66,7 +66,7 @@ pub fn compare(a: &Row, b: &Row, order_id: &str) -> Ordering {
         // string, which sorts below every real date.
         "played" => a.last_played.as_deref().unwrap_or("").cmp(b.last_played.as_deref().unwrap_or("")),
         "size" => a.size_bytes.cmp(&b.size_bytes),
-        "platform" => name_cmp(&a.platform.to_lowercase(), &b.platform.to_lowercase()),
+        "platform" => name_cmp(&a.platform, &b.platform),
         _ => Ordering::Equal,
     };
     let keyed = if order.dir < 0 { keyed.reverse() } else { keyed };
@@ -171,3 +171,4 @@ mod tests {
         assert_eq!(names(&rows, "nonsense"), ["asteroids", "Zelda"]);
     }
 }
+

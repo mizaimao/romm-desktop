@@ -59,15 +59,44 @@ window.addEventListener("resize", resetNav);
 
 /// Fetch the table if the page has changed under it.
 ///
-/// The one await on this path, and it happens on the first press after a
-/// redraw rather than on every press.
+/// One call in flight at a time. A held direction repeats every 110ms, and on
+/// a list this long the fetch can outlast that — without the guard, every
+/// press while the first was still out would start another, each re-reading
+/// 2,506 positions out of the page.
+let inFlight = null;
+
 async function syncGeometry(nodes) {
   const now = `${nodes.length}:${el.list.clientWidth}`;
   if (shape === now && table) return;
-  table = await invoke("set_grid", {
-    cards: nodes.map((n) => [n.offsetTop, n.offsetLeft, n.offsetWidth]),
-  });
-  shape = now;
+  if (!inFlight) {
+    // Read every position in one go. Interleaving reads with anything that
+    // writes to the page would force a fresh layout per card.
+    const cards = nodes.map((n) => [n.offsetTop, n.offsetLeft, n.offsetWidth]);
+    inFlight = invoke("set_grid", { cards })
+      .then((t) => {
+        table = t;
+        shape = now;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+  }
+  await inFlight;
+}
+
+/// Work the table out now, before anybody presses anything.
+///
+/// Called after a list is drawn, from a timer rather than inline: by then the
+/// browser has laid the page out for its own paint, so reading 2,506 positions
+/// costs a lookup each instead of forcing a layout — and the 120KB the table
+/// weighs crosses while nothing is waiting on it. Without this the whole cost
+/// lands on the first arrow press after every redraw, which is exactly when
+/// somebody is watching.
+export function primeNav() {
+  setTimeout(() => {
+    const nodes = items();
+    if (nodes.length) syncGeometry(nodes).catch(() => {});
+  }, 0);
 }
 
 /// Move the cursor.
