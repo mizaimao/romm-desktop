@@ -1,0 +1,32 @@
+[package]
+name = "romm-sdl"
+version.workspace = true
+edition = "2024"
+
+# The third front end, and the one meant to outlive the other two. See
+# docs/handheld-frontend.md task 3 and docs/handheld-device.md.
+#
+# It draws; it decides nothing. Sort orders, filters, bindings, cursor
+# movement and the layout units all come from `romm_desktop`, which is why
+# tasks 1 and 2 came first.
+[[bin]]
+name = "romm-sdl"
+path = "src/main.rs"
+
+[dependencies]
+romm-desktop = { path = ".." }
+anyhow = "1.0.104"
+
+# The C library, not a reimplementation. `libsdl2-dev` is already in the
+# handheld's package list, so the device can build this itself and
+# cross-compiling is a convenience rather than a blocker.
+[dependencies.sdl2]
+version = "0.38"
+default-features = false
+# Ask pkg-config where SDL is rather than hoping the linker's default search
+# path covers it. On Apple silicon Homebrew puts it in /opt/homebrew/lib, which
+# is not one of those paths, and the failure is `ld: library 'SDL2' not found`
+# with nothing to say that the library is installed and one directory away.
+# Debian answers the same question the same way, so this is not a Mac
+# workaround — it is the portable form.
+features = ["use-pkgconfig"]

@@ -108,3 +108,9 @@ backups/
 /new-media.txt
 /remaining-media.txt
 /remaining-arcade.txt
+
+# The dArkOS build system, kept beside the project to read rather than to ship.
+# A gigabyte, and a git repository of its own — see docs/handheld-device.md for
+# what we take from it. If we ever depend on a pinned revision, make it a
+# submodule deliberately rather than letting `git add -A` swallow it.
+reference/

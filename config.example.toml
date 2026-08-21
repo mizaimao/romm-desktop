@@ -215,6 +215,23 @@ max_threads = 1
 # nothing at all.
 app_icon = "arcade"
 
+# How far away the screen is held, in centimetres. Absent means a desk, 60cm.
+#
+# The one number that makes a layout written in points come out the right
+# physical size on a monitor and on a handheld both. A panel's DPI says how
+# fine its pixels are and nothing about how close somebody's face is, and that
+# is most of what decides how big a thing should be drawn.
+#
+# A 4" 960x720 handheld is around 300 DPI. Left at the desk default that works
+# out to a scale of three, which is a screen with room for two covers on it. At
+# 30 it is 1.5, and the screen is 640 points wide. The handheld image ships
+# with this set; a desktop should leave it alone.
+#
+# Read by the SDL front end. The webview has the browser's own scaling.
+#
+#   viewing_distance_cm = 30
+
+
 # Written by Settings -> Control. Every key and controller button starts on the
 # default in src/binds.rs, and only what has been changed appears here — so an
 # empty pair of tables means nothing has been rebound.

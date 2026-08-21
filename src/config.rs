@@ -284,6 +284,20 @@ pub struct AppearanceCfg {
     /// the default rather than no icon.
     #[serde(default)]
     pub app_icon: Option<String>,
+    /// How far away the screen is held, in centimetres. Absent means a desk.
+    ///
+    /// The one number that makes a layout in points come out the right
+    /// physical size on both a monitor and a handheld — see
+    /// [`crate::layout::Scale::viewed_from`]. A panel's DPI says how fine its
+    /// pixels are and nothing about how close somebody's face is, and that is
+    /// most of what decides how big a thing should be drawn.
+    ///
+    /// A 4" 960x720 handheld is around 300 DPI. Left at the desk default that
+    /// works out to a scale of three, which is a screen with room for two
+    /// covers on it. Set to 30 it is 1.5, and the screen is 640 points wide.
+    /// The handheld image ships with this set; nothing else needs it.
+    #[serde(default)]
+    pub viewing_distance_cm: Option<f32>,
 }
 
 /// Which per-system artwork the platform grid shows.

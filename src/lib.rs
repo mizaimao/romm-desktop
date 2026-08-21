@@ -27,6 +27,7 @@ pub mod gamesort;
 pub mod gridnav;
 pub mod iconart;
 pub mod launch;
+pub mod layout;
 pub mod lightgun;
 pub mod macdisplay;
 pub mod media;

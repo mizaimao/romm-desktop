@@ -360,7 +360,13 @@ and getting it up early proves the GL context works on the device.
   handheld is easy to defend; absent on the desktop is a regression somebody
   will notice. The cheap answer for manuals is to hand the file to the system
   viewer on desktop and drop them on the handheld; video wants libmpv or
-  nothing. **Decide before the SDL front end is finished, not after.**
+  nothing.
+
+  **Decided on 2026-08-21, and deferred:** *"I will want to try to provide PDF
+  and video support in desktop and handheld. But we worry about that later."*
+  So neither is dropped — both are wanted on both, and neither blocks the front
+  end. Plan the detail pane so a video frame and a page image are things it can
+  be handed, rather than assuming they will never exist.
 * Whether the animated backdrop should default off on battery — there is already
   a strength slider and per-shape settings to hang that off.
 * Whether the desktop app writes `config.toml` onto the card when it is
