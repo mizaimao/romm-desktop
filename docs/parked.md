@@ -171,6 +171,24 @@ a real change: the cursor, the "remember where this tab was" scroll position,
 the pad navigation and the lazy cover observer all currently assume every row
 exists.
 
+**One more number, measured 2026-08-20 while chasing a report that browsing a
+large platform felt laggy.** Parked with "forget about the laggy thing" — kept
+here so nobody measures it twice. A worktree at 98a3b8b and one at 0.2.504,
+same jsdom probe, 2,506 rows:
+
+| | before the refactor | after |
+|---|--:|--:|
+| entering a platform | 412ms | 394ms |
+| one cursor move | 106ms | 109ms |
+| `renderRows` | ~340ms | ~380ms |
+
+So the front-end refactor did not cause it. **73ms of every cursor move is
+`selectRom` drawing the info pane, and it sends three commands per move** —
+`rom_detail`, `game_cores`, `game_states` — while a held direction repeats nine
+times a second. Debouncing the pane, so it draws for where the cursor stopped
+rather than for every row it passed over, is a smaller and more separable job
+than windowing and would probably be felt first.
+
 ## 15. The two rough edges left in three columns
 
 Coming back up from a collection's games still uses the one-pane trail, and
