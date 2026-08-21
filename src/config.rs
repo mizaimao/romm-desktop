@@ -39,6 +39,19 @@ pub struct Config {
     /// existing config keeps working.
     #[serde(default, alias = "cheevos")]
     pub achievements: AchievementsCfg,
+    /// Rebound keys and controller buttons. Empty until somebody changes one;
+    /// see [`crate::binds`] for the tables the changes are layered over.
+    ///
+    /// Here rather than in the webview's own storage because the TUI and any
+    /// front end that is not a browser have to read the same choices — and
+    /// because the settings window is a second document, which meant the two
+    /// halves of the app kept separate copies and synchronised them by hand.
+    #[serde(default)]
+    pub bindings: crate::binds::Bindings,
+    /// How the left column is ordered, per kind of list. Remembered, unlike
+    /// the game sort — see [`crate::pickorder`].
+    #[serde(default)]
+    pub picker_order: crate::pickorder::PickerOrders,
 }
 
 /// RetroAchievements — the `[achievements]` section of config.toml.
@@ -675,26 +688,69 @@ fn write_raw(path: &str, table: &str, key: &str, value: Option<&str>) -> Result<
 }
 
 fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Result<()> {
+    write_lines(path, table, &[(key.to_owned(), entry)])
+}
+
+/// Set or clear a whole table's worth of keys in one pass over the file.
+///
+/// One read and one write, whatever the length of the list. The single-key
+/// writer above goes through here too, so there is one implementation of where
+/// a key belongs in a file.
+///
+/// Written for the bindings, which are 29 actions and 16 buttons: doing those
+/// one at a time is forty-five read-modify-writes of config.toml for a single
+/// press of a rebind button, and a file rewritten that often is one that
+/// eventually gets caught half-written.
+pub fn set_table_entries(path: &str, table: &str, entries: &[(String, Option<String>)]) -> Result<()> {
+    let lines: Vec<(String, Option<String>)> = entries
+        .iter()
+        .map(|(key, value)| {
+            let entry = value.as_ref().map(|v| {
+                format!(
+                    "{} = \"{}\"",
+                    toml_key(key),
+                    v.replace('\\', "\\\\").replace('"', "\\\"")
+                )
+            });
+            (key.clone(), entry)
+        })
+        .collect();
+    write_lines(path, table, &lines)
+}
+
+fn write_lines(path: &str, table: &str, entries: &[(String, Option<String>)]) -> Result<()> {
     let file = Path::new(path);
     let original = std::fs::read_to_string(file).unwrap_or_default();
     let header = format!("[{table}]");
 
     let mut lines: Vec<String> = original.lines().map(str::to_owned).collect();
+    let mut touched = false;
+    for (key, entry) in entries {
+        touched |= edit(&mut lines, &header, key, entry.clone());
+    }
+    if !touched {
+        return Ok(());
+    }
+    std::fs::write(file, lines.join("\n") + "\n")
+        .with_context(|| format!("writing {}", file.display()))?;
+    Ok(())
+}
+
+/// Put one key where it belongs in `lines`. Returns whether anything changed.
+fn edit(lines: &mut Vec<String>, header: &str, key: &str, entry: Option<String>) -> bool {
 
     // Locate the table, and the key within it.
     let table_at = lines.iter().position(|l| l.trim() == header);
     let Some(start) = table_at else {
         // Nothing to remove from a table that does not exist.
-        let Some(entry) = entry else { return Ok(()) };
+        let Some(entry) = entry else { return false };
         // No such table yet: append it.
         if !lines.is_empty() && !lines.last().is_some_and(|l| l.trim().is_empty()) {
             lines.push(String::new());
         }
-        lines.push(header);
+        lines.push(header.to_owned());
         lines.push(entry);
-        std::fs::write(file, lines.join("\n") + "\n")
-            .with_context(|| format!("writing {}", file.display()))?;
-        return Ok(());
+        return true;
     };
 
     // The table ends at the next header line.
@@ -710,20 +766,111 @@ fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Resu
         .map(|i| start + 1 + i);
 
     match (existing, entry) {
-        (Some(i), Some(entry)) => lines[i] = entry,
+        (Some(i), Some(entry)) => {
+            if lines[i] == entry {
+                return false;
+            }
+            lines[i] = entry;
+        }
         (Some(i), None) => {
             lines.remove(i);
         }
         (None, Some(entry)) => lines.insert(end, entry),
-        (None, None) => return Ok(()),
+        (None, None) => return false,
     }
-    std::fs::write(file, lines.join("\n") + "\n")
-        .with_context(|| format!("writing {}", file.display()))?;
-    Ok(())
+    true
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// A whole table at once, which is what the bindings need: 29 actions and
+    /// 16 buttons, written one at a time, is forty-five read-modify-writes of
+    /// config.toml for one press of a rebind button.
+    #[test]
+    fn a_whole_table_is_written_in_one_pass() {
+        let dir = std::env::temp_dir().join("romm-cfg-table");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let file = path.to_str().unwrap();
+        std::fs::write(&path, "[server]\nurl = \"http://dev.lan\"\n").unwrap();
+
+        super::set_table_entries(
+            file,
+            "bindings.keys",
+            &[
+                ("sortMenu".to_owned(), Some("s".to_owned())),
+                ("filterMenu".to_owned(), Some("f".to_owned())),
+                // Empty, not absent: "deliberately unbound".
+                ("left".to_owned(), Some(String::new())),
+                // Absent: never touched, so nothing should appear for it.
+                ("random".to_owned(), None),
+            ],
+        )
+        .unwrap();
+
+        let doc: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let keys = doc.get("bindings").and_then(|b| b.get("keys")).unwrap();
+        assert_eq!(keys.get("sortMenu").unwrap().as_str(), Some("s"));
+        assert_eq!(keys.get("filterMenu").unwrap().as_str(), Some("f"));
+        assert_eq!(keys.get("left").unwrap().as_str(), Some(""), "unbound was not written");
+        assert!(keys.get("random").is_none(), "a key nobody set was written anyway");
+        // And the rest of the file is untouched.
+        assert_eq!(
+            doc.get("server").unwrap().get("url").unwrap().as_str(),
+            Some("http://dev.lan")
+        );
+    }
+
+    /// The config carries hand-written comments explaining non-obvious
+    /// choices, which is why every writer here is a targeted text edit rather
+    /// than parse-and-reserialise. A batched writer that lost them would undo
+    /// that quietly.
+    #[test]
+    fn writing_a_table_keeps_the_comments_around_it() {
+        let dir = std::env::temp_dir().join("romm-cfg-comments");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let file = path.to_str().unwrap();
+        std::fs::write(
+            &path,
+            "# why this console needs this core\n[cores]\n# and why not the other one\nnes = \"nestopia\"\n",
+        )
+        .unwrap();
+
+        super::set_table_entries(file, "cores", &[("nes".to_owned(), Some("mesen".to_owned()))])
+            .unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("# why this console needs this core"), "a comment was lost");
+        assert!(after.contains("# and why not the other one"), "a comment was lost");
+        assert!(after.contains("nes = \"mesen\""), "the value was not changed");
+    }
+
+    /// Nothing to change means nothing to write. Rebinding one button walks
+    /// all 45 entries, and 44 of them are already what they should be — a file
+    /// rewritten every time is one that eventually gets caught half-written.
+    #[test]
+    fn a_table_that_would_not_change_is_not_rewritten() {
+        let dir = std::env::temp_dir().join("romm-cfg-nochange");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let file = path.to_str().unwrap();
+        std::fs::write(&path, "[cores]\nnes = \"mesen\"\n").unwrap();
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        super::set_table_entries(file, "cores", &[("nes".to_owned(), Some("mesen".to_owned()))])
+            .unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "the file was rewritten with the same contents"
+        );
+    }
 
     /// The app wrote `autofire = false` into people's config files while this
     /// was a toggle. Changing the field to a string without accepting that did

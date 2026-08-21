@@ -80,6 +80,31 @@ struct AppState {
     /// The number in config.toml is the one you start with; moving it here is
     /// for the run you are about to have.
     autofire_hz: Mutex<Option<u32>>,
+    /// Keys and buttons, resolved by `romm_desktop::binds` rather than by the
+    /// page. `config.toml` stays the source of truth; this is the live copy,
+    /// so a rebind takes effect on the next press rather than the next
+    /// restart.
+    bindings: Mutex<romm_desktop::binds::Bindings>,
+    /// How the left column is ordered, per kind of list.
+    picker_order: Mutex<romm_desktop::pickorder::PickerOrders>,
+    /// The order and filters chosen per view, for this run only. See
+    /// `romm_desktop::gamelist::Chosen` for why this one is memory and
+    /// `picker_order` is a file.
+    chosen: Mutex<romm_desktop::gamelist::Chosen>,
+    /// The list last handed to a front end.
+    ///
+    /// Kept so `arrange_list` can answer "which of these, and in what order"
+    /// without the whole list travelling back here: 2,506 rows leave for the
+    /// arcade console, and every change of sort or filter would otherwise
+    /// return all of them to be handed straight back.
+    list_rows: Mutex<Vec<romm_desktop::gamelist::Row>>,
+    /// Which view `list_rows` was filled for, so an arrangement asked for a
+    /// different one is refused rather than answered with the wrong list.
+    list_scope: Mutex<String>,
+    /// The names on the page and the groups they sit under, for the filter box
+    /// above them. Sent once per list rather than once per keystroke: there are
+    /// 2,506 of them on the arcade console.
+    page_names: Mutex<(Vec<String>, Vec<Vec<usize>>)>,
 }
 
 #[derive(Serialize)]
@@ -776,12 +801,16 @@ fn play_history(state: State<'_, AppState>) -> CmdResult<History> {
 /// is picking up where you left off, and that is rarely the machine you are
 /// sitting at now.
 #[tauri::command]
-fn recent_games(state: State<'_, AppState>, limit: Option<usize>) -> CmdResult<Vec<RomView>> {
+fn recent_games(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+    list: Option<ListRef>,
+) -> CmdResult<Vec<RomView>> {
     let rows = {
         let cache = state.cache.lock().map_err(err)?;
         cache.recently_played(limit.unwrap_or(8)).map_err(err)?
     };
-    Ok(to_views(&state, rows))
+    Ok(to_views(&state, rows, list.map(|l| l.scope()).as_deref()))
 }
 
 /// What a bulk download should cover: what to take, and how much of it.
@@ -1029,7 +1058,7 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
     // otherwise be taken four times for each of thirty consoles.
     let set = state.icon_set.lock().map_err(err)?.clone();
     let look = state.icon_look.lock().map_err(err)?.clone();
-    Ok(rows
+    let views: Vec<PlatformView> = rows
         .into_iter()
         .map(|p| PlatformView {
             playable: resolve_core(&state, &p.fs_slug).is_some(),
@@ -1065,11 +1094,40 @@ fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
             name: p.display_name,
             rom_count: p.rom_count,
         })
-        .collect())
+        .collect();
+    // Alphabetically, here rather than in whatever draws them.
+    //
+    // The server hands these back by size, so every list in the app used to
+    // open on whichever console happens to have the most ROMs in it. Sorted
+    // once, at the source, because the console grid is redrawn on a layout
+    // switch and on every batch of covers that arrives — and the order is not
+    // something any of those redraws should have an opinion about.
+    let order = romm_desktop::pickorder::by_name(
+        &views
+            .iter()
+            .map(|p| romm_desktop::pickorder::PickerRow {
+                name: p.name.clone(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>(),
+    );
+    let mut views: Vec<Option<PlatformView>> = views.into_iter().map(Some).collect();
+    Ok(order.into_iter().filter_map(|i| views[i].take()).collect())
 }
 
 /// Shape cache rows for the list/grid, marking what is already on disk.
-fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomView> {
+/// Turn cache rows into what a list draws, and remember them if asked.
+///
+/// `stash` is the scope the rows belong to — `roms:arcade:` and the like. A
+/// list a front end will sort and filter passes one; the strip of recently
+/// played games at the top of the console grid does not, because it is eight
+/// rows in a fixed order and stashing them would displace the two and a half
+/// thousand the middle column is showing.
+fn to_views(
+    state: &State<'_, AppState>,
+    rows: Vec<cache::RomRow>,
+    stash: Option<&str>,
+) -> Vec<RomView> {
     // One query for the whole list rather than one per row.
     let favourites = state
         .cache
@@ -1077,7 +1135,8 @@ fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomVie
         .ok()
         .and_then(|c| c.favourite_ids().ok())
         .unwrap_or_default();
-    rows.into_iter()
+    let views: Vec<RomView> = rows
+        .into_iter()
         .map(|r| {
             let meta: Option<serde_json::Value> =
                 r.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok());
@@ -1107,16 +1166,27 @@ fn to_views(state: &State<'_, AppState>, rows: Vec<cache::RomRow>) -> Vec<RomVie
                 size_bytes: r.fs_size_bytes,
             }
         })
-        .collect()
+        .collect();
+    if let Some(scope) = stash
+        && let (Ok(mut held), Ok(mut at)) = (state.list_rows.lock(), state.list_scope.lock())
+    {
+        *held = views.iter().map(RomView::as_row).collect();
+        *at = scope.to_owned();
+    }
+    views
 }
 
 #[tauri::command]
-fn roms(state: State<'_, AppState>, platform: String) -> CmdResult<Vec<RomView>> {
+fn roms(
+    state: State<'_, AppState>,
+    platform: String,
+    list: Option<ListRef>,
+) -> CmdResult<Vec<RomView>> {
     let rows = {
         let cache = state.cache.lock().map_err(err)?;
         cache.roms_for(&platform).map_err(err)?
     };
-    Ok(to_views(&state, rows))
+    Ok(to_views(&state, rows, list.map(|l| l.scope()).as_deref()))
 }
 
 /// One collection group — `genre`, `franchise`, `user`, …
@@ -1203,21 +1273,29 @@ fn collections_in(state: State<'_, AppState>, group: String) -> CmdResult<Vec<Co
 }
 
 #[tauri::command]
-fn collection_roms(state: State<'_, AppState>, id: String) -> CmdResult<Vec<RomView>> {
+fn collection_roms(
+    state: State<'_, AppState>,
+    id: String,
+    list: Option<ListRef>,
+) -> CmdResult<Vec<RomView>> {
     let rows = {
         let cache = state.cache.lock().map_err(err)?;
         cache.roms_in_collection(&id).map_err(err)?
     };
-    Ok(to_views(&state, rows))
+    Ok(to_views(&state, rows, list.map(|l| l.scope()).as_deref()))
 }
 
 #[tauri::command]
-fn search(state: State<'_, AppState>, term: String) -> CmdResult<Vec<RomView>> {
+fn search(
+    state: State<'_, AppState>,
+    term: String,
+    list: Option<ListRef>,
+) -> CmdResult<Vec<RomView>> {
     let rows = {
         let cache = state.cache.lock().map_err(err)?;
         cache.search(&term, 200).map_err(err)?
     };
-    Ok(to_views(&state, rows))
+    Ok(to_views(&state, rows, list.map(|l| l.scope()).as_deref()))
 }
 
 #[tauri::command]
@@ -3342,6 +3420,404 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+
+// ---------------------------------------------------------------------------
+// The interface logic, which lives in `romm_desktop` rather than here.
+//
+// Sort orders, filter predicates, the order of the left column, page filtering
+// and binding resolution were all written in the webview, which meant the TUI
+// could not read a keybinding and an SDL front end would have had to
+// reimplement every rule from the comments. The commands below are a thin
+// window onto `romm_desktop::{binds, gamelist, gamesort, gamefilter,
+// pickorder, pagefilter, gridnav}` — no decision is taken in this file.
+//
+// One exception, deliberate: the controller poll. It runs inside
+// `requestAnimationFrame`, 120 times a second, and a round trip per frame is
+// not a thing that can be made fast enough. `ui/js/gamepad.js` keeps the
+// arithmetic and `romm_desktop::padpoll` is the definition it copies.
+// ---------------------------------------------------------------------------
+
+use romm_desktop::{binds, gamefilter, gamelist, gamesort, gridnav, pagefilter, pickorder};
+
+impl RomView {
+    /// The nine facts a list needs to order and narrow itself.
+    fn as_row(&self) -> gamelist::Row {
+        gamelist::Row {
+            id: self.id,
+            name: self.name.clone(),
+            platform: self.platform.clone(),
+            downloaded: self.downloaded,
+            favourite: self.favourite,
+            rating: self.rating,
+            year: self.year,
+            last_played: self.last_played.clone(),
+            size_bytes: self.size_bytes,
+            players: self.players,
+        }
+    }
+}
+
+/// Which list a question is about. The three fields a front end already has.
+#[derive(Debug, Deserialize)]
+struct ListRef {
+    view: String,
+    #[serde(default)]
+    platform: Option<String>,
+    #[serde(default)]
+    collection: Option<String>,
+}
+
+impl ListRef {
+    fn scope(&self) -> String {
+        gamelist::scope(&self.view, self.platform.as_deref(), self.collection.as_deref())
+    }
+}
+
+/// Everything a front end needs to draw and dispatch bindings.
+///
+/// One call rather than four, because the page caches the result and re-reads
+/// it only when something is rebound — the previous version resolved the pad
+/// map inside the poll loop, which was a storage read, a parse and a scan of
+/// the result at 120Hz forever, and the app's largest idle cost.
+#[derive(Serialize)]
+struct BindingsView {
+    actions: &'static [binds::Action],
+    pad_buttons: &'static [binds::PadButton],
+    /// Button index -> action, `null` where a rebind cleared the button.
+    ///
+    /// The nulls are kept rather than dropped because "bound to nothing" and
+    /// "not a button on this pad" are different answers to why a press did
+    /// nothing, and the settings window has to be able to say which.
+    pad_map: std::collections::BTreeMap<u8, Option<String>>,
+    /// Action -> key, `null` when unbound.
+    keys: std::collections::BTreeMap<String, Option<String>>,
+    /// Action -> the button's own name, for the help page.
+    pad_labels: std::collections::BTreeMap<String, String>,
+    key_labels: std::collections::BTreeMap<String, String>,
+}
+
+fn bindings_view(b: &binds::Bindings) -> BindingsView {
+    BindingsView {
+        actions: binds::ACTIONS,
+        pad_buttons: binds::PAD_BUTTONS,
+        pad_map: b.pad_map(),
+        keys: binds::ACTIONS.iter().map(|a| (a.id.to_owned(), b.key_for(a.id))).collect(),
+        pad_labels: binds::ACTIONS
+            .iter()
+            .map(|a| (a.id.to_owned(), binds::pad_label(b.pad_for(a.id))))
+            .collect(),
+        key_labels: binds::ACTIONS
+            .iter()
+            .map(|a| (a.id.to_owned(), binds::key_label(b.key_for(a.id).as_deref())))
+            .collect(),
+    }
+}
+
+/// Write the whole binding table back to `config.toml`.
+///
+/// All of it rather than the one key that changed, because a rebind clears
+/// whichever key or button previously held the action — so a single press
+/// changes two entries, and writing one of them leaves a config where two
+/// things claim the same key.
+///
+/// Two passes over the file, not forty-five: `set_table_entries` takes the
+/// whole table at once. Done a key at a time, one press of a rebind button was
+/// forty-five read-modify-writes of config.toml.
+fn save_bindings(b: &binds::Bindings) -> Result<(), String> {
+    use romm_desktop::config::set_table_entries;
+    let keys: Vec<(String, Option<String>)> = binds::ACTIONS
+        .iter()
+        .map(|a| (a.id.to_owned(), b.keys.get(a.id).cloned()))
+        .collect();
+    set_table_entries("config.toml", "bindings.keys", &keys).map_err(err)?;
+
+    let pad: Vec<(String, Option<String>)> = binds::PAD_BUTTONS
+        .iter()
+        .map(|p| {
+            let index = p.index.to_string();
+            let held = b.pad.get(&index).cloned();
+            (index, held)
+        })
+        .collect();
+    set_table_entries("config.toml", "bindings.pad", &pad).map_err(err)
+}
+
+#[tauri::command]
+fn ui_bindings(state: State<'_, AppState>) -> CmdResult<BindingsView> {
+    let b = state.bindings.lock().map_err(err)?;
+    Ok(bindings_view(&b))
+}
+
+/// Bind a key to an action. A null key unbinds it.
+#[tauri::command]
+fn set_key_binding(
+    state: State<'_, AppState>,
+    action: String,
+    key: Option<String>,
+) -> CmdResult<BindingsView> {
+    let mut b = state.bindings.lock().map_err(err)?;
+    b.set_key(&action, key.as_deref());
+    save_bindings(&b)?;
+    Ok(bindings_view(&b))
+}
+
+/// Bind a controller button to an action. A null index unbinds it.
+#[tauri::command]
+fn set_pad_binding(
+    state: State<'_, AppState>,
+    action: String,
+    index: Option<u8>,
+) -> CmdResult<BindingsView> {
+    let mut b = state.bindings.lock().map_err(err)?;
+    b.set_pad(&action, index);
+    save_bindings(&b)?;
+    Ok(bindings_view(&b))
+}
+
+/// Put the defaults back. `which` is "keys" or "pad" — the two are reset
+/// separately because they are rebound separately, and somebody undoing a
+/// controller experiment rarely means to lose their keyboard as well.
+#[tauri::command]
+fn reset_bindings(state: State<'_, AppState>, which: String) -> CmdResult<BindingsView> {
+    let mut b = state.bindings.lock().map_err(err)?;
+    match which.as_str() {
+        "pad" => b.reset_pad(),
+        _ => b.reset_keys(),
+    }
+    save_bindings(&b)?;
+    Ok(bindings_view(&b))
+}
+
+/// Adopt bindings a previous version left in the webview's own storage.
+///
+/// Runs once. Before this the two tables lived in `localStorage`, which the
+/// TUI cannot read and which the settings window — a second document — kept
+/// its own copy of. Anything already in `config.toml` wins, so a second run
+/// after somebody has rebound something cannot undo it.
+#[tauri::command]
+fn import_bindings(
+    state: State<'_, AppState>,
+    keys: std::collections::BTreeMap<String, Option<String>>,
+    pad: std::collections::BTreeMap<String, Option<String>>,
+) -> CmdResult<BindingsView> {
+    let mut b = state.bindings.lock().map_err(err)?;
+    b.adopt(keys, pad);
+    save_bindings(&b)?;
+    Ok(bindings_view(&b))
+}
+
+/// The orders and filters a menu offers, with their labels.
+#[derive(Serialize)]
+struct ListControls {
+    orders: &'static [gamesort::Order],
+    filters: &'static [gamefilter::Filter],
+}
+
+#[tauri::command]
+fn list_controls() -> ListControls {
+    ListControls { orders: gamesort::ORDERS, filters: gamefilter::FILTERS }
+}
+
+/// Which rows to draw, in what order, and what the two buttons should say.
+#[derive(Serialize)]
+struct Arrangement {
+    /// Row ids, narrowed and ordered. `null` when the backend is not holding
+    /// this list — the caller then draws what it has rather than an order
+    /// computed from somebody else's rows.
+    ids: Option<Vec<i64>>,
+    order: &'static str,
+    order_label: &'static str,
+    filters: Vec<String>,
+    sortable: bool,
+    filterable: bool,
+}
+
+fn arrangement(state: &State<'_, AppState>, list: &ListRef) -> Result<Arrangement, String> {
+    let scope = list.scope();
+    let chosen = state.chosen.lock().map_err(err)?;
+    let order = chosen.order(&scope);
+    let filters = chosen.filters(&scope);
+    let held = state.list_rows.lock().map_err(err)?;
+    let ids = (*state.list_scope.lock().map_err(err)? == scope)
+        .then(|| gamelist::arrange(&held, order.id, &filters));
+    Ok(Arrangement {
+        ids,
+        order: order.id,
+        order_label: order.label,
+        filters: filters.into_iter().collect(),
+        sortable: gamelist::sortable(&list.view),
+        filterable: gamelist::filterable(&list.view),
+    })
+}
+
+#[tauri::command]
+fn arrange_list(state: State<'_, AppState>, list: ListRef) -> CmdResult<Arrangement> {
+    arrangement(&state, &list)
+}
+
+/// Choose an order for this list. `preferred` sets it only if nothing has been
+/// chosen yet, which is how Continue playing opens most-recent-first without
+/// overriding somebody who asked for something else.
+#[tauri::command]
+fn set_list_order(
+    state: State<'_, AppState>,
+    list: ListRef,
+    order: String,
+    preferred: Option<bool>,
+) -> CmdResult<Arrangement> {
+    {
+        let mut chosen = state.chosen.lock().map_err(err)?;
+        let scope = list.scope();
+        if preferred.unwrap_or(false) {
+            chosen.default_order(&scope, &order);
+        } else {
+            chosen.set_order(&scope, &order);
+        }
+    }
+    arrangement(&state, &list)
+}
+
+/// Step to the next order without opening a menu, for the stick click.
+#[tauri::command]
+fn cycle_list_order(
+    state: State<'_, AppState>,
+    list: ListRef,
+    delta: i32,
+) -> CmdResult<Arrangement> {
+    {
+        let mut chosen = state.chosen.lock().map_err(err)?;
+        let scope = list.scope();
+        let next = gamesort::cycle(chosen.order(&scope).id, delta);
+        chosen.set_order(&scope, next.id);
+    }
+    arrangement(&state, &list)
+}
+
+#[tauri::command]
+fn toggle_list_filter(
+    state: State<'_, AppState>,
+    list: ListRef,
+    filter: String,
+) -> CmdResult<Arrangement> {
+    state.chosen.lock().map_err(err)?.toggle_filter(&list.scope(), &filter);
+    arrangement(&state, &list)
+}
+
+#[tauri::command]
+fn clear_list_filters(state: State<'_, AppState>, list: ListRef) -> CmdResult<Arrangement> {
+    state.chosen.lock().map_err(err)?.clear_filters(&list.scope());
+    arrangement(&state, &list)
+}
+
+/// The left column: which entries to draw, in what order, and what the button
+/// above them should say.
+#[derive(Serialize)]
+struct PickerArrangement {
+    /// Indices into the rows that were handed over.
+    order: Vec<usize>,
+    /// The orders this kind of list offers. Empty for consoles, which get the
+    /// alphabet and no button.
+    orders: &'static [pickorder::PickerOrder],
+    chosen: Option<&'static str>,
+    label: Option<&'static str>,
+}
+
+#[tauri::command]
+fn sort_picker(
+    state: State<'_, AppState>,
+    kind: String,
+    rows: Vec<pickorder::PickerRow>,
+) -> CmdResult<PickerArrangement> {
+    let orders = state.picker_order.lock().map_err(err)?;
+    let chosen = orders.get(&kind);
+    Ok(PickerArrangement {
+        order: pickorder::sort(&rows, chosen.map(|o| o.id)),
+        orders: pickorder::orders_for(&kind),
+        chosen: chosen.map(|o| o.id),
+        label: chosen.map(|o| o.label),
+    })
+}
+
+/// What a kind of list offers and which of them is chosen, without sorting
+/// anything. The bar above the column is drawn before the column itself.
+#[tauri::command]
+fn picker_controls(state: State<'_, AppState>, kind: String) -> CmdResult<PickerArrangement> {
+    let orders = state.picker_order.lock().map_err(err)?;
+    let chosen = orders.get(&kind);
+    Ok(PickerArrangement {
+        order: Vec::new(),
+        orders: pickorder::orders_for(&kind),
+        chosen: chosen.map(|o| o.id),
+        label: chosen.map(|o| o.label),
+    })
+}
+
+#[tauri::command]
+fn set_picker_order(state: State<'_, AppState>, kind: String, order: String) -> CmdResult<()> {
+    state.picker_order.lock().map_err(err)?.set(&kind, &order);
+    romm_desktop::config::set_table_entry("config.toml", "picker_order", &kind, &order)
+        .map_err(err)
+}
+
+/// Which entries on the page survive the text typed into the filter box, and
+/// which group headings are left with nothing under them.
+#[derive(Serialize)]
+struct PageFilterResult {
+    visible: Vec<bool>,
+    headings: Vec<bool>,
+    shown: usize,
+}
+
+#[tauri::command]
+fn set_page_names(
+    state: State<'_, AppState>,
+    names: Vec<String>,
+    groups: Option<Vec<Vec<usize>>>,
+) -> CmdResult<()> {
+    *state.page_names.lock().map_err(err)? = (names, groups.unwrap_or_default());
+    Ok(())
+}
+
+#[tauri::command]
+fn page_filter(state: State<'_, AppState>, query: String) -> CmdResult<PageFilterResult> {
+    let held = state.page_names.lock().map_err(err)?;
+    let (names, groups) = &*held;
+    let visible = pagefilter::visible(names, &query);
+    Ok(PageFilterResult {
+        headings: pagefilter::empty_groups(groups, &visible, &query),
+        shown: visible.iter().filter(|v| **v).count(),
+        visible,
+    })
+}
+
+/// Hand over where every card on the page was drawn — top, left, width — and
+/// get back where each of them leads.
+///
+/// The whole table, once per rebuild, rather than a question per keypress. A
+/// held direction repeats nine times a second, and a cursor that only moves
+/// after a round trip reads as an app that is thinking about it. The geometry
+/// is still decided in `gridnav`; the page only looks the answer up.
+/// The same table for a grid that is uniform, from two numbers instead of
+/// every card's position.
+///
+/// What a windowed list uses. Only a band of it is drawn, so most of the cards
+/// have no position to measure — and the cursor still has to be able to move
+/// through them. `gridnav::uniform` and `gridnav::moves` agree on any layout
+/// where both apply; a test says so.
+#[tauri::command]
+fn grid_uniform(count: usize, columns: usize) -> gridnav::Moves {
+    gridnav::uniform(count, columns)
+}
+
+#[tauri::command]
+fn set_grid(cards: Vec<[f64; 3]>) -> gridnav::Moves {
+    let cards: Vec<gridnav::Card> = cards
+        .into_iter()
+        .map(|[top, left, width]| gridnav::Card { top, left, width })
+        .collect();
+    gridnav::moves(&cards)
+}
+
 fn main() {
     install_panic_log();
     anchor_to_data_root();
@@ -3418,6 +3894,12 @@ fn main() {
             auto_sync: cfg.saves.auto_sync,
             pending_conflicts: Mutex::new(Vec::new()),
             autofire_hz: Mutex::new(None),
+            bindings: Mutex::new(cfg.bindings.clone()),
+            picker_order: Mutex::new(cfg.picker_order.clone()),
+            chosen: Mutex::new(Default::default()),
+            list_rows: Mutex::new(Vec::new()),
+            list_scope: Mutex::new(String::new()),
+            page_names: Mutex::new((Vec::new(), Vec::new())),
         })
         .invoke_handler(tauri::generate_handler![
             bios_status,
@@ -3476,7 +3958,25 @@ fn main() {
             set_config_field,
             app_icons,
             set_app_icon,
-            verify_server
+            verify_server,
+            ui_bindings,
+            set_key_binding,
+            set_pad_binding,
+            reset_bindings,
+            import_bindings,
+            list_controls,
+            arrange_list,
+            set_list_order,
+            cycle_list_order,
+            toggle_list_filter,
+            clear_list_filters,
+            sort_picker,
+            picker_controls,
+            set_picker_order,
+            set_page_names,
+            page_filter,
+            set_grid,
+            grid_uniform
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

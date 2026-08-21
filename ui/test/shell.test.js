@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -96,6 +97,12 @@ before(async () => {
     },
     event: { listen: async () => () => {} },
   };
+
+  // The interface commands — bindings, ordering, the grid, the page filter —
+  // are answered by the stand-in in backend.js. See the note at the top of
+  // that file: it is deliberately naive, and the rules it stands in for are
+  // asserted by `cargo test` against the real implementation.
+  dom.window.__TAURI__.core.invoke = fakeBackend(dom.window.__TAURI__.core.invoke);
   // jsdom implements no layout, so it has no scrollIntoView — and the list
   // calls it to keep the cursor visible. A no-op is the honest stand-in: there
   // is nothing to scroll into view in a document with no viewport.

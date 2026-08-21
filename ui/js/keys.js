@@ -16,9 +16,10 @@ import {
 import { cyclePictures } from "./pictures.js";
 import { openSortMenu, cycleOrder } from "./sort.js";
 import { openFilterMenu } from "./filter.js";
-import { ACTIONS, actionFor, keyFor, keyLabel, padMap, padLabel } from "./bindings.js";
+import { actions, actionFor, keyLabelFor, padMap, padLabelFor, padLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
+import { windowedList } from "./visible.js";
 
 function items() {
   // Not the ones the page filter has hidden: the cursor stepping onto a card
@@ -28,55 +29,125 @@ function items() {
   );
 }
 
-// Rows are derived from where things actually landed, not from a column count.
-//
-// The previous version measured the first row, then moved by +/- that number
-// with the result clamped into range. Three things fell out of that: Up on the
+// Where the cursor goes next is worked out in `src/gridnav.rs`, from where the
+// cards actually landed rather than from a column count. The version that
+// replaced measured the first row and moved by plus or minus that number with
+// the result clamped into range, and three things fell out of it: Up on the
 // top row clamped to index 0, so you jumped to the first card instead of
 // staying put; Down on the last row clamped to the final card the same way;
 // and Left/Right ran off the end of a row into the next one. Grouped search
 // results made it worse, since each console section can have its own card
-// shape and the single column count no longer described the page.
+// shape and one column count no longer described the page.
+//
+// The whole table of moves comes over once per rebuild, not one question per
+// keypress. Reading `offsetTop` out of the page forces a layout, and a held
+// direction repeats nine times a second across 2,506 arcade cards — a cursor
+// that only moves once a round trip has come back reads as an app thinking
+// about it. Looking a move up in the table is synchronous, which is what a
+// cursor has to be.
 //
 // `offsetTop`/`offsetLeft` rather than getBoundingClientRect: they are
 // relative to the layout, so the map stays valid while scrolling and only
 // needs rebuilding when the list itself changes.
-let rowCache = null;
+let shape = null;
+let table = null;
 
 export function resetNav() {
-  rowCache = null;
+  shape = null;
+  table = null;
 }
 window.addEventListener("resize", resetNav);
 
-function rows() {
-  const nodes = items();
-  if (rowCache && rowCache.count === nodes.length && rowCache.width === el.list.clientWidth) {
-    return rowCache.rows;
+/// Fetch the table if the page has changed under it.
+///
+/// One call in flight at a time. A held direction repeats every 110ms, and on
+/// a list this long the fetch can outlast that — without the guard, every
+/// press while the first was still out would start another, each re-reading
+/// 2,506 positions out of the page.
+let inFlight = null;
+
+async function syncGeometry(nodes) {
+  // A windowed list is a uniform grid, and a uniform grid needs no measuring:
+  // where a card sits is `index / columns`, so the table comes from two
+  // numbers. That is not a shortcut — most of the cards are not drawn, so most
+  // of them have no position to read, and the cursor has to be able to move
+  // through them anyway. See src/gridnav.rs.
+  const win = windowedList();
+  if (win && el.list.contains(win.container)) {
+    const now = `rows:${win.total}:${win.columns}`;
+    if (shape === now && table) return;
+    table = await invoke("grid_uniform", { count: win.total, columns: win.columns });
+    shape = now;
+    return;
   }
-  const buckets = [];
-  for (const n of nodes) {
-    const top = n.offsetTop;
-    // A few px of jitter is normal between cards of differing height.
-    let b = buckets.find((x) => Math.abs(x.top - top) <= 6);
-    if (!b) {
-      b = { top, nodes: [] };
-      buckets.push(b);
-    }
-    b.nodes.push(n);
+  const now = `${nodes.length}:${el.list.clientWidth}`;
+  if (shape === now && table) return;
+  if (!inFlight) {
+    // Read every position in one go. Interleaving reads with anything that
+    // writes to the page would force a fresh layout per card.
+    const cards = nodes.map((n) => [n.offsetTop, n.offsetLeft, n.offsetWidth]);
+    inFlight = invoke("set_grid", { cards })
+      .then((t) => {
+        table = t;
+        shape = now;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
   }
-  buckets.sort((a, b) => a.top - b.top);
-  const out = buckets.map((b) => b.nodes.sort((x, y) => x.offsetLeft - y.offsetLeft));
-  rowCache = { rows: out, count: nodes.length, width: el.list.clientWidth };
-  return out;
+  await inFlight;
 }
 
-function locate() {
-  const grid = rows();
-  for (let r = 0; r < grid.length; r++) {
-    const c = grid[r].findIndex((n) => n.classList.contains("sel"));
-    if (c >= 0) return { grid, r, c };
+/// Work the table out now, before anybody presses anything.
+///
+/// Called after a list is drawn, from a timer rather than inline: by then the
+/// browser has laid the page out for its own paint, so reading 2,506 positions
+/// costs a lookup each instead of forcing a layout — and the 120KB the table
+/// weighs crosses while nothing is waiting on it. Without this the whole cost
+/// lands on the first arrow press after every redraw, which is exactly when
+/// somebody is watching.
+export function primeNav() {
+  setTimeout(() => {
+    const nodes = items();
+    if (nodes.length) syncGeometry(nodes).catch(() => {});
+  }, 0);
+}
+
+/// Move the cursor.
+///
+/// A null entry in the table means stay put, which is the whole point of the
+/// geometry: running off the top of a grid leaves you where you were rather
+/// than jumping to the first card.
+async function step(direction) {
+  const win = windowedList();
+  const windowed = win && el.list.contains(win.container);
+  const nodes = items();
+  if (!windowed && !nodes.length) return;
+  await syncGeometry(nodes);
+  if (!table) return;
+
+  const at = windowed ? cursorIn(win) : nodes.findIndex((n) => n.classList.contains("sel"));
+  // Nothing selected yet: any direction lands on the first card, so a press on
+  // a freshly drawn grid always does something.
+  const to = at < 0 ? table.first : table[direction]?.[at];
+  if (to === null || to === undefined) return;
+  // Windowed, the row it lands on may not be drawn — that is the whole point
+  // — so the window is asked for it, which scrolls there and draws the band
+  // around it.
+  focusNode(windowed ? win.reveal(to) : nodes[to]);
+}
+
+/// Where the cursor is in a windowed list.
+///
+/// Found by the game it is on rather than by the `.sel` class, because the
+/// card carrying that class is thrown away every time the band moves. The row
+/// survives; the node does not.
+function cursorIn(win) {
+  if (state.selected === null || state.selected === undefined) return -1;
+  for (let i = 0; i < win.total; i += 1) {
+    if (win.at(i)?.id === state.selected) return i;
   }
-  return { grid, r: -1, c: -1 };
+  return -1;
 }
 
 function focusNode(node) {
@@ -92,45 +163,25 @@ function focusNode(node) {
   node.scrollIntoView({ block: "nearest" });
 }
 
-/// Left/right within the current row. Stops at the ends rather than spilling
-/// into the neighbouring row, which is what made this feel random.
-function moveX(step) {
-  const { grid, r, c } = locate();
-  if (!grid.length) return;
-  if (r < 0) return focusNode(grid[0][0]);
-  const row = grid[r];
-  focusNode(row[Math.max(0, Math.min(c + step, row.length - 1))]);
-}
+/// Left/right stop at the ends of their row rather than spilling into the
+/// neighbouring one, which is what made this feel random. Up/down keep the
+/// column you were in, matched on horizontal centre rather than index — so a
+/// short last row, a row of differently-shaped cards, or the next console's
+/// section all land somewhere that looks directly above or below where you
+/// were. All of that is decided in `src/gridnav.rs`; this picks a column of
+/// the table it produced.
+const move = (direction) => step(direction);
 
-/// Up/down a row, keeping the column you were in.
-///
-/// Matched on horizontal centre rather than index, so a short last row, a
-/// row of differently-shaped cards, or the next console's section all land
-/// somewhere that looks directly above or below where you were.
-function moveY(step) {
-  const { grid, r, c } = locate();
-  if (!grid.length) return;
-  if (r < 0) return focusNode(grid[0][0]);
-  const target = r + step;
-  if (target < 0 || target >= grid.length) return; // stay put at the edges
-  const from = grid[r][c];
-  const x = from.offsetLeft + from.offsetWidth / 2;
-  let best = grid[target][0];
-  let bestDist = Infinity;
-  for (const n of grid[target]) {
-    const d = Math.abs(n.offsetLeft + n.offsetWidth / 2 - x);
-    if (d < bestDist) {
-      bestDist = d;
-      best = n;
-    }
+const edge = (last) => {
+  const win = windowedList();
+  if (win && el.list.contains(win.container)) {
+    if (!win.total) return;
+    return focusNode(win.reveal(last ? win.total - 1 : 0));
   }
-  focusNode(best);
-}
-
-function edge(last) {
   const nodes = items();
-  focusNode(last ? nodes[nodes.length - 1] : nodes[0]);
-}
+  if (!nodes.length) return;
+  focusNode(nodes[last ? nodes.length - 1 : 0]);
+};
 
 /// Index of the selected card, or -1. Lost when linear navigation was replaced
 /// with the grid-aware version below, while `activate` kept calling it — so
@@ -141,6 +192,8 @@ function focusedIndex(nodes) {
 }
 
 function activate() {
+  // The drawn nodes are enough here: the cursor is always on screen, so the
+  // card it is on is always one of them.
   const nodes = items();
   if (!nodes.length) return;
   // With nothing selected, focusedIndex is -1 and `nodes[-1]` is undefined, so
@@ -179,13 +232,14 @@ function toggleHelp() {
   // pad working" and not "what does this button do", the question somebody
   // opens a help page to ask. An action with a button and no key belongs here
   // too, so the filter is either-or rather than keyboard-only.
-  const map = padMap();
-  const padFor = (id) => {
-    const entry = Object.entries(map).find(([, a]) => a === id);
-    return entry ? padLabel(Number(entry[0])) : null;
-  };
-  const bound = ACTIONS.map((a) => ({ ...a, key: keyFor(a.id), pad: padFor(a.id) }))
-    .filter((a) => a.key || a.pad);
+  const bound = actions()
+    .map((a) => ({
+      ...a,
+      key: keyLabelFor(a.id),
+      pad: padLabelFor(a.id),
+    }))
+    // "—" and "unset" are what the two labels say for an action nobody bound.
+    .filter((a) => a.key !== "—" || a.pad !== "unset");
 
   const box = document.createElement("div");
   box.id = "shortcuts";
@@ -197,8 +251,8 @@ function toggleHelp() {
         .map(
           (a) => `<tr>
             <td>${escapeHtml(a.label)}</td>
-            <td>${a.key ? escapeHtml(keyLabel(a.key)) : "<span class=\"dim\">—</span>"}</td>
-            <td>${a.pad ? escapeHtml(a.pad) : "<span class=\"dim\">—</span>"}</td>
+            <td>${a.key === "—" ? "<span class=\"dim\">—</span>" : escapeHtml(a.key)}</td>
+            <td>${a.pad === "unset" ? "<span class=\"dim\">—</span>" : escapeHtml(a.pad)}</td>
           </tr>`
         )
         .join("")}</tbody>
@@ -251,7 +305,7 @@ function toggleHelp() {
       .map((i) => {
         const action = map[i];
         const label = action
-          ? ACTIONS.find((a) => a.id === action)?.label || action
+          ? actions().find((a) => a.id === action)?.label || action
           : "<em>not bound</em>";
         return `${i} → ${label}`;
       });
@@ -276,12 +330,12 @@ function toggleHelp() {
 export const HANDLERS = {
   // Movement is grid-aware now, so none of these need a column count: a list
   // is simply a grid one card wide and behaves correctly without a special case.
-  left: () => moveX(-1),
-  right: () => moveX(1),
-  up: () => moveY(-1),
-  down: () => moveY(1),
-  pageUp: () => moveY(-3),
-  pageDown: () => moveY(3),
+  left: () => move("left"),
+  right: () => move("right"),
+  up: () => move("up"),
+  down: () => move("down"),
+  pageUp: () => move("page_up"),
+  pageDown: () => move("page_down"),
   first: () => edge(false),
   last: () => edge(true),
   activate,

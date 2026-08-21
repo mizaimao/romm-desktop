@@ -11,10 +11,15 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-let dom, filter, library, state, el;
+let dom, filter, library, state, el, backend, arrangeCurrentList;
+
+/// A turn of the event loop, for the handlers that write through the backend
+/// and redraw when it answers.
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // `players` is the most a game supports, parsed from RomM's free text in Rust.
 // Delta has none on purpose: two thirds of the real library has no player
@@ -76,102 +81,51 @@ before(async () => {
     },
     event: { listen: async () => () => {}, emit: () => {} },
   };
+
+  // The interface commands — bindings, ordering, the grid, the page filter —
+  // are answered by the stand-in in backend.js. See the note at the top of
+  // that file: it is deliberately naive, and the rules it stands in for are
+  // asserted by `cargo test` against the real implementation.
+  backend = fakeBackend(dom.window.__TAURI__.core.invoke);
+  dom.window.__TAURI__.core.invoke = backend;
   filter = await import("../js/filter.js");
   library = await import("../js/library.js");
   ({ state, el } = await import("../js/state.js"));
+  ({ arrangeCurrentList } = await import("../js/arrange.js"));
+  // The tables the menu is built from, which the app fetches at startup.
+  const { loadListControls } = await import("../js/sort.js");
+  filter.setFilters((await loadListControls()).filters);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   state.view = "roms";
   state.platform = "arcade";
   state.collection = null;
   state.rows = ROWS;
   state.layout = "list";
-  filter.clearFilters();
+  // These tests hand rows to the page directly rather than through `roms`, so
+  // the stand-in backend is told what the list holds and how it narrows.
+  backend.rows(ROWS);
+  backend.arrange((all) => all);
+  await filter.clearFilters();
+  await arrangeCurrentList();
   document.querySelector(".ctx-menu")?.remove();
 });
 
-const names = (rows) => filter.filtered(rows).map((r) => r.name);
-
-describe("filters", () => {
-  test("nothing on leaves the list alone", () => {
-    assert.equal(filter.filtered(ROWS), ROWS, "an untouched list was copied anyway");
-  });
-
-  test("each one keeps what it says", () => {
-    filter.toggleFilter("local");
-    assert.deepEqual(names(ROWS), ["Alpha", "Gamma"]);
-    filter.clearFilters();
-    filter.toggleFilter("fav");
-    assert.deepEqual(names(ROWS), ["Beta", "Gamma"]);
-    filter.clearFilters();
-    filter.toggleFilter("unplayed");
-    assert.deepEqual(names(ROWS), ["Alpha", "Delta"]);
-    filter.clearFilters();
-    filter.toggleFilter("great");
-    assert.deepEqual(names(ROWS), ["Alpha", "Gamma"], "an unrated game counted as good");
-    filter.clearFilters();
-    filter.toggleFilter("twoplayer");
-    assert.deepEqual(names(ROWS), ["Beta", "Gamma"], "a one-player game got through");
-  });
-
-  /// A game nothing says a player count for is not a two-player game. Assuming
-  /// otherwise would let two thirds of the library through and make the filter
-  /// worthless — it exists to narrow, and the honest answer to "we do not
-  /// know" is to leave it out.
-  test("an unknown player count is not counted as two players", () => {
-    filter.toggleFilter("twoplayer");
-    assert.ok(!names(ROWS).includes("Delta"), "a game with no player count got through");
-    assert.ok(!names(ROWS).includes("Alpha"), "a one-player game got through");
-  });
-
-  /// The reason several can be on at once: "downloaded and never played" is
-  /// the list of things taking up disk you have not touched, and there is no
-  /// other way to ask it.
-  test("two of them both have to pass", () => {
-    filter.toggleFilter("local");
-    filter.toggleFilter("unplayed");
-    assert.deepEqual(names(ROWS), ["Alpha"]);
-  });
-
-  /// Choosing one clears its opposite rather than leaving a list that can
-  /// never match anything and no clue why.
-  test("opposites cancel rather than emptying the list", () => {
-    filter.toggleFilter("local");
-    filter.toggleFilter("missing");
-    assert.deepEqual(filter.activeFilters(), ["missing"]);
-    assert.deepEqual(names(ROWS), ["Beta", "Delta"]);
-  });
-
-  /// The same reasoning as the game sort: "what have I not played on this
-  /// console" is a question about this console, asked now. A library still
-  /// filtered a week later, for a forgotten reason, looks like one that has
-  /// lost half its games.
-  test("they belong to the list they were set on", () => {
-    filter.toggleFilter("fav");
-    state.platform = "gb";
-    assert.deepEqual(filter.activeFilters(), [], "the next console inherited them");
-    state.platform = "arcade";
-    assert.deepEqual(filter.activeFilters(), ["fav"], "and lost them coming back");
-  });
-
-  test("the console grid has nothing to filter", () => {
-    state.view = "platforms";
-    assert.equal(filter.filterable(), false);
-    state.view = "roms";
-    assert.equal(filter.filterable(), true);
-  });
-});
+// What each filter keeps, which of them cancel each other out, and that they
+// belong to the list they were set on, are asserted in `gamefilter::tests` and
+// `gamelist::tests` — against the implementation, rather than through a page.
+// What is left here is the page: the button, the menu, and the empty result.
 
 describe("the filter menu and button", () => {
   /// A filtered list looks exactly like a short one, and the filter itself is
   /// off screen in a menu — so the button has to say it is doing something.
-  test("the button counts what is on", () => {
+  test("the button counts what is on", async () => {
     filter.refreshFilterButton();
     assert.match(el.filterBtn.textContent, /Filter/);
     assert.equal(el.filterBtn.classList.contains("on"), false);
 
-    filter.toggleFilter("fav");
+    await filter.toggleFilter("fav");
     filter.refreshFilterButton();
     assert.match(el.filterBtn.textContent, /Filters · 1/);
     assert.equal(el.filterBtn.classList.contains("on"), true, "a filtered list looks unfiltered");
@@ -179,27 +133,33 @@ describe("the filter menu and button", () => {
 
   /// A filter is built out of two or three choices. A menu that shuts on each
   /// one turns that into four trips to the same button.
-  test("choosing one leaves the menu open", () => {
+  test("choosing one leaves the menu open", async () => {
     filter.openFilterMenu();
     const item = [...document.querySelectorAll(".ctx-menu button")].find((b) =>
       b.textContent.includes("Starred")
     );
     assert.ok(item, "the menu does not offer the filters");
     item.click();
+    await settle();
     assert.deepEqual(filter.activeFilters(), ["fav"]);
     assert.ok(document.querySelector(".ctx-menu"), "the menu shut after one choice");
   });
 
   /// An empty result is indistinguishable from an empty console, and the
   /// reason for it is hidden in a menu.
-  test("an empty result says why, and offers the way out", () => {
-    filter.toggleFilter("local");
-    filter.toggleFilter("great");
+  test("an empty result says why, and offers the way out", async () => {
+    // Two filters on and nothing left that passes them: the case that looks
+    // exactly like an empty console unless the page says otherwise.
+    await filter.toggleFilter("local");
+    await filter.toggleFilter("great");
+    backend.arrange(() => []);
+    await arrangeCurrentList();
     library.renderRows([{ ...ROWS[3] }], false);
     const empty = document.getElementById("list").textContent;
     assert.match(empty, /matches the filters/, `unexplained empty list: ${empty}`);
 
     document.querySelector(".clear-filters").click();
+    await settle();
     assert.deepEqual(filter.activeFilters(), [], "the way out did not clear them");
   });
 });
@@ -216,8 +176,13 @@ describe("surprise me", () => {
 
   /// From what is shown, not from everything — so "surprise me out of the ones
   /// I have not played" is a question you can actually ask.
-  test("it picks from what the filters left", () => {
-    filter.toggleFilter("unplayed");
+  test("it picks from what the filters left", async () => {
+    await filter.toggleFilter("unplayed");
+    // What "unplayed" keeps out of these four is settled in `gamefilter::tests`;
+    // here it is given, and what is under test is that the button picks from
+    // what was left rather than from everything.
+    backend.arrange((all) => all.filter((r) => !r.last_played));
+    await arrangeCurrentList();
     library.renderRows(ROWS, false);
     for (let i = 0; i < 20; i++) {
       const pick = library.randomGame();
@@ -228,8 +193,10 @@ describe("surprise me", () => {
     }
   });
 
-  test("an empty list is not an error", () => {
+  test("an empty list is not an error", async () => {
     state.rows = [];
+    backend.rows([]);
+    await arrangeCurrentList();
     assert.equal(library.randomGame(), null);
   });
 });
@@ -238,12 +205,14 @@ describe("random comes from this list and no other", () => {
   /// The point of it is "something from what I am looking at". Reaching across
   /// consoles, or past the filters, would make it a lucky dip through the
   /// whole library — which is not what a button on a console's page can mean.
-  test("only rows from the list on screen", () => {
+  test("only rows from the list on screen", async () => {
     const arcade = [
       { id: 90, name: "Metal Slug", downloaded: true, favourite: false, last_played: null },
       { id: 91, name: "Pang", downloaded: true, favourite: false, last_played: null },
     ];
     state.rows = arcade;
+    backend.rows(arcade);
+    await arrangeCurrentList();
     library.renderRows(arcade, false);
     const ids = new Set();
     for (let i = 0; i < 30; i++) ids.add(library.randomGame().id);

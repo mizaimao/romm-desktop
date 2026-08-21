@@ -100,7 +100,24 @@ impl App {
         client: Option<Arc<api::Client>>,
         rt: tokio::runtime::Handle,
     ) -> Result<Self> {
-        let platforms = cache.platforms()?;
+        // Alphabetically, through the same ordering the GUI's console column
+        // uses. The cache hands these back in the server's order, which is by
+        // size — so this list used to open on whichever console happened to
+        // have the most ROMs in it.
+        let platforms = {
+            let rows = cache.platforms()?;
+            let order = crate::pickorder::by_name(
+                &rows
+                    .iter()
+                    .map(|p| crate::pickorder::PickerRow {
+                        name: p.display_name.clone(),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let mut rows: Vec<Option<PlatformRow>> = rows.into_iter().map(Some).collect();
+            order.into_iter().filter_map(|i| rows[i].take()).collect::<Vec<_>>()
+        };
         let mut platform_state = ListState::default();
         if !platforms.is_empty() {
             platform_state.select(Some(0));
@@ -168,15 +185,17 @@ impl App {
     }
 
     fn apply_filter(&mut self) {
-        let needle = self.filter.to_lowercase();
+        // The same rule the GUI's page filter uses — case and stray space
+        // ignored, matching anywhere in the name rather than at the start. The
+        // filename as well as the title, which is the one thing this list can
+        // usefully search that a grid of covers cannot.
         self.filtered = self
             .roms
             .iter()
             .enumerate()
             .filter(|(_, r)| {
-                needle.is_empty()
-                    || r.name.to_lowercase().contains(&needle)
-                    || r.fs_name.to_lowercase().contains(&needle)
+                crate::pagefilter::matches(&r.name, &self.filter)
+                    || crate::pagefilter::matches(&r.fs_name, &self.filter)
             })
             .map(|(i, _)| i)
             .collect();

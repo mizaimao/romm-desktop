@@ -566,6 +566,16 @@ body.has-pad #tabbar .bumper { display: inline; }
   /* Default until the platform's real ratio is measured. */
   --ar: 0.75;
 }
+/* The stand-in for the rows a window is not drawing. One above the band and
+   one below, each exactly the height of the rows it replaces, so the scrollbar
+   and every remembered scroll position are what they would have been with the
+   whole list in the document. See ui/js/visible.js.
+
+   Spanning every column, or the grid would flow cards around it and the band
+   would no longer start on a row of its own. */
+.gcards > .vspace { grid-column: 1 / -1; }
+.rows > .vspace { flex: 0 0 auto; }
+
 .gcard { cursor: pointer; user-select: none; }
 .gcard .art {
   /* Shaped to the platform's actual box art: PSP UMD cases are 0.58,

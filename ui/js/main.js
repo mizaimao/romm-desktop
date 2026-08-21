@@ -13,6 +13,9 @@ import { setSidebar, installDetailResizer } from "./detail.js";
 import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
 import { installKeys } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
+import { loadBindings } from "./bindings.js";
+import { loadListControls } from "./sort.js";
+import { setFilters } from "./filter.js";
 import { warmRefresh } from "./actions.js";
 import { redrawCollections } from "./collections.js";
 import {
@@ -297,6 +300,16 @@ function statusCard(s) {
   setLayout(state.layout);
   setSidebar(state.sidebar);
   installTabs();
+  // The interface tables, before anything that reads them: the sort and filter
+  // menus, the header buttons, the keyboard and the pad all resolve through
+  // the backend now, and a menu drawn before the answer arrives is an empty
+  // menu.
+  await Promise.all([
+    loadBindings().catch((e) => console.warn("loading bindings:", e)),
+    loadListControls()
+      .then((c) => setFilters(c.filters))
+      .catch((e) => console.warn("loading list controls:", e)),
+  ]);
   await showSection("library", { force: true });
   installPageFilter();
   installDetailResizer();

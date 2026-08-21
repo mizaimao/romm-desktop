@@ -2,7 +2,7 @@
 // glass, and the shader backdrop.
 import { invoke, listen, convertFileSrc } from "../state.js";
 import { toast, escapeHtml, cssColor } from "../util.js";
-import { padFor, padLabel, keyFor, keyLabel, ACTIONS } from "../bindings.js";
+import { padFor, padLabelFor, keyLabelFor, actions } from "../bindings.js";
 import {
   backdropSupported, backdropSettings, saveBackdropSettings,
   backdropWanted, setBackdropWanted, SCHEMES, ALL_SCHEMES, SCHEME_GROUPS,
@@ -136,21 +136,21 @@ export const html = `      <h4>Layout</h4>
 function markPadControls(box) {
   for (const mark of box.querySelectorAll(".padmark")) {
     const id = mark.dataset.action;
-    const action = ACTIONS.find((a) => a.id === id);
-    const pad = padFor(id);
-    const key = keyFor(id);
-    if (pad === null && !key) {
+    const action = actions().find((a) => a.id === id);
+    const pad = padLabelFor(id);
+    const key = keyLabelFor(id);
+    if (pad === "unset" && key === "—") {
       // Nothing bound to it: a badge pointing at a button that does not exist
       // is worse than no badge.
       mark.remove();
       continue;
     }
     mark.innerHTML = `<span class="icon icon-pad"></span>${escapeHtml(
-      pad === null ? keyLabel(key) : padLabel(pad).split(" / ")[0]
+      pad === "unset" ? key : pad.split(" / ")[0]
     )}`;
     mark.title =
       `"${action?.label ?? id}" — changeable without opening this window.\n` +
-      `Controller: ${padLabel(pad)}\nKeyboard: ${key ? keyLabel(key) : "unset"}\n` +
+      `Controller: ${pad}\nKeyboard: ${key === "—" ? "unset" : key}\n` +
       `Both are rebindable on the Control tab.`;
   }
 }

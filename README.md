@@ -168,12 +168,28 @@ src/main.rs     CLI (clap) and TUI
 src-tauri/      Tauri GUI shell, thin: it delegates to the library
 ui/             static ES modules and CSS, no bundler
 ui/js/shell.js  where a view is drawn and what the window looks like while it is
+ui/js/visible.js  which rows of a long list are drawn at all
 ui/js/settings/ one file per Settings tab: markup and wiring, nothing shared
 ui/icons/       Lucide (ISC), vendored — see ui/icons/README.md
 ui/test/        jsdom suites, run against the real index.html and stylesheet
+ui/test/backend.js  a stand-in for the backend, for tests about the page
 tools/          one-shot Python for DAT analysis, BIOS sets, server sync
 data/           generated reference data (core map, arcade names, icon sets)
 docs/           arcade and BIOS coverage, handheld card builds, and docs/parked.md
+```
+
+The interface logic is in the core, not in the front end that happened to be
+written first:
+
+```
+src/binds.rs       keys and controller buttons: the tables, and what resolves
+src/gamelist.rs    what a list of games knows about itself
+src/gamesort.rs    the orders a list can be in
+src/gamefilter.rs  what each filter keeps
+src/pickorder.rs   how the left column is ordered
+src/pagefilter.rs  searching inside the page you are on
+src/gridnav.rs     where the cursor goes next, from where the cards landed
+src/padpoll.rs     deadzones, repeat timings, and the lock after a game exits
 ```
 
 Views describe what they need and hand content to `shell.js` by role — the list
@@ -183,6 +199,12 @@ window. `PLAN.md` section 19 has the reasoning.
 
 The GUI, TUI and CLI share one launch planner. Adding an emulator quirk in one
 place fixes it in all three — which is the point, because it did not used to.
+The same now goes for sort orders, filters, key and pad bindings and cursor
+movement: the webview asks the core and caches the answer rather than deciding
+for itself. The one exception is the controller poll, which runs at the
+display's refresh rate inside `requestAnimationFrame` and cannot afford a round
+trip per frame — `src/padpoll.rs` is the definition `ui/js/gamepad.js` copies,
+and it says so in both.
 
 ## Saves
 

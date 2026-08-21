@@ -11,6 +11,7 @@
 
 import { TABS, paneHtml, wirePane, isCapturing, captureKey } from "./settings-panes.js";
 import { applyStoredGlassTint } from "./backdrop.js";
+import { loadBindings } from "./bindings.js";
 
 const tabsEl = document.getElementById("tabs");
 const paneEl = document.getElementById("pane");
@@ -121,4 +122,9 @@ async function showVersions() {
 applyStoredGlassTint();
 showVersions();
 buildTabs();
-show(localStorage.getItem(REMEMBERED) || TABS[0].id);
+// The bindings before the first pane, because the Control tab is a row per
+// action with the key and button currently on it — and this window is a second
+// document, so it has its own copy of them to fill.
+loadBindings()
+  .catch((e) => console.warn("loading bindings:", e))
+  .finally(() => show(localStorage.getItem(REMEMBERED) || TABS[0].id));

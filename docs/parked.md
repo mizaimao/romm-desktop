@@ -153,6 +153,13 @@ keyboard.
 
 Requested, never arrived. Scraping still goes through the server's own account.
 
+## 14. Windowing the middle column — **done in 0.2.606**
+
+Both halves. Covers are released once a card is well off screen, and a flat
+list over 400 rows draws only the band around the viewport: 2,506 cards to 100,
+`renderRows` 447ms to 21ms. See `docs/handheld-frontend.md` task 2 for what had
+to change to get there. The rest of this entry is what it looked like before.
+
 ## 14. Windowing the middle column
 
 The arcade list is 2,506 games and every one of them is inserted into the
@@ -170,6 +177,24 @@ Drawing only the rows on screen and filling in as you scroll is the fix. It is
 a real change: the cursor, the "remember where this tab was" scroll position,
 the pad navigation and the lazy cover observer all currently assume every row
 exists.
+
+**One more number, measured 2026-08-20 while chasing a report that browsing a
+large platform felt laggy.** Parked with "forget about the laggy thing" — kept
+here so nobody measures it twice. A worktree at 98a3b8b and one at 0.2.504,
+same jsdom probe, 2,506 rows:
+
+| | before the refactor | after |
+|---|--:|--:|
+| entering a platform | 412ms | 394ms |
+| one cursor move | 106ms | 109ms |
+| `renderRows` | ~340ms | ~380ms |
+
+So the front-end refactor did not cause it. **73ms of every cursor move is
+`selectRom` drawing the info pane, and it sends three commands per move** —
+`rom_detail`, `game_cores`, `game_states` — while a held direction repeats nine
+times a second. Debouncing the pane, so it draws for where the cursor stopped
+rather than for every row it passed over, is a smaller and more separable job
+than windowing and would probably be felt first.
 
 ## 15. The two rough edges left in three columns
 

@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -26,7 +27,7 @@ const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 /// once here so a test never disagrees with library.js by a typo.
 const SEL = "sel";
 
-let dom, invoked, pads, ui;
+let dom, invoked, pads, ui, backend;
 
 /// Minimal stand-ins for the backend. Shapes matter: the render path reads
 /// `.length` off list responses and `.downloaded` off a detail, so returning a
@@ -92,15 +93,18 @@ before(async () => {
   });
 
   invoked = [];
+  // The interface commands — bindings, ordering, the grid — are answered by
+  // the stand-in in backend.js; everything else falls through to `reply`.
+  backend = fakeBackend(reply);
   dom.window.__TAURI__ = {
     core: {
       invoke: (cmd, args) => {
         invoked.push({ cmd, args });
-        return Promise.resolve(reply(cmd, args));
+        return backend(cmd, args);
       },
       convertFileSrc: (p) => p,
     },
-    event: { listen: () => Promise.resolve(() => {}) },
+    event: { listen: () => Promise.resolve(() => {}), emit: () => {} },
   };
 
   pads = [];
@@ -138,7 +142,15 @@ before(async () => {
     ...(await load("bulk.js")),
     ...(await load("lightbox.js")),
     ...(await load("shell.js")),
+    ...(await load("sort.js")),
+    ...(await load("filter.js")),
+    ...(await load("arrange.js")),
   };
+  // The tables come from the backend now, so nothing that reads a binding or
+  // draws a sort menu works until they have arrived. The app does this in
+  // main.js before it installs the keyboard or the pad.
+  await ui.loadBindings();
+  ui.setFilters((await ui.loadListControls()).filters);
 });
 
 beforeEach(async () => {
@@ -224,18 +236,16 @@ describe("pad bindings", () => {
     }
   });
 
-  test("a rebind moves the action and frees the old button", () => {
-    ui.setPad("activate", 3);
+  /// Rebinding, the clearing of whatever held the button before, and the
+  /// repair that keeps a direction from being left on nothing are asserted in
+  /// `binds::tests` — against the implementation rather than through a page.
+  /// What is left here is that the page can read the result.
+  test("a rebind moves the action, and the page sees it", async () => {
+    await ui.setPad("activate", 3);
     assert.equal(ui.padMap()[3], "activate");
-    assert.equal(ui.padMap()[0], null, "the old button is cleared, not left dangling");
-    ui.resetPad();
+    assert.equal(ui.padFor("activate"), 3);
+    await ui.resetPad();
     assert.equal(ui.padMap()[0], "activate", "reset restores the defaults");
-  });
-
-  test("padFor reports where an action currently lives", () => {
-    assert.equal(ui.padFor("activate"), 0);
-    ui.setPad("activate", 2);
-    assert.equal(ui.padFor("activate"), 2);
   });
 });
 
@@ -945,77 +955,10 @@ describe("walking the reel with a pad", () => {
   });
 });
 
-describe("sorting a list", () => {
-  const games = [
-    { id: 1, name: "Zed Blade", rating: 6.1, year: 1994, size_bytes: 900, favourite: false },
-    { id: 2, name: "Alpha Mission", rating: null, year: 1985, size_bytes: 100, favourite: false },
-    { id: 3, name: "Metal Slug", rating: 9.2, year: 1996, size_bytes: 500, favourite: false },
-    { id: 4, name: "Zzz Last", rating: 8.0, year: 1999, size_bytes: 50, favourite: true },
-  ];
-  const names = (rows) => rows.map((g) => g.name);
-
-  test("alphabetical by default", async () => {
-    const sort = await import("../js/sort.js");
-    ui.state.view = "roms";
-    ui.state.platform = "neogeo";
-    assert.equal(sort.currentOrder().id, "name");
-    // The favourite is first whatever the order — that is what a favourite is.
-    assert.deepEqual(names(sort.sorted(games)), [
-      "Zzz Last", "Alpha Mission", "Metal Slug", "Zed Blade",
-    ]);
-  });
-
-  /// An unrated game is not a bad game, and a list that opens on the unknowns
-  /// answers nothing.
-  test("rating sorts high to low, with the unrated last", async () => {
-    const sort = await import("../js/sort.js");
-    ui.state.view = "roms";
-    ui.state.platform = "neogeo";
-    sort.setOrder("rating");
-    assert.deepEqual(names(sort.sorted(games)), [
-      "Zzz Last", "Metal Slug", "Zed Blade", "Alpha Mission",
-    ]);
-    sort.setOrder("name");
-  });
-
-  /// "Sort this console by rating" is a statement about that console. Carrying
-  /// it to the next one silently reorders a screen nobody asked about.
-  test("each console keeps its own order", async () => {
-    const sort = await import("../js/sort.js");
-    ui.state.view = "roms";
-    ui.state.platform = "neogeo";
-    sort.setOrder("year");
-    assert.equal(sort.currentOrder().id, "year");
-
-    ui.state.platform = "snes";
-    assert.equal(sort.currentOrder().id, "name", "the order followed to another console");
-
-    ui.state.platform = "neogeo";
-    assert.equal(sort.currentOrder().id, "year", "and was forgotten on the way back");
-    sort.setOrder("name");
-  });
-
-  /// The console grid is a couple of dozen tiles in an order people learn the
-  /// shape of. Shuffling it costs more than it gives.
-  test("the console grid has no sort", async () => {
-    const sort = await import("../js/sort.js");
-    ui.state.view = "platforms";
-    assert.equal(sort.sortable(), false);
-    assert.equal(sort.cycleOrder(1), null, "the stick click sorted the consoles");
-    ui.state.view = "roms";
-  });
-
-  test("sorting never reorders the caller's array", async () => {
-    const sort = await import("../js/sort.js");
-    ui.state.view = "roms";
-    ui.state.platform = "neogeo";
-    sort.setOrder("size");
-    const before = names(games);
-    sort.sorted(games);
-    assert.deepEqual(names(games), before, "state.rows was sorted in place");
-    sort.setOrder("name");
-  });
-});
+// Which order a list opens in, what each one does to it, that favourites stay
+// on top, and that an order belongs to the console it was set on are asserted
+// in `gamesort::tests` and `gamelist::tests` — against the implementation
+// rather than through a page.
 
 describe("opening the player with a held button", () => {
   /// Y opens the player and Y closes it, and a button is held down across
@@ -1166,9 +1109,14 @@ describe("search results group the twins together", () => {
   const heads = () =>
     [...document.querySelectorAll("#list .pgroup .gslug")].map((n) => n.textContent);
 
-  const search = (rows) => {
+  const search = async (rows) => {
     ui.state.view = "search";
+    ui.state.platform = null;
     ui.state.rows = rows;
+    // These hand rows to the page directly rather than through `search`, so
+    // the stand-in backend is told what the list holds.
+    backend.rows(rows);
+    await ui.arrangeCurrentList();
     ui.renderRows(rows, true);
   };
 
@@ -1185,8 +1133,8 @@ describe("search results group the twins together", () => {
   /// The NES release and the Famicom one are the same game on the same
   /// hardware sold in two places. Ordering purely by hit count put eight other
   /// consoles between them.
-  test("nes and famicom sit next to each other", () => {
-    search([
+  test("nes and famicom sit next to each other", async () => {
+    await search([
       game(1, "psx", "Zelda-ish"),
       game(2, "psx", "Another"),
       game(3, "psx", "Third"),
@@ -1202,8 +1150,8 @@ describe("search results group the twins together", () => {
     assert.equal(fc, nes + 1, `famicom is not behind nes: ${order}`);
   });
 
-  test("snes and sfc too, and the home-market name leads", () => {
-    search([
+  test("snes and sfc too, and the home-market name leads", async () => {
+    await search([
       game(1, "sfc", "Mario J"),
       game(2, "snes", "Mario"),
       game(3, "snes", "Mario 2"),
@@ -1215,8 +1163,8 @@ describe("search results group the twins together", () => {
 
   /// A family's place in the list is decided by both halves together: three
   /// hits plus two beats a console with four, because it is one machine.
-  test("a family is weighed as one console", () => {
-    search([
+  test("a family is weighed as one console", async () => {
+    await search([
       game(1, "psx", "A"),
       game(2, "psx", "B"),
       game(3, "psx", "C"),

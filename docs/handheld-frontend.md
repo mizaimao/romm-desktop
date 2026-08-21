@@ -89,7 +89,35 @@ every other app on the machine. Neither is the answer.
   translated sets, so font fallback is not optional. It is the least glamorous
   item here and the one most likely to make the result feel cheap.
 
-## Task 1 — move the logic into `src/`
+## Task 1 — move the logic into `src/` — **done, 0.2.503**
+
+Seven modules in `src/`, 91 tests: `binds` (keys and buttons), `gamelist`
+(the row shape and the per-view memory), `gamesort`, `gamefilter`, `pickorder`,
+`pagefilter`, `gridnav`, and `padpoll`. The webview reaches them through Tauri
+commands and caches the answers, because `renderRows` and the key handler are
+synchronous.
+
+One exception, decided deliberately: **the controller poll stays in JS**. It
+runs inside `requestAnimationFrame` at 120Hz and a round trip per frame is not
+a thing that can be made fast enough. `src/padpoll.rs` holds the deadzones, the
+repeat timings, the dominant-axis rule and the settle lock as the definition
+`ui/js/gamepad.js` is a copy of — so when one of those numbers is argued about,
+it is argued about once. That is the one place two implementations remain.
+
+Two things moved storage on the way: bindings and the column order now live in
+`config.toml` rather than in the webview's `localStorage`, which is what lets
+the TUI read them and what retires the `storage`-event sync between the main
+window and the settings window. Bindings left by an older build are adopted
+once, at startup.
+
+The webview's own tests kept the assertions about the *page* — the menu, the
+button, the empty result — and handed the ones about the rules to `cargo test`.
+They run against a deliberately naive stand-in backend in `ui/test/backend.js`;
+its copy of the default binding table is a fixture that `cargo test`
+regenerates and checks, so a moved default button fails there rather than
+quietly changing what the tests press.
+
+The original brief follows.
 
 **Do this first, and do it whether or not the handheld front end ever happens.**
 
@@ -112,6 +140,42 @@ green: `npm test` and `cargo test --workspace`, plus
 
 This is narrow, well-specified, test-backed work — the shape a smaller local
 model handles well. One module at a time.
+
+## Task 2 — window the middle column — **done, 0.2.606**
+
+Two fixes, and the doc was right that they are the same one.
+
+**The 578 MB.** Covers are let go once a card is well off screen. Two
+observers, not one: near, at 300px, fetches; far, at 1600px, puts the
+placeholder back and drops the image. The gap between them is the hysteresis —
+a card one flick of the wheel off the top of the screen is about to be looked
+at again. The version this replaces unobserved a card the moment its cover
+arrived, so nothing ever released one.
+
+**The 2,506 nodes.** A flat list over 400 rows draws only the band around the
+viewport, with a spacer above and below standing in for the rest at exactly the
+height they would have taken — so the scrollbar and every remembered scroll
+position are unchanged. Measured on the arcade console, ten across, an 800px
+window: **2,506 cards to 100, and `renderRows` from 447ms to 21ms.** Grouped
+results are drawn whole; search is capped at 200 and a window over a short list
+is machinery with nothing to do.
+
+The four things that assumed every row exists were the work:
+
+* **The cursor** now moves in rows rather than in drawn nodes, through
+  `gridnav::uniform` — a table from two numbers, because a uniform grid needs
+  no measuring and most of its cards have no position to measure. A test
+  asserts it agrees with the measured table on any layout where both apply.
+* **The remembered position** asks the window to reveal its row, which scrolls
+  there and draws the band around it. Being far down the list is exactly why it
+  was worth remembering.
+* **The filter box** narrows the list rather than hiding drawn nodes — hiding
+  would have searched a hundred games out of two and a half thousand, finding
+  less the further down you had scrolled.
+* **The cover observers** are re-attached on every band change, and the
+  highlight is put back: the card carrying it is thrown away each time.
+
+The original brief follows.
 
 ## Task 2 — window the middle column
 
@@ -138,6 +202,38 @@ a row scrolls well out of view, against the existing observer.
 networking; the rest is this app holding every cover it has ever drawn.
 
 ## Task 3 — the SDL2 front end
+
+**What tasks 1 and 2 leave it.** Written down because the point of doing them
+first was that this one inherits the result, and a list of what is already
+there is the difference between starting from facts and starting from a survey.
+
+Ready to call, tested, no webview anywhere near them:
+
+| | |
+|---|---|
+| `binds` | the action table, the pad table, defaults, repair, and storage in `config.toml` |
+| `gamelist` / `gamesort` / `gamefilter` | the row shape, the orders, the predicates, and the per-view memory |
+| `pickorder` | how the left column is ordered, remembered across restarts |
+| `pagefilter` | what the filter box matches, and when a heading has nothing left under it |
+| `gridnav` | where the cursor goes next — including `uniform`, which needs no geometry at all and is what a windowed list navigates by |
+| `padpoll` | deadzones, repeat timings, hold-versus-tap, and the lock after a game exits |
+
+**Two things it has to write for itself, and both are deliberate.** Neither is
+an oversight; both are places a round trip per frame was the wrong answer for
+the webview and will be the right code to lift for SDL, which has no boundary
+to cross:
+
+* **The controller poll.** `padpoll` is the arithmetic; the loop around it —
+  reading the pad, routing to a dialog or a player or the library, the settle
+  window after an emulator exits — is in `ui/js/gamepad.js` and has no Rust
+  equivalent. SDL reads `SDL_GameController` and translates into the button
+  indices `binds::PAD_BUTTONS` names before asking anything.
+* **Which rows to draw.** `ui/js/visible.js` holds the windowing arithmetic —
+  given the column count, a row's height and where the list is scrolled, which
+  band to draw and how much empty space to leave either side. Fourteen tests in
+  `ui/test/visible.test.js` pin it. A 1 GB handheld needs this more than a Mac
+  does; port `slice()` into `src/` early and delete the duplicate reasoning,
+  rather than rediscovering it against a 4" screen.
 
 **Add a fourth front end. Do not convert.** The repo is already CLI + TUI + Tauri
 over one core. Converting would cost the desktop app its video, manuals and

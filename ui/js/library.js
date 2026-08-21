@@ -1,19 +1,20 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
-import { resetNav } from "./keys.js";
+import { resetNav, primeNav } from "./keys.js";
 import { currentOrder, defaultOrder, refreshSortButton, sorted } from "./sort.js";
 import { filtered, refreshFilterButton, activeFilters, clearFilters } from "./filter.js";
+import { arrangeCurrentList, listRef } from "./arrange.js";
 import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
-import { byName } from "./picker-order.js";
 import { setPageFilterLabel, refreshPageFilter } from "./pagefilter.js";
 import { followSections } from "./sections.js";
 import { play, restoreSidebar, selectRom, showPlatformInfo, withTransition } from "./detail.js";
 import { download, launch } from "./actions.js";
 import { installTilt } from "./tilt.js";
+import { windowRows, stopWindowing, worthWindowing, windowedList } from "./visible.js";
 
 export async function showPlatforms() {
   state.view = "platforms";
@@ -125,7 +126,7 @@ async function showRecent() {
     (overflow ? `<button class="link recent-more">More…</button>` : "") +
     `</h2>` +
     `<div class="gcards">${shown.map((r) => `
-       <div class="gcard" data-id="${r.id}">
+       <div class="gcard" data-id="${r.id}" data-name="${escapeHtml(r.name.slice(0, 2))}">
          <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span></div>
          <div class="gname">${escapeHtml(r.name)}</div>
          <div class="gmeta">${here(r)}${escapeHtml(r.platform)}</div>
@@ -168,7 +169,7 @@ export async function showAllRecent() {
 
   let rows = [];
   try {
-    rows = await invoke("recent_games", { limit: 500 });
+    rows = await invoke("recent_games", { limit: 500, list: listRef() });
   } catch (e) {
     region("primary").innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
     return;
@@ -181,7 +182,7 @@ export async function showAllRecent() {
   state.rows = rows;
   // Most recent first unless this view has already been sorted otherwise, and
   // grouped by console only when that is what was asked for.
-  defaultOrder("played");
+  await defaultOrder("played");
   renderRows(rows, currentOrder().id === "platform");
 }
 
@@ -210,11 +211,12 @@ function renderPlatforms(items) {
   // A column is narrow, so the console cards are always a list there — a grid
   // of two-across cards in a 260px column is neither a grid nor readable.
   const asList = state.layout !== "grid" || shellMode() === "columns";
-  // The server hands these back by size, so the list opened on whichever
-  // console has the most ROMs in it. Alphabetical, and left alone: thirty-five
-  // consoles that never change are something you learn the shape of, and a
-  // button that reshuffles them works against that.
-  const ordered = byName(items);
+  // Already alphabetical: the `platforms` command orders them, because the
+  // server hands them back by size and this grid is redrawn on a layout switch
+  // and on every batch of covers that arrives. Left alone thereafter —
+  // thirty-five consoles that never change are something you learn the shape
+  // of, and a button that reshuffles them works against that.
+  const ordered = items;
   into.innerHTML = asList
     ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
     : `<div class="grid">${ordered.map(platformCard).join("")}</div>`;
@@ -234,7 +236,12 @@ function renderPlatforms(items) {
     });
   });
   if (shellMode() === "columns" && state.platform) markPlatform(state.platform);
+  // Thirty-five consoles are never windowed, and leaving a window's scroll
+  // listener attached to a list it no longer draws is a listener that runs on
+  // every scroll of every screen after this one.
+  stopWindowing();
   resetNav();
+  primeNav();
 }
 
 /// Open a console, carrying its name up into the title bar.
@@ -356,7 +363,8 @@ export async function showRoms(slug) {
   state.lastPlatform = slug;
   localStorage.setItem("lastPlatform", slug);
   el.search.value = "";
-  state.rows = await invoke("roms", { platform: slug });
+  state.rows = await invoke("roms", { platform: slug, list: listRef() });
+  await arrangeCurrentList();
   enter({
     title: `${slug} — ${state.rows.length} games`,
     back: true,
@@ -376,7 +384,8 @@ export async function runSearch(term) {
   }
   state.view = "search";
   restoreSidebar();
-  state.rows = await invoke("search", { term });
+  state.rows = await invoke("search", { term, list: listRef() });
+  await arrangeCurrentList();
   const consoles = new Set(state.rows.map((r) => r.platform)).size;
   enter({
     title:
@@ -494,6 +503,19 @@ async function gameMenu(id, x, y) {
   );
 }
 
+/// Put the highlight back on the card the cursor is on.
+///
+/// A windowed list rebuilds its cards every time the band moves, so the node
+/// carrying `.sel` is thrown away and replaced by one that does not. The
+/// cursor is a row, not a node — this is what keeps the two in step.
+function markSelected() {
+  if (state.selected === null || state.selected === undefined) return;
+  const want = String(state.selected);
+  for (const node of el.list.querySelectorAll(".gcard, .row")) {
+    node.classList.toggle("sel", node.dataset.id === want);
+  }
+}
+
 export function renderRows(unsorted, showPlatform) {
   // Ordered here rather than by whoever supplied the rows, so every path that
   // draws a list — a console, a collection, a search, a redraw after the order
@@ -504,6 +526,7 @@ export function renderRows(unsorted, showPlatform) {
   refreshSortButton();
   refreshFilterButton();
   if (!rows.length) {
+    stopWindowing();
     // A filtered list that matches nothing looks exactly like a console with
     // no games in it, and the filter is off screen in a menu — so the empty
     // list has to say so, and offer the way out.
@@ -513,8 +536,8 @@ export function renderRows(unsorted, showPlatform) {
       : `<div class="empty">Nothing here.</div>`;
     region("games")
       .querySelector(".clear-filters")
-      ?.addEventListener("click", () => {
-        clearFilters();
+      ?.addEventListener("click", async () => {
+        await clearFilters();
         renderRows(unsorted, showPlatform);
       });
     return;
@@ -523,11 +546,47 @@ export function renderRows(unsorted, showPlatform) {
   // meant. Grouping also lets each console keep its own cover shape, which a
   // single mixed grid cannot.
   resetNav();
-  region("games").innerHTML = showPlatform
-    ? groupedMarkup(rows)
-    : state.layout === "grid"
-      ? gridMarkup(rows)
-      : listMarkup(rows, showPlatform);
+
+  // A long flat list draws only the band around the viewport. Grouped results
+  // are drawn whole: search is capped at 200 by the backend, and a grouped
+  // collection is sections of a few hundred — below the threshold a window is
+  // machinery with nothing to do. See `visible.js`.
+  const window = !showPlatform && worthWindowing(rows.length);
+  if (window) {
+    const uniform = gridAspect(null);
+    region("games").innerHTML =
+      state.layout === "grid"
+        ? `<div class="gcards"${uniform ? ` style="--ar:${uniform.toFixed(3)}"` : ""}></div>`
+        : `<div class="rows"></div>`;
+    windowRows({
+      container: region("games").firstElementChild,
+      scroller: el.list,
+      rows,
+      html: (r, at) =>
+        state.layout === "grid"
+          ? cardMarkup(r, uniform, at)
+          : rowMarkup(r, showPlatform, at),
+      // Every band change is a different set of nodes, so both of the things
+      // that hold a map of the page have to be told: the cover observers, and
+      // the cursor.
+      onDraw: () => {
+        if (state.layout === "grid") observeCovers();
+        // The card the cursor was on has just been thrown away and drawn
+        // again, without the class that says so.
+        markSelected();
+      },
+    });
+  } else {
+    stopWindowing();
+    region("games").innerHTML = showPlatform
+      ? groupedMarkup(rows)
+      : state.layout === "grid"
+        ? gridMarkup(rows)
+        : listMarkup(rows, showPlatform);
+  }
+  // Work out where the cursor can go while nobody is waiting on it, rather
+  // than on the first arrow press after this.
+  primeNav();
 
   delegateGames(region("games"));
   setPageFilterLabel(`${rows.length} games`);
@@ -542,7 +601,14 @@ export function renderRows(unsorted, showPlatform) {
   if (rows.length) {
     const want = rememberedRom(rows) ?? rows[0].id;
     selectRom(want);
-    const node = el.list.querySelector(`[data-id="${want}"]`);
+    let node = el.list.querySelector(`[data-id="${want}"]`);
+    // Windowed, the remembered row is very often not drawn — being far down
+    // the list is exactly why it was worth remembering. Ask the window for it,
+    // which scrolls there and draws the band around it.
+    if (!node) {
+      const at = rows.findIndex((r) => r.id === want);
+      node = windowedList()?.reveal(at) ?? null;
+    }
     // `nearest` rather than `center`: if the remembered row is already on
     // screen, scrolling it to the middle moves the list for no reason.
     node?.scrollIntoView({ block: "nearest" });
@@ -600,31 +666,46 @@ function groupedMarkup(rows) {
   // over the first row and cropping it.
   const single = ordered.length === 1;
 
+  // Numbered across the whole result rather than within each section, so
+  // `data-at` means the same thing here as it does in a flat list: where the
+  // cursor is in what is on screen, top to bottom.
+  let at = 0;
   return ordered
-    .map(
-      ([platform, items]) => `
+    .map(([platform, items]) => {
+      const from = at;
+      at += items.length;
+      return `
       <section class="pgroup">
         ${single ? "" : `<h2 class="ghead">
           <span class="gslug">${escapeHtml(platform)}</span>
           <span class="gcount">${items.length}</span>
         </h2>`}
-        ${state.layout === "grid" ? gridMarkup(items, platform) : listMarkup(items, false)}
-      </section>`
-    )
+        ${state.layout === "grid"
+          ? gridMarkup(items, platform, from)
+          : listMarkup(items, false, from)}
+      </section>`;
+    })
     .join("");
 }
 
-function listMarkup(rows, showPlatform) {
-  return `<div class="rows">${rows
-    .map(
-      (r) => `
-      <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}">
+/// One row.
+///
+/// `at` is its place in the whole list, not in what happens to be drawn — a
+/// windowed list draws a band out of the middle, and the cursor moves through
+/// rows that are not on the page. See `visible.js`.
+function rowMarkup(r, showPlatform, at) {
+  return `
+      <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}" data-at="${at}">
         <span class="have">${here(r)}</span>
         <span class="nm">${r.favourite ? `<span class="star" title="Starred — in one of your starred collections">★</span>` : ""}${escapeHtml(r.name)}</span>
         ${showPlatform ? `<span class="pf">${r.platform}</span>` : ""}
         <span class="sz">${human(r.size_bytes)}</span>
-      </div>`
-    )
+      </div>`;
+}
+
+function listMarkup(rows, showPlatform, from = 0) {
+  return `<div class="rows">${rows
+    .map((r, i) => rowMarkup(r, showPlatform, from + i))
     .join("")}</div>`;
 }
 
@@ -642,16 +723,23 @@ function here(r) {
     : `<span class="mark away" title="On the server — downloads when you play it"><span class="icon icon-cloud"></span></span>`;
 }
 
-function gridMarkup(rows, platform) {
-  // One ratio per grid. Grouped search passes its console in, so each section
-  // is uniform even though the results as a whole are not.
+/// The ratio every card in a grid is shaped to, or null where the rows come
+/// from more than one console and each card has to say for itself.
+///
+/// Grouped search passes its console in, so each section is uniform even
+/// though the results as a whole are not. Uniformity is what lets a long list
+/// be windowed at all — see `visible.js`.
+function gridAspect(platform) {
   const slug = platform ?? (state.view !== "search" ? state.platform : null);
-  const uniform = slug ? state.aspects[slug] : null;
-  const style = uniform ? ` style="--ar:${uniform.toFixed(3)}"` : "";
-  return `<div class="gcards"${style}>${rows
-    .map(
-      (r) => `
-      <div class="gcard" data-id="${r.id}"${
+  return slug ? (state.aspects[slug] ?? null) : null;
+}
+
+/// One card. `at` is its place in the whole list; see `rowMarkup`.
+function cardMarkup(r, uniform, at) {
+  return `
+      <div class="gcard" data-id="${r.id}" data-at="${at}" data-name="${escapeHtml(r.name.slice(0, 2))}"${
+        r.favourite ? ` data-fav="1"` : ""
+      }${
         !uniform && state.aspects[r.platform]
           ? ` style="--ar:${state.aspects[r.platform].toFixed(3)}"`
           : ""
@@ -663,8 +751,14 @@ function gridMarkup(rows, platform) {
         }</div>
         <div class="gname">${escapeHtml(r.name)}</div>
         <div class="gmeta">${here(r)}${human(r.size_bytes)}</div>
-      </div>`
-    )
+      </div>`;
+}
+
+function gridMarkup(rows, platform, from = 0) {
+  const uniform = gridAspect(platform);
+  const style = uniform ? ` style="--ar:${uniform.toFixed(3)}"` : "";
+  return `<div class="gcards"${style}>${rows
+    .map((r, i) => cardMarkup(r, uniform, from + i))
     .join("")}</div>`;
 }
 
@@ -683,6 +777,13 @@ export function setZoom(px) {
   localStorage.setItem("zoom", String(px));
   el.zoom.value = String(px);
   document.documentElement.style.setProperty("--card", `${px}px`);
+  // Wider cards mean fewer columns and a taller row, so a windowed list is
+  // now drawing the wrong band and standing the wrong height in for the rest.
+  // The resize listener does not fire for this: the window did not change, the
+  // cards did.
+  windowedList()?.remeasure();
+  resetNav();
+  primeNav();
 }
 
 export function setLayout(next) {
@@ -710,21 +811,57 @@ export function setLayout(next) {
 }
 
 // Covers load only for cards near the viewport, batched — opening a
-// 2,400-game platform must not fire 2,400 requests.
+// 2,400-game platform must not fire 2,400 requests — and are let go again
+// once a card is well away from it.
+//
+// The letting go is the whole of the memory problem. A cover is a few tens of
+// kilobytes as a PNG and about 786 KB once decoded into a bitmap, and the
+// version this replaces unobserved a card the moment its cover arrived: every
+// image the list had ever drawn stayed decoded for as long as the list was on
+// screen. Measured on 2026-08-20, the WebKit content process sat at 578 MB of
+// a ~671 MB total, and that was all of it. See docs/handheld-frontend.md.
 let coverObserver;
+/// The second observer, at a much larger margin than the first. Two of them,
+/// not one, because loading and releasing want different distances: a card
+/// just off the top of the screen is one flick of the wheel from being looked
+/// at again, and dropping its cover there would mean fetching and decoding it
+/// again on the way back. The gap between the two margins is the hysteresis.
+let coverReleaser;
 let coverQueue = [];
 let coverTimer;
 
+/// How far off screen a card has to be before its cover is let go. Two
+/// screenfuls at a typical window height — far enough that scrolling back is
+/// deliberate rather than a flick.
+const RELEASE_MARGIN = "1600px";
+
 let coverErrorShown = false;
+
+/// The placeholder a card is drawn with, and goes back to when its cover is
+/// released: the first two letters of its name, and the star if it has one.
+function placeholder(card) {
+  // `data-name` already holds only the two letters the placeholder draws, and
+  // is already escaped — it went through `escapeHtml` on the way into the
+  // attribute. Escaping it again would turn an `&` into `&amp;amp;`.
+  const star = card.dataset.fav === "1"
+    ? `<span class="star" title="Starred — in one of your starred collections">★</span>`
+    : "";
+  return `<span class="ph">${card.dataset.name ?? ""}</span>${star}`;
+}
 
 function observeCovers() {
   coverObserver?.disconnect();
+  coverReleaser?.disconnect();
   coverQueue = [];
   coverObserver = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
-        coverObserver.unobserve(e.target);
+        // Still observed, not unobserved: a card whose cover has been released
+        // has to be able to ask for it again. `loaded` is what stops the same
+        // card being queued twice.
+        if (e.target.dataset.loaded === "1") continue;
+        e.target.dataset.loaded = "1";
         coverQueue.push(Number(e.target.dataset.id));
       }
       clearTimeout(coverTimer);
@@ -732,7 +869,25 @@ function observeCovers() {
     },
     { root: el.list, rootMargin: "300px" }
   );
-  el.list.querySelectorAll(".gcard").forEach((c) => coverObserver.observe(c));
+  coverReleaser = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) continue;
+        const art = e.target.querySelector(".art");
+        // Only if there is something to let go of. Putting the placeholder
+        // back over a placeholder is a write to the page for no reason, and
+        // this runs for every card that leaves the margin.
+        if (!art?.firstElementChild || art.firstElementChild.tagName !== "IMG") continue;
+        art.innerHTML = placeholder(e.target);
+        delete e.target.dataset.loaded;
+      }
+    },
+    { root: el.list, rootMargin: RELEASE_MARGIN }
+  );
+  for (const c of el.list.querySelectorAll(".gcard")) {
+    coverObserver.observe(c);
+    coverReleaser.observe(c);
+  }
 }
 
 async function flushCovers() {
@@ -741,8 +896,17 @@ async function flushCovers() {
   try {
     for (const { id, cover } of await invoke("rom_covers", { ids })) {
       if (!cover) continue;
-      const art = el.list.querySelector(`.gcard[data-id="${id}"] .art`);
-      if (art) art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />`;
+      const card = el.list.querySelector(`.gcard[data-id="${id}"]`);
+      const art = card?.querySelector(".art");
+      // Gone since the batch was asked for — released again, or the list
+      // redrawn under it. Dropping it is right; the card will ask again.
+      if (!art || card.dataset.loaded !== "1") continue;
+      const star = card.dataset.fav === "1"
+        ? `<span class="star" title="Starred — in one of your starred collections">★</span>`
+        : "";
+      // The star is kept. Replacing the whole of `.art` with the image took it
+      // away, so a starred game lost its star the moment its cover arrived.
+      art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />${star}`;
     }
   } catch (e) {
     // Placeholders stay — a failed batch is not worth interrupting browsing —
@@ -770,10 +934,18 @@ async function flushCovers() {
 export function randomGame() {
   const rows = sorted(filtered(state.rows));
   if (!rows.length) return null;
-  const pick = rows[Math.floor(Math.random() * rows.length)];
+  const at = Math.floor(Math.random() * rows.length);
+  const pick = rows[at];
   selectRom(pick.id);
-  const node = region("games")?.querySelector(`[data-id="${pick.id}"]`);
+  // Windowed, a game picked at random out of 2,506 is almost never one of the
+  // hundred or so on the page — which is the point of the button. Ask the
+  // window for it, which scrolls there and draws the band around it.
+  const win = windowedList();
+  const node =
+    (win && el.list.contains(win.container) ? win.reveal(at) : null) ??
+    region("games")?.querySelector(`[data-id="${pick.id}"]`);
   node?.scrollIntoView({ block: "center", behavior: "smooth" });
+  markSelected();
   toast(pick.name);
   return pick;
 }

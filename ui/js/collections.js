@@ -8,7 +8,8 @@
 import { el, state, trail, invoke, convertFileSrc, listen } from "./state.js";
 import { enter as enterView, region, resetGames } from "./shell.js";
 import { escapeHtml } from "./util.js";
-import { pickerBar, wirePickerBar, sortPicker } from "./picker-order.js";
+import { pickerBar, wirePickerBar, sortPicker, loadPickerOrders } from "./picker-order.js";
+import { arrangeCurrentList, listRef } from "./arrange.js";
 import {
   setPageFilterLabel, setPageFilterExtra, refreshPageFilter,
 } from "./pagefilter.js";
@@ -141,7 +142,10 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
   // this one, and where it does not sit in the middle of a page of cards.
   region(into).innerHTML = `<div class="grid" id="cgrid"></div>`;
   setPageFilterLabel(`${items.length} collections`);
-  // The order button rides beside it.
+  // The order button rides beside it. Which orders it offers, and which one
+  // is on, come from config.toml — so the bar is drawn after that is known
+  // rather than saying "Name" over a list ordered by something else.
+  await loadPickerOrders("collections");
   const bar = document.createElement("span");
   bar.innerHTML = pickerBar({ kind: "collections" });
   setPageFilterExtra(bar.firstElementChild);
@@ -149,8 +153,8 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
 
   const grid = document.getElementById("cgrid");
 
-  function draw(unordered) {
-    const list = sortPicker("collections", unordered);
+  async function draw(unordered) {
+    const list = await sortPicker("collections", unordered);
     grid.innerHTML = list
       .map(
         (c) => `
@@ -181,7 +185,7 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
     refreshPageFilter();
   }
 
-  draw(items);
+  await draw(items);
 
   // The middle belongs to a collection's games, and one of them may as well be
   // showing: the one you were last in, or the first. The same thing Library
@@ -209,7 +213,8 @@ export async function showCollectionRoms(id, name) {
   state.collectionName = name;
   el.search.value = "";
 
-  state.rows = await invoke("collection_roms", { id: String(id) });
+  state.rows = await invoke("collection_roms", { id: String(id), list: listRef() });
+  await arrangeCurrentList();
   enterView({
     title: `${name} — ${state.rows.length} games`,
     back: true,

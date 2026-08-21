@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -23,14 +24,18 @@ before(async () => {
   const dom = new JSDOM(readFileSync(join(uiDir, "settings.html"), "utf8"), {
     url: "http://localhost/",
   });
+  const backend = fakeBackend();
   dom.window.__TAURI__ = {
-    core: { invoke: () => Promise.resolve([]), convertFileSrc: (p) => p },
-    event: { listen: () => Promise.resolve(() => {}) },
+    core: { invoke: backend, convertFileSrc: (p) => p },
+    event: { listen: () => Promise.resolve(() => {}), emit: () => {} },
   };
   for (const k of ["window", "document", "navigator", "localStorage", "CSS"]) {
     Object.defineProperty(globalThis, k, { value: dom.window[k], configurable: true });
   }
   ({ paneHtml } = await import(join(uiDir, "js", "settings-panes.js")));
+  // The bindings table is drawn from what the backend says is bound, so the
+  // pane has nothing to draw until they arrive.
+  await (await import(join(uiDir, "js", "bindings.js"))).loadBindings();
   doc = new JSDOM(`<body>${paneHtml("control")}</body>`).window.document;
 });
 

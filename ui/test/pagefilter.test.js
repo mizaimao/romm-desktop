@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -68,6 +69,12 @@ before(async () => {
     },
     event: { listen: async () => () => {}, emit: () => {} },
   };
+
+  // The interface commands — bindings, ordering, the grid, the page filter —
+  // are answered by the stand-in in backend.js. See the note at the top of
+  // that file: it is deliberately naive, and the rules it stands in for are
+  // asserted by `cargo test` against the real implementation.
+  dom.window.__TAURI__.core.invoke = fakeBackend(dom.window.__TAURI__.core.invoke);
   pf = await import("../js/pagefilter.js");
   tabs = await import("../js/tabs.js");
   ({ el } = await import("../js/state.js"));
@@ -90,18 +97,18 @@ const visible = () =>
     .map((n) => n.textContent.trim());
 
 describe("filtering the page", () => {
-  test("it keeps what matches and hides the rest", () => {
-    pf.applyPageFilter("game boy");
+  test("it keeps what matches and hides the rest", async () => {
+    await pf.applyPageFilter("game boy");
     assert.deepEqual(visible(), ["Game Boy", "Game Boy Advance"]);
   });
 
-  test("case does not matter, and neither does stray space", () => {
-    pf.applyPageFilter("  ARCADE ");
+  test("case does not matter, and neither does stray space", async () => {
+    await pf.applyPageFilter("  ARCADE ");
     assert.deepEqual(visible(), ["Arcade"]);
   });
 
-  test("emptying it puts everything back", () => {
-    pf.applyPageFilter("arcade");
+  test("emptying it puts everything back", async () => {
+    await pf.applyPageFilter("arcade");
     pf.clearPageFilter();
     assert.equal(visible().length, 3);
   });
@@ -109,8 +116,8 @@ describe("filtering the page", () => {
   /// A redraw builds fresh nodes that have never seen the filter. Without
   /// this, changing the order or coming back to a tab quietly undoes the
   /// search still sitting in the box.
-  test("a redrawn list is filtered again", () => {
-    pf.applyPageFilter("advance");
+  test("a redrawn list is filtered again", async () => {
+    await pf.applyPageFilter("advance");
     assert.deepEqual(visible(), ["Game Boy Advance"]);
     el.list.innerHTML = `
       <div class="rows">
@@ -118,7 +125,7 @@ describe("filtering the page", () => {
         <div class="row prow"><span class="nm">Game Boy Advance</span></div>
       </div>`;
     assert.equal(visible().length, 2, "the redraw should start unfiltered");
-    pf.refreshPageFilter();
+    await pf.refreshPageFilter();
     assert.deepEqual(visible(), ["Game Boy Advance"]);
   });
 
@@ -126,7 +133,7 @@ describe("filtering the page", () => {
   /// means arriving at a list that is missing things for no visible reason.
   test("changing view clears it", async () => {
     const shell = await import("../js/shell.js");
-    pf.applyPageFilter("arcade");
+    await pf.applyPageFilter("arcade");
     shell.enter({ title: "History" });
     assert.equal(pf.pageFilterText(), "");
     assert.equal(el.pageFilter.value, "");

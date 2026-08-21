@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,10 +30,19 @@ before(async () => {
     core: { invoke: async () => [], convertFileSrc: (p) => p },
     event: { listen: async () => () => {}, emit: () => {} },
   };
+
+  // The interface commands — bindings, ordering, the grid, the page filter —
+  // are answered by the stand-in in backend.js. See the note at the top of
+  // that file: it is deliberately naive, and the rules it stands in for are
+  // asserted by `cargo test` against the real implementation.
+  dom.window.__TAURI__.core.invoke = fakeBackend(dom.window.__TAURI__.core.invoke);
   order = await import(join(uiDir, "js", "picker-order.js"));
 });
 
-beforeEach(() => dom.window.localStorage.clear());
+beforeEach(async () => {
+  dom.window.localStorage.clear();
+  await order.setPickerOrder("collections", "name");
+});
 
 const consoles = [
   { name: "Arcade", rom_count: 322, playable: false },
@@ -46,87 +56,33 @@ const cols = [
   { name: "Beta", rom_count: 90, local_count: 900 },
 ];
 
-describe("the column is ordered by something someone chose", () => {
-  /// Consoles are alphabetical and stay that way: thirty-five of them that
-  /// never change is a column you learn the shape of, and a button that
-  /// reshuffles it works against that. The server's own order is by size,
-  /// which is why the list used to open on whichever console had the most
-  /// ROMs in it.
-  test("consoles are alphabetical, with no order to choose", () => {
-    assert.deepEqual(
-      order.byName(consoles).map((p) => p.name),
-      ["Arcade", "Game Boy", "Nintendo 64"]
-    );
-    assert.equal(order.PICKER_ORDERS.platforms, undefined, "the consoles kept a menu");
-  });
-
-  test("collections start under name, not size", () => {
-    assert.equal(order.pickerOrder("collections").id, "name");
-  });
-
-  test("the chosen order is remembered", () => {
-    order.setPickerOrder("collections", "count");
-    assert.equal(order.pickerOrder("collections").id, "count");
-    assert.deepEqual(
-      order.sortPicker("collections", cols).map((c) => c.rom_count),
-      [500, 90, 12]
-    );
-    // Unlike the game sort, which is deliberately forgotten: the order of a
-    // game list is a question about one console, the order of the column is
-    // the shape of the app.
-    assert.equal(dom.window.localStorage.getItem("romm.order.collections"), "count");
-  });
-
-  test("what is downloaded can come first", () => {
-    order.setPickerOrder("collections", "here");
-    assert.equal(order.sortPicker("collections", cols)[0].name, "Beta");
-  });
-
-  /// A starred collection is one you said you wanted at hand, so it stays at
-  /// the top whatever else is chosen.
-  test("favourites stay on top of any order", () => {
-    const starred = [
-      { name: "Zebra", rom_count: 1, is_favorite: true },
-      { name: "Alpha", rom_count: 500 },
-    ];
-    for (const id of ["name", "count", "here"]) {
-      order.setPickerOrder("collections", id);
-      assert.equal(
-        order.sortPicker("collections", starred)[0].name,
-        "Zebra",
-        `the favourite is not first under ${id}`
-      );
-    }
-  });
-
-  test("sorting does not disturb what it was given", () => {
-    const original = [...cols];
-    order.setPickerOrder("collections", "count");
-    order.sortPicker("collections", cols);
-    assert.deepEqual(cols, original, "the caller's array was reordered under it");
-  });
-});
+// Which orders each kind of list offers, what each one does to it, that
+// favourites stay on top of any of them, and that the chosen one survives a
+// restart are all asserted in `pickorder::tests` — against the implementation
+// rather than through a page. What is left here is the bar above the column.
 
 describe("the bar above the column", () => {
   /// The filter that used to sit beside this button is furniture of the tab
   /// row now — one box for every page rather than one for the only page that
   /// had it — so what is left here is the button alone.
-  test("it is the order button, and nothing else", () => {
+  test("it is the order button, and nothing else", async () => {
     const doc = dom.window.document;
+    await order.loadPickerOrders("collections");
     doc.body.innerHTML = order.pickerBar({ kind: "collections" });
     assert.ok(doc.querySelector(".pick-sort"), "the order button is gone");
     assert.equal(doc.querySelector("input"), null, "it still draws a filter box of its own");
   });
 
-  test("the order button says which order it is in", () => {
-    order.setPickerOrder("collections", "count");
+  test("the order button says which order it is in", async () => {
+    await order.setPickerOrder("collections", "count");
     const doc = dom.window.document;
     doc.body.innerHTML = order.pickerBar({ kind: "collections" });
     assert.match(doc.querySelector(".pick-sort").textContent, /Most games/);
   });
 
-  test("choosing an order redraws the list and relabels the button", () => {
+  test("choosing an order redraws the list and relabels the button", async () => {
     const doc = dom.window.document;
+    await order.loadPickerOrders("collections");
     doc.body.innerHTML = order.pickerBar({ kind: "collections" });
     let redrawn = 0;
     order.wirePickerBar(doc.body, "collections", () => redrawn++);
@@ -138,6 +94,9 @@ describe("the bar above the column", () => {
     );
     assert.ok(item, "the menu does not offer the orders");
     item.click();
+    // The choice is written through the backend, so the label and the redraw
+    // land on the turn after the click.
+    await new Promise((r) => setTimeout(r, 0));
     assert.equal(order.pickerOrder("collections").id, "fewest");
     assert.equal(redrawn, 1, "the list was not drawn again");
     // The bar is not part of the redraw, so without this the button went on

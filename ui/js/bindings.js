@@ -1,251 +1,173 @@
-// Keyboard bindings: defaults, persistence, and lookup.
+// Keyboard and controller bindings — a window onto the backend, and no
+// decisions of its own.
 //
-// One binding per action. D/G/I/T are deliberately unbound out of the box —
-// bare letters are easy to hit by accident, so those actions are opt-in via
-// Settings.
+// The tables, the defaults, the repair rules and the storage all live in
+// `src/binds.rs` now. They were here, which meant the TUI could not read a
+// keybinding and an SDL front end would have had to reimplement every rule
+// from the comments around them.
+//
+// Two things this file still does, and both are about speed. It holds the
+// resolved tables in a variable so the accessors stay *synchronous*: the
+// controller poll runs inside requestAnimationFrame, 120 times a second on
+// this display, and `padMap()` there cannot await anything. And it reloads on
+// `bindings-changed`, because the settings window is a separate document —
+// rebinding there changes the file, and this document has to be told.
 
-const STORAGE_KEY = "keybindings";
+const invoke = (...args) => window.__TAURI__.core.invoke(...args);
+const emit = (name) => window.__TAURI__?.event?.emit?.(name);
 
-/// Order here is the order shown in Settings.
-export const ACTIONS = [
-  { id: "left",    label: "Move left",            fallback: "ArrowLeft" },
-  { id: "right",   label: "Move right",           fallback: "ArrowRight" },
-  { id: "up",      label: "Move up",              fallback: "ArrowUp" },
-  { id: "down",    label: "Move down",            fallback: "ArrowDown" },
-  { id: "first",   label: "Jump to first",        fallback: "Home" },
-  { id: "last",    label: "Jump to last",         fallback: "End" },
-  { id: "pageUp",  label: "Page up",              fallback: "PageUp" },
-  { id: "pageDown",label: "Page down",            fallback: "PageDown" },
-  { id: "activate",label: "Open platform / play", fallback: "Enter" },
-  { id: "back",    label: "Go back",              fallback: "Escape" },
-  { id: "back2",   label: "Go back (alternate)",  fallback: "Backspace" },
-  { id: "search",  label: "Focus search",         fallback: "/" },
-  { id: "help",    label: "Shortcut list",        fallback: "?" },
-  { id: "download",label: "Download without playing", fallback: null },
-  { id: "layout",  label: "Toggle grid / list",   fallback: null },
-  { id: "sidebar", label: "Toggle info pane",     fallback: null },
-  { id: "settings",label: "Open settings",        fallback: null },
-  { id: "prevSection", label: "Previous section",  fallback: "q" },
-  { id: "nextSection", label: "Next section",      fallback: "e" },
-  { id: "scrollUp",  label: "Scroll the list up",  fallback: null },
-  { id: "scrollDown",label: "Scroll the list down",fallback: null },
-  { id: "zoomIn",  label: "Bigger covers",         fallback: "+" },
-  { id: "zoomOut", label: "Smaller covers",        fallback: "-" },
-  { id: "video",   label: "Play gameplay video",   fallback: "v" },
-  { id: "pictures",label: "Change the pictures",    fallback: null },
-  { id: "sortCycle", label: "Next sort order",     fallback: null },
-  { id: "sortMenu",  label: "Sort by…",            fallback: "s" },
-  { id: "filterMenu",label: "Filter this list…",   fallback: "f" },
-  { id: "random",    label: "Surprise me",         fallback: "r" },
-];
-
-/// Controller buttons, by W3C "standard mapping" index.
+/// The resolved tables, as `ui_bindings` returns them. Null until loaded.
 ///
-/// Separate from the keyboard map because the two are rebound independently —
-/// and because an index means nothing without a name: 0 is the bottom face
-/// button, which is A on Xbox, Cross on PlayStation and B on a Nintendo pad.
-export const PAD_BUTTONS = [
-  { index: 0,  name: "A / Cross (bottom face)" },
-  { index: 1,  name: "B / Circle (right face)" },
-  { index: 2,  name: "X / Square (left face)" },
-  { index: 3,  name: "Y / Triangle (top face)" },
-  { index: 4,  name: "L1 / LB" },
-  { index: 5,  name: "R1 / RB" },
-  { index: 6,  name: "L2 / LT" },
-  { index: 7,  name: "R2 / RT" },
-  { index: 8,  name: "Select / Share" },
-  { index: 9,  name: "Start / Options" },
-  { index: 10, name: "L3 (left stick)" },
-  { index: 11, name: "R3 (right stick)" },
-  { index: 12, name: "D-pad up" },
-  { index: 13, name: "D-pad down" },
-  { index: 14, name: "D-pad left" },
-  { index: 15, name: "D-pad right" },
-];
+/// Every accessor below reads this and never computes anything from it beyond
+/// a lookup — the moment one of them starts deciding something, there are two
+/// implementations of that decision again.
+let table = null;
 
-const PAD_KEY = "romm.pad";
-
-/// Defaults, chosen by position rather than label so they read correctly on
-/// every controller family.
-const PAD_FALLBACK = {
-  0: "activate",
-  1: "back",
-  // The shoulders move between sections — the navigation you use constantly,
-  // and the one thing that should never need the cursor.
-  4: "prevSection",
-  5: "nextSection",
-  // The triggers resize the covers. They are analog, so they are the closest
-  // thing a pad has to the slider this replaces, and holding one sweeps the
-  // whole range rather than stepping.
-  // The triggers scroll the list, and how hard you pull decides how fast.
-  // They were zoom, which is a thing you set once and then leave — a poor use
-  // of the only two analogue controls on the pad, on a screen whose main job
-  // is moving through two thousand games.
-  6: "scrollUp",
-  7: "scrollDown",
-  // The top face button plays the gameplay video. It is the one thing ES-DE
-  // has that is genuinely hard to find, so here it is on a button.
-  3: "video",
-  // Select cycles the pictures rather than opening settings. Settings is a
-  // second window full of text fields and tables that a pad cannot navigate,
-  // so the button opened something you then could not use and could only leave
-  // again — whereas changing what the covers show is a thing you want to try
-  // several times in a row while looking at them.
-  8: "pictures",
-  9: "help",
-  // The left stick click steps through the sort orders, with the new one
-  // named in a toast. The right one used to open the sort menu, which is a
-  // list of items with no keyboard or pad navigation — so a controller could
-  // open it and then only close it again, and it was left doing nothing at
-  // all. It picks a game at random now: the one thing on this screen that is
-  // worth a button, needs no menu, and answers the question a 2,506-game
-  // arcade list actually poses.
-  10: "sortCycle",
-  11: "random",
-  12: "up",
-  13: "down",
-  14: "left",
-  15: "right",
+/// Sensible nothing, for the window between startup and the first load. An
+/// accessor that throws there would take out whatever called it, and what
+/// calls these is the key handler.
+const EMPTY = {
+  actions: [],
+  pad_buttons: [],
+  pad_map: {},
+  keys: {},
+  pad_labels: {},
+  key_labels: {},
 };
 
-function loadPad() {
+const now = () => table ?? EMPTY;
+
+/// Fetch the tables. Called once at startup, before the keyboard or the pad is
+/// installed, and again whenever something is rebound.
+export async function loadBindings() {
+  await adoptOldStorage();
+  table = await invoke("ui_bindings");
+  return table;
+}
+
+/// Hand over bindings a previous version left in this document's own storage.
+///
+/// They lived in localStorage, which the TUI cannot read and which the
+/// settings window — being a second document — kept a separate copy of, synced
+/// by listening for `storage` events. Moving them to config.toml is what
+/// retires that; this is the one-way door people walking in from an older
+/// build go through. The backend keeps anything already in the file, so this
+/// cannot undo a rebind, and the keys are cleared afterwards so it happens
+/// once.
+const OLD_KEYS = "keybindings";
+const OLD_PAD = "romm.pad";
+
+async function adoptOldStorage() {
+  let keys = null;
+  let pad = null;
   try {
-    return JSON.parse(localStorage.getItem(PAD_KEY)) || {};
+    keys = JSON.parse(localStorage.getItem(OLD_KEYS) || "null");
+    pad = JSON.parse(localStorage.getItem(OLD_PAD) || "null");
   } catch {
-    return {};
+    // Unparseable is the same as absent: there is nothing to carry over and
+    // failing here would stop the app before it drew anything.
+  }
+  if (!keys && !pad) return;
+  try {
+    await invoke("import_bindings", { keys: keys ?? {}, pad: pad ?? {} });
+    localStorage.removeItem(OLD_KEYS);
+    localStorage.removeItem(OLD_PAD);
+  } catch (e) {
+    // Left in place to try again next launch rather than thrown away.
+    console.warn("carrying over old bindings:", e);
   }
 }
 
-/// index -> action, user overrides layered over the defaults.
-/// Actions the app is unusable without.
-///
-/// Anything else can be left unbound on purpose — plenty of people never want a
-/// themes button on their pad. These four are different: with a direction
-/// missing you cannot reach half the grid, and with Confirm missing you cannot
-/// open anything at all.
-const ESSENTIAL = ["up", "down", "left", "right", "activate"];
-
-/// The resolved map, held between calls.
-///
-/// `padMap` is called from the controller poll, which runs on every animation
-/// frame — 120 times a second on this display. Rebuilding it there meant a
-/// synchronous localStorage read, a JSON parse, an object spread and a scan of
-/// the result, at 120Hz, forever, for a value that changes only when somebody
-/// rebinds a button. It was the app's largest idle cost.
-let cached = null;
-
-/// Forget the cached map. Called by everything that writes the bindings, and by
-/// a storage event — the settings window is a separate document, so rebinding
-/// there changes nothing this one can see until the browser tells it.
-function forgetPadMap() {
-  cached = null;
-}
+// Rebinding happens in the settings window, which is a separate document with
+// its own copy of this module. The file is the truth; both copies re-read it.
 if (typeof window !== "undefined") {
-  window.addEventListener("storage", (ev) => {
-    if (!ev.key || ev.key === PAD_KEY) forgetPadMap();
+  window.__TAURI__?.event?.listen?.("bindings-changed", () => {
+    invoke("ui_bindings").then((t) => (table = t)).catch(() => {});
   });
 }
 
-export function padMap() {
-  if (cached) return cached;
-  const map = { ...PAD_FALLBACK, ...loadPad() };
+/// Every action, in the order Settings lists them.
+export function actions() {
+  return now().actions;
+}
 
-  // Rebinding clears whichever button previously held that action by writing
-  // null over it. If that leaves an essential action with no button at all, the
-  // pad is broken rather than customised — a direction that does nothing looks
-  // exactly like an app ignoring the button, and there is nothing on screen to
-  // say otherwise. Put the default back.
-  for (const action of ESSENTIAL) {
-    if (Object.values(map).includes(action)) continue;
-    const home = Object.entries(PAD_FALLBACK).find(([, a]) => a === action)?.[0];
-    // Only if its own default button is free, so healing one binding never
-    // steals a button the user deliberately assigned to something else.
-    if (home !== undefined && !map[home]) map[home] = action;
-  }
-  cached = map;
-  return map;
+/// Controller buttons by W3C "standard mapping" index, with their names — 0 is
+/// the bottom face button, which is A on Xbox, Cross on PlayStation and B on a
+/// Nintendo pad.
+export function padButtons() {
+  return now().pad_buttons;
+}
+
+/// Button index -> action, with `null` where a rebind cleared the button.
+///
+/// The nulls are kept rather than dropped: "bound to nothing" and "not a
+/// button on this pad" are different answers to why a press did nothing, and
+/// the settings window has to be able to say which. Anything dispatching from
+/// this has to skip them.
+export function padMap() {
+  return now().pad_map;
 }
 
 /// Which button currently triggers `action`, or null.
 export function padFor(action) {
-  const entry = Object.entries(padMap()).find(([, a]) => a === action);
-  return entry ? Number(entry[0]) : null;
-}
-
-/// Bind `action` to `index`, clearing whatever else held that button. A null
-/// index unbinds.
-export function setPad(action, index) {
-  const custom = loadPad();
-  for (const [i, a] of Object.entries(padMap())) {
-    if (a === action) custom[i] = null;
-  }
-  if (index !== null) custom[index] = action;
-  localStorage.setItem(PAD_KEY, JSON.stringify(custom));
-  forgetPadMap();
-}
-
-export function resetPad() {
-  localStorage.removeItem(PAD_KEY);
-  forgetPadMap();
-}
-
-export function padLabel(index) {
-  if (index === null || index === undefined) return "unset";
-  return PAD_BUTTONS.find((b) => b.index === index)?.name ?? `button ${index}`;
-}
-
-function load() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-  } catch {
-    return {};
-  }
-}
-
-let overrides = load();
-
-/// Current key for an action, or null when unbound.
-export function keyFor(id) {
-  if (Object.prototype.hasOwnProperty.call(overrides, id)) return overrides[id];
-  return ACTIONS.find((a) => a.id === id)?.fallback ?? null;
-}
-
-/// Action bound to a pressed key, or null. Case-insensitive for letters so a
-/// binding works whether or not Shift is held.
-export function actionFor(key) {
-  const k = key.length === 1 ? key.toLowerCase() : key;
-  for (const a of ACTIONS) {
-    const bound = keyFor(a.id);
-    if (!bound) continue;
-    if ((bound.length === 1 ? bound.toLowerCase() : bound) === k) return a.id;
+  for (const [index, bound] of Object.entries(now().pad_map)) {
+    if (bound === action) return Number(index);
   }
   return null;
 }
 
-export function setKey(id, key) {
-  // A key can only drive one action; clear whoever held it.
-  if (key) {
-    for (const a of ACTIONS) {
-      if (a.id !== id && keyFor(a.id) === key) overrides[a.id] = null;
-    }
+/// Current key for an action, or null when unbound.
+export function keyFor(id) {
+  return now().keys[id] ?? null;
+}
+
+/// Action bound to a pressed key, or null.
+///
+/// Case-insensitive for single characters so a binding works whether or not
+/// Shift is held; anything longer is a named key where case is part of it.
+export function actionFor(key) {
+  const want = key.length === 1 ? key.toLowerCase() : key;
+  for (const [id, bound] of Object.entries(now().keys)) {
+    if (!bound) continue;
+    if ((bound.length === 1 ? bound.toLowerCase() : bound) === want) return id;
   }
-  overrides[id] = key;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  return null;
 }
 
-export function resetAll() {
-  overrides = {};
-  localStorage.removeItem(STORAGE_KEY);
+/// What to print on the button that rebinds this action.
+export function keyLabelFor(id) {
+  return now().key_labels[id] ?? "—";
 }
 
-/// Human label for a key, e.g. `ArrowLeft` -> `←`.
-export function keyLabel(key) {
-  if (!key) return "—";
-  return (
-    {
-      ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓",
-      Escape: "Esc", Backspace: "⌫", Enter: "⏎", " ": "Space",
-      PageUp: "PgUp", PageDown: "PgDn",
-    }[key] || key.toUpperCase()
-  );
+export function padLabelFor(id) {
+  return now().pad_labels[id] ?? "unset";
+}
+
+/// The name of one controller button, for the live readout that answers "which
+/// index is this button" — the question the bindings themselves cannot.
+export function padLabel(index) {
+  if (index === null || index === undefined) return "unset";
+  return padButtons().find((b) => b.index === index)?.name ?? `button ${index}`;
+}
+
+/// Bind `action` to `index`, clearing whatever else held that button. A null
+/// index unbinds.
+export async function setPad(action, index) {
+  table = await invoke("set_pad_binding", { action, index });
+  emit("bindings-changed");
+}
+
+export async function setKey(id, key) {
+  table = await invoke("set_key_binding", { action: id, key: key ?? null });
+  emit("bindings-changed");
+}
+
+export async function resetAll() {
+  table = await invoke("reset_bindings", { which: "keys" });
+  emit("bindings-changed");
+}
+
+export async function resetPad() {
+  table = await invoke("reset_bindings", { which: "pad" });
+  emit("bindings-changed");
 }

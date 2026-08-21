@@ -43,8 +43,14 @@ export const TABS = [
 
 /// Markup for one tab. Unknown ids return nothing rather than throwing, so a
 /// stale saved tab cannot leave the window blank.
+///
+/// A pane may export its markup as a function instead of a string, for the one
+/// that is built out of live state: the Control tab draws a row per action
+/// with whatever key and button are bound to it now, and a string evaluated
+/// when the module was imported cannot say that.
 export function paneHtml(id) {
-  return TABS.find((t) => t.id === id)?.pane.html ?? "";
+  const markup = TABS.find((t) => t.id === id)?.pane.html;
+  return (typeof markup === "function" ? markup() : markup) ?? "";
 }
 
 /// Attach behaviour to a rendered pane.
