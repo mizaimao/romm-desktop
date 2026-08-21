@@ -29,6 +29,7 @@ use sdl2::rect::Rect;
 use std::collections::BTreeSet;
 
 mod input;
+mod text;
 
 /// The handheld's panel, and this window's default.
 const POCKET: (u32, u32) = (960, 720);
@@ -62,6 +63,12 @@ fn main() -> Result<()> {
     let display = window.display_index().unwrap_or(0);
     let mut scale = scale_for(&video, display, held_at);
     let mut canvas = window.into_canvas().accelerated().build().context("getting a renderer")?;
+
+    // The texture creator outlives everything drawn from it, which is what
+    // lets rendered labels be kept as textures rather than rebuilt per frame.
+    let creator = canvas.texture_creator();
+    let mut painter = text::Painter::new(&creator).context("finding fonts")?;
+    check_fonts(&mut painter);
 
     let mut screen = viewport(&canvas, scale);
     say_where_we_are(&screen);
@@ -119,7 +126,7 @@ fn main() -> Result<()> {
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
-        draw(&mut canvas, &screen, &held);
+        draw(&mut canvas, &mut painter, &screen, &held);
         canvas.present();
     }
     Ok(())
@@ -156,6 +163,29 @@ fn scale_for(video: &sdl2::VideoSubsystem, display: i32, held_at_cm: f32) -> Sca
     Scale::viewed_from(dpi, held_at_cm)
 }
 
+/// Say what the machine can and cannot draw, once, at startup.
+///
+/// Both halves matter on hardware we did not build. A machine with no CJK face
+/// turns every Japanese title into a row of empty boxes, and that does not look
+/// like a missing font — it looks like the names are wrong, which is a bug
+/// report about the library. And a card width that cuts every name short is
+/// worth knowing before squinting at a 4" screen to find out.
+fn check_fonts(painter: &mut text::Painter) {
+    println!("{} faces installed", painter.faces());
+    for probe in ["Metroid", "ゼルダの伝説", "Pokémon"] {
+        if !painter.can_draw(probe) {
+            eprintln!("warning: no installed face can draw {probe:?} — it will be drawn as boxes");
+        }
+    }
+    let cut = SAMPLE
+        .iter()
+        .filter(|name| {
+            painter.is_clipped(&text::Spec::new(**name, 13.0, 1.0).wrapped(150.0, 2))
+        })
+        .count();
+    println!("{cut} of {} sample titles are cut short at a 150pt card", SAMPLE.len());
+}
+
 fn say_where_we_are(screen: &Viewport) {
     println!(
         "{:.0}x{:.0}px at {:.2}x -> {:.0}x{:.0}pt, {:.2}:1, {:?}",
@@ -180,11 +210,39 @@ fn act(action: &str, now: f64) {
 /// Not a design. It is the smallest thing that is wrong on screen if the units
 /// are wrong: cards that change physical size when the window is dragged
 /// between displays, or a column that appears at the wrong width.
-fn draw(canvas: &mut sdl2::render::WindowCanvas, screen: &Viewport, held: &BTreeSet<String>) {
+/// Names that between them break every naive way of drawing text.
+///
+/// Not a placeholder: a Latin title far too long for its card, a Japanese one
+/// with no spaces to break at, an accented one, and a short one that must be
+/// left alone. If all four look right at every window size, the hard part of
+/// phase two is done.
+const SAMPLE: &[&str] = &[
+    "Metroid",
+    "ゼルダの伝説 神々のトライフォース",
+    "Castlevania: Symphony of the Night",
+    "Pokémon Crystal",
+    "ドラゴンクエストIII そして伝説へ",
+    "Mortal Kombat II: The Very Long Subtitle Nobody Asked For",
+    "Sonic the Hedgehog 2",
+    "スーパーマリオブラザーズ3",
+];
+
+fn draw(
+    canvas: &mut sdl2::render::WindowCanvas,
+    painter: &mut text::Painter,
+    screen: &Viewport,
+    held: &BTreeSet<String>,
+) {
     const CARD: f32 = 150.0;
     const GAP: f32 = 14.0;
     const PICKER: f32 = 260.0;
     const ASIDE: f32 = 320.0;
+    /// Cover art is 3:4, so a card is taller than it is wide, and the name
+    /// sits under it.
+    const ART: f32 = CARD / 0.75;
+    const LABEL: f32 = 13.0;
+    /// Two lines of label, and the gap above them.
+    const CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0;
 
     canvas.set_draw_color(Color::RGB(18, 18, 22));
     canvas.clear();
@@ -215,8 +273,8 @@ fn draw(canvas: &mut sdl2::render::WindowCanvas, screen: &Viewport, held: &BTree
     for i in 0..(columns * 4) {
         let (row, col) = (i / columns, i % columns);
         let x = left + GAP + col as f32 * (CARD + GAP);
-        let y = GAP + row as f32 * (CARD / 0.75 + GAP);
-        if y + CARD / 0.75 > screen.height() {
+        let y = GAP + row as f32 * (ART + CAPTION + GAP);
+        if y + ART + CAPTION > screen.height() {
             break;
         }
         canvas.set_draw_color(if i == lit {
@@ -224,8 +282,44 @@ fn draw(canvas: &mut sdl2::render::WindowCanvas, screen: &Viewport, held: &BTree
         } else {
             Color::RGB(44, 44, 54)
         });
-        fill(canvas, px(x), px(y), px(CARD), px(CARD / 0.75));
+        fill(canvas, px(x), px(y), px(CARD), px(ART));
+
+
+        // The name, in the width the card actually has, over two lines, cut
+        // short with an ellipsis if it does not fit. This is the whole of
+        // phase two on screen.
+        let name = SAMPLE[i % SAMPLE.len()];
+        let spec = text::Spec::new(name, LABEL, screen.scale.factor()).wrapped(CARD, 2);
+        painter.draw(
+            canvas,
+            &spec,
+            px(x),
+            px(y + ART + 4.0),
+            if i == lit { Color::RGB(235, 240, 250) } else { Color::RGB(190, 190, 200) },
+        );
     }
+
+    // What the window currently thinks it is, in the corner. On screen rather
+    // than in the terminal because the thing worth watching is what happens
+    // *while* an edge is being dragged — the moment a column appears, and
+    // whether the cards stay the same physical size across displays.
+    let readout = format!(
+        "{:.0}x{:.0}pt · {:.2}x · {:?} · {} columns",
+        screen.width(),
+        screen.height(),
+        screen.scale.factor(),
+        panes,
+        columns,
+    );
+    let spec = text::Spec::new(readout, 11.0, screen.scale.factor());
+    let (w, h) = painter.measure(&spec);
+    painter.draw(
+        canvas,
+        &spec,
+        screen.width_px - w as f32 - px(GAP),
+        screen.height_px - h as f32 - px(GAP),
+        Color::RGB(120, 120, 132),
+    );
 }
 
 fn fill(canvas: &mut sdl2::render::WindowCanvas, x: f32, y: f32, w: f32, h: f32) {

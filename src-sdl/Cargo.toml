@@ -17,6 +17,21 @@ path = "src/main.rs"
 romm-desktop = { path = ".." }
 anyhow = "1.0.104"
 
+# Text: shaping, font fallback, line breaking and rasterisation.
+#
+# SDL_ttf was the obvious pairing and is the wrong one. It wraps FreeType and
+# draws a string in *one* face — so a Japanese title in a Latin font comes out
+# as a row of empty boxes, and the fix is to open several faces and guess which
+# one has the glyph, which is precisely how this ends up feeling cheap. Whether
+# it can shape at all depends on whether the distribution built it against
+# HarfBuzz, which is not a thing we get to decide on the handheld.
+#
+# cosmic-text does shaping (rustybuzz), per-script fallback (fontdb, reading
+# the same fontconfig directories the OS does), Unicode line breaking and
+# rasterisation (swash). It is also pure Rust, so it cross-compiles to the
+# handheld with nothing to install.
+cosmic-text = "0.19"
+
 # The C library, not a reimplementation. `libsdl2-dev` is already in the
 # handheld's package list, so the device can build this itself and
 # cross-compiling is a convenience rather than a blocker.
