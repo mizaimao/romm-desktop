@@ -177,6 +177,16 @@ fn check_fonts(painter: &mut text::Painter) {
             eprintln!("warning: no installed face can draw {probe:?} — it will be drawn as boxes");
         }
     }
+    // Which face each of the shared scripts is handed to. The interesting
+    // answer is not "one was found" — it is *which*: Chinese, Japanese and
+    // Korean share code points whose correct shapes differ, and a face picked
+    // for covering the script rather than for the language draws one of them
+    // in another's forms. Legible, and visibly foreign. See text::Fonts::face_for.
+    for (what, sample) in [("Japanese", "ゼルダの伝説"), ("Chinese", "塞尔达传说"), ("Korean", "젤다의 전설")] {
+        if let Some(face) = painter.face_for(sample) {
+            println!("  {what:<9} -> {face}");
+        }
+    }
     let cut = SAMPLE
         .iter()
         .filter(|name| {

@@ -127,6 +127,46 @@ impl Fonts {
         laid.glyphs > 0 && laid.missing == 0
     }
 
+    /// Which face was actually chosen to draw this string.
+    ///
+    /// A diagnostic, and a sharp one: fallback picking *a* face that has the
+    /// glyph is not the same as picking the right one.
+    ///
+    /// **Han unification is the trap.** Chinese, Japanese and Korean share
+    /// code points for characters whose correct *shapes* differ — 直, 骨, 話,
+    /// 令 are drawn differently in each, and a reader of one notices the other
+    /// immediately. Fallback here picks a family by which scripts it covers,
+    /// not by what language the text is in, so on the handheld — where the one
+    /// installed family is `fonts-noto-cjk`, covering all four with variants
+    /// chosen by *language tag* — Chinese titles will come out in Japanese
+    /// shapes, or the other way round, depending on nothing but which variant
+    /// fontconfig happens to list first.
+    ///
+    /// It is not a bug anybody reports, because the text is perfectly legible.
+    /// It just looks foreign.
+    ///
+    /// cosmic-text 0.19 takes its shaping language from the system locale
+    /// rather than per string (`shape.rs`, `buffer.language()`), and `Attrs`
+    /// has no language of its own. The lever we do have is the family: a title
+    /// known to be Chinese can ask for `Family::Name("Noto Sans CJK SC")`
+    /// outright. What is missing is knowing that it *is* Chinese — the ROM's
+    /// region is in the library metadata, and that is where the answer will
+    /// come from. See docs/handheld-frontend.md.
+    pub fn face_for(&mut self, text: &str) -> Option<String> {
+        let spec = Spec::new(text, 16.0, 1.0);
+        let size = spec.size_px();
+        let mut buffer = Buffer::new(&mut self.system, Metrics::new(size, size * 1.3));
+        let id = {
+            let mut buffer = buffer.borrow_with(&mut self.system);
+            buffer.set_text(text, &Attrs::new().family(Family::SansSerif), Shaping::Advanced, None);
+            buffer.shape_until_scroll(false);
+            buffer.layout_runs().flat_map(|r| r.glyphs.iter()).map(|g| g.font_id).next()?
+        };
+        self.system.db().face(id).map(|f| {
+            f.families.first().map(|(name, _)| name.clone()).unwrap_or_else(|| f.post_script_name.clone())
+        })
+    }
+
     fn lay_out(&mut self, spec: &Spec) -> Laid {
         let size = spec.size_px();
         // Line height at 1.3x. Tighter and diacritics collide with the line
@@ -206,30 +246,46 @@ impl Fonts {
             width = width.max(run.line_w);
             lines += 1;
         }
-        let w = spec.width_px().map(|w| w.min(width.ceil())).unwrap_or(width.ceil()).ceil().max(1.0);
-        let h = (size * 1.3 * lines.max(1) as f32).ceil().max(1.0);
-        let (w, h) = (w as u32, h as u32);
-        let mut coverage = vec![0u8; (w as usize) * (h as usize)];
-
-        // Baseline-relative, which is what the shaper works in.
+        // Where the glyphs actually landed, rather than where the box is.
+        //
+        // Not the same thing, and the difference is not a rounding error: with
+        // a wrap width set, a right-to-left line is laid out from the *right*
+        // edge of that width. Sizing the image to the ink's width and blitting
+        // from zero put every Arabic glyph outside its own bitmap — a face was
+        // found, twelve glyphs were shaped, and nothing at all was drawn.
         let runs: Vec<_> = buffer.layout_runs().map(|r| (r.line_y, r.glyphs.to_vec())).collect();
-        for (line_y, glyphs) in runs {
+        let mut placed = Vec::new();
+        let (mut min_x, mut max_x) = (f32::MAX, f32::MIN);
+        for (line_y, glyphs) in &runs {
             for glyph in glyphs {
                 let physical = glyph.physical((0.0, 0.0), 1.0);
                 let Some(image) = self.swash.get_image(&mut self.system, physical.cache_key).clone()
                 else {
                     continue;
                 };
-                let image = &image;
-                blit(
-                    &mut coverage,
-                    w,
-                    h,
-                    physical.x + image.placement.left,
-                    physical.y + line_y as i32 - image.placement.top,
-                    image,
-                );
+                let left = physical.x + image.placement.left;
+                min_x = min_x.min(left as f32);
+                max_x = max_x.max((left + image.placement.width as i32) as f32);
+                placed.push((left, physical.y + *line_y as i32 - image.placement.top, image));
             }
+        }
+        if placed.is_empty() {
+            min_x = 0.0;
+            max_x = width.max(1.0);
+        }
+        // Slid over so the leftmost ink sits at zero. The image is then the
+        // size of what is in it, whichever direction the script runs.
+        let shift = min_x as i32;
+        let ink_w = (max_x - min_x).ceil().max(1.0);
+        let w = spec.width_px().map(|box_w| ink_w.min(box_w)).unwrap_or(ink_w).ceil().max(1.0);
+        // Height stays a whole number of line boxes rather than the ink's own
+        // extent: a label whose height depended on whether its letters had
+        // descenders would sit at a different height on every card.
+        let h = (size * 1.3 * lines.max(1) as f32).ceil().max(1.0);
+        let (w, h) = (w as u32, h as u32);
+        let mut coverage = vec![0u8; (w as usize) * (h as usize)];
+        for (x, y, image) in &placed {
+            blit(&mut coverage, w, h, x - shift, *y, image);
         }
         Raster { width: w, height: h, coverage, clipped }
     }
@@ -336,6 +392,12 @@ impl<'a> Painter<'a> {
     pub fn measure(&mut self, spec: &Spec) -> (u32, u32) {
         let drawn = self.entry(spec);
         (drawn.width, drawn.height)
+    }
+
+    /// Which face was chosen to draw this string. See [`Fonts::face_for`] for
+    /// why the answer is worth looking at and not only whether there was one.
+    pub fn face_for(&mut self, text: &str) -> Option<String> {
+        self.fonts.face_for(text)
     }
 
     /// Whether anything installed can draw this string.
@@ -505,5 +567,72 @@ mod tests {
         let out = f.render(&Spec::new("Metroid", 24.0, 1.0));
         let ink: usize = out.coverage.iter().filter(|&&v| v > 0).count();
         assert!(ink > 20, "only {ink} pixels of ink for a whole word");
+    }
+}
+
+#[cfg(test)]
+mod scripts {
+    use super::*;
+
+    /// Every script a game library actually contains, not just the one that
+    /// prompted the work.
+    ///
+    /// The fallback is per-script and general — nothing here names a language
+    /// — so this is a check that the *machine* has the faces, and a list of
+    /// what breaks first when it does not.
+    const LIBRARY: &[(&str, &str)] = &[
+        ("Japanese", "ゼルダの伝説"),
+        ("Chinese (simplified)", "塞尔达传说"),
+        ("Chinese (traditional)", "薩爾達傳說"),
+        ("Korean", "젤다의 전설"),
+        ("Cyrillic", "Тетрис"),
+        ("Greek", "Ελλάδα"),
+        ("Arabic", "لعبة"),
+        ("Hebrew", "משחק"),
+        ("Thai", "เกม"),
+        ("Latin, accented", "Pokémon Crystal"),
+    ];
+
+    #[test]
+    fn every_script_a_library_holds_finds_a_face() {
+        let mut f = Fonts::load().expect("no fonts");
+        let mut missing = Vec::new();
+        for (name, sample) in LIBRARY {
+            if !f.can_draw(sample) {
+                missing.push(*name);
+            }
+        }
+        assert!(missing.is_empty(), "no face for: {missing:?}");
+    }
+
+    /// Right-to-left is not a font problem, it is a layout one: the shaper has
+    /// to reorder. A run that comes back with no glyphs at all means bidi
+    /// never ran.
+    /// Which face each script is handed to. Printed, not asserted — the
+    /// answer depends on what the machine has installed, and the point is to
+    /// be able to see it.
+    #[test]
+    fn which_face_draws_what() {
+        let mut f = Fonts::load().expect("no fonts");
+        for (name, sample) in LIBRARY {
+            println!("{name:<24} {sample:<20} -> {:?}", f.face_for(sample));
+        }
+    }
+
+    #[test]
+    fn right_to_left_still_produces_glyphs() {
+        let mut f = Fonts::load().expect("no fonts");
+        let out = f.render(&Spec::new("لعبة الفيديو", 16.0, 1.0).wrapped(200.0, 2));
+        let ink = out.coverage.iter().filter(|&&v| v > 0).count();
+        assert!(ink > 20, "Arabic drew {ink} pixels of ink");
+    }
+
+    /// Mixed scripts in one string, which is what a translated title actually
+    /// looks like: `Final Fantasy VII ファイナルファンタジーVII`.
+    #[test]
+    fn one_string_can_span_two_scripts() {
+        let mut f = Fonts::load().expect("no fonts");
+        assert!(f.can_draw("Final Fantasy VII ファイナルファンタジーVII"));
+        assert!(f.can_draw("Street Fighter II 街霸II"));
     }
 }

@@ -367,6 +367,48 @@ and getting it up early proves the GL context works on the device.
   So neither is dropped — both are wanted on both, and neither blocks the front
   end. Plan the detail pane so a video frame and a page image are things it can
   be handed, rather than assuming they will never exist.
+* **Which language a title is in, and therefore which shapes to draw it with.**
+  Raised on 2026-08-21 by Frank, who reads Chinese and would notice:
+
+  > If we are building an "OS", we would actually want to have multi-language
+  > support, and CJK is just one of them right? … multi-language support. If
+  > not now, later.
+
+  Two separate things, and only one of them is done.
+
+  *Script coverage is general already.* Nothing in `src-sdl/src/text.rs` names
+  a language: fallback is per script, and `text::scripts` tests Japanese,
+  simplified and traditional Chinese, Korean, Cyrillic, Greek, Arabic, Hebrew,
+  Thai and accented Latin, plus a string that spans two scripts, plus a
+  right-to-left one. That last found a real bug the day it was written — with a
+  wrap width set, a right-to-left line is laid out from the *right* edge of the
+  box, so sizing the image to the ink and blitting from zero put every Arabic
+  glyph outside its own bitmap. Twelve glyphs shaped and nothing drawn.
+
+  *Which shape to draw is not.* Han unification: Chinese, Japanese and Korean
+  share code points for characters whose correct forms differ — 直, 骨, 話, 令
+  — and a reader of one sees the other immediately. Fallback picks a family by
+  the scripts it covers, not by the language the text is in. On this Mac that
+  happens to come out right (Hiragino for Japanese, PingFang SC for Chinese),
+  and even here traditional Chinese is handed to a *simplified* face. On the
+  handheld, where the one installed family is `fonts-noto-cjk` covering all
+  four with variants chosen by language tag, it will come out wrong for one of
+  them and there is nothing to say which.
+
+  cosmic-text 0.19 takes its shaping language from the system locale rather
+  than per string, and `Attrs` has no language. The lever is the family: a
+  title known to be Chinese can ask for `Noto Sans CJK SC` by name. What is
+  missing is knowing that it is Chinese — **the ROM's region is already in the
+  library metadata**, and that is where the answer comes from. Worth doing when
+  the detail pane needs regions anyway.
+
+* **The app's own words, in other languages.** Untouched, and a different job
+  entirely: every string in the interface is currently an English literal in
+  the source. Nothing about the front end forbids it — the text engine draws
+  any script already — but there is no catalogue, no lookup and no plural
+  handling. Parked rather than started; it wants doing once, properly, and not
+  while the front end is still moving.
+
 * Whether the animated backdrop should default off on battery — there is already
   a strength slider and per-shape settings to hang that off.
 * Whether the desktop app writes `config.toml` onto the card when it is
