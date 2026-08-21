@@ -7,6 +7,9 @@ Written to be picked up cold. Every number here was measured on 2026-08-20, and
 the command that produced it is given so it can be re-checked rather than
 trusted.
 
+The machine it ends up on — the OS, the boot chain, why we ship an image rather
+than a zip, and what is already installed — is `handheld-device.md`.
+
 ## Why this exists
 
 `PLAN.md` §4 chose Rust + Tauri, and the reasoning was sound:
@@ -235,6 +238,78 @@ to cross:
   does; port `slice()` into `src/` early and delete the duplicate reasoning,
   rather than rediscovering it against a 4" screen.
 
+### The direction changed on 2026-08-21: SDL is meant to replace Tauri
+
+This section said "add a fourth front end, do not convert". Frank's call, made
+after the argument below was put to him rather than instead of it:
+
+> I know the handheld comes with that 960x720 size, but I still want to make
+> the entire frontend unified into a single one, that is, I am currently
+> leaning to use SDL to completely replace Tauri. It's a trade off: performance
+> and compatibility and maintainability at the cost of ease of development.
+
+**Both sides of it, written down while they are still fresh**, because in six
+months the only thing anyone will remember is the conclusion.
+
+*What SDL wins.* It runs where there is no display server, which is the whole
+reason any of this started. Memory goes from ~671 MB to tens. Startup is
+instant. One rendering path, fully controlled, instead of a browser engine's.
+And **no IPC boundary at all** — the thing that cost two rounds of chasing
+during task 1, where a round trip landed on the cursor and on every keystroke.
+
+*What it costs, and none of it is "ease of programming".*
+
+* **Text is a ceiling, not an effort.** HTML gives shaping, bidi, font
+  fallback, wrapping, ellipsis and sub-pixel positioning, tuned over decades.
+  SDL_ttf draws a string at a point. Matching it for a library with Japanese
+  and translated titles means HarfBuzz, a line breaker and a fallback chain.
+  Writing that is tractable; making it as good as a browser's is not, and this
+  is already the item most likely to make the result feel cheap.
+* **Video and manuals go**, unless we take on libmpv and a PDF renderer. A
+  webview gave both for free.
+* **Accessibility goes.** VoiceOver and Narrator work today for nothing.
+* **Design iteration slows.** CSS is the fastest visual-iteration surface
+  there is; a shader or layout change is a rebuild, and somebody still has to
+  look at it. That cost is human-in-the-loop and does not go away.
+
+*Why the decision still stands.* Every one of those is a known price rather
+than a surprise, three of the four are already accepted on the handheld, and
+one front end that runs everywhere is worth more than two that share a core but
+not a look. **Nothing has to be decided in advance**: building SDL as a peer on
+macOS costs exactly the same as building it as a replacement. The only
+difference is when Tauri gets deleted, and that can wait for evidence.
+
+**So Tauri stays until SDL is better than it, and then it goes.** Not before.
+
+### One front end means it has to fit every window
+
+960x720 is 4:3, at 4 inches. A desktop is 16:9 or 16:10 at twenty-seven. A
+layout in pixels cannot serve both, and "it works at 960x720" is not the
+requirement — **that size is the one we test hardest, not the one we build
+for.**
+
+Three things have to be true from the first commit, because retrofitting any of
+them is a rewrite:
+
+* **Layout in points, not pixels.** One scale factor, derived from the display,
+  turns points into pixels. A card is "150 points" everywhere and comes out
+  physically similar on a 4" 300-DPI panel and a 27" retina one. Pixels are a
+  measurement, never a design unit.
+* **Breakpoints on available width in points.** The shell already has this
+  idea: `ui/js/shell.js` switches between one pane and three columns, and views
+  describe what they need by role rather than reaching for elements. 960 points
+  wide is one or two panes; a desktop is three. That design is the thing worth
+  porting most carefully.
+* **The window resizes, and the layout answers.** Not a fixed backbuffer
+  scaled up. On the handheld it happens once at startup; on a desktop it
+  happens while somebody drags an edge, and it is the fastest way to find every
+  place a pixel got hardcoded.
+
+See `handheld-device.md` for the machine, the image, and what is already
+installed on it.
+
+### The original position, for the record
+
 **Add a fourth front end. Do not convert.** The repo is already CLI + TUI + Tauri
 over one core. Converting would cost the desktop app its video, manuals and
 glass in exchange for nothing — a Mac has a display server and plenty of RAM.
@@ -272,7 +347,22 @@ and getting it up early proves the GL context works on the device.
 
 ## Open questions
 
-* Font fallback strategy for Japanese and translated titles under SDL_ttf.
+* ~~Font fallback strategy for Japanese and translated titles under SDL_ttf.~~
+  **Answered 2026-08-21:** the rootfs already ships `fonts-noto-cjk`,
+  `libfreetype6` and `libfontconfig1-dev`, so we resolve fallback through
+  fontconfig and bundle nothing. See `handheld-device.md`. What is *not*
+  answered is the shaping and line-breaking above it, which is task 3's
+  highest-stakes item now that SDL is meant to be the only front end.
+* ~~Whether video is worth libmpv on the handheld, or simply absent there.~~
+  **Reopened, wider:** if SDL replaces Tauri then this is not a handheld
+  question, it is a product one — the desktop app has a gameplay-video lightbox
+  and PDF manuals today, and both come free from the webview. Absent on the
+  handheld is easy to defend; absent on the desktop is a regression somebody
+  will notice. The cheap answer for manuals is to hand the file to the system
+  viewer on desktop and drop them on the handheld; video wants libmpv or
+  nothing. **Decide before the SDL front end is finished, not after.**
 * Whether the animated backdrop should default off on battery — there is already
   a strength slider and per-shape settings to hang that off.
-* Whether video is worth libmpv on the handheld, or simply absent there.
+* Whether the desktop app writes `config.toml` onto the card when it is
+  mounted, so a handheld never has to be told its own server. Strongly
+  recommended in `handheld-device.md`; not built.
