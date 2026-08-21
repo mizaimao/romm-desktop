@@ -89,7 +89,35 @@ every other app on the machine. Neither is the answer.
   translated sets, so font fallback is not optional. It is the least glamorous
   item here and the one most likely to make the result feel cheap.
 
-## Task 1 — move the logic into `src/`
+## Task 1 — move the logic into `src/` — **done, 0.2.503**
+
+Seven modules in `src/`, 91 tests: `binds` (keys and buttons), `gamelist`
+(the row shape and the per-view memory), `gamesort`, `gamefilter`, `pickorder`,
+`pagefilter`, `gridnav`, and `padpoll`. The webview reaches them through Tauri
+commands and caches the answers, because `renderRows` and the key handler are
+synchronous.
+
+One exception, decided deliberately: **the controller poll stays in JS**. It
+runs inside `requestAnimationFrame` at 120Hz and a round trip per frame is not
+a thing that can be made fast enough. `src/padpoll.rs` holds the deadzones, the
+repeat timings, the dominant-axis rule and the settle lock as the definition
+`ui/js/gamepad.js` is a copy of — so when one of those numbers is argued about,
+it is argued about once. That is the one place two implementations remain.
+
+Two things moved storage on the way: bindings and the column order now live in
+`config.toml` rather than in the webview's `localStorage`, which is what lets
+the TUI read them and what retires the `storage`-event sync between the main
+window and the settings window. Bindings left by an older build are adopted
+once, at startup.
+
+The webview's own tests kept the assertions about the *page* — the menu, the
+button, the empty result — and handed the ones about the rules to `cargo test`.
+They run against a deliberately naive stand-in backend in `ui/test/backend.js`;
+its copy of the default binding table is a fixture that `cargo test`
+regenerates and checks, so a moved default button fails there rather than
+quietly changing what the tests press.
+
+The original brief follows.
 
 **Do this first, and do it whether or not the handheld front end ever happens.**
 

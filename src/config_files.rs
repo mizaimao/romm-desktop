@@ -85,7 +85,7 @@ mod tests {
         const KNOWN: &[&str] = &[
             "server", "library", "retroarch", "saves", "controllers", "theme", "cores",
             "shaders", "lightgun", "media", "icons", "appearance", "achievements", "cheevos",
-            "scraper", "esde",
+            "scraper", "esde", "bindings", "picker_order",
         ];
         for (name, toml) in both() {
             let doc: toml::Value = toml::from_str(&toml).expect(name);

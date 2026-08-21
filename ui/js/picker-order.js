@@ -1,85 +1,74 @@
 // The order of the left column, and the little bar above it.
 //
+// The orders, the comparison and the storage are in `src/pickorder.rs`. What
+// is left here is the bar, the menu it opens, and a cache of what the backend
+// said — `pickerBar` builds markup and cannot await.
+//
 // Separate from sort.js, which orders games. The two answer different
 // questions and want different answers: a game list sorted by rating is a
 // question you asked about one console and stop caring about when you leave
 // it, so that one is deliberately forgotten. The order of the column is the
 // shape of the whole app — you learn where things are in it — so this one is
-// remembered.
-//
-// It also had no order anybody chose. The server hands consoles and
-// collections back by size, so the column opened on "Arcade Fighting, 322" and
-// buried "Best of nes" thirty rows down, and there was no way to say otherwise.
+// remembered, in config.toml rather than in this document's own storage.
 
 import { escapeHtml } from "./util.js";
 import { showMenu } from "./menu.js";
 
-/// Orders per kind of list, in the sequence the menu offers them.
-///
-/// `key` returns something comparable and `dir` is 1 for ascending. The two
-/// kinds share the idea but not the fields: a console knows whether an
-/// emulator is installed, a collection knows how much of it is downloaded, and
-/// neither knows the other's.
-export const PICKER_ORDERS = {
-  collections: [
-    { id: "name", label: "Name", key: (c) => c.name.toLowerCase(), dir: 1 },
-    { id: "count", label: "Most games", key: (c) => c.rom_count ?? 0, dir: -1 },
-    { id: "fewest", label: "Fewest games", key: (c) => c.rom_count ?? 0, dir: 1 },
-    { id: "here", label: "Most downloaded", key: (c) => c.local_count ?? 0, dir: -1 },
-  ],
-};
+const invoke = (...args) => window.__TAURI__.core.invoke(...args);
 
-/// Consoles, alphabetically, with no button to say otherwise.
-///
-/// There are thirty-five of them and they do not change, so the column is
-/// something you learn the shape of — which a button that reshuffles it works
-/// against. Collections are different: there are twenty-seven, they arrive from
-/// the server in size order, and which of them you want at the top depends on
-/// what you are doing.
-export function byName(items) {
-  return [...items].sort((a, b) => a.name.localeCompare(b.name));
+/// What each kind of list offers, and which of them is chosen. Filled by
+/// `loadPickerOrders` before the bar is drawn.
+const known = new Map();
+
+/// Ask what this kind of list offers. Consoles offer nothing, and that is the
+/// answer rather than an omission: thirty-five of them that never change is a
+/// column you learn the shape of, which a button that reshuffles it works
+/// against.
+export async function loadPickerOrders(kind) {
+  const controls = await invoke("picker_controls", { kind });
+  known.set(kind, controls);
+  return controls;
 }
 
-const KEY = (kind) => `romm.order.${kind}`;
+function controlsFor(kind) {
+  return known.get(kind) ?? { orders: [], chosen: null, label: null };
+}
 
-/// Name, not size. The server's own order is by count, which is why every list
-/// in this app opened on whichever console happens to have the most ROMs in
-/// it.
+/// The orders a kind offers, for the menu.
+export function pickerOrders(kind) {
+  return controlsFor(kind).orders;
+}
+
+/// The chosen order, as `{ id, label }`, or null for a kind with no choice.
 export function pickerOrder(kind) {
-  const orders = PICKER_ORDERS[kind] ?? [];
-  const saved = localStorage.getItem(KEY(kind));
-  return orders.find((o) => o.id === saved) ?? orders[0];
+  const at = controlsFor(kind);
+  return at.chosen ? { id: at.chosen, label: at.label } : null;
 }
 
-export function setPickerOrder(kind, id) {
-  localStorage.setItem(KEY(kind), id);
+export async function setPickerOrder(kind, id) {
+  await invoke("set_picker_order", { kind, order: id });
+  await loadPickerOrders(kind);
 }
 
-/// Keep the button's own label in step. The list is redrawn by the caller, but
-/// the bar above it is not part of that redraw — so without this the button
-/// went on saying "Name" over a list sorted by size.
-function relabel(root, kind) {
-  const btn = root?.querySelector(".pick-sort span");
-  if (btn) btn.textContent = pickerOrder(kind)?.label ?? "Name";
-}
-
-/// Sort a copy. The caller's array is what it was handed and re-sorting it in
+/// Which entries to draw, in what order.
+///
+/// A copy: the caller's array is what it was handed, and re-sorting it in
 /// place would compound across redraws.
-export function sortPicker(kind, items) {
-  const order = pickerOrder(kind);
-  if (!order) return [...items];
-  return [...items].sort((a, b) => {
-    // Favourites first whatever else is chosen — a starred collection is one
-    // you said you wanted at hand.
-    if (!!a.is_favorite !== !!b.is_favorite) return a.is_favorite ? -1 : 1;
-    const ka = order.key(a);
-    const kb = order.key(b);
-    if (ka < kb) return -order.dir;
-    if (ka > kb) return order.dir;
-    // A stable tie-break, or two consoles with the same count swap places
-    // between one redraw and the next.
-    return (a.name ?? "").localeCompare(b.name ?? "");
-  });
+export async function sortPicker(kind, items) {
+  const at = await invoke("sort_picker", { kind, rows: rowsOf(items) });
+  known.set(kind, { orders: at.orders, chosen: at.chosen, label: at.label });
+  return at.order.map((i) => items[i]);
+}
+
+/// The four facts an order can be built out of. Sent rather than the whole
+/// entry, which carries sample cover ids the ordering has no use for.
+function rowsOf(items) {
+  return items.map((c) => ({
+    name: c.name ?? "",
+    rom_count: c.rom_count ?? 0,
+    local_count: c.local_count ?? 0,
+    is_favorite: !!c.is_favorite,
+  }));
 }
 
 /// The button that says how a list is ordered.
@@ -96,6 +85,14 @@ export function pickerBar({ kind }) {
   </div>`;
 }
 
+/// Keep the button's own label in step. The list is redrawn by the caller, but
+/// the bar above it is not part of that redraw — so without this the button
+/// went on saying "Name" over a list sorted by size.
+function relabel(root, kind) {
+  const btn = root?.querySelector(".pick-sort span");
+  if (btn) btn.textContent = pickerOrder(kind)?.label ?? "Name";
+}
+
 /// Wire the order button inside `root`. `redraw` is called after a change.
 export function wirePickerBar(root, kind, redraw) {
   const btn = root?.querySelector(".pick-sort");
@@ -105,10 +102,10 @@ export function wirePickerBar(root, kind, redraw) {
     const now = pickerOrder(kind)?.id;
     const at = btn.getBoundingClientRect();
     showMenu(
-      (PICKER_ORDERS[kind] ?? []).map((o) => ({
+      pickerOrders(kind).map((o) => ({
         label: o.id === now ? `✓ ${o.label}` : `   ${o.label}`,
-        run: () => {
-          setPickerOrder(kind, o.id);
+        run: async () => {
+          await setPickerOrder(kind, o.id);
           relabel(root, kind);
           redraw();
         },

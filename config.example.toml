@@ -214,3 +214,38 @@ max_threads = 1
 # An id this build does not ship falls back to the default rather than to
 # nothing at all.
 app_icon = "arcade"
+
+# Written by Settings -> Control. Every key and controller button starts on the
+# default in src/binds.rs, and only what has been changed appears here — so an
+# empty pair of tables means nothing has been rebound.
+#
+# An entry present but empty means "deliberately unbound", which is not the
+# same as absent: a rebind clears whichever key or button used to hold the
+# action by writing an empty value over it, and the default would otherwise
+# come straight back on the next launch.
+#
+# Here rather than in the browser's own storage because the TUI reads the same
+# file, and because Settings runs in a second window that used to keep its own
+# copy. Bindings left in an older build's storage are adopted once, at startup.
+[bindings.keys]
+# Action id -> key, as the browser names it.
+#
+#   sortMenu = "s"
+#   left = ""            # unbound on purpose
+
+[bindings.pad]
+# Controller button index -> action id, by W3C "standard mapping" position: 0
+# is the bottom face button, which is A on Xbox, Cross on PlayStation and B on
+# a Nintendo pad. See src/binds.rs for the full table and the defaults.
+#
+#   3 = "activate"
+#   0 = ""               # cleared by rebinding activate onto 3
+
+# How the left column is ordered, per kind of list. Remembered, unlike the sort
+# on a game list — the order of a game list is a question about one console and
+# is deliberately forgotten when you leave it, while the order of the column is
+# the shape of the app.
+#
+# Consoles are alphabetical and offer no choice; only collections do.
+[picker_order]
+# collections = "count"   # name | count | fewest | here

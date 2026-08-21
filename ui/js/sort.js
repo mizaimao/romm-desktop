@@ -1,52 +1,39 @@
 // How a list of games is ordered, and the menu that changes it.
 //
-// Per view, and deliberately not saved. Sorting by rating to see what a console
-// is famous for, and then finding every console still sorted that way a week
-// later, is a setting that has outlived its question. It lasts as long as the
-// app is open, which is how long the reason for it usually lasts.
+// The orders themselves, the comparison and the per-view memory are in
+// `src/gamesort.rs` and `src/gamelist.rs`. What is left here is the menu, the
+// button, and a cache of the backend's answer — because `sorted()` is called
+// from inside a redraw, which cannot await anything.
+//
+// Per view, and deliberately not saved. Sorting by rating to see what a
+// console is famous for, and then finding every console still sorted that way
+// a week later, is a setting that has outlived its question. It lasts as long
+// as the app is open, which is how long the reason for it usually lasts.
 //
 // The console grid has no sort of its own: it is one screen of a couple of
-// dozen tiles in a fixed order that people learn the shape of, and shuffling it
-// would cost more than it gives.
+// dozen tiles in a fixed order that people learn the shape of, and shuffling
+// it would cost more than it gives.
 
-import { el, state } from "./state.js";
+import { el, state, invoke } from "./state.js";
 import { escapeHtml } from "./util.js";
+import { listRef, applyArrangement, arrangement, arrangeCurrentList } from "./arrange.js";
 
-/// The orders, in the sequence the menu lists them.
-///
-/// `key` returns something comparable; `missing` is where games with nothing to
-/// compare go. A game with no rating sorts last under "rating" rather than
-/// first, because an unrated game is not a bad one and a screen that opens on
-/// the unknowns is a screen that answers nothing.
-export const ORDERS = [
-  { id: "name", label: "Name", key: (g) => g.name.toLowerCase(), dir: 1 },
-  { id: "rating", label: "Rating", key: (g) => g.rating ?? -1, dir: -1 },
-  { id: "year", label: "Release year", key: (g) => g.year ?? -1, dir: -1 },
-  { id: "played", label: "Recently played", key: (g) => g.last_played ?? "", dir: -1 },
-  { id: "size", label: "Size", key: (g) => g.size_bytes ?? 0, dir: -1 },
-  // Only meaningful where the rows come from more than one console — a
-  // search, or Continue playing. Inside a console every row has the same key
-  // and this degrades to the name tie-break, which is harmless.
-  { id: "platform", label: "Console", key: (g) => (g.platform ?? "").toLowerCase(), dir: 1 },
-];
+/// The orders, in the sequence the menu lists them. Filled by `loadListControls`.
+export let ORDERS = [];
 
-/// Chosen order per view, for this run of the app only.
-///
-/// Keyed by what is on screen rather than globally: "sort this console by
-/// rating" is a statement about that console. A Map, not localStorage — the
-/// forgetting is the feature.
-const chosen = new Map();
-
-function scope() {
-  return `${state.view}:${state.platform ?? ""}:${state.collection ?? ""}`;
+export async function loadListControls() {
+  const controls = await invoke("list_controls");
+  ORDERS = controls.orders;
+  return controls;
 }
 
 export function currentOrder() {
-  return ORDERS.find((o) => o.id === chosen.get(scope())) ?? ORDERS[0];
+  const at = arrangement();
+  return ORDERS.find((o) => o.id === at.order) ?? ORDERS[0] ?? { id: "name", label: "Name" };
 }
 
-export function setOrder(id) {
-  chosen.set(scope(), id);
+export async function setOrder(id) {
+  applyArrangement(await invoke("set_list_order", { list: listRef(), order: id }));
 }
 
 /// The order a view starts in, if the user has not picked one for it yet.
@@ -54,32 +41,26 @@ export function setOrder(id) {
 /// Continue playing is ordered by *when you played it* or it is not a
 /// continue-playing list — it arrived grouped by console, which threw that
 /// away. Set rather than forced, so choosing something else still sticks.
-export function defaultOrder(id) {
-  if (!chosen.has(scope())) chosen.set(scope(), id);
+export async function defaultOrder(id) {
+  applyArrangement(
+    await invoke("set_list_order", { list: listRef(), order: id, preferred: true })
+  );
 }
 
-/// Sort a copy of `rows`. Never in place: `state.rows` is what the page was
-/// given and re-sorting it repeatedly would compound rather than replace.
+/// Order a copy of `rows` by the arrangement the backend last worked out.
+///
+/// Never in place: `state.rows` is what the page was given, and re-sorting it
+/// repeatedly would compound rather than replace.
 export function sorted(rows) {
-  const order = currentOrder();
-  const copy = [...rows];
-  copy.sort((a, b) => {
-    // Favourites stay on top whatever the order, which is what they are for.
-    if (a.favourite !== b.favourite) return a.favourite ? -1 : 1;
-    const ka = order.key(a);
-    const kb = order.key(b);
-    if (ka < kb) return -order.dir;
-    if (ka > kb) return order.dir;
-    // Name as the tie-break, so two games with the same rating do not swap
-    // places between one redraw and the next.
-    return a.name.localeCompare(b.name);
-  });
-  return copy;
+  const ids = arrangement().ids;
+  if (!ids) return [...rows];
+  const by = new Map(rows.map((r) => [r.id, r]));
+  return ids.map((id) => by.get(id)).filter(Boolean);
 }
 
 /// Whether this view has anything worth sorting.
 export function sortable() {
-  return state.view !== "platforms" && state.view !== "systems";
+  return arrangement().sortable;
 }
 
 let open = null;
@@ -113,8 +94,8 @@ export function openSortMenu(anchor) {
     open = null;
   };
   for (const b of menu.querySelectorAll("button")) {
-    b.addEventListener("click", () => {
-      setOrder(b.dataset.order);
+    b.addEventListener("click", async () => {
+      await setOrder(b.dataset.order);
       close();
       redraw();
     });
@@ -126,13 +107,15 @@ export function openSortMenu(anchor) {
 }
 
 /// Step to the next order without opening anything, for the stick click.
-export function cycleOrder(delta = 1) {
+///
+/// Returns the new order's label for the toast, or null where the view has no
+/// sort to step through.
+export async function cycleOrder(delta = 1) {
   if (!sortable()) return null;
-  const at = ORDERS.findIndex((o) => o.id === currentOrder().id);
-  const want = ORDERS[(at + delta + ORDERS.length) % ORDERS.length];
-  setOrder(want.id);
+  const at = await invoke("cycle_list_order", { list: listRef(), delta });
+  applyArrangement(at);
   redraw();
-  return want.label;
+  return at.order_label;
 }
 
 /// Redraw the current list in the new order.
@@ -155,3 +138,5 @@ export function refreshSortButton() {
     document.createTextNode(currentOrder().label)
   );
 }
+
+export { arrangeCurrentList };

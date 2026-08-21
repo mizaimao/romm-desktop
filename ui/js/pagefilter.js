@@ -11,7 +11,7 @@
 // the tab row now: one box, always in the same place, filtering whatever the
 // row is pointing at.
 
-import { el } from "./state.js";
+import { el, invoke } from "./state.js";
 
 /// Hidden by the filter. A class rather than the `hidden` attribute so nothing
 /// else that hides things — a view emptying itself, a card with no artwork —
@@ -37,21 +37,31 @@ function targets() {
 let current = "";
 
 /// Apply `text` to what is on screen. Empty text puts everything back.
-export function applyPageFilter(text) {
+///
+/// What counts as a match, and when a group heading has been left with nothing
+/// under it, are decided in `src/pagefilter.rs`. This finds the nodes, hands
+/// over their names, and puts the class on whatever did not survive.
+export async function applyPageFilter(text) {
   current = String(text ?? "").trim().toLowerCase();
-  let shown = 0;
-  for (const node of targets()) {
-    const hit = !current || nameOf(node).includes(current);
-    node.classList.toggle(OUT, !hit);
-    if (hit) shown += 1;
-  }
-  // Group headings with nothing left under them: a search that leaves five
-  // headings and no games reads as a broken page.
-  for (const head of el.list.querySelectorAll(".ghead")) {
-    const group = head.parentElement;
-    const alive = group?.querySelectorAll(`.card:not(.${OUT}), .row:not(.${OUT}), .gcard:not(.${OUT})`);
-    head.classList.toggle(OUT, !!current && alive?.length === 0);
-  }
+  const nodes = targets();
+  const heads = [...el.list.querySelectorAll(".ghead")];
+  const at = new Map(nodes.map((n, i) => [n, i]));
+  // Which entries sit under each heading, so a heading with nothing left under
+  // it can go too: a search that leaves five headings and no games reads as a
+  // broken page.
+  const groups = heads.map((head) =>
+    [...(head.parentElement?.querySelectorAll(".card, .row, .gcard") ?? [])]
+      .map((n) => at.get(n))
+      .filter((i) => i !== undefined)
+  );
+
+  const { visible, headings, shown } = await invoke("page_filter", {
+    names: nodes.map(nameOf),
+    query: current,
+    groups,
+  });
+  nodes.forEach((node, i) => node.classList.toggle(OUT, !visible[i]));
+  heads.forEach((head, i) => head.classList.toggle(OUT, !!headings[i]));
   return shown;
 }
 
@@ -59,7 +69,7 @@ export function applyPageFilter(text) {
 /// never seen the filter — without this, changing the order or coming back to
 /// a tab quietly undoes the search still sitting in the box.
 export function refreshPageFilter() {
-  if (current) applyPageFilter(current);
+  if (current) return applyPageFilter(current);
 }
 
 export function pageFilterText() {

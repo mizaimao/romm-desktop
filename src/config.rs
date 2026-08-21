@@ -39,6 +39,19 @@ pub struct Config {
     /// existing config keeps working.
     #[serde(default, alias = "cheevos")]
     pub achievements: AchievementsCfg,
+    /// Rebound keys and controller buttons. Empty until somebody changes one;
+    /// see [`crate::binds`] for the tables the changes are layered over.
+    ///
+    /// Here rather than in the webview's own storage because the TUI and any
+    /// front end that is not a browser have to read the same choices — and
+    /// because the settings window is a second document, which meant the two
+    /// halves of the app kept separate copies and synchronised them by hand.
+    #[serde(default)]
+    pub bindings: crate::binds::Bindings,
+    /// How the left column is ordered, per kind of list. Remembered, unlike
+    /// the game sort — see [`crate::pickorder`].
+    #[serde(default)]
+    pub picker_order: crate::pickorder::PickerOrders,
 }
 
 /// RetroAchievements — the `[achievements]` section of config.toml.

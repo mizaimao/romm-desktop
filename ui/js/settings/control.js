@@ -4,8 +4,8 @@
 // the only tab that captures anything — and the settings window asks whether a
 // capture is in progress before deciding what a keypress means.
 import {
-  ACTIONS, keyFor, setKey, resetAll, keyLabel,
-  padFor, setPad, resetPad, padLabel,
+  actions, setKey, resetAll, keyLabelFor,
+  padFor, setPad, resetPad, padLabel, padLabelFor,
 } from "../bindings.js";
 import { toast, escapeHtml } from "../util.js";
 import { wireConfigFields } from "./fields.js";
@@ -18,7 +18,7 @@ let capturing = null;
 /// button-down event, so binding one means polling until something is pressed.
 let padCapture = null;
 
-export const html = `      <h4>Players</h4>
+export const html = () => `      <h4>Players</h4>
       <p class="hint">Four ports, filled in the order pads connect. Only the
         first drives this app's menus.</p>
       <div class="pad-list">Looking for controllers…</div>
@@ -36,14 +36,16 @@ export const html = `      <h4>Players</h4>
       <table class="bindtbl">
         <thead><tr><th>Action</th><th>Keyboard</th><th>Controller</th></tr></thead>
         <tbody>
-        ${ACTIONS.map(
-          (a) => `
+        ${actions()
+          .map(
+            (a) => `
           <tr data-id="${a.id}">
             <td class="bindname">${a.label}</td>
-            <td class="key-cell"><button class="set-key ${keyFor(a.id) ? "" : "unset"}">${keyLabel(keyFor(a.id))}</button></td>
-            <td class="pad-cell"><button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabel(padFor(a.id))}</button></td>
+            <td class="key-cell"><button class="set-key ${keyLabelFor(a.id) === "—" ? "unset" : ""}">${keyLabelFor(a.id)}</button></td>
+            <td class="pad-cell"><button class="set-pad ${padFor(a.id) === null ? "unset" : ""}">${padLabelFor(a.id)}</button></td>
           </tr>`
-        ).join("")}
+          )
+          .join("")}
         </tbody>
       </table>
       <footer>
@@ -56,7 +58,7 @@ export function wire(box) {
     const btn = row.querySelector(".key-cell .set-key");
     if (!btn) return;
     btn.addEventListener("click", () => {
-      if (capturing) capturing.btn.textContent = keyLabel(keyFor(capturing.id));
+      if (capturing) capturing.btn.textContent = keyLabelFor(capturing.id);
       capturing = { id: row.dataset.id, btn };
       btn.textContent = "press a key…";
       btn.classList.add("capturing");
@@ -68,14 +70,14 @@ export function wire(box) {
   // including the wiring for every text field and toggle on that tab — never
   // ran. Splitting the panes into files is what made it visible: the button is
   // in this file and the handler was in another.
-  box.querySelector(".set-reset")?.addEventListener("click", () => {
-    resetAll();
+  box.querySelector(".set-reset")?.addEventListener("click", async () => {
+    await resetAll();
     redraw(box);
     toast("Keyboard bindings reset");
   });
 
-  box.querySelector(".set-pad-reset")?.addEventListener("click", () => {
-    resetPad();
+  box.querySelector(".set-pad-reset")?.addEventListener("click", async () => {
+    await resetPad();
     redraw(box);
     toast("Controller bindings reset");
   });
@@ -167,7 +169,7 @@ export function stopPadCapture() {
   if (!padCapture) return;
   cancelAnimationFrame(padCapture.raf);
   padCapture.btn.classList.remove("capturing");
-  padCapture.btn.textContent = padLabel(padFor(padCapture.id));
+  padCapture.btn.textContent = padLabelFor(padCapture.id);
   padCapture = null;
 }
 
@@ -186,10 +188,9 @@ function startPadCapture(id, btn) {
           continue;
         }
         if (!settled.has(i)) continue; // held since before we started
-        setPad(id, i);
         padCapture = null;
         btn.classList.remove("capturing");
-        redrawPadRows();
+        setPad(id, i).then(redrawPadRows);
         return;
       }
     }
@@ -203,11 +204,10 @@ export function captureKey(ev) {
   if (padCapture) {
     if (ev.key !== "Escape") return true;   // swallow keys while binding a pad
     ev.preventDefault();
-    setPad(padCapture.id, null);
-    const { btn } = padCapture;
+    const { btn, id } = padCapture;
     padCapture = null;
     btn.classList.remove("capturing");
-    redrawPadRows();
+    setPad(id, null).then(redrawPadRows);
     return true;
   }
   if (!capturing) return false;
@@ -217,23 +217,23 @@ export function captureKey(ev) {
   if (["Shift", "Control", "Alt", "Meta"].includes(ev.key)) return true;
 
   const key = ev.key === "Escape" ? null : ev.key;
-  setKey(capturing.id, key);
-
-  const { btn } = capturing;
-  btn.classList.remove("capturing");
-  btn.classList.toggle("unset", !key);
-  btn.textContent = keyLabel(key);
+  const { btn, id } = capturing;
   capturing = null;
+  btn.classList.remove("capturing");
+  // Every row, not just this one: a key can only drive one action, so binding
+  // it here takes it away from whoever held it before.
+  setKey(id, key).then(redrawKeyRows);
+  return true;
+}
 
-  // Another row may have lost its key to this one; redraw them all.
+function redrawKeyRows() {
   document.querySelectorAll("#settings tr[data-id]").forEach((row) => {
     const b = row.querySelector(".key-cell .set-key");
     if (!b || b.classList.contains("capturing")) return;
-    const k = keyFor(row.dataset.id);
-    b.textContent = keyLabel(k);
-    b.classList.toggle("unset", !k);
+    const label = keyLabelFor(row.dataset.id);
+    b.textContent = label;
+    b.classList.toggle("unset", label === "—");
   });
-  return true;
 }
 
 function redrawPadRows() {
@@ -258,6 +258,6 @@ export function isCapturing() {
 /// settings window there is no window to close and reopen anyway: redrawing the
 /// pane is what "show me the new bindings" means.
 function redraw(box) {
-  box.innerHTML = html;
+  box.innerHTML = html();
   wire(box);
 }

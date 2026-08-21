@@ -16,7 +16,7 @@ import {
 import { cyclePictures } from "./pictures.js";
 import { openSortMenu, cycleOrder } from "./sort.js";
 import { openFilterMenu } from "./filter.js";
-import { ACTIONS, actionFor, keyFor, keyLabel, padMap, padLabel } from "./bindings.js";
+import { actions, actionFor, keyLabelFor, padMap, padLabelFor, padLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
 
@@ -28,55 +28,54 @@ function items() {
   );
 }
 
-// Rows are derived from where things actually landed, not from a column count.
-//
-// The previous version measured the first row, then moved by +/- that number
-// with the result clamped into range. Three things fell out of that: Up on the
+// Where the cursor goes next is worked out in `src/gridnav.rs`, from where the
+// cards actually landed rather than from a column count. The version that
+// replaced measured the first row and moved by plus or minus that number with
+// the result clamped into range, and three things fell out of it: Up on the
 // top row clamped to index 0, so you jumped to the first card instead of
 // staying put; Down on the last row clamped to the final card the same way;
 // and Left/Right ran off the end of a row into the next one. Grouped search
 // results made it worse, since each console section can have its own card
-// shape and the single column count no longer described the page.
+// shape and one column count no longer described the page.
+//
+// The geometry goes over once per rebuild, not once per keypress. Reading
+// `offsetTop` out of the page forces a layout, and a held direction repeats
+// nine times a second across 2,506 arcade cards.
 //
 // `offsetTop`/`offsetLeft` rather than getBoundingClientRect: they are
 // relative to the layout, so the map stays valid while scrolling and only
 // needs rebuilding when the list itself changes.
-let rowCache = null;
+let sent = null;
 
 export function resetNav() {
-  rowCache = null;
+  sent = null;
 }
 window.addEventListener("resize", resetNav);
 
-function rows() {
-  const nodes = items();
-  if (rowCache && rowCache.count === nodes.length && rowCache.width === el.list.clientWidth) {
-    return rowCache.rows;
-  }
-  const buckets = [];
-  for (const n of nodes) {
-    const top = n.offsetTop;
-    // A few px of jitter is normal between cards of differing height.
-    let b = buckets.find((x) => Math.abs(x.top - top) <= 6);
-    if (!b) {
-      b = { top, nodes: [] };
-      buckets.push(b);
-    }
-    b.nodes.push(n);
-  }
-  buckets.sort((a, b) => a.top - b.top);
-  const out = buckets.map((b) => b.nodes.sort((x, y) => x.offsetLeft - y.offsetLeft));
-  rowCache = { rows: out, count: nodes.length, width: el.list.clientWidth };
-  return out;
+async function syncGeometry(nodes) {
+  const shape = `${nodes.length}:${el.list.clientWidth}`;
+  if (sent === shape) return;
+  await invoke("set_grid", {
+    cards: nodes.map((n) => [n.offsetTop, n.offsetLeft, n.offsetWidth]),
+  });
+  sent = shape;
 }
 
-function locate() {
-  const grid = rows();
-  for (let r = 0; r < grid.length; r++) {
-    const c = grid[r].findIndex((n) => n.classList.contains("sel"));
-    if (c >= 0) return { grid, r, c };
-  }
-  return { grid, r: -1, c: -1 };
+/// Move the cursor, and put it on whatever the backend chose.
+///
+/// A null answer means stay put, which is the whole point of the geometry:
+/// running off the top of a grid leaves you where you were.
+async function step(axis, delta) {
+  const nodes = items();
+  if (!nodes.length) return;
+  await syncGeometry(nodes);
+  const at = nodes.findIndex((n) => n.classList.contains("sel"));
+  const to = await invoke("grid_move", {
+    selected: at < 0 ? null : at,
+    axis,
+    step: delta,
+  });
+  if (to !== null && to !== undefined) focusNode(nodes[to]);
 }
 
 function focusNode(node) {
@@ -94,43 +93,16 @@ function focusNode(node) {
 
 /// Left/right within the current row. Stops at the ends rather than spilling
 /// into the neighbouring row, which is what made this feel random.
-function moveX(step) {
-  const { grid, r, c } = locate();
-  if (!grid.length) return;
-  if (r < 0) return focusNode(grid[0][0]);
-  const row = grid[r];
-  focusNode(row[Math.max(0, Math.min(c + step, row.length - 1))]);
-}
+const moveX = (delta) => step("x", delta);
 
 /// Up/down a row, keeping the column you were in.
 ///
-/// Matched on horizontal centre rather than index, so a short last row, a
-/// row of differently-shaped cards, or the next console's section all land
+/// Matched on horizontal centre rather than index, so a short last row, a row
+/// of differently-shaped cards, or the next console's section all land
 /// somewhere that looks directly above or below where you were.
-function moveY(step) {
-  const { grid, r, c } = locate();
-  if (!grid.length) return;
-  if (r < 0) return focusNode(grid[0][0]);
-  const target = r + step;
-  if (target < 0 || target >= grid.length) return; // stay put at the edges
-  const from = grid[r][c];
-  const x = from.offsetLeft + from.offsetWidth / 2;
-  let best = grid[target][0];
-  let bestDist = Infinity;
-  for (const n of grid[target]) {
-    const d = Math.abs(n.offsetLeft + n.offsetWidth / 2 - x);
-    if (d < bestDist) {
-      bestDist = d;
-      best = n;
-    }
-  }
-  focusNode(best);
-}
+const moveY = (delta) => step("y", delta);
 
-function edge(last) {
-  const nodes = items();
-  focusNode(last ? nodes[nodes.length - 1] : nodes[0]);
-}
+const edge = (last) => step("edge", last ? 1 : -1);
 
 /// Index of the selected card, or -1. Lost when linear navigation was replaced
 /// with the grid-aware version below, while `activate` kept calling it — so
@@ -179,13 +151,14 @@ function toggleHelp() {
   // pad working" and not "what does this button do", the question somebody
   // opens a help page to ask. An action with a button and no key belongs here
   // too, so the filter is either-or rather than keyboard-only.
-  const map = padMap();
-  const padFor = (id) => {
-    const entry = Object.entries(map).find(([, a]) => a === id);
-    return entry ? padLabel(Number(entry[0])) : null;
-  };
-  const bound = ACTIONS.map((a) => ({ ...a, key: keyFor(a.id), pad: padFor(a.id) }))
-    .filter((a) => a.key || a.pad);
+  const bound = actions()
+    .map((a) => ({
+      ...a,
+      key: keyLabelFor(a.id),
+      pad: padLabelFor(a.id),
+    }))
+    // "—" and "unset" are what the two labels say for an action nobody bound.
+    .filter((a) => a.key !== "—" || a.pad !== "unset");
 
   const box = document.createElement("div");
   box.id = "shortcuts";
@@ -197,8 +170,8 @@ function toggleHelp() {
         .map(
           (a) => `<tr>
             <td>${escapeHtml(a.label)}</td>
-            <td>${a.key ? escapeHtml(keyLabel(a.key)) : "<span class=\"dim\">—</span>"}</td>
-            <td>${a.pad ? escapeHtml(a.pad) : "<span class=\"dim\">—</span>"}</td>
+            <td>${a.key === "—" ? "<span class=\"dim\">—</span>" : escapeHtml(a.key)}</td>
+            <td>${a.pad === "unset" ? "<span class=\"dim\">—</span>" : escapeHtml(a.pad)}</td>
           </tr>`
         )
         .join("")}</tbody>
@@ -251,7 +224,7 @@ function toggleHelp() {
       .map((i) => {
         const action = map[i];
         const label = action
-          ? ACTIONS.find((a) => a.id === action)?.label || action
+          ? actions().find((a) => a.id === action)?.label || action
           : "<em>not bound</em>";
         return `${i} → ${label}`;
       });

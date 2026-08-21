@@ -4,11 +4,11 @@ import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state
 import { resetNav } from "./keys.js";
 import { currentOrder, defaultOrder, refreshSortButton, sorted } from "./sort.js";
 import { filtered, refreshFilterButton, activeFilters, clearFilters } from "./filter.js";
+import { arrangeCurrentList, listRef } from "./arrange.js";
 import { enter, region, showZoom, shellMode } from "./shell.js";
 import { showMenu } from "./menu.js";
 import { deleteState } from "./states.js";
 import { human, escapeHtml, toast } from "./util.js";
-import { byName } from "./picker-order.js";
 import { setPageFilterLabel, refreshPageFilter } from "./pagefilter.js";
 import { followSections } from "./sections.js";
 import { play, restoreSidebar, selectRom, showPlatformInfo, withTransition } from "./detail.js";
@@ -168,7 +168,7 @@ export async function showAllRecent() {
 
   let rows = [];
   try {
-    rows = await invoke("recent_games", { limit: 500 });
+    rows = await invoke("recent_games", { limit: 500, list: listRef() });
   } catch (e) {
     region("primary").innerHTML = `<div class="empty">${escapeHtml(String(e))}</div>`;
     return;
@@ -181,7 +181,7 @@ export async function showAllRecent() {
   state.rows = rows;
   // Most recent first unless this view has already been sorted otherwise, and
   // grouped by console only when that is what was asked for.
-  defaultOrder("played");
+  await defaultOrder("played");
   renderRows(rows, currentOrder().id === "platform");
 }
 
@@ -210,11 +210,12 @@ function renderPlatforms(items) {
   // A column is narrow, so the console cards are always a list there — a grid
   // of two-across cards in a 260px column is neither a grid nor readable.
   const asList = state.layout !== "grid" || shellMode() === "columns";
-  // The server hands these back by size, so the list opened on whichever
-  // console has the most ROMs in it. Alphabetical, and left alone: thirty-five
-  // consoles that never change are something you learn the shape of, and a
-  // button that reshuffles them works against that.
-  const ordered = byName(items);
+  // Already alphabetical: the `platforms` command orders them, because the
+  // server hands them back by size and this grid is redrawn on a layout switch
+  // and on every batch of covers that arrives. Left alone thereafter —
+  // thirty-five consoles that never change are something you learn the shape
+  // of, and a button that reshuffles them works against that.
+  const ordered = items;
   into.innerHTML = asList
     ? `<div class="rows">${ordered.map(platformRow).join("")}</div>`
     : `<div class="grid">${ordered.map(platformCard).join("")}</div>`;
@@ -356,7 +357,8 @@ export async function showRoms(slug) {
   state.lastPlatform = slug;
   localStorage.setItem("lastPlatform", slug);
   el.search.value = "";
-  state.rows = await invoke("roms", { platform: slug });
+  state.rows = await invoke("roms", { platform: slug, list: listRef() });
+  await arrangeCurrentList();
   enter({
     title: `${slug} — ${state.rows.length} games`,
     back: true,
@@ -376,7 +378,8 @@ export async function runSearch(term) {
   }
   state.view = "search";
   restoreSidebar();
-  state.rows = await invoke("search", { term });
+  state.rows = await invoke("search", { term, list: listRef() });
+  await arrangeCurrentList();
   const consoles = new Set(state.rows.map((r) => r.platform)).size;
   enter({
     title:
@@ -513,8 +516,8 @@ export function renderRows(unsorted, showPlatform) {
       : `<div class="empty">Nothing here.</div>`;
     region("games")
       .querySelector(".clear-filters")
-      ?.addEventListener("click", () => {
-        clearFilters();
+      ?.addEventListener("click", async () => {
+        await clearFilters();
         renderRows(unsorted, showPlatform);
       });
     return;

@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { JSDOM } from "jsdom";
+import { fakeBackend } from "./backend.js";
 
 const uiDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -45,16 +46,19 @@ before(async () => {
   });
 
   asked = [];
+  const backend = fakeBackend((cmd) => {
+    // Shapes the panes actually read. Anything else is a list.
+    if (cmd === "config_fields") return { config_exists: true, library_root: "./library" };
+    if (cmd === "motion_options") return { current: null, options: [] };
+    if (cmd === "bios_status") return [0, 0, 0];
+    if (cmd === "versions") return ["0.1.87", "3.4.0"];
+    return [];
+  });
   dom.window.__TAURI__ = {
     core: {
-      invoke: async (cmd) => {
+      invoke: (cmd, args) => {
         asked.push(cmd);
-        // Shapes the panes actually read. Anything else is a list.
-        if (cmd === "config_fields") return { config_exists: true, library_root: "./library" };
-        if (cmd === "motion_options") return { current: null, options: [] };
-        if (cmd === "bios_status") return [0, 0, 0];
-        if (cmd === "versions") return ["0.1.87", "3.4.0"];
-        return [];
+        return backend(cmd, args);
       },
       convertFileSrc: (p) => p,
     },
@@ -62,6 +66,9 @@ before(async () => {
   };
 
   panes = await import(join(uiDir, "js", "settings-panes.js"));
+  // The Control tab is a row per action with whatever key and button are on
+  // it, so it needs the tables the settings window fetches at startup.
+  await (await import(join(uiDir, "js", "bindings.js"))).loadBindings();
 });
 
 describe("every tab renders and wires", () => {
@@ -95,11 +102,20 @@ describe("every tab renders and wires", () => {
 
   /// Each tab exports the same two things, which is what lets the dispatcher be
   /// a table rather than a chain of ifs.
+  ///
+  /// Markup may be a function rather than a string, for a pane built out of
+  /// live state: the Control tab draws a row per action with whatever key and
+  /// button are bound to it now, which a string evaluated at import time
+  /// cannot say. `paneHtml` calls whichever it finds, so a pane offering
+  /// neither is the failure.
   test("every tab in the table has markup and a wire function", () => {
     for (const t of panes.TABS) {
       assert.ok(t.pane, `${t.id} has no pane module`);
-      assert.equal(typeof t.pane.html, "string", `${t.id} exports no markup`);
-      assert.ok(t.pane.html.trim().length > 0, `${t.id}'s markup is empty`);
+      assert.ok(
+        ["string", "function"].includes(typeof t.pane.html),
+        `${t.id} exports no markup`
+      );
+      assert.ok(panes.paneHtml(t.id).trim().length > 0, `${t.id}'s markup is empty`);
       assert.equal(typeof t.pane.wire, "function", `${t.id} exports no wire function`);
     }
   });
