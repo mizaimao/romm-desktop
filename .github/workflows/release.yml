@@ -3,9 +3,13 @@ name: Release
 # Tag a commit to publish:  git tag v0.1.0 && git push origin v0.1.0
 # Or run manually from the Actions tab to get artifacts without a release.
 #
-# Linux and Windows only. A CI-built macOS bundle would be unsigned, so it
-# arrives quarantined and needs mounting, dragging and an xattr call before it
-# opens. Build it on the Mac instead: scripts/build-macos.sh
+# Three targets: Linux x86_64, Windows x86_64, macOS on Apple silicon. Intel
+# macOS is deliberately absent — see the matrix below for why.
+#
+# The macOS build is unsigned, so it arrives quarantined and needs one xattr
+# call before it opens; the release notes say so. For your own machine, build
+# it locally instead — scripts/build-macos.sh takes about a minute and a
+# locally-produced bundle carries no quarantine attribute at all.
 on:
   push:
     tags: ["v*"]
