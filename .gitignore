@@ -114,3 +114,10 @@ backups/
 # what we take from it. If we ever depend on a pinned revision, make it a
 # submodule deliberately rather than letting `git add -A` swallow it.
 reference/
+
+# Fonts are a build input, not a source file: pinned by URL and verified by
+# hash in assets/fonts/MANIFEST.tsv, fetched by scripts/fetch-fonts.sh. A
+# repository is a poor place to keep two megabytes of somebody else's binary.
+# The manifest is committed so anybody gets byte-for-byte the same ones.
+assets/fonts/*
+!assets/fonts/MANIFEST.tsv

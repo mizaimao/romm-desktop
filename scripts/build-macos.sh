@@ -16,6 +16,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+
+# The fonts the app ships. Pinned and hashed in assets/fonts/MANIFEST.tsv and
+# never committed, so a fresh checkout has none until this runs. Cheap when
+# they are already there.
+./scripts/fetch-fonts.sh
 APP="RomM-Desktop.app"
 LINK_DIR="$HOME/Applications/MooseStack"
 

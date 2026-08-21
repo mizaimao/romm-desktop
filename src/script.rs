@@ -21,8 +21,10 @@
 /// What to draw a string with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Script {
-    /// Nothing that needs a decision — Latin, Cyrillic, Greek, Arabic and the
-    /// rest, where covering the script is the whole of the answer.
+    /// Nothing that needs a *language* decided — Latin, Cyrillic, Greek,
+    /// Arabic and the rest, where covering the script is the whole of the
+    /// answer. Still names a family, for a different reason: see
+    /// [`Script::families`].
     Plain,
     Japanese,
     Korean,
@@ -107,9 +109,15 @@ impl Script {
     /// the handheld's Noto and a desktop's own faces; whichever is installed
     /// first wins, and none installed means fall back to the generic and
     /// accept whatever covers the glyphs.
+    ///
+    /// Even `Plain` names one, and not for coverage — for sameness. One front
+    /// end that looks different on every machine because each supplied its own
+    /// idea of "sans-serif" is not one front end. Noto Sans is shipped with
+    /// the app (see `assets/fonts/MANIFEST.tsv`), so it is there to ask for;
+    /// where it somehow is not, the generic still answers.
     pub fn families(self) -> &'static [&'static str] {
         match self {
-            Script::Plain => &[],
+            Script::Plain => &["Noto Sans"],
             Script::Japanese => &["Noto Sans CJK JP", "Noto Sans JP", "Hiragino Sans", "Yu Gothic"],
             Script::Korean => {
                 &["Noto Sans CJK KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic"]
@@ -206,7 +214,9 @@ mod tests {
             assert!(!script.families().is_empty(), "{script:?} asks for no font");
             assert!(script.language_tag().is_some(), "{script:?} has no language tag");
         }
-        assert!(Script::Plain.families().is_empty());
+        // Plain names a family too, for sameness across machines rather than
+        // for coverage — but it is not a *language*, and must not claim to be.
+        assert_eq!(Script::Plain.families(), ["Noto Sans"]);
         assert_eq!(Script::Plain.language_tag(), None);
     }
 }

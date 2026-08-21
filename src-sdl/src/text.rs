@@ -90,6 +90,27 @@ pub struct Raster {
     pub clipped: bool,
 }
 
+/// The key `chosen` files the everyday face under. Not a language tag,
+/// because "Latin, Cyrillic, Greek and the rest" is not a language.
+const PLAIN: &str = "*";
+
+/// Where the fonts we ship live, if they are anywhere.
+///
+/// Three places, in the order they become true: beside the executable once it
+/// is installed, inside a macOS bundle, and in the source tree while somebody
+/// is working on it. None of them existing is survivable — the machine's own
+/// faces still answer — so this returns an option rather than failing.
+fn bundled_fonts() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok();
+    let beside = exe.as_ref().and_then(|p| p.parent()).map(|p| p.join("fonts"));
+    let in_bundle = exe
+        .as_ref()
+        .and_then(|p| p.parent()?.parent())
+        .map(|p| p.join("Resources").join("fonts"));
+    let in_tree = Some(std::path::PathBuf::from("assets/fonts"));
+    [beside, in_bundle, in_tree].into_iter().flatten().find(|p| p.is_dir())
+}
+
 /// What a line is cut short with. One character, not three dots: the ellipsis
 /// is narrower, and it is what every other list in the world uses.
 const ELLIPSIS: char = '…';
@@ -124,18 +145,31 @@ impl Fonts {
     /// `fonts-noto-cjk` is found without us shipping or naming it — see
     /// docs/handheld-device.md.
     pub fn load() -> Result<Self> {
-        let system = FontSystem::new();
+        let mut system = FontSystem::new();
+        // The faces we ship, on top of whatever the machine has. On the
+        // handheld this is the only Latin face there is: the rootfs installs
+        // `fonts-noto-cjk` and nothing else, and EmulationStation was quietly
+        // fetching Android's Droid fallback to cover the gap.
+        if let Some(dir) = bundled_fonts() {
+            system.db_mut().load_fonts_dir(&dir);
+        }
         let mut fonts = Fonts { system, swash: SwashCache::new(), chosen: BTreeMap::new() };
         if fonts.faces() == 0 {
             anyhow::bail!("no fonts on this machine at all");
         }
-        for script in [Script::Japanese, Script::Korean, Script::Simplified, Script::Traditional] {
+        for script in [
+            Script::Plain,
+            Script::Japanese,
+            Script::Korean,
+            Script::Simplified,
+            Script::Traditional,
+        ] {
             let installed = script
                 .families()
                 .iter()
                 .find(|wanted| fonts.has_family(wanted))
                 .map(|name| (*name).to_owned());
-            fonts.chosen.insert(script.language_tag().unwrap_or("?"), installed);
+            fonts.chosen.insert(script.language_tag().unwrap_or(PLAIN), installed);
         }
         Ok(fonts)
     }
@@ -151,8 +185,8 @@ impl Fonts {
     /// covers it".
     pub fn family_for(&self, text: &str) -> Option<&str> {
         let script = script::of(text);
-        let tag = script.language_tag()?;
-        self.chosen.get(tag)?.as_deref()
+        let key = script.language_tag().unwrap_or(PLAIN);
+        self.chosen.get(key)?.as_deref()
     }
 
     pub fn faces(&self) -> usize {

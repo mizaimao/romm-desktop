@@ -184,6 +184,7 @@ fn check_fonts(painter: &mut text::Painter) {
     // only a pan-CJK fallback installed will say so here rather than quietly
     // drawing Japanese titles in Chinese forms.
     for (what, sample) in [
+        ("Latin etc.", "Metroid"),
         ("Japanese", "ゼルダの伝説"),
         ("Chinese (S)", "塞尔达传说"),
         ("Chinese (T)", "薩爾達傳說"),
