@@ -275,6 +275,35 @@ impl Bindings {
     pub fn reset_keys(&mut self) {
         self.keys.clear();
     }
+
+    /// Take on bindings from somewhere else, without overruling what is
+    /// already here.
+    ///
+    /// For the one-way door out of the webview's own storage, where these
+    /// lived before the file did — see `import_bindings` in the Tauri layer.
+    /// Anything already set wins, so running it a second time after somebody
+    /// has rebound something cannot undo them, and an action or a button this
+    /// build does not have is dropped rather than written back out.
+    ///
+    /// `None` means "deliberately unbound", which is what the old storage
+    /// wrote over a button a rebind had cleared, and it has to survive the
+    /// move or the default comes straight back.
+    pub fn adopt(
+        &mut self,
+        keys: impl IntoIterator<Item = (String, Option<String>)>,
+        pad: impl IntoIterator<Item = (String, Option<String>)>,
+    ) {
+        for (action, key) in keys {
+            if ACTIONS.iter().any(|a| a.id == action) {
+                self.keys.entry(action).or_insert_with(|| key.unwrap_or_default());
+            }
+        }
+        for (index, action) in pad {
+            if index.parse::<u8>().is_ok() {
+                self.pad.entry(index).or_insert_with(|| action.unwrap_or_default());
+            }
+        }
+    }
 }
 
 /// Lowercase a single character, leave named keys alone.
@@ -426,6 +455,77 @@ mod tests {
         let toml = toml::to_string(&b).expect("serialising bindings");
         let back: Bindings = toml::from_str(&toml).expect("parsing bindings");
         assert_eq!(back.key_for("left"), None, "the arrow key came back");
+    }
+
+    /// The one-way door out of the webview's own storage. Getting this wrong
+    /// means somebody's rebinds are silently thrown away on the launch that
+    /// moves them, and there is nothing on screen to say so.
+    #[test]
+    fn bindings_are_adopted_from_the_old_storage() {
+        let mut b = Bindings::default();
+        b.adopt(
+            [("sortMenu".to_owned(), Some("z".to_owned()))],
+            [("3".to_owned(), Some("activate".to_owned()))],
+        );
+        assert_eq!(b.key_for("sortMenu").as_deref(), Some("z"));
+        assert_eq!(b.pad_map()[&3].as_deref(), Some("activate"));
+    }
+
+    /// Running it again after somebody has rebound something must not undo
+    /// them: the file is the truth by then.
+    #[test]
+    fn adopting_never_overrules_what_is_already_set() {
+        let mut b = Bindings::default();
+        b.set_key("sortMenu", Some("q"));
+        b.set_pad("video", Some(2));
+        b.adopt(
+            [("sortMenu".to_owned(), Some("z".to_owned()))],
+            [("2".to_owned(), Some("random".to_owned()))],
+        );
+        assert_eq!(b.key_for("sortMenu").as_deref(), Some("q"), "an old key overruled a new one");
+        assert_eq!(b.pad_map()[&2].as_deref(), Some("video"), "an old button overruled a new one");
+    }
+
+    /// "Deliberately unbound" is what the old storage wrote over a button a
+    /// rebind had cleared. Losing that on the way across puts the default
+    /// straight back, and the rebind looks like it never happened.
+    #[test]
+    fn an_unbound_entry_survives_being_adopted() {
+        let mut b = Bindings::default();
+        // Button 3 is the gameplay video, which nobody has to have.
+        b.adopt([("video".to_owned(), None)], [("3".to_owned(), None)]);
+        assert_eq!(b.key_for("video"), None, "the key came back");
+        assert_eq!(b.pad_map()[&3], None, "the button came back");
+    }
+
+    /// Except where it would leave the pad broken.
+    ///
+    /// Somebody arriving with Confirm unbound in the old storage would
+    /// otherwise land on a controller that opens nothing, with nothing on
+    /// screen to say why — the same repair that protects a rebind protects
+    /// this, and the two have to agree.
+    #[test]
+    fn adopting_cannot_leave_an_essential_action_on_no_button() {
+        let mut b = Bindings::default();
+        b.adopt([], [("0".to_owned(), None)]);
+        assert_eq!(
+            b.pad_map()[&0].as_deref(),
+            Some("activate"),
+            "the pad arrived with nothing to open a game with"
+        );
+    }
+
+    /// A newer build's action, or a button index that is not one, would
+    /// otherwise be written back into config.toml and sit there forever.
+    #[test]
+    fn nonsense_is_dropped_rather_than_carried_over() {
+        let mut b = Bindings::default();
+        b.adopt(
+            [("teleport".to_owned(), Some("t".to_owned()))],
+            [("banana".to_owned(), Some("back".to_owned()))],
+        );
+        assert!(b.keys.is_empty(), "an unknown action was carried over: {:?}", b.keys);
+        assert!(b.pad.is_empty(), "a nonsense button was carried over: {:?}", b.pad);
     }
 
     #[test]

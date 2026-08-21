@@ -54,9 +54,21 @@ hand over the command rather than running it.
 
 ## Testing, and the traps in it
 
-`npm test` (jsdom, ~300 tests) and `cargo test --workspace` (~350). Both must
+`npm test` (jsdom, ~350 tests) and `cargo test --workspace` (~490). Both must
 pass, plus `cargo clippy --workspace --all-targets -- -D warnings`. CI runs the
 same on ubuntu-22.04, macos-14 and windows-latest.
+
+**Which suite a test belongs in** is now a real question rather than a matter
+of taste. The rules — what a filter keeps, which order a list opens in, where
+the cursor goes next, what a binding resolves to — live in `src/` and are
+asserted by `cargo test` against the implementation. The jsdom suites are about
+the *page*: that the menu opens, that the button counts what is on, that an
+empty result says why. They run against `ui/test/backend.js`, a deliberately
+naive stand-in — it orders nothing and filters nothing — so a test that would
+fail because the stand-in is naive is a test that belongs in Rust. Its copy of
+the default binding table is a fixture `cargo test` regenerates and checks, so
+a moved default button fails there rather than quietly changing what the tests
+press.
 
 What jsdom does **not** have, each of which has produced a green suite over
 broken software:
@@ -69,7 +81,13 @@ broken software:
 * **No layout.** `scrollTop` clamps to 0, `offsetParent` is always null,
   `scrollIntoView` does not exist, and every `getBoundingClientRect` is zeros.
   Tests that care about geometry stub the rects; tests that care about *rules*
-  read `ui/style.css` and assert on the declarations.
+  read `ui/style.css` and assert on the declarations. The middle column now
+  draws only the rows it can see, and *every* measurement it makes comes back
+  zero here — so it decides there is nothing to window and silently draws
+  everything, which is a green suite over the exact bug. `ui/test/windowing.test.js`
+  gives the page a layout: cards report a height, the grid reports its columns,
+  the list reports how much of itself is on screen. Its first assertion is that
+  the windowing happened at all.
 * **`.click()` is not a click.** It skips `pointerdown`, which is where the
   menu bug lived for months: the menu closed on the next pointerdown anywhere,
   so it came off the page between press and release and no click ever reached

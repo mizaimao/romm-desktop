@@ -784,6 +784,94 @@ fn edit(lines: &mut Vec<String>, header: &str, key: &str, entry: Option<String>)
 #[cfg(test)]
 mod tests {
 
+    /// A whole table at once, which is what the bindings need: 29 actions and
+    /// 16 buttons, written one at a time, is forty-five read-modify-writes of
+    /// config.toml for one press of a rebind button.
+    #[test]
+    fn a_whole_table_is_written_in_one_pass() {
+        let dir = std::env::temp_dir().join("romm-cfg-table");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let file = path.to_str().unwrap();
+        std::fs::write(&path, "[server]\nurl = \"http://dev.lan\"\n").unwrap();
+
+        super::set_table_entries(
+            file,
+            "bindings.keys",
+            &[
+                ("sortMenu".to_owned(), Some("s".to_owned())),
+                ("filterMenu".to_owned(), Some("f".to_owned())),
+                // Empty, not absent: "deliberately unbound".
+                ("left".to_owned(), Some(String::new())),
+                // Absent: never touched, so nothing should appear for it.
+                ("random".to_owned(), None),
+            ],
+        )
+        .unwrap();
+
+        let doc: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let keys = doc.get("bindings").and_then(|b| b.get("keys")).unwrap();
+        assert_eq!(keys.get("sortMenu").unwrap().as_str(), Some("s"));
+        assert_eq!(keys.get("filterMenu").unwrap().as_str(), Some("f"));
+        assert_eq!(keys.get("left").unwrap().as_str(), Some(""), "unbound was not written");
+        assert!(keys.get("random").is_none(), "a key nobody set was written anyway");
+        // And the rest of the file is untouched.
+        assert_eq!(
+            doc.get("server").unwrap().get("url").unwrap().as_str(),
+            Some("http://dev.lan")
+        );
+    }
+
+    /// The config carries hand-written comments explaining non-obvious
+    /// choices, which is why every writer here is a targeted text edit rather
+    /// than parse-and-reserialise. A batched writer that lost them would undo
+    /// that quietly.
+    #[test]
+    fn writing_a_table_keeps_the_comments_around_it() {
+        let dir = std::env::temp_dir().join("romm-cfg-comments");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let file = path.to_str().unwrap();
+        std::fs::write(
+            &path,
+            "# why this console needs this core\n[cores]\n# and why not the other one\nnes = \"nestopia\"\n",
+        )
+        .unwrap();
+
+        super::set_table_entries(file, "cores", &[("nes".to_owned(), Some("mesen".to_owned()))])
+            .unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("# why this console needs this core"), "a comment was lost");
+        assert!(after.contains("# and why not the other one"), "a comment was lost");
+        assert!(after.contains("nes = \"mesen\""), "the value was not changed");
+    }
+
+    /// Nothing to change means nothing to write. Rebinding one button walks
+    /// all 45 entries, and 44 of them are already what they should be — a file
+    /// rewritten every time is one that eventually gets caught half-written.
+    #[test]
+    fn a_table_that_would_not_change_is_not_rewritten() {
+        let dir = std::env::temp_dir().join("romm-cfg-nochange");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let file = path.to_str().unwrap();
+        std::fs::write(&path, "[cores]\nnes = \"mesen\"\n").unwrap();
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        super::set_table_entries(file, "cores", &[("nes".to_owned(), Some("mesen".to_owned()))])
+            .unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "the file was rewritten with the same contents"
+        );
+    }
+
     /// The app wrote `autofire = false` into people's config files while this
     /// was a toggle. Changing the field to a string without accepting that did
     /// not merely lose the setting — the whole file failed to parse, so every

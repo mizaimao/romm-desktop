@@ -3601,16 +3601,7 @@ fn import_bindings(
     pad: std::collections::BTreeMap<String, Option<String>>,
 ) -> CmdResult<BindingsView> {
     let mut b = state.bindings.lock().map_err(err)?;
-    for (action, key) in keys {
-        if binds::ACTIONS.iter().any(|a| a.id == action) {
-            b.keys.entry(action).or_insert_with(|| key.unwrap_or_default());
-        }
-    }
-    for (index, action) in pad {
-        if index.parse::<u8>().is_ok() {
-            b.pad.entry(index).or_insert_with(|| action.unwrap_or_default());
-        }
-    }
+    b.adopt(keys, pad);
     save_bindings(&b)?;
     Ok(bindings_view(&b))
 }

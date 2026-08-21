@@ -203,6 +203,38 @@ networking; the rest is this app holding every cover it has ever drawn.
 
 ## Task 3 — the SDL2 front end
 
+**What tasks 1 and 2 leave it.** Written down because the point of doing them
+first was that this one inherits the result, and a list of what is already
+there is the difference between starting from facts and starting from a survey.
+
+Ready to call, tested, no webview anywhere near them:
+
+| | |
+|---|---|
+| `binds` | the action table, the pad table, defaults, repair, and storage in `config.toml` |
+| `gamelist` / `gamesort` / `gamefilter` | the row shape, the orders, the predicates, and the per-view memory |
+| `pickorder` | how the left column is ordered, remembered across restarts |
+| `pagefilter` | what the filter box matches, and when a heading has nothing left under it |
+| `gridnav` | where the cursor goes next — including `uniform`, which needs no geometry at all and is what a windowed list navigates by |
+| `padpoll` | deadzones, repeat timings, hold-versus-tap, and the lock after a game exits |
+
+**Two things it has to write for itself, and both are deliberate.** Neither is
+an oversight; both are places a round trip per frame was the wrong answer for
+the webview and will be the right code to lift for SDL, which has no boundary
+to cross:
+
+* **The controller poll.** `padpoll` is the arithmetic; the loop around it —
+  reading the pad, routing to a dialog or a player or the library, the settle
+  window after an emulator exits — is in `ui/js/gamepad.js` and has no Rust
+  equivalent. SDL reads `SDL_GameController` and translates into the button
+  indices `binds::PAD_BUTTONS` names before asking anything.
+* **Which rows to draw.** `ui/js/visible.js` holds the windowing arithmetic —
+  given the column count, a row's height and where the list is scrolled, which
+  band to draw and how much empty space to leave either side. Fourteen tests in
+  `ui/test/visible.test.js` pin it. A 1 GB handheld needs this more than a Mac
+  does; port `slice()` into `src/` early and delete the duplicate reasoning,
+  rather than rediscovering it against a 4" screen.
+
 **Add a fourth front end. Do not convert.** The repo is already CLI + TUI + Tauri
 over one core. Converting would cost the desktop app its video, manuals and
 glass in exchange for nothing — a Mac has a display server and plenty of RAM.
