@@ -171,6 +171,61 @@ pub fn move_y(cards: &[Card], selected: Option<usize>, step: i32) -> Option<usiz
     step_y(cards, &grid, at, step)
 }
 
+/// Where each row leads in a grid that is uniform: every card the same size,
+/// laid out left to right and wrapping at `columns`.
+///
+/// No geometry at all, because none is needed — position is `index / columns`
+/// and `index % columns`. That matters for more than tidiness: a windowed list
+/// draws a band around the viewport and the cursor still has to move through
+/// the rows that are not on the page, which cannot be measured because they do
+/// not exist. It also means the front end sends two numbers instead of every
+/// card's position.
+///
+/// The answers match [`moves`] on the same layout — see the test.
+pub fn uniform(count: usize, columns: usize) -> Moves {
+    let cols = columns.max(1);
+    let rows = count.div_ceil(cols);
+    let sideways = |step: i32| -> Vec<Option<usize>> {
+        (0..count)
+            .map(|i| {
+                let (r, c) = (i / cols, i % cols);
+                // The last row is usually short, so its right-hand end is not
+                // at `cols - 1`.
+                let last = (count - r * cols).min(cols) - 1;
+                Some(r * cols + (c as i32 + step).clamp(0, last as i32) as usize)
+            })
+            .collect()
+    };
+    let vertical = |step: i32| -> Vec<Option<usize>> {
+        (0..count)
+            .map(|i| {
+                let (r, c) = (i / cols, i % cols);
+                let target = r as i32 + step;
+                if target < 0 || target >= rows as i32 {
+                    return None;
+                }
+                let target = target as usize;
+                // Landing on a short last row: the column you were in may not
+                // exist there, so take the nearest that does — which is what
+                // matching on horizontal centre comes to when every card is
+                // the same width.
+                let last = (count - target * cols).min(cols) - 1;
+                Some(target * cols + c.min(last))
+            })
+            .collect()
+    };
+    Moves {
+        up: vertical(-1),
+        down: vertical(1),
+        left: sideways(-1),
+        right: sideways(1),
+        page_up: vertical(-PAGE),
+        page_down: vertical(PAGE),
+        first: edge(count, false),
+        last: edge(count, true),
+    }
+}
+
 /// The first or last card on the page, in the order they were handed over.
 pub fn edge(count: usize, last: bool) -> Option<usize> {
     if count == 0 {
@@ -294,6 +349,45 @@ mod tests {
         }
         assert_eq!(table.first, Some(0));
         assert_eq!(table.last, Some(cards.len() - 1));
+    }
+
+    /// The two ways of working the table out have to agree, or the cursor
+    /// behaves differently on a long list from a short one — which is exactly
+    /// the sort of difference nobody attributes to windowing.
+    #[test]
+    fn the_uniform_table_matches_the_measured_one() {
+        for (count, columns) in [(14usize, 4usize), (40, 10), (41, 10), (7, 1), (3, 9)] {
+            let cards: Vec<Card> = (0..count)
+                .map(|i| Card {
+                    top: (i / columns) as f64 * 200.0,
+                    left: (i % columns) as f64 * 160.0,
+                    width: 150.0,
+                })
+                .collect();
+            let measured = moves(&cards);
+            let derived = uniform(count, columns);
+            assert_eq!(derived.up, measured.up, "up, {count} over {columns}");
+            assert_eq!(derived.down, measured.down, "down, {count} over {columns}");
+            assert_eq!(derived.left, measured.left, "left, {count} over {columns}");
+            assert_eq!(derived.right, measured.right, "right, {count} over {columns}");
+            assert_eq!(derived.page_up, measured.page_up, "page up, {count} over {columns}");
+            assert_eq!(derived.page_down, measured.page_down, "page down, {count} over {columns}");
+            assert_eq!(derived.first, measured.first);
+            assert_eq!(derived.last, measured.last);
+        }
+    }
+
+    /// The case windowing exists for: a table over rows that were never drawn.
+    #[test]
+    fn a_uniform_table_covers_rows_nothing_measured() {
+        let table = uniform(2506, 10);
+        assert_eq!(table.down.len(), 2506);
+        assert_eq!(table.down[0], Some(10));
+        assert_eq!(table.up[0], None, "up from the first row moved");
+        assert_eq!(table.down[2505], None, "down from the last row moved");
+        // 2,506 over ten leaves six on the last row. Column 8 has nothing
+        // below it, so it lands on the end of the short row rather than off it.
+        assert_eq!(table.down[2498], Some(2505));
     }
 
     #[test]

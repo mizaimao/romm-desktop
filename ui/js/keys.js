@@ -19,6 +19,7 @@ import { openFilterMenu } from "./filter.js";
 import { actions, actionFor, keyLabelFor, padMap, padLabelFor, padLabel } from "./bindings.js";
 import { captureKey, isCapturing, settingsOpen, closeSettings, toggleSettings } from "./settings.js";
 import { cycleSection, resetSection } from "./tabs.js";
+import { windowedList } from "./visible.js";
 
 function items() {
   // Not the ones the page filter has hidden: the cursor stepping onto a card
@@ -66,6 +67,19 @@ window.addEventListener("resize", resetNav);
 let inFlight = null;
 
 async function syncGeometry(nodes) {
+  // A windowed list is a uniform grid, and a uniform grid needs no measuring:
+  // where a card sits is `index / columns`, so the table comes from two
+  // numbers. That is not a shortcut — most of the cards are not drawn, so most
+  // of them have no position to read, and the cursor has to be able to move
+  // through them anyway. See src/gridnav.rs.
+  const win = windowedList();
+  if (win && el.list.contains(win.container)) {
+    const now = `rows:${win.total}:${win.columns}`;
+    if (shape === now && table) return;
+    table = await invoke("grid_uniform", { count: win.total, columns: win.columns });
+    shape = now;
+    return;
+  }
   const now = `${nodes.length}:${el.list.clientWidth}`;
   if (shape === now && table) return;
   if (!inFlight) {
@@ -105,15 +119,35 @@ export function primeNav() {
 /// geometry: running off the top of a grid leaves you where you were rather
 /// than jumping to the first card.
 async function step(direction) {
+  const win = windowedList();
+  const windowed = win && el.list.contains(win.container);
   const nodes = items();
-  if (!nodes.length) return;
+  if (!windowed && !nodes.length) return;
   await syncGeometry(nodes);
   if (!table) return;
-  const at = nodes.findIndex((n) => n.classList.contains("sel"));
+
+  const at = windowed ? cursorIn(win) : nodes.findIndex((n) => n.classList.contains("sel"));
   // Nothing selected yet: any direction lands on the first card, so a press on
   // a freshly drawn grid always does something.
   const to = at < 0 ? table.first : table[direction]?.[at];
-  if (to !== null && to !== undefined) focusNode(nodes[to]);
+  if (to === null || to === undefined) return;
+  // Windowed, the row it lands on may not be drawn — that is the whole point
+  // — so the window is asked for it, which scrolls there and draws the band
+  // around it.
+  focusNode(windowed ? win.reveal(to) : nodes[to]);
+}
+
+/// Where the cursor is in a windowed list.
+///
+/// Found by the game it is on rather than by the `.sel` class, because the
+/// card carrying that class is thrown away every time the band moves. The row
+/// survives; the node does not.
+function cursorIn(win) {
+  if (state.selected === null || state.selected === undefined) return -1;
+  for (let i = 0; i < win.total; i += 1) {
+    if (win.at(i)?.id === state.selected) return i;
+  }
+  return -1;
 }
 
 function focusNode(node) {
@@ -139,6 +173,11 @@ function focusNode(node) {
 const move = (direction) => step(direction);
 
 const edge = (last) => {
+  const win = windowedList();
+  if (win && el.list.contains(win.container)) {
+    if (!win.total) return;
+    return focusNode(win.reveal(last ? win.total - 1 : 0));
+  }
   const nodes = items();
   if (!nodes.length) return;
   focusNode(nodes[last ? nodes.length - 1 : 0]);
@@ -153,6 +192,8 @@ function focusedIndex(nodes) {
 }
 
 function activate() {
+  // The drawn nodes are enough here: the cursor is always on screen, so the
+  // card it is on is always one of them.
   const nodes = items();
   if (!nodes.length) return;
   // With nothing selected, focusedIndex is -1 and `nodes[-1]` is undefined, so

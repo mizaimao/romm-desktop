@@ -153,6 +153,13 @@ keyboard.
 
 Requested, never arrived. Scraping still goes through the server's own account.
 
+## 14. Windowing the middle column — **done in 0.2.606**
+
+Both halves. Covers are released once a card is well off screen, and a flat
+list over 400 rows draws only the band around the viewport: 2,506 cards to 100,
+`renderRows` 447ms to 21ms. See `docs/handheld-frontend.md` task 2 for what had
+to change to get there. The rest of this entry is what it looked like before.
+
 ## 14. Windowing the middle column
 
 The arcade list is 2,506 games and every one of them is inserted into the

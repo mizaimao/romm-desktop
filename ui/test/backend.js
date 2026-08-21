@@ -214,6 +214,35 @@ export function fakeBackend(reply = () => []) {
       };
     },
 
+    // A grid that is uniform needs no measuring, so this one is not naive: a
+    // windowed list navigates entirely through it, and a linear stand-in would
+    // make every test about that navigation agree with itself and with
+    // nothing else. That the arithmetic is right is asserted in
+    // `gridnav::tests`, against the measured table on the same layout.
+    grid_uniform: ({ count, columns }) => {
+      const cols = Math.max(1, columns || 1);
+      const rows = Math.ceil(count / cols);
+      const lastIn = (r) => Math.min(count - r * cols, cols) - 1;
+      const sideways = (step) =>
+        Array.from({ length: count }, (_, i) => {
+          const r = Math.floor(i / cols);
+          return r * cols + Math.max(0, Math.min((i % cols) + step, lastIn(r)));
+        });
+      const vertical = (step) =>
+        Array.from({ length: count }, (_, i) => {
+          const target = Math.floor(i / cols) + step;
+          if (target < 0 || target >= rows) return null;
+          return target * cols + Math.min(i % cols, lastIn(target));
+        });
+      return {
+        up: vertical(-1), down: vertical(1),
+        left: sideways(-1), right: sideways(1),
+        page_up: vertical(-3), page_down: vertical(3),
+        first: count ? 0 : null,
+        last: count ? count - 1 : null,
+      };
+    },
+
     // Linear, on purpose. Which card sits above which is geometry, and
     // `gridnav::tests` is where that is asserted — jsdom has no layout to
     // measure anyway, so every card here reports the same position.

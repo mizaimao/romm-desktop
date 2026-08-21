@@ -141,6 +141,42 @@ green: `npm test` and `cargo test --workspace`, plus
 This is narrow, well-specified, test-backed work — the shape a smaller local
 model handles well. One module at a time.
 
+## Task 2 — window the middle column — **done, 0.2.606**
+
+Two fixes, and the doc was right that they are the same one.
+
+**The 578 MB.** Covers are let go once a card is well off screen. Two
+observers, not one: near, at 300px, fetches; far, at 1600px, puts the
+placeholder back and drops the image. The gap between them is the hysteresis —
+a card one flick of the wheel off the top of the screen is about to be looked
+at again. The version this replaces unobserved a card the moment its cover
+arrived, so nothing ever released one.
+
+**The 2,506 nodes.** A flat list over 400 rows draws only the band around the
+viewport, with a spacer above and below standing in for the rest at exactly the
+height they would have taken — so the scrollbar and every remembered scroll
+position are unchanged. Measured on the arcade console, ten across, an 800px
+window: **2,506 cards to 100, and `renderRows` from 447ms to 21ms.** Grouped
+results are drawn whole; search is capped at 200 and a window over a short list
+is machinery with nothing to do.
+
+The four things that assumed every row exists were the work:
+
+* **The cursor** now moves in rows rather than in drawn nodes, through
+  `gridnav::uniform` — a table from two numbers, because a uniform grid needs
+  no measuring and most of its cards have no position to measure. A test
+  asserts it agrees with the measured table on any layout where both apply.
+* **The remembered position** asks the window to reveal its row, which scrolls
+  there and draws the band around it. Being far down the list is exactly why it
+  was worth remembering.
+* **The filter box** narrows the list rather than hiding drawn nodes — hiding
+  would have searched a hundred games out of two and a half thousand, finding
+  less the further down you had scrolled.
+* **The cover observers** are re-attached on every band change, and the
+  highlight is put back: the card carrying it is thrown away each time.
+
+The original brief follows.
+
 ## Task 2 — window the middle column
 
 Already `docs/parked.md` item #1, described there as *"the only thing in the app

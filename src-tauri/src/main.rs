@@ -3806,6 +3806,18 @@ fn page_filter(state: State<'_, AppState>, query: String) -> CmdResult<PageFilte
 /// held direction repeats nine times a second, and a cursor that only moves
 /// after a round trip reads as an app that is thinking about it. The geometry
 /// is still decided in `gridnav`; the page only looks the answer up.
+/// The same table for a grid that is uniform, from two numbers instead of
+/// every card's position.
+///
+/// What a windowed list uses. Only a band of it is drawn, so most of the cards
+/// have no position to measure — and the cursor still has to be able to move
+/// through them. `gridnav::uniform` and `gridnav::moves` agree on any layout
+/// where both apply; a test says so.
+#[tauri::command]
+fn grid_uniform(count: usize, columns: usize) -> gridnav::Moves {
+    gridnav::uniform(count, columns)
+}
+
 #[tauri::command]
 fn set_grid(cards: Vec<[f64; 3]>) -> gridnav::Moves {
     let cards: Vec<gridnav::Card> = cards
@@ -3972,7 +3984,8 @@ fn main() {
             set_picker_order,
             set_page_names,
             page_filter,
-            set_grid
+            set_grid,
+            grid_uniform
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

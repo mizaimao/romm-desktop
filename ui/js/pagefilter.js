@@ -12,6 +12,7 @@
 // row is pointing at.
 
 import { el, invoke } from "./state.js";
+import { windowedList } from "./visible.js";
 
 /// Hidden by the filter. A class rather than the `hidden` attribute so nothing
 /// else that hides things — a view emptying itself, a card with no artwork —
@@ -43,9 +44,24 @@ let current = "";
 /// over their names, and puts the class on whatever did not survive.
 export async function applyPageFilter(text) {
   current = String(text ?? "").trim().toLowerCase();
+
+  // A windowed list is narrowed rather than hidden: only a band of it is
+  // drawn, so putting a class on the nodes that are there would search a few
+  // hundred games out of two and a half thousand — a filter that finds less
+  // the further down you have scrolled. The window is told which rows survive
+  // and redraws from the top, and the cursor then moves through those and no
+  // others.
+  const win = windowedList();
+  if (win && el.list.contains(win.container)) {
+    await sendNames(win.names());
+    const { visible, shown } = await invoke("page_filter", { query: current });
+    win.narrow(current ? visible : null);
+    return shown;
+  }
+
   const nodes = targets();
   const heads = [...el.list.querySelectorAll(".ghead")];
-  await sendNames(nodes, heads);
+  await sendNames(nodes.map(nameOf), heads, nodes);
 
   const { visible, headings, shown } = await invoke("page_filter", { query: current });
   nodes.forEach((node, i) => node.classList.toggle(OUT, !visible[i]));
@@ -66,19 +82,22 @@ export function forgetPageNames() {
   namesFor = null;
 }
 
-async function sendNames(nodes, heads) {
-  const now = `${nodes.length}:${heads.length}`;
+async function sendNames(names, heads = [], nodes = null) {
+  const now = `${names.length}:${heads.length}`;
   if (namesFor === now) return;
-  const at = new Map(nodes.map((n, i) => [n, i]));
-  // Which entries sit under each heading, so a heading with nothing left under
-  // it can go too: a search that leaves five headings and no games reads as a
-  // broken page.
-  const groups = heads.map((head) =>
-    [...(head.parentElement?.querySelectorAll(".card, .row, .gcard") ?? [])]
-      .map((n) => at.get(n))
-      .filter((i) => i !== undefined)
-  );
-  await invoke("set_page_names", { names: nodes.map(nameOf), groups });
+  let groups = [];
+  if (nodes) {
+    const at = new Map(nodes.map((n, i) => [n, i]));
+    // Which entries sit under each heading, so a heading with nothing left
+    // under it can go too: a search that leaves five headings and no games
+    // reads as a broken page.
+    groups = heads.map((head) =>
+      [...(head.parentElement?.querySelectorAll(".card, .row, .gcard") ?? [])]
+        .map((n) => at.get(n))
+        .filter((i) => i !== undefined)
+    );
+  }
+  await invoke("set_page_names", { names, groups });
   namesFor = now;
 }
 
@@ -101,6 +120,7 @@ export function pageFilterText() {
 export function clearPageFilter() {
   current = "";
   forgetPageNames();
+  windowedList()?.narrow(null);
   if (el.pageFilter) el.pageFilter.value = "";
   for (const node of targets()) node.classList.remove(OUT);
   for (const head of el.list.querySelectorAll(".ghead")) head.classList.remove(OUT);

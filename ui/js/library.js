@@ -14,6 +14,7 @@ import { followSections } from "./sections.js";
 import { play, restoreSidebar, selectRom, showPlatformInfo, withTransition } from "./detail.js";
 import { download, launch } from "./actions.js";
 import { installTilt } from "./tilt.js";
+import { windowRows, stopWindowing, worthWindowing, windowedList } from "./visible.js";
 
 export async function showPlatforms() {
   state.view = "platforms";
@@ -235,6 +236,10 @@ function renderPlatforms(items) {
     });
   });
   if (shellMode() === "columns" && state.platform) markPlatform(state.platform);
+  // Thirty-five consoles are never windowed, and leaving a window's scroll
+  // listener attached to a list it no longer draws is a listener that runs on
+  // every scroll of every screen after this one.
+  stopWindowing();
   resetNav();
   primeNav();
 }
@@ -498,6 +503,19 @@ async function gameMenu(id, x, y) {
   );
 }
 
+/// Put the highlight back on the card the cursor is on.
+///
+/// A windowed list rebuilds its cards every time the band moves, so the node
+/// carrying `.sel` is thrown away and replaced by one that does not. The
+/// cursor is a row, not a node — this is what keeps the two in step.
+function markSelected() {
+  if (state.selected === null || state.selected === undefined) return;
+  const want = String(state.selected);
+  for (const node of el.list.querySelectorAll(".gcard, .row")) {
+    node.classList.toggle("sel", node.dataset.id === want);
+  }
+}
+
 export function renderRows(unsorted, showPlatform) {
   // Ordered here rather than by whoever supplied the rows, so every path that
   // draws a list — a console, a collection, a search, a redraw after the order
@@ -508,6 +526,7 @@ export function renderRows(unsorted, showPlatform) {
   refreshSortButton();
   refreshFilterButton();
   if (!rows.length) {
+    stopWindowing();
     // A filtered list that matches nothing looks exactly like a console with
     // no games in it, and the filter is off screen in a menu — so the empty
     // list has to say so, and offer the way out.
@@ -527,11 +546,44 @@ export function renderRows(unsorted, showPlatform) {
   // meant. Grouping also lets each console keep its own cover shape, which a
   // single mixed grid cannot.
   resetNav();
-  region("games").innerHTML = showPlatform
-    ? groupedMarkup(rows)
-    : state.layout === "grid"
-      ? gridMarkup(rows)
-      : listMarkup(rows, showPlatform);
+
+  // A long flat list draws only the band around the viewport. Grouped results
+  // are drawn whole: search is capped at 200 by the backend, and a grouped
+  // collection is sections of a few hundred — below the threshold a window is
+  // machinery with nothing to do. See `visible.js`.
+  const window = !showPlatform && worthWindowing(rows.length);
+  if (window) {
+    const uniform = gridAspect(null);
+    region("games").innerHTML =
+      state.layout === "grid"
+        ? `<div class="gcards"${uniform ? ` style="--ar:${uniform.toFixed(3)}"` : ""}></div>`
+        : `<div class="rows"></div>`;
+    windowRows({
+      container: region("games").firstElementChild,
+      scroller: el.list,
+      rows,
+      html: (r, at) =>
+        state.layout === "grid"
+          ? cardMarkup(r, uniform, at)
+          : rowMarkup(r, showPlatform, at),
+      // Every band change is a different set of nodes, so both of the things
+      // that hold a map of the page have to be told: the cover observers, and
+      // the cursor.
+      onDraw: () => {
+        if (state.layout === "grid") observeCovers();
+        // The card the cursor was on has just been thrown away and drawn
+        // again, without the class that says so.
+        markSelected();
+      },
+    });
+  } else {
+    stopWindowing();
+    region("games").innerHTML = showPlatform
+      ? groupedMarkup(rows)
+      : state.layout === "grid"
+        ? gridMarkup(rows)
+        : listMarkup(rows, showPlatform);
+  }
   // Work out where the cursor can go while nobody is waiting on it, rather
   // than on the first arrow press after this.
   primeNav();
@@ -549,7 +601,14 @@ export function renderRows(unsorted, showPlatform) {
   if (rows.length) {
     const want = rememberedRom(rows) ?? rows[0].id;
     selectRom(want);
-    const node = el.list.querySelector(`[data-id="${want}"]`);
+    let node = el.list.querySelector(`[data-id="${want}"]`);
+    // Windowed, the remembered row is very often not drawn — being far down
+    // the list is exactly why it was worth remembering. Ask the window for it,
+    // which scrolls there and draws the band around it.
+    if (!node) {
+      const at = rows.findIndex((r) => r.id === want);
+      node = windowedList()?.reveal(at) ?? null;
+    }
     // `nearest` rather than `center`: if the remembered row is already on
     // screen, scrolling it to the middle moves the list for no reason.
     node?.scrollIntoView({ block: "nearest" });
@@ -607,31 +666,46 @@ function groupedMarkup(rows) {
   // over the first row and cropping it.
   const single = ordered.length === 1;
 
+  // Numbered across the whole result rather than within each section, so
+  // `data-at` means the same thing here as it does in a flat list: where the
+  // cursor is in what is on screen, top to bottom.
+  let at = 0;
   return ordered
-    .map(
-      ([platform, items]) => `
+    .map(([platform, items]) => {
+      const from = at;
+      at += items.length;
+      return `
       <section class="pgroup">
         ${single ? "" : `<h2 class="ghead">
           <span class="gslug">${escapeHtml(platform)}</span>
           <span class="gcount">${items.length}</span>
         </h2>`}
-        ${state.layout === "grid" ? gridMarkup(items, platform) : listMarkup(items, false)}
-      </section>`
-    )
+        ${state.layout === "grid"
+          ? gridMarkup(items, platform, from)
+          : listMarkup(items, false, from)}
+      </section>`;
+    })
     .join("");
 }
 
-function listMarkup(rows, showPlatform) {
-  return `<div class="rows">${rows
-    .map(
-      (r) => `
-      <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}">
+/// One row.
+///
+/// `at` is its place in the whole list, not in what happens to be drawn — a
+/// windowed list draws a band out of the middle, and the cursor moves through
+/// rows that are not on the page. See `visible.js`.
+function rowMarkup(r, showPlatform, at) {
+  return `
+      <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}" data-at="${at}">
         <span class="have">${here(r)}</span>
         <span class="nm">${r.favourite ? `<span class="star" title="Starred — in one of your starred collections">★</span>` : ""}${escapeHtml(r.name)}</span>
         ${showPlatform ? `<span class="pf">${r.platform}</span>` : ""}
         <span class="sz">${human(r.size_bytes)}</span>
-      </div>`
-    )
+      </div>`;
+}
+
+function listMarkup(rows, showPlatform, from = 0) {
+  return `<div class="rows">${rows
+    .map((r, i) => rowMarkup(r, showPlatform, from + i))
     .join("")}</div>`;
 }
 
@@ -649,16 +723,21 @@ function here(r) {
     : `<span class="mark away" title="On the server — downloads when you play it"><span class="icon icon-cloud"></span></span>`;
 }
 
-function gridMarkup(rows, platform) {
-  // One ratio per grid. Grouped search passes its console in, so each section
-  // is uniform even though the results as a whole are not.
+/// The ratio every card in a grid is shaped to, or null where the rows come
+/// from more than one console and each card has to say for itself.
+///
+/// Grouped search passes its console in, so each section is uniform even
+/// though the results as a whole are not. Uniformity is what lets a long list
+/// be windowed at all — see `visible.js`.
+function gridAspect(platform) {
   const slug = platform ?? (state.view !== "search" ? state.platform : null);
-  const uniform = slug ? state.aspects[slug] : null;
-  const style = uniform ? ` style="--ar:${uniform.toFixed(3)}"` : "";
-  return `<div class="gcards"${style}>${rows
-    .map(
-      (r) => `
-      <div class="gcard" data-id="${r.id}" data-name="${escapeHtml(r.name.slice(0, 2))}"${
+  return slug ? (state.aspects[slug] ?? null) : null;
+}
+
+/// One card. `at` is its place in the whole list; see `rowMarkup`.
+function cardMarkup(r, uniform, at) {
+  return `
+      <div class="gcard" data-id="${r.id}" data-at="${at}" data-name="${escapeHtml(r.name.slice(0, 2))}"${
         r.favourite ? ` data-fav="1"` : ""
       }${
         !uniform && state.aspects[r.platform]
@@ -672,8 +751,14 @@ function gridMarkup(rows, platform) {
         }</div>
         <div class="gname">${escapeHtml(r.name)}</div>
         <div class="gmeta">${here(r)}${human(r.size_bytes)}</div>
-      </div>`
-    )
+      </div>`;
+}
+
+function gridMarkup(rows, platform, from = 0) {
+  const uniform = gridAspect(platform);
+  const style = uniform ? ` style="--ar:${uniform.toFixed(3)}"` : "";
+  return `<div class="gcards"${style}>${rows
+    .map((r, i) => cardMarkup(r, uniform, from + i))
     .join("")}</div>`;
 }
 
@@ -692,6 +777,13 @@ export function setZoom(px) {
   localStorage.setItem("zoom", String(px));
   el.zoom.value = String(px);
   document.documentElement.style.setProperty("--card", `${px}px`);
+  // Wider cards mean fewer columns and a taller row, so a windowed list is
+  // now drawing the wrong band and standing the wrong height in for the rest.
+  // The resize listener does not fire for this: the window did not change, the
+  // cards did.
+  windowedList()?.remeasure();
+  resetNav();
+  primeNav();
 }
 
 export function setLayout(next) {
@@ -842,10 +934,18 @@ async function flushCovers() {
 export function randomGame() {
   const rows = sorted(filtered(state.rows));
   if (!rows.length) return null;
-  const pick = rows[Math.floor(Math.random() * rows.length)];
+  const at = Math.floor(Math.random() * rows.length);
+  const pick = rows[at];
   selectRom(pick.id);
-  const node = region("games")?.querySelector(`[data-id="${pick.id}"]`);
+  // Windowed, a game picked at random out of 2,506 is almost never one of the
+  // hundred or so on the page — which is the point of the button. Ask the
+  // window for it, which scrolls there and draws the band around it.
+  const win = windowedList();
+  const node =
+    (win && el.list.contains(win.container) ? win.reveal(at) : null) ??
+    region("games")?.querySelector(`[data-id="${pick.id}"]`);
   node?.scrollIntoView({ block: "center", behavior: "smooth" });
+  markSelected();
   toast(pick.name);
   return pick;
 }
