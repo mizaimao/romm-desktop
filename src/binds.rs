@@ -570,9 +570,15 @@ mod tests {
             std::fs::write(path, &want).expect("writing the fixture");
             return;
         }
+        // Line endings normalised on both sides. Git checks this file out with
+        // CRLF on Windows unless told otherwise, so a byte-for-byte comparison
+        // fails there and only there — which is a red CI run about nothing,
+        // and the fix it suggests would produce a file that then fails
+        // everywhere else.
         let have = std::fs::read_to_string(path).unwrap_or_default();
         assert_eq!(
-            have, want,
+            have.replace("\r\n", "\n"),
+            want.replace("\r\n", "\n"),
             "ui/test/bindings.fixture.json is out of step with these tables — \
              run UPDATE_FIXTURES=1 cargo test to bring it up to date"
         );
