@@ -8,8 +8,14 @@
 # get byte-for-byte the same fonts, and LICENSES.md, because the SIL Open Font
 # License requires the licence to travel with the font.
 #
-#   ./scripts/fetch-fonts.sh          fetch anything missing or wrong
-#   ./scripts/fetch-fonts.sh --check  say what is missing, fetch nothing
+#   ./scripts/fetch-fonts.sh             fetch anything missing or wrong
+#   ./scripts/fetch-fonts.sh --check     say what is missing, fetch nothing
+#   ./scripts/fetch-fonts.sh --with-cjk  add the CJK set (50 MB)
+#
+# CJK is not in the default set because both targets already have it — the
+# handheld installs fonts-noto-cjk, macOS ships PingFang and Hiragino — and it
+# is fifty megabytes against two. A Linux desktop without the Debian package,
+# or Windows, wants --with-cjk.
 #
 # Idempotent: a file already present with the right hash is left alone, so this
 # is cheap to call from every build.
@@ -19,7 +25,14 @@ cd "$(dirname "$0")/.."
 DIR="assets/fonts"
 MANIFEST="$DIR/MANIFEST.tsv"
 CHECK_ONLY=false
-[ "${1:-}" = "--check" ] && CHECK_ONLY=true
+WITH_CJK=false
+for arg in "$@"; do
+  case "$arg" in
+    --check) CHECK_ONLY=true ;;
+    --with-cjk) WITH_CJK=true ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
 
 [ -f "$MANIFEST" ] || { echo "no $MANIFEST" >&2; exit 1; }
 
@@ -32,11 +45,22 @@ hash_of() {
 
 missing=0
 fetched=0
+section=default
 while IFS=$'\t' read -r name want size url; do
-  case "$name" in ''|'#'*) continue ;; esac
+  case "$name" in
+    ''|'#'*) continue ;;
+    '[cjk]') section=cjk; continue ;;
+  esac
+  # The CJK set is skipped unless asked for. Its hashes are left as `-` in the
+  # manifest: pinning them would mean this file grew fifty megabytes of
+  # provenance for something almost nobody fetches, and the URLs are already
+  # pinned to a family and a name.
+  if [ "$section" = cjk ] && ! $WITH_CJK; then
+    continue
+  fi
   out="$DIR/$name"
 
-  if [ -f "$out" ] && [ "$(hash_of "$out")" = "$want" ]; then
+  if [ -f "$out" ] && { [ "$want" = "-" ] || [ "$(hash_of "$out")" = "$want" ]; }; then
     continue
   fi
 
@@ -51,7 +75,7 @@ while IFS=$'\t' read -r name want size url; do
   curl -sfL --retry 3 "$url" -o "$tmp"
 
   got=$(hash_of "$tmp")
-  if [ "$got" != "$want" ]; then
+  if [ "$want" != "-" ] && [ "$got" != "$want" ]; then
     rm -f "$tmp"
     # Not a warning. A font that is not the font the manifest names is either a
     # broken download or a different file at the same URL, and both mean the

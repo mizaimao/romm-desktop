@@ -111,11 +111,21 @@ above. Credit goes in `LICENSES.md`, which the repo already has.
 
 Read out of `needed_packages.txt` and `needed_dev_packages.txt`.
 
-**Fonts are solved.** `fonts-noto-cjk` is in the rootfs, with `libfreetype6`,
-`libfontconfig1-dev` and `libfreetype-dev`. So the Japanese and translated
-titles have a face to be drawn in without us shipping one, and fallback
-resolution is a fontconfig call rather than a hardcoded list of paths. Nothing
-to bundle, and no sixteen megabytes of Noto in the binary.
+**Fonts are half solved, and the missing half is the common half.**
+
+`fonts-noto-cjk` is in the rootfs, with `libfreetype6`, `libfontconfig1-dev`
+and `libfreetype-dev`. It installs `NotoSansCJK-Regular.ttc`, a collection
+holding the JP, KR, SC, TC and HK faces — and the font database reads those out
+separately, so asking for "Noto Sans CJK TC" by name works and Chinese titles
+are not drawn in Japanese shapes. See `src/script.rs`.
+
+**There is no Latin face at all.** `needed_packages.txt` installs CJK and
+nothing else, which is most of a library. EmulationStation covered the gap by
+fetching Android's `DroidSansFallbackFull.ttf` itself, in
+`build_emulationstation-rk3566.sh` — so stripping ES makes it ours. We ship
+Noto Sans and its Arabic, Hebrew and Thai companions, 2.3 MB, fetched at build
+time and pinned by hash: `assets/fonts/MANIFEST.tsv` and
+`scripts/fetch-fonts.sh`.
 
 **The whole SDL stack is a dependency already**: `libsdl2-2.0-0` and
 `libsdl2-dev`, plus `-image`, `-ttf`, `-mixer`, `-net` and `-gfx`.

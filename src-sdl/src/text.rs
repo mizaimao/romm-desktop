@@ -730,6 +730,41 @@ mod scripts {
         }
     }
 
+    /// Whether the font database reads the individual faces inside a
+    /// collection file, or only the first one.
+    ///
+    /// This decides whether the handheld works at all: Debian's
+    /// `fonts-noto-cjk` is a single `NotoSansCJK-Regular.ttc` holding the JP,
+    /// KR, SC, TC and HK faces together. If only face zero is seen, every
+    /// language gets whichever is first and the Han unification fix silently
+    /// does nothing.
+    #[test]
+    fn faces_inside_a_collection_are_seen_separately() {
+        let f = Fonts::load().expect("no fonts");
+        let mut collections: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for face in f.system.db().faces() {
+            let path = match &face.source {
+                cosmic_text::fontdb::Source::File(p) => p.display().to_string(),
+                _ => continue,
+            };
+            if !path.to_lowercase().ends_with(".ttc") {
+                continue;
+            }
+            let name = face.families.first().map(|(n, _)| n.clone()).unwrap_or_default();
+            collections.entry(path).or_default().push(name);
+        }
+        let multi: Vec<_> = collections.iter().filter(|(_, v)| v.len() > 1).collect();
+        for (path, names) in multi.iter().take(3) {
+            println!("{} -> {} faces: {:?}", path, names.len(), &names[..names.len().min(6)]);
+        }
+        assert!(
+            !multi.is_empty(),
+            "no collection file yielded more than one face — Noto Sans CJK on the handheld is \
+             one .ttc holding JP, KR, SC and TC, and reading only the first would give every \
+             language the same shapes"
+        );
+    }
+
     #[test]
     fn which_face_draws_what() {
         let mut f = Fonts::load().expect("no fonts");
