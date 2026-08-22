@@ -36,8 +36,12 @@ enum State {
 
 pub struct Covers {
     media_root: PathBuf,
-    /// Which artwork to prefer, from `[media] list_art`.
+    /// Which game artwork to prefer, from `[media] list_art`.
     look: String,
+    /// Which console picture the grid draws, from `[icons] style`, and which
+    /// installed set it comes from — `[icons] set`, empty for none.
+    console_look: String,
+    console_set: String,
     held: HashMap<i64, Texture>,
     known: HashMap<i64, State>,
     /// The order things were asked for, oldest first. A plain queue rather
@@ -47,10 +51,12 @@ pub struct Covers {
 }
 
 impl Covers {
-    pub fn new(media_root: PathBuf, look: String) -> Self {
+    pub fn new(media_root: PathBuf, look: String, icons: (String, String)) -> Self {
         Covers {
             media_root,
             look,
+            console_look: icons.0,
+            console_set: icons.1,
             held: HashMap::new(),
             known: HashMap::new(),
             order: Vec::new(),
@@ -59,6 +65,43 @@ impl Covers {
 
     pub fn holding(&self) -> usize {
         self.held.len()
+    }
+
+    /// A console's own picture — the hardware render the grid draws.
+    ///
+    /// Kept in the same cache as the covers, under a key no game can have.
+    /// There are three dozen consoles against two and a half thousand games,
+    /// so they cost nothing to hold and are on screen constantly.
+    pub fn console(&mut self, gfx: &Gfx, slug: &str) -> Option<&Texture> {
+        let (look, set) = (self.console_look.clone(), self.console_set.clone());
+        // A stable negative id per slug: the cache is keyed by rom id, and no
+        // rom has one.
+        let key = -(slug.bytes().fold(1i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64)).abs() | 1);
+        if let Some(State::None) = self.known.get(&key) {
+            return None;
+        }
+        if self.known.contains_key(&key) {
+            return self.held.get(&key);
+        }
+        let path = romm_desktop::theme::look_art(&self.media_root, slug, &set, &look)
+            .or_else(|| romm_desktop::theme::look_art(&self.media_root, slug, &set, "systemart"))
+            .or_else(|| romm_desktop::theme::look_art(&self.media_root, slug, &set, "consolegame"))
+            .or_else(|| romm_desktop::platformicon::installed(&self.media_root, slug));
+        let Some(path) = path else {
+            self.known.insert(key, State::None);
+            return None;
+        };
+        match self.load(gfx, &path) {
+            Some(texture) => {
+                self.held.insert(key, texture);
+                self.known.insert(key, State::Ready);
+                self.held.get(&key)
+            }
+            None => {
+                self.known.insert(key, State::None);
+                None
+            }
+        }
     }
 
     /// The cover for a game, decoding it if it is on disk and not yet held.

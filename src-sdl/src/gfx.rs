@@ -41,13 +41,42 @@ void main() {
 /// and artwork is a picture drawn as it is, and both are "a colour times a
 /// sample" — with a 1x1 white texture standing in when there is no picture, so
 /// a plain rectangle takes the same path as everything else.
+/// The fragment shader: a colour, optionally multiplied by a texture, inside
+/// rounded corners.
+///
+/// One program rather than two. Text is a coverage mask tinted at draw time
+/// and artwork is a picture drawn as it is, and both are "a colour times a
+/// sample" — with a 1x1 white texture standing in when there is no picture, so
+/// a plain rectangle takes the same path as everything else.
+///
+/// The corners are a signed distance to a rounded box, smoothed over one pixel.
+/// `border-radius` is on nearly everything in `ui/style.css` and its absence is
+/// most of why the SDL front end read as a prototype: square corners are what a
+/// debug view looks like.
 const FRAGMENT: &str = r#"
 in vec2 v_uv;
 out vec4 color;
 uniform sampler2D u_texture;
 uniform vec4 u_tint;
+/// Half the quad, in pixels, and how round its corners are. Zero radius is a
+/// plain rectangle and costs one comparison.
+uniform vec2 u_half;
+uniform float u_radius;
+
+float rounded(vec2 p, vec2 half_size, float r) {
+  vec2 q = abs(p) - (half_size - vec2(r));
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
 void main() {
-  color = texture(u_texture, v_uv) * u_tint;
+  vec4 texel = texture(u_texture, v_uv) * u_tint;
+  if (u_radius > 0.0) {
+    vec2 p = (v_uv - 0.5) * 2.0 * u_half;
+    // Smoothed across one pixel, which is what stops a rounded corner looking
+    // like a staircase.
+    texel.a *= 1.0 - smoothstep(-1.0, 1.0, rounded(p, u_half, u_radius));
+  }
+  color = texel;
 }
 "#;
 
@@ -130,6 +159,12 @@ pub struct Gfx {
     vbo: u32,
     u_screen: i32,
     u_tint: i32,
+    u_half: i32,
+    u_radius: i32,
+    /// How round the next quad's corners are, in pixels. Set around a draw
+    /// rather than passed to it, so the twenty call sites that want square
+    /// corners say nothing.
+    radius: std::cell::Cell<f32>,
     /// One white pixel, so a rectangle with no picture on it is the same draw
     /// as one with.
     blank: Texture,
@@ -169,6 +204,9 @@ impl Gfx {
             Ok(Gfx {
                 u_screen: uniform(program, "u_screen"),
                 u_tint: uniform(program, "u_tint"),
+                u_half: uniform(program, "u_half"),
+                u_radius: uniform(program, "u_radius"),
+                radius: std::cell::Cell::new(0.0),
                 program,
                 vao,
                 vbo,
@@ -191,6 +229,18 @@ impl Gfx {
             gl::ClearColor(color.0, color.1, color.2, color.3);
             gl::Clear(gl::COLOR_BUFFER_BIT);
         }
+    }
+
+    /// Round the corners of whatever is drawn inside `body`, by `pixels`.
+    ///
+    /// Scoped rather than a parameter, because a card is a picture inside a
+    /// panel inside a column and all three want the same corner — and because
+    /// every other call site wants none and should not have to say so.
+    pub fn rounded(&self, pixels: f32, body: impl FnOnce()) {
+        let was = self.radius.get();
+        self.radius.set(pixels.max(0.0));
+        body();
+        self.radius.set(was);
     }
 
     /// A filled rectangle, in pixels from the top left.
@@ -259,6 +309,10 @@ impl Gfx {
             gl::UseProgram(self.program);
             gl::Uniform2f(self.u_screen, self.width, self.height);
             gl::Uniform4f(self.u_tint, tint.0, tint.1, tint.2, tint.3);
+            gl::Uniform2f(self.u_half, w / 2.0, h / 2.0);
+            // Never more than half the shorter side, or the corners meet in
+            // the middle and the quad turns into a lozenge.
+            gl::Uniform1f(self.u_radius, self.radius.get().min(w.min(h) / 2.0));
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, texture.id);
             gl::BindVertexArray(self.vao);

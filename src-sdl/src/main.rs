@@ -135,7 +135,11 @@ fn main() -> Result<()> {
 
     // Box art, from the same folder the other front ends fill. Nothing is
     // fetched: what is on disk is drawn and what is not is a flat card.
-    let mut art = covers::Covers::new(config.media_dir(), config.media.list_art.clone());
+    let mut art = covers::Covers::new(
+        config.media_dir(),
+        config.media.list_art.clone(),
+        (config.icons.style.clone(), config.icons.set.clone()),
+    );
 
     // The library, straight out of the metadata cache the other front ends
     // read. Nothing is fetched and nothing is written.
@@ -481,6 +485,15 @@ mod size {
     pub const HEADER: f32 = 38.0;
     /// What the two together take off the top of everything else.
     pub const CHROME: f32 = TABS + HEADER;
+    /// How round a corner is. `ui/style.css` uses 6 to 12 depending on what it
+    /// is; a card is at the top of that range and a small mark at the bottom.
+    pub const ROUND: f32 = 10.0;
+    pub const ROUND_SMALL: f32 = 6.0;
+    /// A console tile in the grid: the machine's picture above, its name and
+    /// count below.
+    pub const TILE: f32 = 190.0;
+    pub const TILE_ART: f32 = 108.0;
+    pub const TILE_CAPTION: f32 = 52.0;
 }
 
 fn draw(
@@ -502,10 +515,10 @@ fn draw(
     let whole = (screen.width_px, screen.height_px);
     let top = size::CHROME;
     let pane = |x: f32, y: f32, w: f32, h: f32, tint| match frosted {
-        Some(glass) => glass.panel(gfx, whole, x, y, w, h, tint),
+        Some(glass) => gfx.rounded(px(size::ROUND), || glass.panel(gfx, whole, x, y, w, h, tint)),
         // No glass on this machine: a flat panel, the same shape and the same
         // colour, that simply does not show what is behind it.
-        None => gfx.rect(x, y, w, h, tint),
+        None => gfx.rounded(px(size::ROUND), || gfx.rect(x, y, w, h, tint)),
     };
 
     let picker_column = panes >= Panes::Two;
@@ -547,7 +560,18 @@ fn draw(
         );
     } else if picker_column || !showing_games {
         let width = if picker_column { size::PICKER } else { screen.width() };
-        draw_consoles(gfx, frosted, painter, lib, screen, &mut hits, width, !showing_games || !picker_column);
+        draw_consoles(
+            gfx,
+            frosted,
+            painter,
+            art,
+            lib,
+            screen,
+            &mut hits,
+            if picker_column { 0.0 } else { size::GAP },
+            width,
+            !showing_games || !picker_column,
+        );
     }
 
     if showing_games {
@@ -601,61 +625,138 @@ fn draw(
     hits
 }
 
-/// The consoles, as a column of names.
+/// The consoles.
+///
+/// A grid of tiles with the machine's own picture on each where there is room,
+/// and a column of names where there is not — which is the handheld, and the
+/// picker column beside the games. The webview draws exactly these two shapes
+/// for exactly that reason.
 #[allow(clippy::too_many_arguments)]
 fn draw_consoles(
     gfx: &Gfx,
     frosted: Option<&glass::Glass>,
     painter: &mut text::Painter,
+    art: &mut covers::Covers,
     lib: &mut library::Library,
     screen: &Viewport,
     hits: &mut Hits,
+    left: f32,
     width: f32,
     focused: bool,
 ) {
     let px = |points: f32| screen.scale.px(points);
-    // Scrolled to keep the cursor on screen. A console list is thirty-five
-    // rows, so this is the whole of the windowing it needs.
+    let whole = (screen.width_px, screen.height_px);
     let top = size::CHROME + size::GAP;
-    let fits = ((screen.height() - top - size::GAP) / size::ROW).floor().max(1.0) as usize;
-    let first = lib.console_at.saturating_sub(fits.saturating_sub(1));
 
-    for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
-        let y = top + (offset - first) as f32 * size::ROW;
-        hits.add(0.0, px(y - 3.0), px(width), px(size::ROW), offset);
-        let on = offset == lib.console_at;
-        if on {
+    // A tile needs room for a picture. Below that it is a list, which is what
+    // the picker column always is.
+    if width < size::TILE * 2.0 + size::GAP {
+        let fits = ((screen.height() - top - size::GAP) / size::ROW).floor().max(1.0) as usize;
+        let first = lib.console_at.saturating_sub(fits.saturating_sub(1));
+        for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
+            let y = top + (offset - first) as f32 * size::ROW;
+            hits.add(px(left), px(y - 3.0), px(width), px(size::ROW), offset);
+            let on = offset == lib.console_at;
             let (hx, hy, hw, hh) = (
-                px(size::GAP / 2.0),
+                px(left + size::GAP / 2.0),
                 px(y - 3.0),
                 px(width - size::GAP),
                 px(size::ROW - 2.0),
             );
-            match (focused, frosted) {
-                // The cursor is a solid colour wherever it is: a highlight you
-                // can see through is one you have to look for.
-                (true, _) => gfx.rect(hx, hy, hw, hh, paint::CURSOR),
-                (false, Some(glass)) => glass.panel(
-                    gfx,
-                    (screen.width_px, screen.height_px),
-                    hx, hy, hw, hh,
-                    paint::CARD,
-                ),
-                (false, None) => gfx.rect(hx, hy, hw, hh, paint::CARD),
-            }
+            gfx.rounded(px(size::ROUND_SMALL), || match (on, focused, frosted) {
+                (true, true, _) => gfx.rect(hx, hy, hw, hh, paint::CURSOR),
+                (true, false, Some(glass)) => glass.panel(gfx, whole, hx, hy, hw, hh, paint::CARD),
+                (true, false, None) => gfx.rect(hx, hy, hw, hh, paint::CARD),
+                _ => {}
+            });
+            let spec = text::Spec::new(&console.name, size::TITLE, screen.scale.factor())
+                .wrapped(width - size::GAP * 3.0 - 40.0, 1);
+            painter.draw(
+                gfx,
+                &spec,
+                px(left + size::GAP),
+                px(y),
+                if on { paint::TEXT } else { paint::DIM },
+            );
+            let count = text::Spec::new(console.games.to_string(), 11.0, screen.scale.factor());
+            let (cw, _) = painter.measure(gfx, &count);
+            painter.draw(
+                gfx,
+                &count,
+                px(left + width - size::GAP) - cw as f32,
+                px(y + 3.0),
+                if on { paint::TEXT } else { paint::FAINT },
+            );
         }
-        let spec = text::Spec::new(&console.name, size::TITLE, screen.scale.factor())
-            .wrapped(width - size::GAP * 3.0 - 40.0, 1);
-        painter.draw(gfx, &spec, px(size::GAP), px(y), if on { paint::TEXT } else { paint::DIM });
+        return;
+    }
 
-        let count = text::Spec::new(console.games.to_string(), 11.0, screen.scale.factor());
-        let (cw, _) = painter.measure(gfx, &count);
+    let columns = (((width + size::GAP) / (size::TILE + size::GAP)).floor() as usize).max(1);
+    lib.relayout(columns);
+    let step = size::TILE_ART + size::TILE_CAPTION + size::GAP;
+    let rows = ((screen.height() - top) / step).ceil().max(1.0) as usize;
+    let first_row = (lib.console_at / columns).saturating_sub(rows.saturating_sub(2));
+
+    for (offset, console) in lib.consoles.iter().enumerate() {
+        let (row, col) = (offset / columns, offset % columns);
+        if row < first_row || row >= first_row + rows {
+            continue;
+        }
+        let x = left + col as f32 * (size::TILE + size::GAP);
+        let y = top + (row - first_row) as f32 * step;
+        let on = offset == lib.console_at;
+        let (tx, ty, tw, th) =
+            (px(x), px(y), px(size::TILE), px(size::TILE_ART + size::TILE_CAPTION));
+        hits.add(tx, ty, tw, th, offset);
+
+        // A pane of glass, with a lit border when the cursor is on it. The
+        // webview lights the border rather than filling the card, so the
+        // machine's picture never sits on a block of colour.
+        gfx.rounded(px(size::ROUND), || {
+            match frosted {
+                Some(glass) => glass.panel(gfx, whole, tx, ty, tw, th, paint::CARD),
+                None => gfx.rect(tx, ty, tw, th, paint::CARD),
+            }
+            if on {
+                outline(gfx, tx, ty, tw, th, px(2.0), paint::CURSOR);
+            }
+        });
+
+        // The machine itself, fitted — a Game Boy is tall and an arcade
+        // cabinet is not.
+        if let Some(picture) = art.console(gfx, &console.slug) {
+            gfx.image_fitted(
+                picture,
+                tx + px(size::GAP),
+                ty + px(size::GAP * 0.6),
+                tw - px(size::GAP * 2.0),
+                px(size::TILE_ART - size::GAP),
+                Rgba::WHITE,
+            );
+        }
+
+        let name = text::Spec::new(&console.name, 13.0, screen.scale.factor())
+            .wrapped(size::TILE - size::GAP * 2.0, 2);
+        painter.draw(
+            gfx,
+            &name,
+            tx + px(size::GAP),
+            ty + px(size::TILE_ART),
+            if on { paint::TEXT } else { paint::DIM },
+        );
+
+        // The count, behind the dot the webview uses to say an emulator is
+        // installed. Green for playable is the same signal in both.
+        let dot = text::Spec::new("●", 9.0, screen.scale.factor());
+        painter.draw(gfx, &dot, tx + px(size::GAP), ty + px(size::TILE_ART + 30.0), paint::HERE);
+        let count =
+            text::Spec::new(format!("{} games", console.games), 11.0, screen.scale.factor());
         painter.draw(
             gfx,
             &count,
-            px(width - size::GAP) - cw as f32,
-            px(y + 3.0),
-            if on { paint::TEXT } else { paint::FAINT },
+            tx + px(size::GAP + 12.0),
+            ty + px(size::TILE_ART + 29.0),
+            paint::FAINT,
         );
     }
 }
@@ -716,6 +817,7 @@ fn draw_games(
 
         let on = i == lib.at;
         let frame = (px(x), px(y), px(size::CARD), px(cover_height));
+        let round = px(size::ROUND_SMALL);
         // The whole card, artwork and caption, is what a pointer is over.
         hits.add(frame.0, frame.1, frame.2, px(cover_height + size::CAPTION), i);
         match art.get(gfx, id, &platform, &stem) {
@@ -729,18 +831,23 @@ fn draw_games(
             // so the grid keeps its shape and a game with no cover is still a
             // thing you can put the cursor on — and it looks like an empty
             // card rather than a hole.
-            None => match frosted {
+            None => gfx.rounded(round, || match frosted {
                 Some(glass) => glass.panel(
                     gfx,
                     (screen.width_px, screen.height_px),
-                    frame.0, frame.1, frame.2, frame.3,
+                    frame.0,
+                    frame.1,
+                    frame.2,
+                    frame.3,
                     paint::CARD,
                 ),
                 None => gfx.rect(frame.0, frame.1, frame.2, frame.3, paint::CARD),
-            },
+            }),
         }
         if on {
-            outline(gfx, frame.0, frame.1, frame.2, frame.3, px(3.0), paint::CURSOR);
+            gfx.rounded(round, || {
+                outline(gfx, frame.0, frame.1, frame.2, frame.3, px(3.0), paint::CURSOR)
+            });
         }
 
         let spec = text::Spec::new(&name, size::LABEL, screen.scale.factor())
@@ -760,7 +867,9 @@ fn draw_games(
         if favourite {
             let star = text::Spec::new("★", 12.0, screen.scale.factor());
             let (w, _) = painter.measure(gfx, &star);
-            gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK);
+            gfx.rounded(px(4.0), || {
+                gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK)
+            });
             painter.draw(gfx, &star, px(mark_x), px(y + 5.0), paint::STAR);
             mark_x += screen.scale.pt(w as f32) + 8.0;
         }
@@ -772,7 +881,9 @@ fn draw_games(
                 if downloaded { ("●", paint::HERE) } else { ("○", paint::AWAY) };
             let mark = text::Spec::new(glyph, 12.0, screen.scale.factor());
             let (w, _) = painter.measure(gfx, &mark);
-            gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK);
+            gfx.rounded(px(4.0), || {
+                gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK)
+            });
             painter.draw(gfx, &mark, px(mark_x), px(y + 5.0), colour);
         }
     }
