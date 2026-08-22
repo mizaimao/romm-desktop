@@ -58,6 +58,26 @@ fn main() -> Result<()> {
     let sdl = sdl2::init().map_err(anyhow::Error::msg).context("starting SDL")?;
     let video = sdl.video().map_err(anyhow::Error::msg).context("opening the display")?;
 
+    // Ask for the context the shader needs, *before* the window is made —
+    // SDL fixes the attributes at creation and there is no changing them
+    // after. Left alone, macOS hands back a legacy 2.1 context and the shader
+    // fails with "version '330' is not supported", which is a true statement
+    // about a context nobody asked for.
+    //
+    // Core 3.3 on a desktop and GLES 3.0 on the handheld: the two dialects the
+    // backdrop is written in, and the only difference between them is the
+    // version line.
+    {
+        let attr = video.gl_attr();
+        if cfg!(any(target_os = "android", target_os = "linux")) {
+            attr.set_context_profile(sdl2::video::GLProfile::GLES);
+            attr.set_context_version(3, 0);
+        } else {
+            attr.set_context_profile(sdl2::video::GLProfile::Core);
+            attr.set_context_version(3, 3);
+        }
+    }
+
     // A GL window if the machine has one, and a plain one if not.
     //
     // Not a nicety: the backdrop is a shader and needs a context, but a

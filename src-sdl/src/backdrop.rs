@@ -188,10 +188,15 @@ impl Backdrop {
             gl::load_with(|name| video.gl_get_proc_address(name) as *const _);
 
             let chosen = style(style_id);
-            let version = version_line();
+            let version = version_line(&reported(gl::SHADING_LANGUAGE_VERSION))?;
             let fragment = format!("{version}\nprecision highp float;\n{HEAD}{}{TAIL}", chosen.body);
             let vertex = format!("{version}\n{VERTEX}");
 
+            println!(
+                "gl: {} · {}",
+                reported(gl::VERSION),
+                reported(gl::SHADING_LANGUAGE_VERSION)
+            );
             let program = link(&vertex, &fragment)?;
 
             // One quad, as two triangles covering the clip volume. The vertex
@@ -284,17 +289,42 @@ impl Drop for Backdrop {
     }
 }
 
-/// The version line, which is the only real difference between the desktop and
-/// the handheld.
+/// The version line, chosen from what the context actually is.
 ///
-/// GLES 3.0 on the device, GL 3.3 on a desktop. Everything below it — the
-/// noise, the ramp, the vignette — is identical, which is the whole reason the
-/// doc calls this the most portable thing in the front end.
-fn version_line() -> &'static str {
-    if cfg!(any(target_os = "android", target_os = "linux")) {
-        "#version 300 es"
-    } else {
-        "#version 330 core"
+/// Asked rather than assumed, because the answer is not the platform's to
+/// give: SDL hands back whatever context it was configured for, and a request
+/// for core 3.3 that was not honoured produces "version '330' is not
+/// supported" — a true statement about a context nobody asked for, and an
+/// unhelpful one.
+///
+/// Everything below this line — the noise, the ramp, the vignette — is
+/// identical in both dialects, which is the whole reason the doc calls this
+/// the most portable thing in the front end.
+fn version_line(shading_language: &str) -> Result<&'static str> {
+    // "OpenGL ES GLSL ES 3.00" or "3.30" / "4.10 Metal - 90".
+    let es = shading_language.contains("ES");
+    let number: f32 = shading_language
+        .split_whitespace()
+        .find_map(|word| word.parse().ok())
+        .unwrap_or(0.0);
+
+    match (es, number) {
+        (true, n) if n >= 3.0 => Ok("#version 300 es"),
+        (false, n) if n >= 3.3 => Ok("#version 330 core"),
+        _ => Err(anyhow!(
+            "this context is GLSL {shading_language:?}, and the backdrop needs \
+             GLSL ES 3.00 or GLSL 3.30 — SDL was asked for one and given another"
+        )),
+    }
+}
+
+unsafe fn reported(name: u32) -> String {
+    unsafe {
+        let raw = gl::GetString(name);
+        if raw.is_null() {
+            return String::new();
+        }
+        std::ffi::CStr::from_ptr(raw as *const _).to_string_lossy().into_owned()
     }
 }
 
@@ -384,6 +414,26 @@ mod tests {
         let fastest = STYLES.iter().map(|s| s.pace).fold(f32::MIN, f32::max);
         let slowest = STYLES.iter().map(|s| s.pace).fold(f32::MAX, f32::min);
         assert!(fastest / slowest > 10.0, "the paces are all the same, so the slider is a lie");
+    }
+
+    /// The version line comes from the context, and the strings are what
+    /// drivers actually report — including Apple's, which puts "Metal" in it.
+    #[test]
+    fn the_shader_version_follows_the_context() {
+        assert_eq!(version_line("OpenGL ES GLSL ES 3.20").unwrap(), "#version 300 es");
+        assert_eq!(version_line("OpenGL ES GLSL ES 3.00").unwrap(), "#version 300 es");
+        assert_eq!(version_line("3.30").unwrap(), "#version 330 core");
+        assert_eq!(version_line("4.10 Metal - 90.1").unwrap(), "#version 330 core");
+    }
+
+    /// The context macOS hands back when nobody asks for a better one. It has
+    /// to say so rather than emit a version line the driver will reject.
+    #[test]
+    fn a_context_too_old_says_which_rather_than_failing_in_the_compiler() {
+        for old in ["1.20", "OpenGL ES GLSL ES 1.00", ""] {
+            let err = version_line(old).unwrap_err().to_string();
+            assert!(err.contains("GLSL"), "{old:?} gave an unhelpful message: {err}");
+        }
     }
 
     #[test]
