@@ -1,5 +1,62 @@
 # What the app weighs, and why
 
+> **Read this section first.** Everything below it was written on a premise
+> that turned out to be false, and is kept only so the mistake is legible.
+
+## The premise was wrong: a picture does not cost four bytes a pixel
+
+Measured 2026-08-22, directly, with no UI in the way. Sixty of Frank's own
+1,280x960 arcade miximages put on screen at 150x110 through the asset
+protocol, and the process weighed before and after:
+
+| | |
+|---|---|
+| app with an empty overlay | 228.3 MB |
+| the same, with 60 full-size pictures on it | 256.6 MB |
+
+**28 MB for sixty pictures. Under half a megabyte each.**
+
+Every calculation in this file before today assumed 1,280 x 960 x 4 =
+4.9 MB apiece. That is what the *file* would cost decoded at full size, and
+WebKit does not decode it at full size. It subsamples at decode time to
+something near the size the picture is drawn — 150x110 at 2x is 66,000
+pixels, and 0.26 MB is exactly four bytes of that. The measurement lands at
+0.48 MB, the same order.
+
+So WebKit already does the thing the Android libraries do with `inSampleSize`
+and QML does with `sourceSize`. **Decoding at draw size is not an optimisation
+available to us. It is already happening.**
+
+Frank said the arithmetic could not work, and it could not:
+
+> I strongly disaggree with your testing results. Showing fewer images eat the
+> same amount of ram this is mathmatically impossible.
+
+He was right twice over. Showing fewer pictures does use less memory — about
+half a megabyte less each. And that is far too little to explain a 400 MB
+arcade screen, which means **the artwork is not where the memory goes** and
+every optimisation proposed in this file was aimed at the wrong thing.
+
+Where it does go is not yet known. Ninety cards of artwork is around 40 MB of
+the roughly 200 MB that opening the arcade console adds. The other 160 MB is
+unaccounted for and is the only thing worth measuring next.
+
+## A burst of asset requests wedges the page
+
+Found on the way. Sixty `<img>` pointed at `asset://` URLs *at once* never
+load and never fail: no `onload`, no `onerror`, nothing in two minutes, and
+the process sits perfectly still. The same sixty loaded one after another all
+succeed, every time.
+
+`flushCovers` sets up to forty `src`s in a single pass. That is very likely
+the same burst, and very likely why three attempts to open the arcade console
+from a script froze the page — and worth holding against "it feels slow and
+laggy when browsing platform games", which has been an open complaint since
+`docs/parked.md` §14 and was never explained.
+
+This is a real bug and it outranks anything about memory.
+
+
 Measured on 2026-08-22, on Frank's Mac, against his own library — 24 consoles,
 2,504 arcade games, `list_art = "miximages"`. Numbers are macOS *physical
 footprint*, which is what Activity Monitor's Memory column shows; RSS

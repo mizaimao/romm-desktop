@@ -331,3 +331,41 @@ clean them up: they are the user's files, in the user's RetroArch directory,
 and a frontend that edits those has broken the promise the README makes. A
 "three files are fighting your settings — remove them?" prompt would be the
 honest version, and it is not built.
+
+## 21. Push the core assignments to a card
+
+The app knows which core runs what — `[cores.overrides]` for ten platforms and
+`data/arcade-core-map.toml` for 154 arcade romsets, the latter measured by
+launching every set headless rather than chosen. None of it reaches a handheld.
+Copying games to a card gets the files across and leaves the emulator choices
+behind, so the same romset that the app runs on `mame2003_plus` launches on the
+card's default core and fails.
+
+Done by hand on 2026-08-22 for a Retroid Pocket Mini V2 card: 118 `<altemulator>`
+tags added to `arcade/gamelist.xml`, plus per-system `<alternativeEmulator>` for
+psx, nds and mame. Zero conflicts against the 36 already set — where both the app
+and the card had an opinion they agreed, which is the argument for making this
+automatic rather than remembered.
+
+What it needs:
+
+* **A target abstraction.** Three firmwares, three conventions. ES-DE wants
+  `<altemulator>LABEL</altemulator>` per game and `<alternativeEmulator><label>`
+  per system, both in `gamelist.xml`. spruceOS reads `default_emulator` from
+  `Emu/<SYS>/config.json` and has no per-game mechanism at all. NextUI has
+  neither — the folder tag *is* the emulator. So the same table has to render
+  three ways, and one target cannot express it.
+* **A core-id to label map.** The app stores libretro ids (`mame2003_plus`,
+  `swanstation`); ES-DE stores display labels (`MAME 2003-Plus`, `SwanStation`).
+  The arcade labels were read off a real card, `SwanStation` and `melonDS DS`
+  were inferred and are unverified — a wrong label fails silently by falling
+  back to the system default, which is the worst failure mode available.
+* **A direction decision.** A card can carry overrides the app has never heard
+  of, set by hand on the device. On 2026-08-22 six of those were discarded to
+  make the card mirror the app. Harvesting them back into
+  `data/arcade-core-map.toml` is the better default and was not what was asked
+  for that time.
+
+Related: `docs/handheld-frontend.md` for the wider "one library, many cards"
+problem, and `tools/stage_arkos_card.py` / `tools/stage_spruce_card.py`, which
+already carry per-firmware layout knowledge this would extend.
