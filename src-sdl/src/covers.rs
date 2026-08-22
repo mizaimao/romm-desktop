@@ -9,10 +9,9 @@
 // count of bytes: every card on screen is the same size, so a texture is the
 // same size as its neighbours and counting them is counting memory.
 
+use crate::gfx::{Gfx, Texture};
 use romm_desktop::media;
-use sdl2::image::LoadTexture;
-use sdl2::render::{Texture, TextureCreator};
-use sdl2::video::WindowContext;
+use sdl2::image::LoadSurface;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -35,12 +34,11 @@ enum State {
     None,
 }
 
-pub struct Covers<'a> {
-    creator: &'a TextureCreator<WindowContext>,
+pub struct Covers {
     media_root: PathBuf,
     /// Which artwork to prefer, from `[media] list_art`.
     look: String,
-    held: HashMap<i64, Texture<'a>>,
+    held: HashMap<i64, Texture>,
     known: HashMap<i64, State>,
     /// The order things were asked for, oldest first. A plain queue rather
     /// than a proper LRU: what is asked for is what is on screen, so the
@@ -48,10 +46,9 @@ pub struct Covers<'a> {
     order: Vec<i64>,
 }
 
-impl<'a> Covers<'a> {
-    pub fn new(creator: &'a TextureCreator<WindowContext>, media_root: PathBuf, look: String) -> Self {
+impl Covers {
+    pub fn new(media_root: PathBuf, look: String) -> Self {
         Covers {
-            creator,
             media_root,
             look,
             held: HashMap::new(),
@@ -68,7 +65,7 @@ impl<'a> Covers<'a> {
     ///
     /// `stem` is the ROM's filename without its extension, which is what the
     /// artwork is named after — see `media::local_art`.
-    pub fn get(&mut self, id: i64, platform: &str, stem: &str) -> Option<&Texture<'a>> {
+    pub fn get(&mut self, gfx: &Gfx, id: i64, platform: &str, stem: &str) -> Option<&Texture> {
         match self.known.get(&id) {
             Some(State::None) => return None,
             Some(State::Ready) => {
@@ -86,7 +83,7 @@ impl<'a> Covers<'a> {
             self.known.insert(id, State::None);
             return None;
         };
-        match self.load(&path) {
+        match self.load(gfx, &path) {
             Some(texture) => {
                 self.make_room();
                 self.held.insert(id, texture);
@@ -104,8 +101,26 @@ impl<'a> Covers<'a> {
         }
     }
 
-    fn load(&self, path: &Path) -> Option<Texture<'a>> {
-        self.creator.load_texture(path).ok()
+    /// Read the file and hand its pixels to the GPU.
+    ///
+    /// SDL_image decodes — it is already a package on the handheld and knows
+    /// every format a scraper produces — but the texture is ours, on our
+    /// context. `into_rgba` because a decoder returns whatever the file was,
+    /// and the uploader wants one layout.
+    fn load(&self, gfx: &Gfx, path: &Path) -> Option<Texture> {
+        let surface = sdl2::surface::Surface::from_file(path).ok()?;
+        let rgba = surface.convert_format(sdl2::pixels::PixelFormatEnum::ABGR8888).ok()?;
+        let (w, h) = (rgba.width(), rgba.height());
+        let pitch = rgba.pitch() as usize;
+        let bytes = rgba.without_lock()?;
+        // Rows can be padded. Copied tightly, because the uploader is told
+        // rows are not.
+        let mut tight = Vec::with_capacity(w as usize * h as usize * 4);
+        for row in 0..h as usize {
+            let from = row * pitch;
+            tight.extend_from_slice(&bytes[from..from + w as usize * 4]);
+        }
+        Some(gfx.upload_rgba(w, h, &tight))
     }
 
     /// Drop the oldest until there is room for one more.

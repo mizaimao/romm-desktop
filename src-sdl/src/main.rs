@@ -21,13 +21,14 @@
 
 use anyhow::{Context, Result};
 use romm_desktop::layout::{Panes, Scale, Viewport};
+use crate::gfx::{Gfx, Rgba};
 use romm_desktop::{binds, padpoll, rowwindow};
 use sdl2::event::{Event, WindowEvent};
-use sdl2::rect::Rect;
 use std::collections::BTreeSet;
 
 mod backdrop;
 mod covers;
+mod gfx;
 mod input;
 mod library;
 mod text;
@@ -78,57 +79,31 @@ fn main() -> Result<()> {
         }
     }
 
-    // A GL window if the machine has one, and a plain one if not.
-    //
-    // Not a nicety: the backdrop is a shader and needs a context, but a
-    // library is more use than a gradient. A headless machine, a remote
-    // session, a driver that will not — all of them still get the app, just
-    // without the moving picture behind it.
-    let mut with_gl = true;
-    let window = open_window(&video, true)
-        .or_else(|e| {
-            eprintln!("no OpenGL here ({e}); the backdrop will be a flat colour");
-            with_gl = false;
-            open_window(&video, false)
-        })
-        .map_err(anyhow::Error::msg)
-        .context("opening a window")?;
+    let window = open_window(&video).map_err(anyhow::Error::msg).context("opening a window")?;
 
     // The config, read once. Everything the front end needs from it is settled
     // before the first frame; nothing below re-reads a file.
     let config = romm_desktop::config::Config::load().unwrap_or_default();
     let held_at = config.appearance.viewing_distance_cm.unwrap_or(DESK_CM);
 
-    // The renderer has to be the GL one, because the backdrop is a shader and
-    // needs a context to live in. SDL picks Metal first on macOS and would
-    // hand back one we cannot draw into.
-    //
-    // Set only once the GL window has actually been made. `render::drivers()`
-    // lists what SDL was *built* with, not what the running video driver can
-    // do, so asking it first says "opengl" even under the dummy driver — and
-    // forcing it there leaves SDL unable to make any renderer at all, so the
-    // app fails to start rather than starting without a backdrop.
-    if with_gl {
-        sdl2::hint::set("SDL_RENDER_DRIVER", "opengl");
-    }
+    // The context, ours. Everything below draws through it.
+    let _context = window
+        .gl_create_context()
+        .map_err(anyhow::Error::msg)
+        .context("creating an OpenGL context")?;
+    window.gl_set_context_to_current().map_err(anyhow::Error::msg)?;
+    let mut gfx = unsafe { Gfx::new(&video) }.context("setting up the renderer")?;
+    println!(
+        "gl: {} · {}",
+        unsafe { gfx::reported(gl::VERSION) },
+        unsafe { gfx::reported(gl::SHADING_LANGUAGE_VERSION) }
+    );
+    // Vertical sync, so a menu does not run the fan up.
+    let _ = video.gl_set_swap_interval(sdl2::video::SwapInterval::VSync);
 
     let display = window.display_index().unwrap_or(0);
     let mut scale = scale_for(&video, display, held_at);
-    // Accelerated where there is acceleration, and software where there is
-    // not. Insisting on the first is how a machine that could have run this
-    // slowly instead runs it not at all.
-    let mut canvas = window
-        .clone()
-        .into_canvas()
-        .accelerated()
-        .build()
-        .or_else(|_| window.into_canvas().software().build())
-        .context("getting a renderer")?;
-
-    // The texture creator outlives everything drawn from it, which is what
-    // lets rendered labels be kept as textures rather than rebuilt per frame.
-    let creator = canvas.texture_creator();
-    let mut painter = text::Painter::new(&creator).context("finding fonts")?;
+    let mut painter = text::Painter::new().context("finding fonts")?;
     check_fonts(&mut painter);
 
     // The shader backdrop, underneath everything. Built after the renderer, so
@@ -136,11 +111,7 @@ fn main() -> Result<()> {
     //
     // Not fatal: a machine whose driver will not compile it still gets a
     // library, and the message says why rather than the window being black.
-    let backdrop = match if with_gl {
-        unsafe { backdrop::Backdrop::build(&video, "blobs") }
-    } else {
-        Err(anyhow::anyhow!("no GL context"))
-    } {
+    let backdrop = match unsafe { backdrop::Backdrop::build(&video, "blobs") } {
         Ok(b) => {
             println!("backdrop: {}", b.style_label());
             Some(b)
@@ -153,11 +124,7 @@ fn main() -> Result<()> {
 
     // Box art, from the same folder the other front ends fill. Nothing is
     // fetched: what is on disk is drawn and what is not is a flat card.
-    let mut art = covers::Covers::new(
-        &creator,
-        config.media_dir(),
-        config.media.list_art.clone(),
-    );
+    let mut art = covers::Covers::new(config.media_dir(), config.media.list_art.clone());
 
     // The library, straight out of the metadata cache the other front ends
     // read. Nothing is fetched and nothing is written.
@@ -171,7 +138,7 @@ fn main() -> Result<()> {
     }
     println!("{} consoles", lib.consoles.len());
 
-    let mut screen = viewport(&canvas, scale);
+    let mut screen = viewport(&window, scale);
     say_where_we_are(&screen);
 
     // The bindings the desktop app writes. Resolved once — the loop below runs
@@ -199,9 +166,9 @@ fn main() -> Result<()> {
                     // Moved as well as resized: dragging a window between a
                     // retina display and a plain one changes the scale
                     // without changing the size in points.
-                    let on = canvas.window().display_index().unwrap_or(0);
+                    let on = window.display_index().unwrap_or(0);
                     scale = scale_for(&video, on, held_at);
-                    screen = viewport(&canvas, scale);
+                    screen = viewport(&window, scale);
                     say_where_we_are(&screen);
                 }
                 Event::KeyDown { keycode: Some(key), repeat: false, .. } => {
@@ -243,38 +210,30 @@ fn main() -> Result<()> {
         // top of it. `RenderFlush` is what keeps the two apart: the renderer
         // batches, and our GL calls landing in the middle of a batch it has
         // not issued yet would leave its state describing something else.
-        canvas.set_draw_color(paint::BACKGROUND);
-        canvas.clear();
+        gfx.resize(screen.width_px, screen.height_px);
+        gfx.clear(paint::BACKGROUND);
+        // The backdrop fills the frame, then the interface goes on top of it.
+        // One context, in one order, with nothing batching behind our back.
         if let Some(backdrop) = &backdrop {
-            // The clear above is *queued*, not done. SDL batches its drawing
-            // and issues it at `present`, so without this our quad goes down
-            // first and the clear lands on top of it — a backdrop that runs
-            // perfectly and is painted over every frame, which is exactly what
-            // it did.
-            unsafe {
-                canvas.render_flush();
-                backdrop.draw(screen.width_px, screen.height_px, now as f32 / 1000.0);
-            }
+            unsafe { backdrop.draw(screen.width_px, screen.height_px, now as f32 / 1000.0) };
         }
-        draw(&mut canvas, &mut painter, &mut art, &mut lib, &screen);
-        canvas.present();
+        draw(&gfx, &mut painter, &mut art, &mut lib, &screen);
+        window.gl_swap_window();
     }
     Ok(())
 }
 
-/// A window, with or without a GL context behind it.
-fn open_window(video: &sdl2::VideoSubsystem, gl: bool) -> Result<sdl2::video::Window, String> {
-    let mut builder = video.window("RomM", POCKET.0, POCKET.1);
-    builder
+fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, String> {
+    video
+        .window("RomM", POCKET.0, POCKET.1)
         .position_centered()
         .resizable()
         // Retina and the like. Without this the window is described in points
         // by the platform and drawn at half the resolution it could be.
-        .allow_highdpi();
-    if gl {
-        builder.opengl();
-    }
-    builder.build().map_err(|e| e.to_string())
+        .allow_highdpi()
+        .opengl()
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 /// Milliseconds since SDL started, which is what `padpoll` counts in.
@@ -291,8 +250,8 @@ fn ticks(timer: &sdl2::TimerSubsystem) -> f64 {
 ///
 /// The *drawable* size, not the window size: on a retina display those differ
 /// by the backing scale, and the drawable is the one with pixels in it.
-fn viewport(canvas: &sdl2::render::WindowCanvas, scale: Scale) -> Viewport {
-    let (w, h) = canvas.output_size().unwrap_or((POCKET.0, POCKET.1));
+fn viewport(window: &sdl2::video::Window, scale: Scale) -> Viewport {
+    let (w, h) = window.drawable_size();
     Viewport::new(w as f32, h as f32, scale)
 }
 
@@ -393,15 +352,15 @@ fn act(lib: &mut library::Library, action: &str) {
 /// the drawing, because the next phase is the glass and it will want to talk
 /// about these by name.
 mod paint {
-    use sdl2::pixels::Color;
+    use crate::gfx::Rgba;
 
-    pub const BACKGROUND: Color = Color::RGB(18, 18, 22);
-    pub const COLUMN: Color = Color::RGB(26, 26, 32);
-    pub const CARD: Color = Color::RGB(44, 44, 54);
-    pub const CURSOR: Color = Color::RGB(90, 130, 190);
-    pub const TEXT: Color = Color::RGB(228, 230, 238);
-    pub const DIM: Color = Color::RGB(140, 142, 152);
-    pub const FAINT: Color = Color::RGB(96, 98, 108);
+    pub const BACKGROUND: Rgba = Rgba::rgb(18, 18, 22);
+    pub const COLUMN: Rgba = Rgba(0.10, 0.10, 0.13, 0.55);
+    pub const CARD: Rgba = Rgba(0.17, 0.17, 0.21, 0.75);
+    pub const CURSOR: Rgba = Rgba::rgb(90, 130, 190);
+    pub const TEXT: Rgba = Rgba::rgb(228, 230, 238);
+    pub const DIM: Rgba = Rgba::rgb(140, 142, 152);
+    pub const FAINT: Rgba = Rgba::rgb(96, 98, 108);
 }
 
 /// The sizes, in points. Nothing here is a pixel.
@@ -420,7 +379,7 @@ mod size {
 }
 
 fn draw(
-    canvas: &mut sdl2::render::WindowCanvas,
+    gfx: &Gfx,
     painter: &mut text::Painter,
     art: &mut covers::Covers,
     lib: &mut library::Library,
@@ -437,14 +396,12 @@ fn draw(
     let picker_column = panes >= Panes::Two;
     let mut left = 0.0;
     if picker_column {
-        canvas.set_draw_color(paint::COLUMN);
-        fill(canvas, 0.0, 0.0, px(size::PICKER), screen.height_px);
+                gfx.rect(0.0, 0.0, px(size::PICKER), screen.height_px, paint::COLUMN);
         left = size::PICKER + size::GAP;
     }
     let mut right = screen.width();
     if panes == Panes::Three {
-        canvas.set_draw_color(paint::COLUMN);
-        fill(canvas, px(screen.width() - size::ASIDE), 0.0, px(size::ASIDE), screen.height_px);
+                gfx.rect(px(screen.width() - size::ASIDE), 0.0, px(size::ASIDE), screen.height_px, paint::COLUMN);
         right = screen.width() - size::ASIDE - size::GAP;
     }
 
@@ -458,9 +415,9 @@ fn draw(
             screen.scale.factor(),
         )
         .wrapped(screen.width() - size::GAP * 4.0, 2);
-        let (w, h) = painter.measure(&spec);
+        let (w, h) = painter.measure(gfx, &spec);
         painter.draw(
-            canvas,
+            gfx,
             &spec,
             (screen.width_px - w as f32) / 2.0,
             (screen.height_px - h as f32) / 2.0,
@@ -468,14 +425,14 @@ fn draw(
         );
     } else if picker_column || !showing_games {
         let width = if picker_column { size::PICKER } else { screen.width() };
-        draw_consoles(canvas, painter, lib, screen, width, !showing_games || !picker_column);
+        draw_consoles(gfx, painter, lib, screen, width, !showing_games || !picker_column);
     }
 
     if showing_games {
         let middle = (right - left - size::GAP).max(0.0);
         let columns = (((middle + size::GAP) / (size::CARD + size::GAP)).floor() as usize).max(1);
         lib.relayout(columns);
-        draw_games(canvas, painter, art, lib, screen, left, columns);
+        draw_games(gfx, painter, art, lib, screen, left, columns);
     }
 
     // What the window thinks it is. On screen rather than in the terminal
@@ -501,16 +458,16 @@ fn draw(
     // rather than one waiting to be told which console.
     let hint = if showing_games { "Esc back · s sort · f filter" } else { "Enter opens a console" };
     let spec = text::Spec::new(hint, 11.0, screen.scale.factor());
-    painter.draw(canvas, &spec, px(size::GAP), screen.height_px - px(size::GAP + 14.0), paint::FAINT);
+    painter.draw(gfx, &spec, px(size::GAP), screen.height_px - px(size::GAP + 14.0), paint::FAINT);
 
     if let Some(row) = lib.selected() {
         let name = text::Spec::new(&row.name, 12.0, screen.scale.factor());
-        painter.draw(canvas, &name, px(size::GAP), screen.height_px - px(size::GAP + 30.0), paint::DIM);
+        painter.draw(gfx, &name, px(size::GAP), screen.height_px - px(size::GAP + 30.0), paint::DIM);
     }
     let spec = text::Spec::new(readout, 11.0, screen.scale.factor());
-    let (w, h) = painter.measure(&spec);
+    let (w, h) = painter.measure(gfx, &spec);
     painter.draw(
-        canvas,
+        gfx,
         &spec,
         screen.width_px - w as f32 - px(size::GAP),
         screen.height_px - h as f32 - px(size::GAP),
@@ -520,7 +477,7 @@ fn draw(
 
 /// The consoles, as a column of names.
 fn draw_consoles(
-    canvas: &mut sdl2::render::WindowCanvas,
+    gfx: &Gfx,
     painter: &mut text::Painter,
     lib: &mut library::Library,
     screen: &Viewport,
@@ -537,17 +494,22 @@ fn draw_consoles(
         let y = size::GAP + (offset - first) as f32 * size::ROW;
         let on = offset == lib.console_at;
         if on {
-            canvas.set_draw_color(if focused { paint::CURSOR } else { paint::CARD });
-            fill(canvas, px(size::GAP / 2.0), px(y - 3.0), px(width - size::GAP), px(size::ROW - 2.0));
+            gfx.rect(
+                px(size::GAP / 2.0),
+                px(y - 3.0),
+                px(width - size::GAP),
+                px(size::ROW - 2.0),
+                if focused { paint::CURSOR } else { paint::CARD },
+            );
         }
         let spec = text::Spec::new(&console.name, size::TITLE, screen.scale.factor())
             .wrapped(width - size::GAP * 3.0 - 40.0, 1);
-        painter.draw(canvas, &spec, px(size::GAP), px(y), if on { paint::TEXT } else { paint::DIM });
+        painter.draw(gfx, &spec, px(size::GAP), px(y), if on { paint::TEXT } else { paint::DIM });
 
         let count = text::Spec::new(console.games.to_string(), 11.0, screen.scale.factor());
-        let (cw, _) = painter.measure(&count);
+        let (cw, _) = painter.measure(gfx, &count);
         painter.draw(
-            canvas,
+            gfx,
             &count,
             px(width - size::GAP) - cw as f32,
             px(y + 3.0),
@@ -558,7 +520,7 @@ fn draw_consoles(
 
 /// One console's games, as covers with their names under them.
 fn draw_games(
-    canvas: &mut sdl2::render::WindowCanvas,
+    gfx: &Gfx,
     painter: &mut text::Painter,
     art: &mut covers::Covers,
     lib: &mut library::Library,
@@ -602,31 +564,21 @@ fn draw_games(
 
         let on = i == lib.at;
         let frame = (px(x), px(y), px(size::CARD), px(size::ART));
-        match art.get(id, &platform, &stem) {
-            Some(cover) => {
-                let _ = canvas.copy(
-                    cover,
-                    None,
-                    Rect::new(frame.0 as i32, frame.1 as i32, frame.2 as u32, frame.3 as u32),
-                );
-            }
+        match art.get(gfx, id, &platform, &stem) {
+            Some(cover) => gfx.image(cover, frame.0, frame.1, frame.2, frame.3, Rgba::WHITE),
             // No artwork on this machine. A flat card rather than nothing, so
             // the grid keeps its shape and a game with no cover is still a
             // thing you can put the cursor on.
-            None => {
-                canvas.set_draw_color(paint::CARD);
-                fill(canvas, frame.0, frame.1, frame.2, frame.3);
-            }
+            None => gfx.rect(frame.0, frame.1, frame.2, frame.3, paint::CARD),
         }
         if on {
-            canvas.set_draw_color(paint::CURSOR);
-            outline(canvas, frame.0, frame.1, frame.2, frame.3, px(3.0));
+            outline(gfx, frame.0, frame.1, frame.2, frame.3, px(3.0), paint::CURSOR);
         }
 
         let spec = text::Spec::new(&name, size::LABEL, screen.scale.factor())
             .wrapped(size::CARD, 2);
         painter.draw(
-            canvas,
+            gfx,
             &spec,
             px(x),
             px(y + size::ART + 4.0),
@@ -634,22 +586,18 @@ fn draw_games(
         );
         if favourite {
             let star = text::Spec::new("★", 11.0, screen.scale.factor());
-            painter.draw(canvas, &star, px(x + 4.0), px(y + 4.0), paint::TEXT);
+            painter.draw(gfx, &star, px(x + 4.0), px(y + 4.0), paint::TEXT);
         }
     }
 }
 
 /// A border, as four filled edges. SDL draws a one-pixel rectangle and the
 /// cursor needs to be visible against artwork.
-fn outline(canvas: &mut sdl2::render::WindowCanvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
-    fill(canvas, x, y, w, t);
-    fill(canvas, x, y + h - t, w, t);
-    fill(canvas, x, y, t, h);
-    fill(canvas, x + w - t, y, t, h);
-}
-
-fn fill(canvas: &mut sdl2::render::WindowCanvas, x: f32, y: f32, w: f32, h: f32) {
-    let _ = canvas.fill_rect(Rect::new(x as i32, y as i32, w.max(0.0) as u32, h.max(0.0) as u32));
+fn outline(gfx: &Gfx, x: f32, y: f32, w: f32, h: f32, t: f32, color: Rgba) {
+    gfx.rect(x, y, w, t, color);
+    gfx.rect(x, y + h - t, w, t, color);
+    gfx.rect(x, y, t, h, color);
+    gfx.rect(x + w - t, y, t, h, color);
 }
 
 /// Unused for now, and kept honest: the tables this front end resolves through

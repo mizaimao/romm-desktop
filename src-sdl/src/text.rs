@@ -24,10 +24,7 @@
 use anyhow::Result;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap};
 use romm_desktop::script::{self, Script};
-use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::rect::Rect;
-use sdl2::render::{BlendMode, Texture, TextureCreator, WindowCanvas};
-use sdl2::video::WindowContext;
+use crate::gfx::{Gfx, Rgba, Texture};
 use std::collections::{BTreeMap, HashMap};
 
 /// What a rendered piece of text is asked for.
@@ -441,14 +438,13 @@ fn blit(page: &mut [u8], w: u32, h: u32, x: i32, y: i32, image: &cosmic_text::Sw
 /// The texture is white with the coverage as its alpha, tinted at draw time.
 /// One raster then serves a name however it is coloured — dim in the metadata
 /// line, bright under the cursor — instead of one per colour.
-pub struct Painter<'a> {
+pub struct Painter {
     fonts: Fonts,
-    creator: &'a TextureCreator<WindowContext>,
-    cache: HashMap<Spec, Drawn<'a>>,
+    cache: HashMap<Spec, Drawn>,
 }
 
-struct Drawn<'a> {
-    texture: Texture<'a>,
+struct Drawn {
+    texture: Texture,
     width: u32,
     height: u32,
 }
@@ -458,19 +454,13 @@ struct Drawn<'a> {
 /// grow without limit before that exists.
 const CACHE_LIMIT: usize = 512;
 
-impl<'a> Painter<'a> {
-    pub fn new(creator: &'a TextureCreator<WindowContext>) -> Result<Self> {
-        Ok(Painter { fonts: Fonts::load()?, creator, cache: HashMap::new() })
+impl Painter {
+    pub fn new() -> Result<Self> {
+        Ok(Painter { fonts: Fonts::load()?, cache: HashMap::new() })
     }
 
     pub fn faces(&self) -> usize {
         self.fonts.faces()
-    }
-
-    /// How big this text comes out, in pixels, without drawing it.
-    pub fn measure(&mut self, spec: &Spec) -> (u32, u32) {
-        let drawn = self.entry(spec);
-        (drawn.width, drawn.height)
     }
 
     /// The family this string asked for, or `None` where covering the script
@@ -486,68 +476,44 @@ impl<'a> Painter<'a> {
     }
 
     /// Whether anything installed can draw this string.
-    ///
-    /// Worth asking at startup on a machine we did not build. A library with
-    /// Japanese titles on a machine with no CJK face draws rows of empty
-    /// boxes, and nothing about that looks like a missing font — it looks like
-    /// the names are wrong.
     pub fn can_draw(&mut self, text: &str) -> bool {
         self.fonts.can_draw(text)
     }
 
     /// Lay a label out and say whether it had to be cut to fit.
-    ///
-    /// The full name is what a detail pane shows when the card's is cut, and
-    /// knowing which those are is how the cut is judged while it is being
-    /// tuned.
     pub fn is_clipped(&mut self, spec: &Spec) -> bool {
         self.fonts.render(spec).clipped
     }
 
-    /// Draw it, with its top-left corner at `x`, `y` in pixels.
-    pub fn draw(
-        &mut self,
-        canvas: &mut WindowCanvas,
-        spec: &Spec,
-        x: f32,
-        y: f32,
-        color: Color,
-    ) {
-        let (w, h) = {
-            let drawn = self.entry(spec);
-            (drawn.width, drawn.height)
-        };
-        let Some(drawn) = self.cache.get_mut(spec) else { return };
-        drawn.texture.set_color_mod(color.r, color.g, color.b);
-        drawn.texture.set_alpha_mod(color.a);
-        let _ = canvas.copy(&drawn.texture, None, Rect::new(x as i32, y as i32, w, h));
+    /// How big this text comes out, in pixels, without drawing it.
+    pub fn measure(&mut self, gfx: &Gfx, spec: &Spec) -> (u32, u32) {
+        let drawn = self.entry(gfx, spec);
+        (drawn.width, drawn.height)
     }
 
-    fn entry(&mut self, spec: &Spec) -> &Drawn<'a> {
+    /// Draw it, with its top-left corner at `x`, `y` in pixels.
+    pub fn draw(&mut self, gfx: &Gfx, spec: &Spec, x: f32, y: f32, color: Rgba) {
+        let (w, h) = {
+            let drawn = self.entry(gfx, spec);
+            (drawn.width, drawn.height)
+        };
+        let Some(drawn) = self.cache.get(spec) else { return };
+        gfx.image(&drawn.texture, x, y, w as f32, h as f32, color);
+    }
+
+    fn entry(&mut self, gfx: &Gfx, spec: &Spec) -> &Drawn {
         if !self.cache.contains_key(spec) {
             if self.cache.len() >= CACHE_LIMIT {
                 self.cache.clear();
             }
             let raster = self.fonts.render(spec);
-            let drawn = self.upload(&raster);
-            self.cache.insert(spec.clone(), drawn);
+            let texture = gfx.upload_coverage(raster.width, raster.height, &raster.coverage);
+            self.cache.insert(
+                spec.clone(),
+                Drawn { texture, width: raster.width, height: raster.height },
+            );
         }
         &self.cache[spec]
-    }
-
-    fn upload(&self, raster: &Raster) -> Drawn<'a> {
-        let mut texture = self
-            .creator
-            .create_texture_static(PixelFormatEnum::ARGB8888, raster.width, raster.height)
-            .expect("a texture the size of one label");
-        // White, with the coverage as alpha. Tinted at draw time.
-        let mut rgba = Vec::with_capacity(raster.coverage.len() * 4);
-        for &value in &raster.coverage {
-            rgba.extend_from_slice(&[255, 255, 255, value]);
-        }
-        let _ = texture.update(None, &rgba, raster.width as usize * 4);
-        texture.set_blend_mode(BlendMode::Blend);
-        Drawn { texture, width: raster.width, height: raster.height }
     }
 }
 
