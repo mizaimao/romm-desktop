@@ -15,6 +15,7 @@
 // actually needs.
 
 use anyhow::{Context, Result, anyhow};
+use romm_desktop::layout::Rect;
 use std::ffi::CString;
 
 /// The vertex shader: a quad in points, and where on a texture each corner
@@ -248,17 +249,28 @@ impl Gfx {
         self.quad(&self.blank, x, y, w, h, color);
     }
 
-    /// An image, whole, inside a box, keeping its own shape.
+    /// The same, taking a box the layout worked out.
     ///
-    /// Letterboxed rather than stretched: box art is 0.58 for a PSP UMD case
-    /// and 1.37 for a SNES box, and a card sized for one squashes the other.
-    /// The grid stays regular — the *slot* is the same everywhere — and what
-    /// goes in it is not distorted.
-    pub fn image_fitted(&self, texture: &Texture, x: f32, y: f32, w: f32, h: f32, tint: Rgba) {
-        let (iw, ih) = (texture.width.max(1) as f32, texture.height.max(1) as f32);
-        let scale = (w / iw).min(h / ih);
-        let (dw, dh) = (iw * scale, ih * scale);
-        self.image(texture, x + (w - dw) / 2.0, y + (h - dh) / 2.0, dw, dh, tint);
+    /// Everything a view draws should come through one of these rather than
+    /// four numbers it added up itself.
+    pub fn fill(&self, r: Rect, color: Rgba) {
+        self.quad(&self.blank, r.x, r.y, r.w, r.h, color);
+    }
+
+    /// A picture, filling the box and keeping its own shape.
+    pub fn picture(&self, texture: &Texture, r: Rect, tint: Rgba) {
+        let fitted = r.fit(texture.width.max(1) as f32 / texture.height.max(1) as f32);
+        self.quad(texture, fitted.x, fitted.y, fitted.w, fitted.h, tint);
+    }
+
+    /// A border, as four filled edges — a cursor has to be visible against
+    /// artwork, and a one-pixel line is not.
+    pub fn outline(&self, r: Rect, thickness: f32, color: Rgba) {
+        let t = thickness.min(r.w / 2.0).min(r.h / 2.0);
+        self.fill(Rect::new(r.x, r.y, r.w, t), color);
+        self.fill(Rect::new(r.x, r.bottom() - t, r.w, t), color);
+        self.fill(Rect::new(r.x, r.y, t, r.h), color);
+        self.fill(Rect::new(r.right() - t, r.y, t, r.h), color);
     }
 
     /// An image, stretched to fit.

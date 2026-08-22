@@ -179,6 +179,239 @@ impl Panes {
     }
 }
 
+/// A box, in points, measured from the top left.
+///
+/// Everything a view places is one of these, and nothing computes a position
+/// by adding gaps to offsets — that is what this file exists to stop. A
+/// hand-placed interface is one where every new element costs ten lines of
+/// arithmetic and every change to a margin costs twenty.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Space around the inside of a box: top, right, bottom, left, as CSS names
+/// them and in the order CSS names them.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Edges {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
+impl Edges {
+    pub const fn all(n: f32) -> Self {
+        Edges { top: n, right: n, bottom: n, left: n }
+    }
+    pub const fn xy(x: f32, y: f32) -> Self {
+        Edges { top: y, right: x, bottom: y, left: x }
+    }
+}
+
+/// How much of a row or column one child wants.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Size {
+    /// Exactly this many points.
+    Fixed(f32),
+    /// A share of what is left after the fixed ones. Two `Grow(1.0)` split it
+    /// evenly; `Grow(2.0)` beside `Grow(1.0)` takes two thirds.
+    Grow(f32),
+}
+
+impl Rect {
+    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Rect { x, y, w, h }
+    }
+
+    pub fn right(self) -> f32 {
+        self.x + self.w
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.y + self.h
+    }
+
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
+    }
+
+    /// The same box, smaller by `edges` on each side. Never inside out: a
+    /// padding wider than the box gives a box of nothing, not a negative one.
+    pub fn inset(self, edges: Edges) -> Self {
+        Rect {
+            x: self.x + edges.left,
+            y: self.y + edges.top,
+            w: (self.w - edges.left - edges.right).max(0.0),
+            h: (self.h - edges.top - edges.bottom).max(0.0),
+        }
+    }
+
+    /// Take `h` points off the top, and what is left.
+    pub fn split_top(self, h: f32) -> (Rect, Rect) {
+        let h = h.clamp(0.0, self.h);
+        (Rect { h, ..self }, Rect { y: self.y + h, h: self.h - h, ..self })
+    }
+
+    pub fn split_bottom(self, h: f32) -> (Rect, Rect) {
+        let h = h.clamp(0.0, self.h);
+        (Rect { y: self.bottom() - h, h, ..self }, Rect { h: self.h - h, ..self })
+    }
+
+    /// Take `w` points off the left, and what is left.
+    pub fn split_left(self, w: f32) -> (Rect, Rect) {
+        let w = w.clamp(0.0, self.w);
+        (Rect { w, ..self }, Rect { x: self.x + w, w: self.w - w, ..self })
+    }
+
+    pub fn split_right(self, w: f32) -> (Rect, Rect) {
+        let w = w.clamp(0.0, self.w);
+        (Rect { x: self.right() - w, w, ..self }, Rect { w: self.w - w, ..self })
+    }
+
+    /// A box of this size, centred in this one.
+    pub fn centre(self, w: f32, h: f32) -> Self {
+        Rect { x: self.x + (self.w - w) / 2.0, y: self.y + (self.h - h) / 2.0, w, h }
+    }
+
+    /// A box of this shape, as large as fits, centred. What a picture that
+    /// must not be distorted goes in.
+    pub fn fit(self, aspect: f32) -> Self {
+        let aspect = if aspect > 0.0 { aspect } else { 1.0 };
+        let (w, h) = if self.w / self.h > aspect {
+            (self.h * aspect, self.h)
+        } else {
+            (self.w, self.w / aspect)
+        };
+        self.centre(w, h)
+    }
+
+    /// Lay children left to right, with `gap` between them.
+    ///
+    /// Fixed children take what they ask for; the rest share what is left in
+    /// proportion to their weight. A row that does not fit gives its growing
+    /// children nothing rather than negative widths.
+    pub fn row(self, gap: f32, children: &[Size]) -> Vec<Rect> {
+        let widths = share(self.w, gap, children);
+        let mut out = Vec::with_capacity(children.len());
+        let mut x = self.x;
+        for w in widths {
+            out.push(Rect { x, w, ..self });
+            x += w + gap;
+        }
+        out
+    }
+
+    /// Lay children top to bottom.
+    pub fn column(self, gap: f32, children: &[Size]) -> Vec<Rect> {
+        let heights = share(self.h, gap, children);
+        let mut out = Vec::with_capacity(children.len());
+        let mut y = self.y;
+        for h in heights {
+            out.push(Rect { y, h, ..self });
+            y += h + gap;
+        }
+        out
+    }
+
+    /// The twelve-column grid, which is the one piece of layout every page on
+    /// the web is built out of and the reason those pages are quick to change.
+    ///
+    /// `span(from, count)` is the box covering those columns — `span(0, 8)`
+    /// beside `span(8, 4)` is the two-thirds/one-third split every layout
+    /// starts as.
+    pub fn columns(self, gap: f32) -> Columns {
+        Columns { rect: self, gap, count: 12 }
+    }
+
+    /// The same, with a different number of tracks — for the grids that are
+    /// not twelve, like a wall of covers.
+    pub fn tracks(self, gap: f32, count: usize) -> Columns {
+        Columns { rect: self, gap, count: count.max(1) }
+    }
+
+    /// How many tracks of `each` points fit across, with `gap` between.
+    ///
+    /// What a wall of covers asks: not "how wide is a card" but "how many".
+    pub fn fits(self, gap: f32, each: f32) -> usize {
+        if each <= 0.0 {
+            return 1;
+        }
+        (((self.w + gap) / (each + gap)).floor() as usize).max(1)
+    }
+}
+
+/// A grid of equal tracks across a box.
+#[derive(Debug, Clone, Copy)]
+pub struct Columns {
+    rect: Rect,
+    gap: f32,
+    count: usize,
+}
+
+impl Columns {
+    pub fn track(self) -> f32 {
+        let gaps = self.gap * (self.count - 1) as f32;
+        ((self.rect.w - gaps) / self.count as f32).max(0.0)
+    }
+
+    /// The box covering `count` tracks starting at `from`.
+    pub fn span(self, from: usize, count: usize) -> Rect {
+        let track = self.track();
+        let from = from.min(self.count);
+        let count = count.min(self.count - from).max(1);
+        Rect {
+            x: self.rect.x + from as f32 * (track + self.gap),
+            w: track * count as f32 + self.gap * (count - 1) as f32,
+            ..self.rect
+        }
+    }
+
+    /// Where the `n`th cell of a wrapping grid goes, given a row height.
+    ///
+    /// For a wall of covers: the cursor's index in, a box out, and no caller
+    /// dividing by a column count.
+    pub fn cell(self, index: usize, height: f32) -> Rect {
+        let (row, col) = (index / self.count, index % self.count);
+        let cell = self.span(col, 1);
+        Rect { y: self.rect.y + row as f32 * (height + self.gap), h: height, ..cell }
+    }
+}
+
+/// Hand out one axis between children.
+fn share(total: f32, gap: f32, children: &[Size]) -> Vec<f32> {
+    if children.is_empty() {
+        return Vec::new();
+    }
+    let gaps = gap * (children.len() - 1) as f32;
+    let fixed: f32 = children
+        .iter()
+        .map(|c| match c {
+            Size::Fixed(n) => *n,
+            Size::Grow(_) => 0.0,
+        })
+        .sum();
+    let weight: f32 = children
+        .iter()
+        .map(|c| match c {
+            Size::Grow(n) => n.max(0.0),
+            Size::Fixed(_) => 0.0,
+        })
+        .sum();
+    let spare = (total - gaps - fixed).max(0.0);
+    children
+        .iter()
+        .map(|c| match c {
+            Size::Fixed(n) => n.max(0.0),
+            Size::Grow(n) if weight > 0.0 => spare * n.max(0.0) / weight,
+            Size::Grow(_) => 0.0,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +530,170 @@ mod tests {
         assert_eq!(Panes::One.at_most(Panes::Three), Panes::One);
         assert_eq!(Panes::Three.at_most(Panes::Three), Panes::Three);
         assert_eq!(Panes::Two.at_most(Panes::Three), Panes::Two);
+    }
+}
+
+#[cfg(test)]
+mod boxes {
+    use super::*;
+
+    const PAGE: Rect = Rect::new(0.0, 0.0, 1200.0, 800.0);
+
+    #[test]
+    fn a_row_gives_the_fixed_ones_what_they_asked_for() {
+        let out = PAGE.row(10.0, &[Size::Fixed(260.0), Size::Grow(1.0), Size::Fixed(320.0)]);
+        assert_eq!(out[0].w, 260.0);
+        assert_eq!(out[2].w, 320.0);
+        // 1200 less two gaps less the two fixed.
+        assert_eq!(out[1].w, 1200.0 - 20.0 - 260.0 - 320.0);
+        // And they sit end to end with the gap between.
+        assert_eq!(out[1].x, out[0].right() + 10.0);
+        assert_eq!(out[2].x, out[1].right() + 10.0);
+        assert_eq!(out[2].right(), 1200.0);
+    }
+
+    #[test]
+    fn growing_children_split_what_is_left_by_weight() {
+        let out = PAGE.row(0.0, &[Size::Grow(2.0), Size::Grow(1.0)]);
+        assert_eq!(out[0].w, 800.0);
+        assert_eq!(out[1].w, 400.0);
+    }
+
+    /// A window dragged narrower than its own furniture. Negative widths are
+    /// how a layout starts drawing things inside out.
+    #[test]
+    fn a_row_that_does_not_fit_gives_nothing_rather_than_less_than_nothing() {
+        let narrow = Rect::new(0.0, 0.0, 100.0, 40.0);
+        let out = narrow.row(10.0, &[Size::Fixed(260.0), Size::Grow(1.0)]);
+        assert_eq!(out[0].w, 260.0, "a fixed child still asks for its size");
+        assert_eq!(out[1].w, 0.0, "the growing one went negative");
+    }
+
+    #[test]
+    fn a_column_stacks_downwards() {
+        let out = PAGE.column(6.0, &[Size::Fixed(42.0), Size::Fixed(38.0), Size::Grow(1.0)]);
+        assert_eq!(out[0].y, 0.0);
+        assert_eq!(out[1].y, 48.0);
+        assert_eq!(out[2].y, 92.0);
+        assert_eq!(out[2].bottom(), 800.0);
+        // Full width, all of them: a column divides one axis and leaves the
+        // other alone.
+        assert!(out.iter().all(|r| r.w == 1200.0));
+    }
+
+    #[test]
+    fn insetting_never_turns_a_box_inside_out() {
+        let small = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let out = small.inset(Edges::all(40.0));
+        assert_eq!((out.w, out.h), (0.0, 0.0));
+    }
+
+    #[test]
+    fn splitting_takes_from_the_edge_it_says() {
+        let (top, rest) = PAGE.split_top(42.0);
+        assert_eq!((top.y, top.h), (0.0, 42.0));
+        assert_eq!((rest.y, rest.h), (42.0, 758.0));
+
+        let (right, rest) = PAGE.split_right(320.0);
+        assert_eq!(right.x, 880.0);
+        assert_eq!(rest.w, 880.0);
+
+        let (bottom, rest) = PAGE.split_bottom(30.0);
+        assert_eq!(bottom.y, 770.0);
+        assert_eq!(rest.h, 770.0);
+    }
+
+    /// More than there is. A split has to clamp or the two halves overlap.
+    #[test]
+    fn splitting_further_than_the_box_goes_clamps() {
+        let (top, rest) = PAGE.split_top(9_000.0);
+        assert_eq!(top.h, 800.0);
+        assert_eq!(rest.h, 0.0);
+    }
+
+    /// The two-thirds/one-third split every page starts as.
+    #[test]
+    fn twelve_columns_span_the_way_the_web_does() {
+        let grid = PAGE.columns(10.0);
+        let main = grid.span(0, 8);
+        let side = grid.span(8, 4);
+        assert!((main.w - (grid.track() * 8.0 + 70.0)).abs() < 0.01);
+        assert_eq!(side.right(), 1200.0);
+        assert!(side.x > main.right(), "the two spans overlap");
+        assert!((side.x - main.right() - 10.0).abs() < 0.01, "the gap between them is wrong");
+    }
+
+    #[test]
+    fn a_span_cannot_run_off_the_grid() {
+        let grid = PAGE.columns(10.0);
+        assert_eq!(grid.span(10, 9).right(), 1200.0);
+        assert!(grid.span(0, 99).w <= 1200.0);
+        assert!(grid.span(99, 1).w > 0.0, "a span past the end vanished");
+    }
+
+    /// What a wall of covers asks: how many fit, then where the nth goes.
+    #[test]
+    fn a_wrapping_grid_places_cells_by_index() {
+        let area = Rect::new(100.0, 50.0, 700.0, 600.0);
+        let across = area.fits(14.0, 150.0);
+        assert_eq!(across, 4);
+        let grid = area.tracks(14.0, across);
+        let first = grid.cell(0, 200.0);
+        assert_eq!((first.x, first.y), (100.0, 50.0));
+        // The fifth wraps to the second row.
+        let fifth = grid.cell(4, 200.0);
+        assert_eq!(fifth.x, 100.0);
+        assert_eq!(fifth.y, 50.0 + 214.0);
+        // And the last of a row ends flush with the area.
+        assert!((grid.cell(3, 200.0).right() - 800.0).abs() < 0.01);
+    }
+
+    /// A picture that must not be distorted, in a box that is not its shape.
+    #[test]
+    fn fitting_keeps_the_shape_and_centres_what_is_left() {
+        // A tall box art in a wide box: letterboxed left and right.
+        let box_ = Rect::new(0.0, 0.0, 200.0, 100.0);
+        let art = box_.fit(0.75);
+        assert_eq!(art.h, 100.0);
+        assert!((art.w - 75.0).abs() < 0.01);
+        assert!((art.x - 62.5).abs() < 0.01, "not centred");
+
+        // And the other way round.
+        let wide = Rect::new(0.0, 0.0, 100.0, 200.0).fit(1.37);
+        assert_eq!(wide.w, 100.0);
+        assert!(wide.y > 0.0);
+    }
+
+    #[test]
+    fn a_point_is_inside_a_box_or_it_is_not() {
+        let r = Rect::new(10.0, 20.0, 100.0, 50.0);
+        assert!(r.contains(10.0, 20.0), "the top left corner is inside");
+        assert!(!r.contains(110.0, 40.0), "the right edge is outside");
+        assert!(!r.contains(9.0, 40.0));
+        assert!(r.contains(109.0, 69.0));
+    }
+
+    /// The whole point: a page laid out in one expression, and every piece of
+    /// it in the right place without a single addition in the caller.
+    #[test]
+    fn a_whole_page_lays_itself_out() {
+        let [tabs, header, body] = <[Rect; 3]>::try_from(
+            PAGE.column(0.0, &[Size::Fixed(42.0), Size::Fixed(38.0), Size::Grow(1.0)]),
+        )
+        .unwrap();
+        let [picker, games, aside] = <[Rect; 3]>::try_from(
+            body.row(14.0, &[Size::Fixed(260.0), Size::Grow(1.0), Size::Fixed(320.0)]),
+        )
+        .unwrap();
+
+        assert_eq!(tabs.h, 42.0);
+        assert_eq!(header.y, 42.0);
+        assert_eq!(body.y, 80.0);
+        assert_eq!(picker.x, 0.0);
+        assert_eq!(aside.right(), 1200.0);
+        assert!(games.w > 500.0);
+        // Nothing overlaps and nothing is left over.
+        assert_eq!(games.x, picker.right() + 14.0);
+        assert_eq!(aside.x, games.right() + 14.0);
     }
 }

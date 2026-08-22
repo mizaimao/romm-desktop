@@ -25,6 +25,7 @@ use anyhow::Result;
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap};
 use romm_desktop::script::{self, Script};
 use crate::gfx::{Gfx, Rgba, Texture};
+use romm_desktop::layout::Rect;
 use std::collections::{BTreeMap, HashMap};
 
 /// What a rendered piece of text is asked for.
@@ -489,6 +490,30 @@ impl Painter {
     pub fn measure(&mut self, gfx: &Gfx, spec: &Spec) -> (u32, u32) {
         let drawn = self.entry(gfx, spec);
         (drawn.width, drawn.height)
+    }
+
+    /// Draw it at the top left of a box, and say how tall it came out.
+    ///
+    /// The box rather than two numbers, so a caller never adds a gap to an
+    /// offset — and the height back, because what goes under a label depends
+    /// on how many lines it took.
+    pub fn put(&mut self, gfx: &Gfx, spec: &Spec, at: Rect, color: Rgba) -> f32 {
+        let (_, h) = self.measure(gfx, spec);
+        self.draw(gfx, spec, at.x, at.y, color);
+        h as f32
+    }
+
+    /// The same, pushed to the right-hand edge of the box.
+    pub fn put_right(&mut self, gfx: &Gfx, spec: &Spec, at: Rect, color: Rgba) {
+        let (w, _) = self.measure(gfx, spec);
+        self.draw(gfx, spec, at.right() - w as f32, at.y, color);
+    }
+
+    /// The same, centred in it.
+    pub fn put_centred(&mut self, gfx: &Gfx, spec: &Spec, at: Rect, color: Rgba) {
+        let (w, h) = self.measure(gfx, spec);
+        let box_ = at.centre(w as f32, h as f32);
+        self.draw(gfx, spec, box_.x, box_.y, color);
     }
 
     /// Draw it, with its top-left corner at `x`, `y` in pixels.

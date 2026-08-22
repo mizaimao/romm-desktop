@@ -20,9 +20,9 @@
 // every day is what stops the constrained case being a surprise at the end.
 
 use anyhow::{Context, Result};
-use romm_desktop::layout::{Panes, Scale, Viewport};
+use romm_desktop::layout::{Edges, Panes, Rect, Scale, Size, Viewport};
 use crate::gfx::{Gfx, Rgba};
-use romm_desktop::{binds, padpoll, rowwindow};
+use romm_desktop::{padpoll, rowwindow};
 use sdl2::event::{Event, WindowEvent};
 use std::collections::BTreeSet;
 
@@ -439,22 +439,19 @@ fn act(lib: &mut library::Library, action: &str) {
 /// Not a design. It is the smallest thing that is wrong on screen if the units
 /// are wrong: cards that change physical size when the window is dragged
 /// between displays, or a column that appears at the wrong width.
-/// The colours, in one place. A palette rather than numbers scattered through
-/// the drawing, because the next phase is the glass and it will want to talk
-/// about these by name.
+/// The colours, in one place.
 mod paint {
     use crate::gfx::Rgba;
 
-    pub const BACKGROUND: Rgba = Rgba::rgb(18, 18, 22);
-    pub const COLUMN: Rgba = Rgba(0.10, 0.10, 0.13, 0.55);
-    pub const CARD: Rgba = Rgba(0.17, 0.17, 0.21, 0.75);
-    pub const CURSOR: Rgba = Rgba::rgb(90, 130, 190);
-    pub const TEXT: Rgba = Rgba::rgb(228, 230, 238);
-    pub const DIM: Rgba = Rgba::rgb(140, 142, 152);
-    pub const FAINT: Rgba = Rgba::rgb(96, 98, 108);
-    /// The bar across the top. Darker than a panel, because it is furniture
-    /// rather than content and should not compete with the artwork.
-    pub const BAR: Rgba = Rgba(0.06, 0.06, 0.09, 0.72);
+    pub const BACKGROUND: Rgba = Rgba::rgb(14, 15, 20);
+    /// Furniture: darker than a panel, so it does not compete with artwork.
+    pub const BAR: Rgba = Rgba(0.05, 0.05, 0.08, 0.72);
+    pub const COLUMN: Rgba = Rgba(0.08, 0.09, 0.13, 0.55);
+    pub const CARD: Rgba = Rgba(0.14, 0.15, 0.21, 0.62);
+    pub const CURSOR: Rgba = Rgba::rgb(96, 140, 210);
+    pub const TEXT: Rgba = Rgba::rgb(232, 234, 242);
+    pub const DIM: Rgba = Rgba::rgb(150, 154, 168);
+    pub const FAINT: Rgba = Rgba::rgb(104, 108, 124);
     /// The plate a mark sits on, so it reads against artwork of any colour.
     pub const MARK: Rgba = Rgba(0.0, 0.0, 0.0, 0.45);
     pub const STAR: Rgba = Rgba::rgb(240, 200, 90);
@@ -465,37 +462,164 @@ mod paint {
 
 /// The sizes, in points. Nothing here is a pixel.
 mod size {
-    pub const CARD: f32 = 150.0;
+    use romm_desktop::layout::Edges;
+
     pub const GAP: f32 = 14.0;
+    /// The tab row and the header under it, as `ui/style.css` has them.
+    pub const TABS: f32 = 42.0;
+    pub const HEADER: f32 = 38.0;
     pub const PICKER: f32 = 260.0;
     pub const ASIDE: f32 = 320.0;
-    /// How tall a card's artwork is, for a console whose covers are this
-    /// shape. Not a constant: a PSP UMD case is 0.58 and a SNES box 1.37.
+    pub const CARD: f32 = 150.0;
+    pub const LABEL: f32 = 13.0;
+    pub const TITLE: f32 = 15.0;
+    /// Two lines of label under a cover, and the marks over it.
+    pub const CAPTION: f32 = LABEL * 1.3 * 2.0 + 6.0;
+    pub const ROW: f32 = 30.0;
+    /// A console tile: the machine's picture above, name and count below.
+    pub const TILE: f32 = 190.0;
+    pub const TILE_ART: f32 = 104.0;
+    pub const TILE_CAPTION: f32 = 50.0;
+    pub const ROUND: f32 = 10.0;
+    pub const ROUND_SMALL: f32 = 6.0;
+    pub const PAD: Edges = Edges::all(GAP);
+
+    /// How tall a card's artwork is for covers of this shape.
     pub fn art(aspect: f32) -> f32 {
         CARD / aspect.clamp(0.3, 3.0)
     }
-    pub const LABEL: f32 = 13.0;
-    /// Two lines of label, and the gap above them.
-    pub const CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0;
-    pub const ROW: f32 = 30.0;
-    pub const TITLE: f32 = 15.0;
-    /// The tab row, and the header under it. The webview's tab bar is 42px
-    /// and this is the same number in points.
-    pub const TABS: f32 = 42.0;
-    pub const HEADER: f32 = 38.0;
-    /// What the two together take off the top of everything else.
-    pub const CHROME: f32 = TABS + HEADER;
-    /// How round a corner is. `ui/style.css` uses 6 to 12 depending on what it
-    /// is; a card is at the top of that range and a small mark at the bottom.
-    pub const ROUND: f32 = 10.0;
-    pub const ROUND_SMALL: f32 = 6.0;
-    /// A console tile in the grid: the machine's picture above, its name and
-    /// count below.
-    pub const TILE: f32 = 190.0;
-    pub const TILE_ART: f32 = 108.0;
-    pub const TILE_CAPTION: f32 = 52.0;
 }
 
+/// Where each thing was drawn, so the mouse knows what it is over.
+///
+/// Rebuilt every frame, because that is when the answer is known, and in
+/// pixels because that is what the pointer arrives in.
+#[derive(Default)]
+pub struct Hits {
+    rows: Vec<(Rect, usize)>,
+    tabs: Vec<(Rect, usize)>,
+}
+
+impl Hits {
+    fn row(&mut self, at: Rect, index: usize) {
+        self.rows.push((at, index));
+    }
+
+    fn tab(&mut self, at: Rect, index: usize) {
+        self.tabs.push((at, index));
+    }
+
+    fn at(&self, x: f32, y: f32) -> Option<usize> {
+        self.rows.iter().find(|(r, _)| r.contains(x, y)).map(|(_, i)| *i)
+    }
+
+    /// Checked before the rows, because the tab row is drawn over them.
+    fn tab_at(&self, x: f32, y: f32) -> Option<usize> {
+        self.tabs.iter().find(|(r, _)| r.contains(x, y)).map(|(_, i)| *i)
+    }
+}
+
+/// Everything one frame needs to draw itself, so no function takes eight
+/// arguments and no call site gets two of them the wrong way round.
+struct Frame<'a> {
+    gfx: &'a Gfx,
+    glass: Option<&'a glass::Glass>,
+    painter: &'a mut text::Painter,
+    art: &'a mut covers::Covers,
+    screen: &'a Viewport,
+    hits: Hits,
+}
+
+impl Frame<'_> {
+    /// Points to pixels. The one conversion in the file.
+    fn px(&self, r: Rect) -> Rect {
+        let s = self.screen.scale.factor();
+        Rect::new(r.x * s, r.y * s, r.w * s, r.h * s)
+    }
+
+    fn whole(&self) -> (f32, f32) {
+        (self.screen.width_px, self.screen.height_px)
+    }
+
+    /// A pane of frosted glass, or a flat one where the machine has no glass.
+    fn pane(&self, at: Rect, tint: Rgba, round: f32) {
+        let at = self.px(at);
+        let round = round * self.screen.scale.factor();
+        let whole = self.whole();
+        self.gfx.rounded(round, || match self.glass {
+            Some(glass) => glass.panel(self.gfx, whole, at.x, at.y, at.w, at.h, tint),
+            None => self.gfx.fill(at, tint),
+        });
+    }
+
+    fn fill(&self, at: Rect, colour: Rgba, round: f32) {
+        let at = self.px(at);
+        let gfx = self.gfx;
+        gfx.rounded(round * self.screen.scale.factor(), || gfx.fill(at, colour));
+    }
+
+    fn outline(&self, at: Rect, thickness: f32, colour: Rgba, round: f32) {
+        let at = self.px(at);
+        let s = self.screen.scale.factor();
+        let gfx = self.gfx;
+        gfx.rounded(round * s, || gfx.outline(at, thickness * s, colour));
+    }
+
+    fn spec(&self, text: impl Into<String>, size: f32) -> text::Spec {
+        text::Spec::new(text, size, self.screen.scale.factor())
+    }
+
+    fn wrapped(&self, text: impl Into<String>, size: f32, width: f32, lines: u16) -> text::Spec {
+        self.spec(text, size).wrapped(width, lines)
+    }
+
+    /// A label at the top left of a box. Returns its height, in points.
+    fn label(&mut self, spec: &text::Spec, at: Rect, colour: Rgba) -> f32 {
+        let at = self.px(at);
+        let h = self.painter.put(self.gfx, spec, at, colour);
+        self.screen.scale.pt(h)
+    }
+
+    fn label_right(&mut self, spec: &text::Spec, at: Rect, colour: Rgba) {
+        let at = self.px(at);
+        self.painter.put_right(self.gfx, spec, at, colour);
+    }
+
+    fn label_centred(&mut self, spec: &text::Spec, at: Rect, colour: Rgba) {
+        let at = self.px(at);
+        self.painter.put_centred(self.gfx, spec, at, colour);
+    }
+
+    /// A console's own picture, in a box.
+    fn console_art(&mut self, slug: &str, at: Rect, round: f32) {
+        let at = self.px(at);
+        let round = round * self.screen.scale.factor();
+        let gfx = self.gfx;
+        if let Some(picture) = self.art.console(gfx, slug) {
+            gfx.rounded(round, || gfx.picture(picture, at, Rgba::WHITE));
+        }
+    }
+
+    /// A game's cover, in a box. Says whether there was one, so the caller can
+    /// put a pane of glass there instead.
+    fn cover(&mut self, id: i64, platform: &str, stem: &str, at: Rect, round: f32) -> bool {
+        let at = self.px(at);
+        let round = round * self.screen.scale.factor();
+        let gfx = self.gfx;
+        match self.art.get(gfx, id, platform, stem) {
+            Some(cover) => {
+                gfx.rounded(round, || gfx.picture(cover, at, Rgba::WHITE));
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// One frame.
+///
+/// The page divides itself: a tab row, a header, and a body split into as many
+/// columns as the window can hold. Nothing below adds a gap to an offset.
 fn draw(
     gfx: &Gfx,
     frosted: Option<&glass::Glass>,
@@ -504,293 +628,216 @@ fn draw(
     lib: &mut library::Library,
     screen: &Viewport,
 ) -> Hits {
-    let mut hits = Hits::default();
-    let px = |points: f32| screen.scale.px(points);
+    let mut f = Frame { gfx, glass: frosted, painter, art, screen, hits: Hits::default() };
+    let page = Rect::new(0.0, 0.0, screen.width(), screen.height());
+
+    let [tabs, header, body] = split3(page.column(
+        0.0,
+        &[Size::Fixed(size::TABS), Size::Fixed(size::HEADER), Size::Grow(1.0)],
+    ));
+
+    // How many columns the body gets, and which. The picker is only a column
+    // of its own where there is room; below that it is the whole body until a
+    // console is opened, which is the handheld's arrangement.
     let panes = screen.panes();
     let showing_games = lib.view == library::View::Roms;
-
-    // The picker column, where there is room for one. Where there is not, it
-    // is the whole pane until a console is opened — which is the one-pane
-    // arrangement, and the handheld's.
-    let whole = (screen.width_px, screen.height_px);
-    let top = size::CHROME;
-    let pane = |x: f32, y: f32, w: f32, h: f32, tint| match frosted {
-        Some(glass) => gfx.rounded(px(size::ROUND), || glass.panel(gfx, whole, x, y, w, h, tint)),
-        // No glass on this machine: a flat panel, the same shape and the same
-        // colour, that simply does not show what is behind it.
-        None => gfx.rounded(px(size::ROUND), || gfx.rect(x, y, w, h, tint)),
+    let wants = match (panes, showing_games) {
+        (Panes::Three, _) => vec![
+            Size::Fixed(size::PICKER),
+            Size::Grow(1.0),
+            Size::Fixed(size::ASIDE),
+        ],
+        (Panes::Two, _) => vec![Size::Fixed(size::PICKER), Size::Grow(1.0)],
+        (Panes::One, _) => vec![Size::Grow(1.0)],
+    };
+    let columns = body.row(size::GAP, &wants);
+    let (picker, games, aside) = match panes {
+        Panes::Three => (Some(columns[0]), columns[1], Some(columns[2])),
+        Panes::Two => (Some(columns[0]), columns[1], None),
+        Panes::One if showing_games => (None, columns[0], None),
+        Panes::One => (Some(columns[0]), columns[0], None),
     };
 
-    let picker_column = panes >= Panes::Two;
-    let mut left = 0.0;
-    if picker_column {
-        pane(0.0, px(top), px(size::PICKER), screen.height_px - px(top), paint::COLUMN);
-        left = size::PICKER + size::GAP;
+    if let Some(picker) = picker {
+        f.pane(picker, paint::COLUMN, size::ROUND);
     }
-    let mut right = screen.width();
-    if panes == Panes::Three {
-        pane(
-            px(screen.width() - size::ASIDE),
-            px(top),
-            px(size::ASIDE),
-            screen.height_px - px(top),
-            paint::COLUMN,
-        );
-        right = screen.width() - size::ASIDE - size::GAP;
-        draw_detail(gfx, painter, art, lib, screen, screen.width() - size::ASIDE);
+    if let Some(aside) = aside {
+        f.pane(aside, paint::COLUMN, size::ROUND);
+        draw_detail(&mut f, lib, aside.inset(size::PAD));
     }
 
     if lib.consoles.is_empty() {
-        // A blank window is indistinguishable from a broken one. The library
-        // being empty is a thing that happens — a fresh install, or a cache
-        // that was never synced — and the app has to say which.
-        let spec = text::Spec::new(
+        let spec = f.wrapped(
             "No consoles in this library.\nRun `romm-desktop sync` to fill it.",
             size::TITLE,
-            screen.scale.factor(),
-        )
-        .wrapped(screen.width() - size::GAP * 4.0, 2);
-        let (w, h) = painter.measure(gfx, &spec);
-        painter.draw(
-            gfx,
-            &spec,
-            (screen.width_px - w as f32) / 2.0,
-            (screen.height_px - h as f32) / 2.0,
-            paint::DIM,
+            page.w * 0.6,
+            2,
         );
-    } else if picker_column || !showing_games {
-        let width = if picker_column { size::PICKER } else { screen.width() };
-        draw_consoles(
-            gfx,
-            frosted,
-            painter,
-            art,
-            lib,
-            screen,
-            &mut hits,
-            if picker_column { 0.0 } else { size::GAP },
-            width,
-            !showing_games || !picker_column,
-        );
+        f.label_centred(&spec, page, paint::DIM);
+    } else if let Some(picker) = picker {
+        draw_consoles(&mut f, lib, picker.inset(size::PAD), !showing_games);
+    } else if !showing_games {
+        draw_consoles(&mut f, lib, games.inset(size::PAD), true);
     }
 
     if showing_games {
-        let middle = (right - left - size::GAP).max(0.0);
-        let columns = (((middle + size::GAP) / (size::CARD + size::GAP)).floor() as usize).max(1);
-        lib.relayout(columns);
-        draw_games(gfx, frosted, painter, art, lib, screen, &mut hits, left, columns);
+        draw_games(&mut f, lib, games.inset(size::PAD));
     }
 
-    // What the window thinks it is. On screen rather than in the terminal
-    // because what is worth watching is what happens while an edge is dragged.
-    let filters = lib.filters();
-    let readout = format!(
-        "{:.0}x{:.0}pt · {:.2}x · {:?} · {} · {}{} · {} covers held",
-        screen.width(),
-        screen.height(),
-        screen.scale.factor(),
-        panes,
-        lib.order_label(),
-        if showing_games {
-            format!("{} games", lib.shown())
-        } else {
-            format!("{} consoles", lib.consoles.len())
-        },
-        if filters.is_empty() { String::new() } else { format!(" · {}", filters.join("+")) },
-        art.holding(),
-    );
-    // What the two buttons do. Obvious once you know, and invisible until
-    // then — a console list you cannot get past looks like a broken app
-    // rather than one waiting to be told which console.
-    let hint = if showing_games { "Esc back · s sort · f filter" } else { "Enter opens a console" };
-    let spec = text::Spec::new(hint, 11.0, screen.scale.factor());
-    painter.draw(gfx, &spec, px(size::GAP), screen.height_px - px(size::GAP + 14.0), paint::FAINT);
-
-    if let Some(row) = lib.selected() {
-        let name = text::Spec::new(&row.name, 12.0, screen.scale.factor());
-        painter.draw(gfx, &name, px(size::GAP), screen.height_px - px(size::GAP + 30.0), paint::DIM);
-    }
-    draw_chrome(gfx, frosted, painter, lib, screen, &mut hits);
-
-    let spec = text::Spec::new(readout, 11.0, screen.scale.factor());
-    let (w, h) = painter.measure(gfx, &spec);
-    painter.draw(
-        gfx,
-        &spec,
-        screen.width_px - w as f32 - px(size::GAP),
-        screen.height_px - h as f32 - px(size::GAP),
-        paint::FAINT,
-    );
-
-    hits
+    draw_chrome(&mut f, lib, tabs, header);
+    f.hits
 }
 
-/// The consoles.
-///
-/// A grid of tiles with the machine's own picture on each where there is room,
-/// and a column of names where there is not — which is the handheld, and the
-/// picker column beside the games. The webview draws exactly these two shapes
-/// for exactly that reason.
-#[allow(clippy::too_many_arguments)]
-fn draw_consoles(
-    gfx: &Gfx,
-    frosted: Option<&glass::Glass>,
-    painter: &mut text::Painter,
-    art: &mut covers::Covers,
-    lib: &mut library::Library,
-    screen: &Viewport,
-    hits: &mut Hits,
-    left: f32,
-    width: f32,
-    focused: bool,
-) {
-    let px = |points: f32| screen.scale.px(points);
-    let whole = (screen.width_px, screen.height_px);
-    let top = size::CHROME + size::GAP;
+fn split3(mut boxes: Vec<Rect>) -> [Rect; 3] {
+    boxes.resize(3, Rect::new(0.0, 0.0, 0.0, 0.0));
+    [boxes[0], boxes[1], boxes[2]]
+}
 
-    // A tile needs room for a picture. Below that it is a list, which is what
-    // the picker column always is.
-    if width < size::TILE * 2.0 + size::GAP {
-        let fits = ((screen.height() - top - size::GAP) / size::ROW).floor().max(1.0) as usize;
+/// The tab row and the header, across the top.
+fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) {
+    f.pane(Rect::new(tabs.x, tabs.y, tabs.w, tabs.h + header.h), paint::BAR, 0.0);
+
+    // Tabs, each as wide as its own name — "Library" should not get the same
+    // room as "My collections".
+    let mut x = tabs.x + size::GAP;
+    for (i, section) in library::SECTIONS.iter().enumerate() {
+        let spec = f.spec(section.label, 13.0);
+        let (w, _) = f.painter.measure(f.gfx, &spec);
+        let width = f.screen.scale.pt(w as f32) + size::GAP * 1.5;
+        let slot = Rect::new(x, tabs.y, width, tabs.h);
+        let on = i == lib.section;
+        if on {
+            f.fill(Rect::new(slot.x, slot.bottom() - 3.0, slot.w, 3.0), paint::CURSOR, 2.0);
+        }
+        f.label_centred(
+            &spec,
+            slot,
+            // A tab that does nothing yet is dimmer rather than missing.
+            if on {
+                paint::TEXT
+            } else if section.ready {
+                paint::DIM
+            } else {
+                paint::FAINT
+            },
+        );
+        f.hits.tab(f.px(slot), i);
+        x += width;
+    }
+
+    // Where you are on the left, how the list is arranged on the right.
+    let inner = header.inset(Edges::xy(size::GAP, 0.0));
+    let here = match lib.view {
+        library::View::Platforms => format!("{} consoles", lib.consoles.len()),
+        library::View::Roms => match lib.console() {
+            Some(c) => format!("{} — {} games", c.name, lib.shown()),
+            None => String::new(),
+        },
+    };
+    let title = f.spec(here, size::TITLE);
+    let (_, th) = f.painter.measure(f.gfx, &title);
+    let centred = Rect::new(inner.x, inner.y, inner.w, inner.h)
+        .centre(inner.w, f.screen.scale.pt(th as f32));
+    f.label(&title, Rect { x: inner.x, ..centred }, paint::TEXT);
+
+    if lib.view == library::View::Roms {
+        let filters = lib.filters();
+        let arranged = if filters.is_empty() {
+            lib.order_label().to_owned()
+        } else {
+            format!("{}  ·  {}", lib.order_label(), filters.join(" + "))
+        };
+        let spec = f.spec(arranged, 12.0);
+        f.label_right(&spec, Rect { x: inner.x, ..centred }, paint::DIM);
+    }
+}
+
+/// The consoles: a grid of tiles where there is room, a list where there is
+/// not — the same two shapes the webview switches between.
+fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused: bool) {
+    if area.w < size::TILE * 2.0 + size::GAP {
+        let fits = (area.h / size::ROW).floor().max(1.0) as usize;
         let first = lib.console_at.saturating_sub(fits.saturating_sub(1));
         for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
-            let y = top + (offset - first) as f32 * size::ROW;
-            hits.add(px(left), px(y - 3.0), px(width), px(size::ROW), offset);
+            let slot = Rect::new(
+                area.x,
+                area.y + (offset - first) as f32 * size::ROW,
+                area.w,
+                size::ROW,
+            );
+            f.hits.row(f.px(slot), offset);
             let on = offset == lib.console_at;
-            let (hx, hy, hw, hh) = (
-                px(left + size::GAP / 2.0),
-                px(y - 3.0),
-                px(width - size::GAP),
-                px(size::ROW - 2.0),
-            );
-            gfx.rounded(px(size::ROUND_SMALL), || match (on, focused, frosted) {
-                (true, true, _) => gfx.rect(hx, hy, hw, hh, paint::CURSOR),
-                (true, false, Some(glass)) => glass.panel(gfx, whole, hx, hy, hw, hh, paint::CARD),
-                (true, false, None) => gfx.rect(hx, hy, hw, hh, paint::CARD),
-                _ => {}
-            });
-            let spec = text::Spec::new(&console.name, size::TITLE, screen.scale.factor())
-                .wrapped(width - size::GAP * 3.0 - 40.0, 1);
-            painter.draw(
-                gfx,
-                &spec,
-                px(left + size::GAP),
-                px(y),
-                if on { paint::TEXT } else { paint::DIM },
-            );
-            let count = text::Spec::new(console.games.to_string(), 11.0, screen.scale.factor());
-            let (cw, _) = painter.measure(gfx, &count);
-            painter.draw(
-                gfx,
-                &count,
-                px(left + width - size::GAP) - cw as f32,
-                px(y + 3.0),
-                if on { paint::TEXT } else { paint::FAINT },
-            );
+            if on {
+                match focused {
+                    true => f.fill(slot, paint::CURSOR, size::ROUND_SMALL),
+                    false => f.pane(slot, paint::CARD, size::ROUND_SMALL),
+                }
+            }
+            let [name, count] =
+                <[Rect; 2]>::try_from(slot.inset(Edges::xy(8.0, 5.0)).row(
+                    6.0,
+                    &[Size::Grow(1.0), Size::Fixed(46.0)],
+                ))
+                .unwrap();
+            let spec = f.wrapped(&console.name, size::TITLE, name.w, 1);
+            f.label(&spec, name, if on { paint::TEXT } else { paint::DIM });
+            let spec = f.spec(console.games.to_string(), 11.0);
+            f.label_right(&spec, count, if on { paint::TEXT } else { paint::FAINT });
         }
         return;
     }
 
-    let columns = (((width + size::GAP) / (size::TILE + size::GAP)).floor() as usize).max(1);
-    lib.relayout(columns);
-    let step = size::TILE_ART + size::TILE_CAPTION + size::GAP;
-    let rows = ((screen.height() - top) / step).ceil().max(1.0) as usize;
-    let first_row = (lib.console_at / columns).saturating_sub(rows.saturating_sub(2));
+    let across = area.fits(size::GAP, size::TILE);
+    lib.relayout(across);
+    let grid = area.tracks(size::GAP, across);
+    let tile_h = size::TILE_ART + size::TILE_CAPTION;
+    let rows = (area.h / (tile_h + size::GAP)).ceil().max(1.0) as usize;
+    let first_row = (lib.console_at / across).saturating_sub(rows.saturating_sub(2));
 
     for (offset, console) in lib.consoles.iter().enumerate() {
-        let (row, col) = (offset / columns, offset % columns);
+        let row = offset / across;
         if row < first_row || row >= first_row + rows {
             continue;
         }
-        let x = left + col as f32 * (size::TILE + size::GAP);
-        let y = top + (row - first_row) as f32 * step;
+        let tile = grid.cell(offset - first_row * across, tile_h);
+        f.hits.row(f.px(tile), offset);
         let on = offset == lib.console_at;
-        let (tx, ty, tw, th) =
-            (px(x), px(y), px(size::TILE), px(size::TILE_ART + size::TILE_CAPTION));
-        hits.add(tx, ty, tw, th, offset);
 
-        // A pane of glass, with a lit border when the cursor is on it. The
-        // webview lights the border rather than filling the card, so the
-        // machine's picture never sits on a block of colour.
-        gfx.rounded(px(size::ROUND), || {
-            match frosted {
-                Some(glass) => glass.panel(gfx, whole, tx, ty, tw, th, paint::CARD),
-                None => gfx.rect(tx, ty, tw, th, paint::CARD),
-            }
-            if on {
-                outline(gfx, tx, ty, tw, th, px(2.0), paint::CURSOR);
-            }
-        });
-
-        // The machine itself, fitted — a Game Boy is tall and an arcade
-        // cabinet is not.
-        if let Some(picture) = art.console(gfx, &console.slug) {
-            gfx.image_fitted(
-                picture,
-                tx + px(size::GAP),
-                ty + px(size::GAP * 0.6),
-                tw - px(size::GAP * 2.0),
-                px(size::TILE_ART - size::GAP),
-                Rgba::WHITE,
-            );
+        f.pane(tile, paint::CARD, size::ROUND);
+        if on {
+            f.outline(tile, 2.0, paint::CURSOR, size::ROUND);
         }
 
-        let name = text::Spec::new(&console.name, 13.0, screen.scale.factor())
-            .wrapped(size::TILE - size::GAP * 2.0, 2);
-        painter.draw(
-            gfx,
-            &name,
-            tx + px(size::GAP),
-            ty + px(size::TILE_ART),
-            if on { paint::TEXT } else { paint::DIM },
-        );
+        let inner = tile.inset(Edges::all(10.0));
+        let (art, caption) = inner.split_top(size::TILE_ART - 10.0);
+        f.console_art(&console.slug, art, 0.0);
 
-        // The count, behind the dot the webview uses to say an emulator is
-        // installed. Green for playable is the same signal in both.
-        let dot = text::Spec::new("●", 9.0, screen.scale.factor());
-        painter.draw(gfx, &dot, tx + px(size::GAP), ty + px(size::TILE_ART + 30.0), paint::HERE);
-        let count =
-            text::Spec::new(format!("{} games", console.games), 11.0, screen.scale.factor());
-        painter.draw(
-            gfx,
-            &count,
-            tx + px(size::GAP + 12.0),
-            ty + px(size::TILE_ART + 29.0),
-            paint::FAINT,
-        );
+        let name = f.wrapped(&console.name, 13.0, caption.w, 2);
+        let used = f.label(&name, caption, if on { paint::TEXT } else { paint::DIM });
+        let under = Rect { y: caption.y + used + 4.0, h: 14.0, ..caption };
+        let [dot, count] =
+            <[Rect; 2]>::try_from(under.row(4.0, &[Size::Fixed(9.0), Size::Grow(1.0)])).unwrap();
+        let spec = f.spec("●", 9.0);
+        f.label(&spec, dot, paint::HERE);
+        let spec = f.spec(format!("{} games", console.games), 11.0);
+        f.label(&spec, count, paint::FAINT);
     }
 }
 
-/// One console's games, as covers with their names under them.
-#[allow(clippy::too_many_arguments)]
-fn draw_games(
-    gfx: &Gfx,
-    frosted: Option<&glass::Glass>,
-    painter: &mut text::Painter,
-    art: &mut covers::Covers,
-    lib: &mut library::Library,
-    screen: &Viewport,
-    hits: &mut Hits,
-    left: f32,
-    columns: usize,
-) {
-    let px = |points: f32| screen.scale.px(points);
-    // The artwork's own shape, so a console of tall boxes gets tall cards and
-    // one of wide ones gets wide.
-    let cover_height = size::art(lib.aspect);
-    let step = cover_height + size::CAPTION + size::GAP;
+/// One console's games, as a wall of covers.
+fn draw_games(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    let cover_h = size::art(lib.aspect);
+    let step = cover_h + size::CAPTION;
+    let across = area.fits(size::GAP, size::CARD);
+    lib.relayout(across);
+    let grid = area.tracks(size::GAP, across);
 
-    // Which rows to draw at all. `rowwindow` is the webview's own arithmetic,
-    // ported into the core — on 2,506 arcade games this is the difference
-    // between a band of a few dozen and every one of them.
-    //
-    // Scrolled to keep the cursor on screen rather than by a scrollbar, since
-    // there is no pointer on a handheld. `scroll_to` answers with nothing when
-    // it is already there, which is what stops the list moving under the
-    // reader on every keypress.
-    let viewport = (screen.height() - size::CHROME - size::GAP).max(step);
+    // Which rows to draw, and where the list is scrolled to keep the cursor
+    // on screen. `rowwindow` answers both, and answers nothing when the
+    // cursor is already visible — which is what stops the wall moving under
+    // the reader on every keypress.
     let (shown, at, was) = (lib.shown(), lib.at, lib.scrolled);
-    let ask = |top: f32| rowwindow::Ask::new(shown, columns, step, top, viewport);
+    let ask = |top: f32| rowwindow::Ask::new(shown, across, step + size::GAP, top, area.h);
     let top = rowwindow::scroll_to(at, ask(was)).unwrap_or(was);
     lib.scrolled = top;
     let band = rowwindow::band(ask(top));
@@ -806,290 +853,81 @@ fn draw_games(
         .collect();
 
     for (i, id, name, favourite, downloaded, platform, stem) in rows {
-        let (row, col) = (i / columns, i % columns);
-        let x = left + size::GAP + col as f32 * (size::CARD + size::GAP);
-        let y = size::CHROME + size::GAP + row as f32 * step - top;
-        // Clipped against the chrome as well as the bottom: a card sliding up
-        // under the tab row must not be pointed at through it.
-        if y + step < size::CHROME || y > screen.height() {
+        let cell = grid.cell(i, step);
+        let card = Rect { y: cell.y - top, ..cell };
+        if card.bottom() < area.y || card.y > area.bottom() {
             continue;
         }
-
+        f.hits.row(f.px(card), i);
+        let (art, caption) = card.split_top(cover_h);
         let on = i == lib.at;
-        let frame = (px(x), px(y), px(size::CARD), px(cover_height));
-        let round = px(size::ROUND_SMALL);
-        // The whole card, artwork and caption, is what a pointer is over.
-        hits.add(frame.0, frame.1, frame.2, px(cover_height + size::CAPTION), i);
-        match art.get(gfx, id, &platform, &stem) {
-            // Fitted, not stretched. The slot is the console's shape and the
-            // picture keeps its own, so a stray landscape screenshot among the
-            // box art is letterboxed rather than squashed.
-            Some(cover) => {
-                gfx.image_fitted(cover, frame.0, frame.1, frame.2, frame.3, Rgba::WHITE)
-            }
-            // No artwork on this machine. A pane of glass rather than nothing,
-            // so the grid keeps its shape and a game with no cover is still a
-            // thing you can put the cursor on — and it looks like an empty
-            // card rather than a hole.
-            None => gfx.rounded(round, || match frosted {
-                Some(glass) => glass.panel(
-                    gfx,
-                    (screen.width_px, screen.height_px),
-                    frame.0,
-                    frame.1,
-                    frame.2,
-                    frame.3,
-                    paint::CARD,
-                ),
-                None => gfx.rect(frame.0, frame.1, frame.2, frame.3, paint::CARD),
-            }),
+
+        // A pane of glass where there is no artwork, rather than a hole, so
+        // the wall keeps its shape.
+        if !f.cover(id, &platform, &stem, art, size::ROUND_SMALL) {
+            f.pane(art, paint::CARD, size::ROUND_SMALL);
         }
         if on {
-            gfx.rounded(round, || {
-                outline(gfx, frame.0, frame.1, frame.2, frame.3, px(3.0), paint::CURSOR)
-            });
+            f.outline(art, 3.0, paint::CURSOR, size::ROUND_SMALL);
         }
 
-        let spec = text::Spec::new(&name, size::LABEL, screen.scale.factor())
-            .wrapped(size::CARD, 2);
-        painter.draw(
-            gfx,
+        // The two marks: starred, and whether it will play with the server
+        // off. Both states are drawn, because no mark is not an answer.
+        let marks = Rect::new(art.x + 5.0, art.y + 5.0, art.w, 16.0);
+        let mut mark_x = marks.x;
+        for (glyph, colour) in [
+            favourite.then_some(("★", paint::STAR)),
+            Some(if downloaded { ("●", paint::HERE) } else { ("○", paint::AWAY) }),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let spec = f.spec(glyph, 12.0);
+            let (w, _) = f.painter.measure(f.gfx, &spec);
+            let w = f.screen.scale.pt(w as f32);
+            let plate = Rect::new(mark_x - 3.0, marks.y, w + 6.0, marks.h);
+            f.fill(plate, paint::MARK, 4.0);
+            f.label(&spec, Rect { x: mark_x, y: marks.y + 1.0, ..plate }, colour);
+            mark_x += w + 9.0;
+        }
+
+        let spec = f.wrapped(&name, size::LABEL, caption.w, 2);
+        f.label(
             &spec,
-            px(x),
-            px(y + cover_height + 4.0),
+            caption.inset(Edges { top: 4.0, ..Edges::default() }),
             if on { paint::TEXT } else { paint::DIM },
         );
-        // The two marks the webview puts on a card, and for the same reason:
-        // a symbol that appears on some cards and explains itself nowhere is a
-        // symbol that makes people guess. A starred game is one you said you
-        // wanted at hand; the disc says it will play with the server off.
-        let mut mark_x = x + 5.0;
-        if favourite {
-            let star = text::Spec::new("★", 12.0, screen.scale.factor());
-            let (w, _) = painter.measure(gfx, &star);
-            gfx.rounded(px(4.0), || {
-                gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK)
-            });
-            painter.draw(gfx, &star, px(mark_x), px(y + 5.0), paint::STAR);
-            mark_x += screen.scale.pt(w as f32) + 8.0;
-        }
-        {
-            // "On this machine" and "on the server" are different answers and
-            // both are drawn — no mark at all is not an answer anybody can
-            // read, especially on a console where everything is downloaded.
-            let (glyph, colour) =
-                if downloaded { ("●", paint::HERE) } else { ("○", paint::AWAY) };
-            let mark = text::Spec::new(glyph, 12.0, screen.scale.factor());
-            let (w, _) = painter.measure(gfx, &mark);
-            gfx.rounded(px(4.0), || {
-                gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK)
-            });
-            painter.draw(gfx, &mark, px(mark_x), px(y + 5.0), colour);
-        }
-    }
-}
-
-/// The tab row and the header, across the top.
-///
-/// The shape the webview has: tabs, then a bar carrying where you are and how
-/// the list is arranged. Drawn after the columns so it sits over them, which
-/// is also how the stylesheet does it.
-fn draw_chrome(
-    gfx: &Gfx,
-    frosted: Option<&glass::Glass>,
-    painter: &mut text::Painter,
-    lib: &library::Library,
-    screen: &Viewport,
-    hits: &mut Hits,
-) {
-    let px = |points: f32| screen.scale.px(points);
-    let whole = (screen.width_px, screen.height_px);
-    match frosted {
-        Some(glass) => {
-            glass.panel(gfx, whole, 0.0, 0.0, screen.width_px, px(size::CHROME), paint::BAR)
-        }
-        None => gfx.rect(0.0, 0.0, screen.width_px, px(size::CHROME), paint::BAR),
-    }
-
-    // The tabs. Laid out by their own width rather than in equal columns, so
-    // "Library" does not get the same room as "My collections".
-    let mut x = size::GAP;
-    for (i, section) in library::SECTIONS.iter().enumerate() {
-        let label = text::Spec::new(section.label, 13.0, screen.scale.factor());
-        let (w, h) = painter.measure(gfx, &label);
-        let width = screen.scale.pt(w as f32) + size::GAP * 1.5;
-        let on = i == lib.section;
-        if on {
-            gfx.rect(
-                px(x),
-                px(size::TABS - 3.0),
-                px(width),
-                px(3.0),
-                paint::CURSOR,
-            );
-        }
-        painter.draw(
-            gfx,
-            &label,
-            px(x + size::GAP * 0.75),
-            px(size::TABS / 2.0) - h as f32 / 2.0,
-            // A tab that does nothing yet says so by being dimmer, rather
-            // than by being missing.
-            if on {
-                paint::TEXT
-            } else if section.ready {
-                paint::DIM
-            } else {
-                paint::FAINT
-            },
-        );
-        hits.add_tab(px(x), 0.0, px(width), px(size::TABS), i);
-        x += width;
-    }
-
-    // The header: where you are on the left, how the list is arranged on the
-    // right. The same two facts the webview's title and buttons carry.
-    let here = match lib.view {
-        library::View::Platforms => format!("{} consoles", lib.consoles.len()),
-        library::View::Roms => match lib.console() {
-            Some(c) => format!("{} — {} games", c.name, lib.shown()),
-            None => String::new(),
-        },
-    };
-    let title = text::Spec::new(&here, size::TITLE, screen.scale.factor());
-    let (_, th) = painter.measure(gfx, &title);
-    painter.draw(
-        gfx,
-        &title,
-        px(size::GAP),
-        px(size::TABS) + (px(size::HEADER) - th as f32) / 2.0,
-        paint::TEXT,
-    );
-
-    if lib.view == library::View::Roms {
-        let filters = lib.filters();
-        let arranged = format!(
-            "{}{}",
-            lib.order_label(),
-            if filters.is_empty() {
-                String::new()
-            } else {
-                format!("  ·  {}", filters.join(" + "))
-            }
-        );
-        let spec = text::Spec::new(&arranged, 12.0, screen.scale.factor());
-        let (w, h) = painter.measure(gfx, &spec);
-        painter.draw(
-            gfx,
-            &spec,
-            screen.width_px - w as f32 - px(size::GAP),
-            px(size::TABS) + (px(size::HEADER) - h as f32) / 2.0,
-            paint::DIM,
-        );
-    }
-}
-
-/// Where each row of the list on screen was drawn, in pixels.
-///
-/// The mouse needs it and nothing else does: a pointer arrives at a place and
-/// has to be told which row that is. Rebuilt every frame, because that is when
-/// the answer is known.
-#[derive(Default)]
-pub struct Hits {
-    spots: Vec<(f32, f32, f32, f32, usize)>,
-    tabs: Vec<(f32, f32, f32, f32, usize)>,
-}
-
-impl Hits {
-    fn add(&mut self, x: f32, y: f32, w: f32, h: f32, index: usize) {
-        self.spots.push((x, y, w, h, index));
-    }
-
-    fn add_tab(&mut self, x: f32, y: f32, w: f32, h: f32, index: usize) {
-        self.tabs.push((x, y, w, h, index));
-    }
-
-    /// Which tab is under this point, if any. Checked before the rows,
-    /// because the tab row is drawn over them.
-    fn tab_at(&self, x: f32, y: f32) -> Option<usize> {
-        self.tabs
-            .iter()
-            .find(|(sx, sy, w, h, _)| x >= *sx && y >= *sy && x < sx + w && y < sy + h)
-            .map(|(_, _, _, _, index)| *index)
-    }
-
-    /// Which row is under this point, if any.
-    fn at(&self, x: f32, y: f32) -> Option<usize> {
-        self.spots
-            .iter()
-            .find(|(sx, sy, w, h, _)| x >= *sx && y >= *sy && x < sx + w && y < sy + h)
-            .map(|(_, _, _, _, index)| *index)
     }
 }
 
 /// The preview column: the cover, the name, and what is known about it.
-fn draw_detail(
-    gfx: &Gfx,
-    painter: &mut text::Painter,
-    art: &mut covers::Covers,
-    lib: &library::Library,
-    screen: &Viewport,
-    left: f32,
-) {
-    let px = |points: f32| screen.scale.px(points);
+fn draw_detail(f: &mut Frame, lib: &library::Library, area: Rect) {
     let Some(detail) = lib.detail() else { return };
-    let width = size::ASIDE - size::GAP * 2.0;
-    let mut y = size::CHROME + size::GAP;
-
-    // The cover, as large as the column allows and in its own shape.
-    let tall = size::art(lib.aspect);
-    if let Some(cover) = art.get(gfx, detail.id, &detail.platform, &detail.stem) {
-        let height = tall * (width / size::CARD);
-        gfx.image_fitted(cover, px(left + size::GAP), px(y), px(width), px(height), Rgba::WHITE);
-        y += height + size::GAP;
+    let (art, rest) = area.split_top(area.w / lib.aspect.clamp(0.3, 3.0));
+    // The game's own cover if there is one, and the console's picture if not —
+    // an empty pane at the top of the column reads as a broken panel.
+    if !f.cover(detail.id, &detail.platform, &detail.stem, art, size::ROUND_SMALL) {
+        f.console_art(&detail.platform, art, size::ROUND_SMALL);
     }
 
-    // The name, over as many lines as it takes. This is the one place a title
-    // is not cut short — the card above had to fit it into 150 points and this
-    // column is where the whole thing goes.
-    let name = text::Spec::new(&detail.name, size::TITLE, screen.scale.factor())
-        .wrapped(width, 4);
-    let (_, name_height) = painter.measure(gfx, &name);
-    painter.draw(gfx, &name, px(left + size::GAP), px(y), paint::TEXT);
-    y += screen.scale.pt(name_height as f32) + size::GAP;
+    // The one place a title is not cut short: the card had to fit it into 150
+    // points and this column is where the whole thing goes.
+    let below = rest.inset(Edges { top: size::GAP, ..Edges::default() });
+    let name = f.wrapped(&detail.name, size::TITLE, below.w, 4);
+    let used = f.label(&name, below, paint::TEXT);
+    let mut y = below.y + used + size::GAP;
 
-    if detail.favourite {
-        let star = text::Spec::new("★ Starred", 11.0, screen.scale.factor());
-        painter.draw(gfx, &star, px(left + size::GAP), px(y), paint::TEXT);
-        y += 18.0;
-    }
-
-    // Label on the left, value on the right, which is the shape the webview's
-    // pane uses and the one a list of facts wants.
     for (label, value) in detail.facts() {
-        let l = text::Spec::new(label, 11.0, screen.scale.factor());
-        let v = text::Spec::new(&value, 11.0, screen.scale.factor()).wrapped(width * 0.55, 2);
-        painter.draw(gfx, &l, px(left + size::GAP), px(y), paint::FAINT);
-        painter.draw(gfx, &v, px(left + size::GAP + width * 0.45), px(y), paint::DIM);
-        y += 17.0;
-        if y > screen.height() - size::GAP {
+        let line = Rect::new(below.x, y, below.w, 16.0);
+        if line.bottom() > area.bottom() {
             break;
         }
+        let [left, right] =
+            <[Rect; 2]>::try_from(line.row(6.0, &[Size::Grow(4.0), Size::Grow(6.0)])).unwrap();
+        let spec = f.spec(label, 11.0);
+        f.label(&spec, left, paint::FAINT);
+        let spec = f.wrapped(value, 11.0, right.w, 1);
+        f.label(&spec, right, paint::DIM);
+        y += 17.0;
     }
-}
-
-/// A border, as four filled edges. SDL draws a one-pixel rectangle and the
-/// cursor needs to be visible against artwork.
-fn outline(gfx: &Gfx, x: f32, y: f32, w: f32, h: f32, t: f32, color: Rgba) {
-    gfx.rect(x, y, w, t, color);
-    gfx.rect(x, y + h - t, w, t, color);
-    gfx.rect(x, y, t, h, color);
-    gfx.rect(x + w - t, y, t, h, color);
-}
-
-/// Unused for now, and kept honest: the tables this front end resolves through
-/// are the same ones the desktop app writes.
-#[allow(dead_code)]
-fn actions() -> &'static [binds::Action] {
-    binds::ACTIONS
 }

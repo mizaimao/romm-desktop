@@ -63,6 +63,9 @@ impl Covers {
         }
     }
 
+    /// How many decoded pictures are being held. The number worth watching
+    /// while scrolling, since it is the one that used to grow without limit.
+    #[allow(dead_code)]
     pub fn holding(&self) -> usize {
         self.held.len()
     }

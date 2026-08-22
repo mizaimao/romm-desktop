@@ -39,6 +39,9 @@ impl Detail {
     /// pane cannot answer, and a dash is not an answer.
     pub fn facts(&self) -> Vec<(&'static str, String)> {
         let mut out = vec![("Console", self.platform.clone()), ("Size", self.size.clone())];
+        if self.favourite {
+            out.push(("Starred", "yes".to_owned()));
+        }
         if let Some(maker) = self.maker {
             out.push(("Made by", maker.to_owned()));
         }
