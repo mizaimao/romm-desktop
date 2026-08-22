@@ -155,3 +155,44 @@ Not measured, and worth doing before anything is built on this:
   trouble, so this is most likely the script driving the page in a way a
   person does not. It has not been explained, and the miximages row above came
   from a session-restore rather than a confirmed scripted browse.
+
+
+## Tightening the margins did nothing, and that is the finding
+
+Frank's idea, on 2026-08-22:
+
+> even at 1080P or 1440P the screen is capped at 7 or 6 inches. That means not
+> many tiles can be displayed. Can we do optimizations that we only load
+> images that are on the display and off load the ones that do not so that we
+> effectively reduce the total image size to less than 12 or soemthing?
+
+The release margin was a flat 1,600px, which is two screens on the window it
+was written against and *eight* on a 720-tall handheld — so the machine with
+the least memory hoarded the most. That is worth fixing whatever else is true,
+and it is fixed: both margins are now a fraction of the list's own height,
+0.4 screens to load and 1.0 to release.
+
+It moved the number by three megabytes. 436 MB before, 439 after.
+
+Which says the thing worth writing down: **releasing the `<img>` does not
+release the decode.** WebKit's image cache is keyed by URL and outlives the
+element. `observeCovers` has been putting the placeholder back for weeks and
+the pictures never went anywhere. The count of cards on screen is not the
+lever; the cache's own byte budget is, and it is not ours.
+
+So there are exactly two things that work:
+
+1. **Serve fewer bytes.** Resize in the asset protocol, source untouched. A
+   500 KB cover instead of a 4.9 MB one means the same budget holds ten times
+   as many, and the peak — the number that kills an app on Android — falls
+   with it.
+
+2. **Own the decode.** `fetch` the file as a blob, `createImageBitmap` it,
+   draw it into a canvas the size of the tile, and `close()` the bitmap. The
+   URL never goes through an `<img>`, so WebKit's image cache never gets an
+   entry, and what is retained is a canvas backing store — 300x420, half a
+   megabyte — that we can throw away when we say. This is the honest port of
+   ES-DE's budget into a webview, and it is the only way to actually get to
+   Frank's "twelve pictures".
+
+Both are worth doing and (1) is most of the win for a tenth of the work.

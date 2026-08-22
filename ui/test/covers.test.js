@@ -41,8 +41,17 @@ class Watcher {
 }
 
 /// The two observers, told apart by the distance each one works at.
-const near = () => observers.filter((o) => o.margin === "300px").at(-1);
-const far = () => observers.filter((o) => o.margin !== "300px").at(-1);
+///
+/// By which is nearer rather than by a fixed number: the margins are a
+/// fraction of the list's own height now, so the pixel values move with the
+/// window and a test that names one is a test that breaks on a resize.
+const px = (o) => Number(String(o.margin).replace("px", ""));
+const both = () => {
+  const last = observers.slice(-2);
+  return last.sort((a, b) => px(a) - px(b));
+};
+const near = () => both()[0];
+const far = () => both()[1];
 
 const ROWS = Array.from({ length: 6 }, (_, i) => ({
   id: i + 1,
@@ -160,8 +169,28 @@ describe("covers well away from it", () => {
   /// the wheel off the top of the screen is about to be looked at again, and
   /// dropping its cover there would mean decoding it twice for nothing.
   test("the release margin is further out than the load margin", () => {
-    const px = (o) => Number(String(o.margin).replace("px", ""));
-    assert.ok(px(far()) > px(near()) * 4, `${far().margin} is not far enough past ${near().margin}`);
+    assert.ok(px(far()) > px(near()) * 2, `${far().margin} is not far enough past ${near().margin}`);
+  });
+
+  /// The bug this replaced: a flat 1,600px release margin was two screens on
+  /// a desktop window and eight on a 720-tall handheld — so the machine with
+  /// the least memory held the most pictures. A decoded cover is four bytes a
+  /// pixel whatever size it is drawn at, so the count of cards inside this
+  /// margin *is* the memory. See `docs/memory.md`.
+  test("the margins are a fraction of the screen, not a fixed distance", () => {
+    const list = dom.window.document.getElementById("list");
+    const height = (n) =>
+      Object.defineProperty(list, "clientHeight", { value: n, configurable: true });
+    // A desktop window, then a handheld's screen.
+    height(900);
+    lib.observeCovers();
+    const tall = px(far());
+    height(300);
+    lib.observeCovers();
+    assert.ok(
+      px(far()) < tall,
+      `a shorter list kept the same ${far().margin} margin, so it holds the same pile of pictures`
+    );
   });
 
   /// This runs for every card leaving the margin, on a list of 2,506.

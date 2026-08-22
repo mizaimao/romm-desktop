@@ -830,10 +830,37 @@ let coverReleaser;
 let coverQueue = [];
 let coverTimer;
 
-/// How far off screen a card has to be before its cover is let go. Two
-/// screenfuls at a typical window height — far enough that scrolling back is
-/// deliberate rather than a flick.
-const RELEASE_MARGIN = "1600px";
+/// How far off screen a card has to be before its cover is let go, and how
+/// close it has to come before one is asked for.
+///
+/// In screenfuls rather than pixels. A fixed 1,600px was two screens on the
+/// window this was written against and eight on a handheld, which is exactly
+/// backwards: the small screen, with the least memory, hoarded the most.
+///
+/// The numbers matter more than they look. Every card inside the release
+/// margin is holding a decoded picture, and a decoded picture is four bytes a
+/// pixel however small it is drawn — 4.9 MB apiece for a 1280x960 miximage.
+/// At 1,600px that was around a hundred and thirty of them. See `memory.md`.
+///
+/// The gap between the two is the hysteresis: a card just off the top is one
+/// flick from being looked at again, and dropping its cover there means
+/// fetching and decoding it twice.
+const LOAD_SCREENS = 0.4;
+const RELEASE_SCREENS = 1.0;
+
+/// Those two as pixel margins for the observers, measured against the list as
+/// it is now. Re-read whenever the observers are rebuilt, which is every time
+/// the list is redrawn — so a resized window gets the right numbers without
+/// anything listening for it.
+function coverMargins() {
+  // A floor, because the list is measured before it has been laid out and a
+  // zero-height screen would mean loading nothing at all.
+  const screen = Math.max(el.list?.clientHeight ?? 0, 200);
+  return {
+    load: `${Math.round(screen * LOAD_SCREENS)}px`,
+    release: `${Math.round(screen * RELEASE_SCREENS)}px`,
+  };
+}
 
 let coverErrorShown = false;
 
@@ -849,7 +876,8 @@ function placeholder(card) {
   return `<span class="ph">${card.dataset.name ?? ""}</span>${star}`;
 }
 
-function observeCovers() {
+export function observeCovers() {
+  const margins = coverMargins();
   coverObserver?.disconnect();
   coverReleaser?.disconnect();
   coverQueue = [];
@@ -867,7 +895,7 @@ function observeCovers() {
       clearTimeout(coverTimer);
       coverTimer = setTimeout(flushCovers, 80);
     },
-    { root: el.list, rootMargin: "300px" }
+    { root: el.list, rootMargin: margins.load }
   );
   coverReleaser = new IntersectionObserver(
     (entries) => {
@@ -882,7 +910,7 @@ function observeCovers() {
         delete e.target.dataset.loaded;
       }
     },
-    { root: el.list, rootMargin: RELEASE_MARGIN }
+    { root: el.list, rootMargin: margins.release }
   );
   for (const c of el.list.querySelectorAll(".gcard")) {
     coverObserver.observe(c);
