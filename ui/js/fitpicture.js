@@ -30,6 +30,9 @@ const NEVER_UPSCALE = 1;
 export async function fitted(url, boxW, boxH, dpr = window.devicePixelRatio || 1) {
   if (!(boxW > 0) || !(boxH > 0)) return null;
   if (typeof createImageBitmap !== "function") return null;
+  // The measuring switch, so an A/B of this change needs one build and turns
+  // one thing off. Never set in normal use.
+  if (globalThis.__ROMM_FLAGS?.includes("no-canvas")) return null;
   let bitmap = null;
   try {
     const response = await fetch(url);

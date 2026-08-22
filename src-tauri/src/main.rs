@@ -3930,8 +3930,19 @@ fn main() {
             if let Ok(path) = std::env::var("ROMM_MEASURE")
                 && let Some(win) = app.get_webview_window("main")
             {
+                // Out of sight, but not hidden: a hidden window stops being
+                // rendered, the page never lays out, and the browse cannot
+                // run. Off the side of the display keeps it drawing while
+                // keeping it off whoever is using the machine — measuring
+                // should not throw a window at them for minutes at a time.
+                let _ = win.set_size(tauri::LogicalSize::new(1460.0, 1046.0));
+                let _ = win.set_position(tauri::LogicalPosition::new(-4000.0, 200.0));
                 match std::fs::read_to_string(&path) {
                     Ok(script) => {
+                        // A switch the script can read, so an A/B needs one
+                        // build and changes one thing.
+                        let flags = std::env::var("ROMM_MEASURE_FLAGS").unwrap_or_default();
+                        let script = format!("window.__ROMM_FLAGS = {flags:?};\n{script}");
                         std::thread::spawn(move || {
                             std::thread::sleep(std::time::Duration::from_secs(4));
                             if let Err(e) = win.eval(&script) {

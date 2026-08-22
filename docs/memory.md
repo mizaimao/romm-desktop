@@ -60,6 +60,29 @@ so the intermediate bitmap may well be full size — but it is transient and
 closed immediately, and only one exists at a time. That is the difference
 between a 4.9 MB spike and a 980 MB resident set.
 
+## What drawing at the shown size saved
+
+One build, one browse, one flag — `ROMM_MEASURE_FLAGS=no-canvas` turns
+`fitpicture.js` off and the covers go back to plain `<img>`. Same arcade
+console, same scroll to the bottom, same twenty pictures on forty-four cards
+at the end. Window moved off the side of the display rather than hidden: a
+hidden window stops being rendered and the page never lays out.
+
+| | `<img>` | canvas | saved |
+|---|---|---|---|
+| peak while scrolling | 972.3 MB | 653.6 MB | **319 MB (33%)** |
+| settled, straight after browsing | 535.6 MB | 335.6 MB | **200 MB (37%)** |
+| after half a minute idle | 355.5 MB | 335.6 MB | 20 MB (6%) |
+
+Against the 235.6 MB floor, the arcade grid itself costs **300 MB before and
+100 MB after** — a third of what it was.
+
+The last row is the honest caveat: left alone for thirty seconds WebKit prunes
+its own cache and the two converge. The saving is in the peak and in the
+working set — what the app weighs *while it is being used* — and that is
+exactly the number that matters on a phone, where a spike is what gets the
+process killed rather than a steady state nobody was waiting on.
+
 ## The baseline, at last: 235.6 MB with nothing of ours on the screen
 
 Asked for repeatedly and put off for too long while I chased the artwork.
