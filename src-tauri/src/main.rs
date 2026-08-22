@@ -3722,6 +3722,21 @@ fn set_grid(cards: Vec<[f64; 3]>) -> gridnav::Moves {
     gridnav::moves(&cards)
 }
 
+/// A line from the measuring script, on stdout where a shell can read it.
+///
+/// The page's own `console.log` goes to the webview's console and nowhere a
+/// script can see it, so a scripted browse had no way of saying whether it had
+/// run — which cost one measurement that looked flat and was actually a browse
+/// that never happened. This is the whole of the reporting channel.
+#[tauri::command]
+fn measure_note(text: String) {
+    if std::env::var_os("ROMM_MEASURE").is_some() {
+        println!("MEASURE {text}");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+    }
+}
+
 fn main() {
     install_panic_log();
     romm_desktop::datadir::anchor();
@@ -3806,6 +3821,7 @@ fn main() {
             page_names: Mutex::new((Vec::new(), Vec::new())),
         })
         .invoke_handler(tauri::generate_handler![
+            measure_note,
             bios_status,
             download_set,
             recent_games,
@@ -3903,6 +3919,7 @@ fn main() {
                 }
             }
             // A scripted browse, for measuring what the app weighs.
+            // See `measure_note` for how it reports back.
             //
             // `ROMM_MEASURE=path/to/script.js` runs that file in the page a
             // few seconds after launch. Nothing ships enabled and the page

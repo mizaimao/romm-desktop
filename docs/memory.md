@@ -22,7 +22,39 @@ a wall of artwork goes past.
 Tauri's 228 MB splits as romm-gui 33, WebKit GPU 29, Networking 6, WebContent
 160. After browsing, WebContent alone is 447 MB and the peak was over 850.
 
-## Why
+## The A/B that changes the reading
+
+Same script, same library, only `list_art` different — so only the size of the
+artwork changed:
+
+| `list_art` | decoded, each | peak | settles at |
+|---|---|---|---|
+| `3dboxes` (325x600) | 0.78 MB | 691 MB | **436 MB** |
+| `miximages` (1280x960) | 4.9 MB | 1,030 MB | **550 MB** |
+
+Six times the artwork did not cost six times the memory. It cost 1.26x.
+
+Work back from the settled figures, over the 228 MB consoles-screen floor:
+
+* 3dboxes: 208 MB of images at 0.78 MB each = about 266 pictures held.
+* miximages: 322 MB of images at 4.9 MB each = about 66 pictures held.
+
+Sixty-six against two hundred and sixty-six. **WebKit is already bounding its
+decode cache by bytes rather than by count** — the same shape as ES-DE's
+`MaxVRAM`, arrived at independently, and it holds a few hundred megabytes of
+pictures whatever size they happen to be.
+
+That is the opposite of what the first measurement suggested, and it matters:
+there is no unbounded leak in the webview to go and fix. What is left is a
+budget somebody else chose, sized for a Mac with plenty of memory, and a
+**peak** — 691 MB, 1,030 MB — reached before the pruning catches up.
+
+The peak is the number that matters on Android. A steady state of 550 MB on a
+6 GB device is uninteresting; a transient gigabyte inside a single-process
+WebView on a 2 GB device is a kill.
+
+## Why the pictures cost what they do
+
 
 The artwork is 1,280×960. Decoded that is 1,280 × 960 × 4 = **4.9 MB per
 picture**, and the grid draws them 150 points wide. Every cover on screen
@@ -30,8 +62,9 @@ costs about ten times what it needs to.
 
 That single number explains everything else:
 
-* 447 MB of WebContent ÷ 4.9 MB ≈ 91 covers held. It is not WebKit being fat.
-  It is ninety-one full-size pictures.
+* 447 MB of WebContent ÷ 4.9 MB ≈ 91 covers held. It is not WebKit being fat
+  in general. It is ninety-one full-size pictures inside a budget that would
+  have held four hundred small ones.
 * `src-sdl/src/covers.rs` caps the cache at 192 *textures* and its comment
   works that out as 150 MB, on the assumption that a cover is 786 KB. At
   4.9 MB the same cap is **940 MB**. The bound is wrong, and it is wrong in
@@ -76,10 +109,10 @@ ever on screen at once. Nothing is resampled and nothing is lost.
 **SDL:** the fix is small — make `covers.rs` count bytes instead of textures,
 with a budget rather than a count, and pick the budget from the machine.
 
-**Tauri:** we cannot do this. WebKit's decoded-image cache is not ours; there
-is no API for "hold at most 200 MB of images", and releasing the `<img>` (which
-`observeCovers` already does) does not release the decode. The 1,030 MB peak
-is WebKit deciding on its own when to prune, and it prunes late.
+**Tauri:** we cannot set the budget — WebKit's decoded-image cache is not ours
+and there is no API for "hold at most 200 MB of images". But the A/B above
+says it already has one. What we can change is what goes into it, and the
+peak, which is where the danger is.
 
 The lever we do have is the asset protocol: the page asks for a picture over
 a URL we serve, so the *served* bytes can be a resized copy while the file on
@@ -88,8 +121,37 @@ Glide make with `inSampleSize` — decode at the size you are going to draw —
 and it is invisible to the source. The detail pane, which draws big, keeps
 asking for the original.
 
+Halving the served size quarters the bytes, which both lowers the peak and
+lets four times as many covers sit inside whatever budget the platform has
+chosen. It is the only lever that works on a cache we do not own.
+
 This matters most on Android, where the WebView is single-process: it runs
 *inside* our app, against the per-app limit, with no separate WebContent
 process to absorb the spike. A 1,030 MB peak is not survivable on a 2 GB
 device. Chromium also decodes the whole image before resampling it down, so
 the intrinsic size is what costs, not the drawn size.
+
+
+## What is measured and what is not
+
+Measured: everything in the tables above, with the script's own notes
+confirming the browse actually happened. `tools/browse.js` reports through the
+`measure_note` command because the page's `console.log` goes to the webview
+console and nowhere a shell can read it — one run looked flat and was in fact
+a browse that never started.
+
+Not measured, and worth doing before anything is built on this:
+
+* **Android.** Every number here is macOS and WKWebView. Chromium sizes its
+  decode cache from device memory and decodes differently. The 2 GB device is
+  the question and nothing here answers it.
+* **The peak.** Sampled every four seconds, so the true peak is higher than
+  1,030 MB. It wants a tighter sampler, or a run under `instruments`.
+* **The floor.** 228 MB on the consoles screen is itself unexplained — 24
+  console pictures and a strip of covers should not cost that. Worth taking
+  apart before optimising anything downstream of it.
+* Opening the arcade console by script hung twice with `list_art =
+  "miximages"` and worked with `3dboxes`. Frank browses it daily without
+  trouble, so this is most likely the script driving the page in a way a
+  person does not. It has not been explained, and the miximages row above came
+  from a session-restore rather than a confirmed scripted browse.
