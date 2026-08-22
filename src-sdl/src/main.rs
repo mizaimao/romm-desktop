@@ -21,12 +21,13 @@
 
 use anyhow::{Context, Result};
 use romm_desktop::layout::{Panes, Scale, Viewport};
-use romm_desktop::{binds, padpoll};
+use romm_desktop::{binds, padpoll, rowwindow};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use std::collections::BTreeSet;
 
+mod covers;
 mod input;
 mod library;
 mod text;
@@ -77,6 +78,14 @@ fn main() -> Result<()> {
     let creator = canvas.texture_creator();
     let mut painter = text::Painter::new(&creator).context("finding fonts")?;
     check_fonts(&mut painter);
+
+    // Box art, from the same folder the other front ends fill. Nothing is
+    // fetched: what is on disk is drawn and what is not is a flat card.
+    let mut art = covers::Covers::new(
+        &creator,
+        config.media_dir(),
+        config.media.list_art.clone(),
+    );
 
     // The library, straight out of the metadata cache the other front ends
     // read. Nothing is fetched and nothing is written.
@@ -146,7 +155,7 @@ fn main() -> Result<()> {
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
-        draw(&mut canvas, &mut painter, &mut lib, &screen);
+        draw(&mut canvas, &mut painter, &mut art, &mut lib, &screen);
         canvas.present();
     }
     Ok(())
@@ -292,6 +301,7 @@ mod size {
 fn draw(
     canvas: &mut sdl2::render::WindowCanvas,
     painter: &mut text::Painter,
+    art: &mut covers::Covers,
     lib: &mut library::Library,
     screen: &Viewport,
 ) {
@@ -346,14 +356,14 @@ fn draw(
         let middle = (right - left - size::GAP).max(0.0);
         let columns = (((middle + size::GAP) / (size::CARD + size::GAP)).floor() as usize).max(1);
         lib.relayout(columns);
-        draw_games(canvas, painter, lib, screen, left, columns);
+        draw_games(canvas, painter, art, lib, screen, left, columns);
     }
 
     // What the window thinks it is. On screen rather than in the terminal
     // because what is worth watching is what happens while an edge is dragged.
     let filters = lib.filters();
     let readout = format!(
-        "{:.0}x{:.0}pt · {:.2}x · {:?} · {} · {}{}",
+        "{:.0}x{:.0}pt · {:.2}x · {:?} · {} · {}{} · {} covers held",
         screen.width(),
         screen.height(),
         screen.scale.factor(),
@@ -365,6 +375,7 @@ fn draw(
             format!("{} consoles", lib.consoles.len())
         },
         if filters.is_empty() { String::new() } else { format!(" · {}", filters.join("+")) },
+        art.holding(),
     );
     // What the two buttons do. Obvious once you know, and invisible until
     // then — a console list you cannot get past looks like a broken app
@@ -430,6 +441,7 @@ fn draw_consoles(
 fn draw_games(
     canvas: &mut sdl2::render::WindowCanvas,
     painter: &mut text::Painter,
+    art: &mut covers::Covers,
     lib: &mut library::Library,
     screen: &Viewport,
     left: f32,
@@ -437,27 +449,62 @@ fn draw_games(
 ) {
     let px = |points: f32| screen.scale.px(points);
     let step = size::ART + size::CAPTION + size::GAP;
-    let visible_rows = ((screen.height() - size::GAP) / step).floor().max(1.0) as usize;
-    // The band around the cursor. `visible.js` does this properly for the
-    // webview and `slice()` is the thing to port here; this is the two lines
-    // that keep the cursor on screen until then.
-    let cursor_row = lib.at / columns;
-    let first_row = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
 
-    let rows: Vec<_> = lib.showing().map(|r| (r.name.clone(), r.favourite)).collect();
-    for (i, (name, favourite)) in rows.iter().enumerate() {
+    // Which rows to draw at all. `rowwindow` is the webview's own arithmetic,
+    // ported into the core — on 2,506 arcade games this is the difference
+    // between a band of a few dozen and every one of them.
+    //
+    // Scrolled to keep the cursor on screen rather than by a scrollbar, since
+    // there is no pointer on a handheld. `scroll_to` answers with nothing when
+    // it is already there, which is what stops the list moving under the
+    // reader on every keypress.
+    let viewport = (screen.height() - size::GAP).max(step);
+    let (shown, at, was) = (lib.shown(), lib.at, lib.scrolled);
+    let ask = |top: f32| rowwindow::Ask::new(shown, columns, step, top, viewport);
+    let top = rowwindow::scroll_to(at, ask(was)).unwrap_or(was);
+    lib.scrolled = top;
+    let band = rowwindow::band(ask(top));
+
+    let rows: Vec<_> = lib
+        .showing()
+        .enumerate()
+        .skip(band.first)
+        .take(band.count)
+        .map(|(i, (r, stem))| (i, r.id, r.name.clone(), r.favourite, r.platform.clone(), stem.to_owned()))
+        .collect();
+
+    for (i, id, name, favourite, platform, stem) in rows {
         let (row, col) = (i / columns, i % columns);
-        if row < first_row || row >= first_row + visible_rows {
+        let x = left + size::GAP + col as f32 * (size::CARD + size::GAP);
+        let y = size::GAP + row as f32 * step - top;
+        if y + step < 0.0 || y > screen.height() {
             continue;
         }
-        let x = left + size::GAP + col as f32 * (size::CARD + size::GAP);
-        let y = size::GAP + (row - first_row) as f32 * step;
 
         let on = i == lib.at;
-        canvas.set_draw_color(if on { paint::CURSOR } else { paint::CARD });
-        fill(canvas, px(x), px(y), px(size::CARD), px(size::ART));
+        let frame = (px(x), px(y), px(size::CARD), px(size::ART));
+        match art.get(id, &platform, &stem) {
+            Some(cover) => {
+                let _ = canvas.copy(
+                    cover,
+                    None,
+                    Rect::new(frame.0 as i32, frame.1 as i32, frame.2 as u32, frame.3 as u32),
+                );
+            }
+            // No artwork on this machine. A flat card rather than nothing, so
+            // the grid keeps its shape and a game with no cover is still a
+            // thing you can put the cursor on.
+            None => {
+                canvas.set_draw_color(paint::CARD);
+                fill(canvas, frame.0, frame.1, frame.2, frame.3);
+            }
+        }
+        if on {
+            canvas.set_draw_color(paint::CURSOR);
+            outline(canvas, frame.0, frame.1, frame.2, frame.3, px(3.0));
+        }
 
-        let spec = text::Spec::new(name, size::LABEL, screen.scale.factor())
+        let spec = text::Spec::new(&name, size::LABEL, screen.scale.factor())
             .wrapped(size::CARD, 2);
         painter.draw(
             canvas,
@@ -466,11 +513,20 @@ fn draw_games(
             px(y + size::ART + 4.0),
             if on { paint::TEXT } else { paint::DIM },
         );
-        if *favourite {
+        if favourite {
             let star = text::Spec::new("★", 11.0, screen.scale.factor());
             painter.draw(canvas, &star, px(x + 4.0), px(y + 4.0), paint::TEXT);
         }
     }
+}
+
+/// A border, as four filled edges. SDL draws a one-pixel rectangle and the
+/// cursor needs to be visible against artwork.
+fn outline(canvas: &mut sdl2::render::WindowCanvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
+    fill(canvas, x, y, w, t);
+    fill(canvas, x, y + h - t, w, t);
+    fill(canvas, x, y, t, h);
+    fill(canvas, x + w - t, y, t, h);
 }
 
 fn fill(canvas: &mut sdl2::render::WindowCanvas, x: f32, y: f32, w: f32, h: f32) {

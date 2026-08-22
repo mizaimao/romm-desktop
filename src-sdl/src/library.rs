@@ -39,9 +39,18 @@ pub struct Library {
     /// The games of the open console, unsorted and unfiltered. What `arranged`
     /// holds is which of them to draw, in what order.
     rows: Vec<Row>,
+    /// The ROM filename without its extension, per row, in the same order.
+    ///
+    /// What the artwork on disk is named after — see `media::local_art`. Kept
+    /// beside the rows rather than on them because `gamelist::Row` is the
+    /// shape a *list* needs, and where a file sits is not part of that.
+    stems: Vec<String>,
     arranged: Vec<usize>,
     /// Where the cursor is, as a place in `arranged`.
     pub at: usize,
+    /// How far the grid is scrolled, in points. Owned here rather than by the
+    /// drawing so it survives a redraw and a resize.
+    pub scrolled: f32,
     chosen: Chosen,
     /// Where each drawn row leads, worked out once per relayout.
     moves: Moves,
@@ -64,8 +73,10 @@ impl Library {
             console_at: 0,
             view: View::Platforms,
             rows: Vec::new(),
+            stems: Vec::new(),
             arranged: Vec::new(),
             at: 0,
+            scrolled: 0.0,
             chosen: Chosen::default(),
             moves: Moves::default(),
             columns: 1,
@@ -81,9 +92,12 @@ impl Library {
         self.consoles.get(self.console_at)
     }
 
-    /// The games to draw, in the order to draw them.
-    pub fn showing(&self) -> impl Iterator<Item = &Row> {
-        self.arranged.iter().filter_map(|i| self.rows.get(*i))
+    /// The games to draw, in the order to draw them, each with the name its
+    /// artwork is filed under.
+    pub fn showing(&self) -> impl Iterator<Item = (&Row, &str)> {
+        self.arranged.iter().filter_map(|i| {
+            Some((self.rows.get(*i)?, self.stems.get(*i).map(String::as_str).unwrap_or("")))
+        })
     }
 
     pub fn shown(&self) -> usize {
@@ -112,10 +126,17 @@ impl Library {
     pub fn open_console(&mut self) -> Result<()> {
         let Some(slug) = self.console().map(|c| c.slug.clone()) else { return Ok(()) };
         let favourites = self.cache.favourite_ids().unwrap_or_default();
-        self.rows = self
-            .cache
-            .roms_for(&slug)
-            .with_context(|| format!("reading {slug}"))?
+        let fetched = self.cache.roms_for(&slug).with_context(|| format!("reading {slug}"))?;
+        self.stems = fetched
+            .iter()
+            .map(|r| {
+                Path::new(&r.fs_name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| r.fs_name.clone())
+            })
+            .collect();
+        self.rows = fetched
             .into_iter()
             .map(|r| Row {
                 favourite: favourites.contains(&r.id),
@@ -132,6 +153,7 @@ impl Library {
             .collect();
         self.view = View::Roms;
         self.at = 0;
+        self.scrolled = 0.0;
         // rearrange relayouts, but only after the view has changed — the
         // table is built for whichever list is showing.
         self.rearrange();
@@ -275,9 +297,11 @@ mod tests {
             consoles: vec![Console { slug: "snes".into(), name: "SNES".into(), games: 3 }],
             console_at: 0,
             view: View::Roms,
+            stems: rows.iter().map(|r| r.name.clone()).collect(),
             rows,
             arranged: Vec::new(),
             at: 0,
+            scrolled: 0.0,
             chosen: Chosen::default(),
             moves: Moves::default(),
             columns: 1,
@@ -289,7 +313,7 @@ mod tests {
     #[test]
     fn a_list_comes_out_in_the_cores_order() {
         let lib = seeded(rows(&[("Zelda", false), ("asteroids", false), ("Metroid", false)]));
-        let names: Vec<_> = lib.showing().map(|r| r.name.as_str()).collect();
+        let names: Vec<_> = lib.showing().map(|(r, _)| r.name.as_str()).collect();
         assert_eq!(names, ["asteroids", "Metroid", "Zelda"]);
     }
 
@@ -297,7 +321,7 @@ mod tests {
     #[test]
     fn favourites_lead_whatever_the_order() {
         let lib = seeded(rows(&[("Alpha", false), ("Zebra", true)]));
-        assert_eq!(lib.showing().next().map(|r| r.name.as_str()), Some("Zebra"));
+        assert_eq!(lib.showing().next().map(|(r, _)| r.name.as_str()), Some("Zebra"));
     }
 
     #[test]

@@ -44,4 +44,4 @@ default-features = false
 # with nothing to say that the library is installed and one directory away.
 # Debian answers the same question the same way, so this is not a Mac
 # workaround — it is the portable form.
-features = ["use-pkgconfig"]
+features = ["use-pkgconfig", "image"]
