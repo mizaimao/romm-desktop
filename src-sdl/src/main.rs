@@ -27,6 +27,7 @@ use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use std::collections::BTreeSet;
 
+mod backdrop;
 mod covers;
 mod input;
 mod library;
@@ -51,17 +52,27 @@ fn main() -> Result<()> {
     // empty database and shows a library of nothing.
     romm_desktop::datadir::anchor();
 
+    // The renderer has to be the GL one, because the backdrop is a shader and
+    // shaders need a context to be in. SDL picks Metal first on macOS and
+    // would give us one we cannot draw into; the handheld has only GL anyway,
+    // so this makes both machines the same rather than special-casing one.
     let sdl = sdl2::init().map_err(anyhow::Error::msg).context("starting SDL")?;
     let video = sdl.video().map_err(anyhow::Error::msg).context("opening the display")?;
 
-    let window = video
-        .window("RomM", POCKET.0, POCKET.1)
-        .position_centered()
-        .resizable()
-        // Retina and the like. Without this the window is described in points
-        // by the platform and drawn at half the resolution it could be.
-        .allow_highdpi()
-        .build()
+    // A GL window if the machine has one, and a plain one if not.
+    //
+    // Not a nicety: the backdrop is a shader and needs a context, but a
+    // library is more use than a gradient. A headless machine, a remote
+    // session, a driver that will not — all of them still get the app, just
+    // without the moving picture behind it.
+    let mut with_gl = true;
+    let window = open_window(&video, true)
+        .or_else(|e| {
+            eprintln!("no OpenGL here ({e}); the backdrop will be a flat colour");
+            with_gl = false;
+            open_window(&video, false)
+        })
+        .map_err(anyhow::Error::msg)
         .context("opening a window")?;
 
     // The config, read once. Everything the front end needs from it is settled
@@ -69,15 +80,57 @@ fn main() -> Result<()> {
     let config = romm_desktop::config::Config::load().unwrap_or_default();
     let held_at = config.appearance.viewing_distance_cm.unwrap_or(DESK_CM);
 
+    // The renderer has to be the GL one, because the backdrop is a shader and
+    // needs a context to live in. SDL picks Metal first on macOS and would
+    // hand back one we cannot draw into.
+    //
+    // Set only once the GL window has actually been made. `render::drivers()`
+    // lists what SDL was *built* with, not what the running video driver can
+    // do, so asking it first says "opengl" even under the dummy driver — and
+    // forcing it there leaves SDL unable to make any renderer at all, so the
+    // app fails to start rather than starting without a backdrop.
+    if with_gl {
+        sdl2::hint::set("SDL_RENDER_DRIVER", "opengl");
+    }
+
     let display = window.display_index().unwrap_or(0);
     let mut scale = scale_for(&video, display, held_at);
-    let mut canvas = window.into_canvas().accelerated().build().context("getting a renderer")?;
+    // Accelerated where there is acceleration, and software where there is
+    // not. Insisting on the first is how a machine that could have run this
+    // slowly instead runs it not at all.
+    let mut canvas = window
+        .clone()
+        .into_canvas()
+        .accelerated()
+        .build()
+        .or_else(|_| window.into_canvas().software().build())
+        .context("getting a renderer")?;
 
     // The texture creator outlives everything drawn from it, which is what
     // lets rendered labels be kept as textures rather than rebuilt per frame.
     let creator = canvas.texture_creator();
     let mut painter = text::Painter::new(&creator).context("finding fonts")?;
     check_fonts(&mut painter);
+
+    // The shader backdrop, underneath everything. Built after the renderer, so
+    // the context it compiles against is the one the renderer made current.
+    //
+    // Not fatal: a machine whose driver will not compile it still gets a
+    // library, and the message says why rather than the window being black.
+    let backdrop = match if with_gl {
+        unsafe { backdrop::Backdrop::build(&video, "blobs") }
+    } else {
+        Err(anyhow::anyhow!("no GL context"))
+    } {
+        Ok(b) => {
+            println!("backdrop: {}", b.style_label());
+            Some(b)
+        }
+        Err(e) => {
+            eprintln!("no backdrop: {e:#}");
+            None
+        }
+    };
 
     // Box art, from the same folder the other front ends fill. Nothing is
     // fetched: what is on disk is drawn and what is not is a flat card.
@@ -155,10 +208,34 @@ fn main() -> Result<()> {
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
+        // The backdrop first, straight into the buffer, then the interface on
+        // top of it. `RenderFlush` is what keeps the two apart: the renderer
+        // batches, and our GL calls landing in the middle of a batch it has
+        // not issued yet would leave its state describing something else.
+        canvas.set_draw_color(paint::BACKGROUND);
+        canvas.clear();
+        if let Some(backdrop) = &backdrop {
+            unsafe { backdrop.draw(screen.width_px, screen.height_px, now as f32 / 1000.0) };
+        }
         draw(&mut canvas, &mut painter, &mut art, &mut lib, &screen);
         canvas.present();
     }
     Ok(())
+}
+
+/// A window, with or without a GL context behind it.
+fn open_window(video: &sdl2::VideoSubsystem, gl: bool) -> Result<sdl2::video::Window, String> {
+    let mut builder = video.window("RomM", POCKET.0, POCKET.1);
+    builder
+        .position_centered()
+        .resizable()
+        // Retina and the like. Without this the window is described in points
+        // by the platform and drawn at half the resolution it could be.
+        .allow_highdpi();
+    if gl {
+        builder.opengl();
+    }
+    builder.build().map_err(|e| e.to_string())
 }
 
 /// Milliseconds since SDL started, which is what `padpoll` counts in.
@@ -305,8 +382,6 @@ fn draw(
     lib: &mut library::Library,
     screen: &Viewport,
 ) {
-    canvas.set_draw_color(paint::BACKGROUND);
-    canvas.clear();
 
     let px = |points: f32| screen.scale.px(points);
     let panes = screen.panes();

@@ -32,6 +32,11 @@ anyhow = "1.0.104"
 # handheld with nothing to install.
 cosmic-text = "0.19"
 
+# Raw GL, for the shader backdrop. SDL's renderer draws the interface; the
+# backdrop is one full-screen quad drawn underneath it, and that needs the
+# context directly. See src/backdrop.rs.
+gl = "0.14"
+
 # The C library, not a reimplementation. `libsdl2-dev` is already in the
 # handheld's package list, so the device can build this itself and
 # cross-compiling is a convenience rather than a blocker.
