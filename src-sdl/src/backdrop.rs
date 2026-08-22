@@ -78,10 +78,84 @@ const TAIL: &str = r#"
 }
 "#;
 
-const VERTEX: &str = r#"
+const VERTEX_MODERN: &str = r#"
 in vec2 pos;
 void main() { gl_Position = vec4(pos, 0.0, 1.0); }
 "#;
+
+const VERTEX_LEGACY: &str = r#"
+attribute vec2 pos;
+void main() { gl_Position = vec4(pos, 0.0, 1.0); }
+"#;
+
+/// Which GLSL this context speaks.
+///
+/// Two, and not by choice. SDL's renderer creates its own context and its GL
+/// backend is a legacy 2.1 one on macOS — the attributes asked for before the
+/// window are for a context we then do not get to use. Owning the context
+/// outright is where this ends up (the glass needs render-to-texture anyway),
+/// and until then the shader speaks both.
+///
+/// The body is identical in both. What differs is three lines of preamble:
+/// where the fragment colour goes, what the vertex input is called, and
+/// whether precision qualifiers are allowed or required.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Dialect {
+    /// GLSL 3.30 core, or GLSL ES 3.00.
+    Modern(&'static str),
+    /// GLSL 1.20, or GLSL ES 1.00.
+    Legacy(&'static str),
+}
+
+impl Dialect {
+    fn fragment_preamble(self) -> &'static str {
+        match self {
+            Dialect::Modern("#version 300 es") => "precision highp float;
+out vec4 color;
+",
+            Dialect::Modern(_) => "out vec4 color;
+",
+            // ES 1.00 must declare a precision and highp is optional in
+            // fragment shaders, so it is asked for and fallen back on. This is
+            // the whole of what the doc means by "a GLSL ES 1.00 rewrite with
+            // mediump fragment precision": at mediump the hash below loses the
+            // bits that make it noise, and the backdrop bands and marches.
+            // Mali-G52 has highp; Mali-400 does not.
+            Dialect::Legacy("#version 100") => {
+                "#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+#define color gl_FragColor
+"
+            }
+            // GLSL 1.20 has no precision statements at all — they arrived in
+            // 1.30 — so asking for one is a compile error rather than a hint.
+            Dialect::Legacy(_) => "#define color gl_FragColor
+",
+        }
+    }
+
+    fn vertex(self) -> &'static str {
+        match self {
+            Dialect::Modern(_) => VERTEX_MODERN,
+            // No precision statement here even for ES 1.00: vertex shaders
+            // default to highp, and only fragment shaders have to be told.
+            Dialect::Legacy(_) => VERTEX_LEGACY,
+        }
+    }
+
+    fn version(self) -> &'static str {
+        match self {
+            Dialect::Modern(v) | Dialect::Legacy(v) => v,
+        }
+    }
+
+    fn uses_vertex_arrays(self) -> bool {
+        matches!(self, Dialect::Modern(_))
+    }
+}
 
 /// One shape, and what the motion slider means for it.
 ///
@@ -162,6 +236,10 @@ pub struct Backdrop {
     pub speed: f32,
     pace: f32,
     label: &'static str,
+    dialect: Dialect,
+    /// Where `pos` lives, for the legacy path that re-describes the buffer
+    /// every draw.
+    attribute: u32,
 }
 
 struct Uniforms {
@@ -188,9 +266,14 @@ impl Backdrop {
             gl::load_with(|name| video.gl_get_proc_address(name) as *const _);
 
             let chosen = style(style_id);
-            let version = version_line(&reported(gl::SHADING_LANGUAGE_VERSION))?;
-            let fragment = format!("{version}\nprecision highp float;\n{HEAD}{}{TAIL}", chosen.body);
-            let vertex = format!("{version}\n{VERTEX}");
+            let dialect = dialect_for(&reported(gl::SHADING_LANGUAGE_VERSION))?;
+            let version = dialect.version();
+            let fragment = format!(
+                "{version}\n{}{HEAD}{}{TAIL}",
+                dialect.fragment_preamble(),
+                chosen.body
+            );
+            let vertex = format!("{version}\n{}", dialect.vertex());
 
             println!(
                 "gl: {} · {}",
@@ -204,10 +287,14 @@ impl Backdrop {
             // fragment.
             let corners: [f32; 12] =
                 [-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0];
+            // Vertex array objects are 3.0 and later. A legacy context binds
+            // the buffer and describes it on every draw instead.
             let (mut vao, mut vbo) = (0, 0);
-            gl::GenVertexArrays(1, &mut vao);
+            if dialect.uses_vertex_arrays() {
+                gl::GenVertexArrays(1, &mut vao);
+                gl::BindVertexArray(vao);
+            }
             gl::GenBuffers(1, &mut vbo);
-            gl::BindVertexArray(vao);
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
@@ -216,10 +303,12 @@ impl Backdrop {
                 gl::STATIC_DRAW,
             );
             let pos = CString::new("pos").unwrap();
-            let at = gl::GetAttribLocation(program, pos.as_ptr()) as u32;
+            let at = gl::GetAttribLocation(program, pos.as_ptr()).max(0) as u32;
             gl::EnableVertexAttribArray(at);
             gl::VertexAttribPointer(at, 2, gl::FLOAT, gl::FALSE, 0, std::ptr::null());
-            gl::BindVertexArray(0);
+            if dialect.uses_vertex_arrays() {
+                gl::BindVertexArray(0);
+            }
 
             let uniform = |name: &str| {
                 let c = CString::new(name).unwrap();
@@ -243,6 +332,8 @@ impl Backdrop {
                 speed: 1.0,
                 pace: chosen.pace,
                 label: chosen.label,
+                dialect,
+                attribute: at,
             })
         }
     }
@@ -265,9 +356,22 @@ impl Backdrop {
             gl::Uniform1f(self.uniforms.speed, self.speed * self.pace);
             gl::Disable(gl::BLEND);
             gl::Disable(gl::DEPTH_TEST);
-            gl::BindVertexArray(self.vao);
+            if self.dialect.uses_vertex_arrays() {
+                gl::BindVertexArray(self.vao);
+            } else {
+                gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo);
+                gl::EnableVertexAttribArray(self.attribute);
+                gl::VertexAttribPointer(
+                    self.attribute, 2, gl::FLOAT, gl::FALSE, 0, std::ptr::null(),
+                );
+            }
             gl::DrawArrays(gl::TRIANGLES, 0, 6);
-            gl::BindVertexArray(0);
+            if self.dialect.uses_vertex_arrays() {
+                gl::BindVertexArray(0);
+            } else {
+                gl::DisableVertexAttribArray(self.attribute);
+                gl::BindBuffer(gl::ARRAY_BUFFER, 0);
+            }
             gl::UseProgram(0);
         }
     }
@@ -284,7 +388,9 @@ impl Drop for Backdrop {
         unsafe {
             gl::DeleteProgram(self.program);
             gl::DeleteBuffers(1, &self.vbo);
-            gl::DeleteVertexArrays(1, &self.vao);
+            if self.dialect.uses_vertex_arrays() {
+                gl::DeleteVertexArrays(1, &self.vao);
+            }
         }
     }
 }
@@ -300,8 +406,8 @@ impl Drop for Backdrop {
 /// Everything below this line — the noise, the ramp, the vignette — is
 /// identical in both dialects, which is the whole reason the doc calls this
 /// the most portable thing in the front end.
-fn version_line(shading_language: &str) -> Result<&'static str> {
-    // "OpenGL ES GLSL ES 3.00" or "3.30" / "4.10 Metal - 90".
+fn dialect_for(shading_language: &str) -> Result<Dialect> {
+    // "OpenGL ES GLSL ES 3.00", or "3.30", or Apple's "4.10 Metal - 90.1".
     let es = shading_language.contains("ES");
     let number: f32 = shading_language
         .split_whitespace()
@@ -309,11 +415,13 @@ fn version_line(shading_language: &str) -> Result<&'static str> {
         .unwrap_or(0.0);
 
     match (es, number) {
-        (true, n) if n >= 3.0 => Ok("#version 300 es"),
-        (false, n) if n >= 3.3 => Ok("#version 330 core"),
+        (true, n) if n >= 3.0 => Ok(Dialect::Modern("#version 300 es")),
+        (true, n) if n >= 1.0 => Ok(Dialect::Legacy("#version 100")),
+        (false, n) if n >= 3.3 => Ok(Dialect::Modern("#version 330 core")),
+        (false, n) if n >= 1.2 => Ok(Dialect::Legacy("#version 120")),
         _ => Err(anyhow!(
-            "this context is GLSL {shading_language:?}, and the backdrop needs \
-             GLSL ES 3.00 or GLSL 3.30 — SDL was asked for one and given another"
+            "this context reports GLSL {shading_language:?}, which is older than \
+             anything the backdrop can be written in"
         )),
     }
 }
@@ -419,21 +527,43 @@ mod tests {
     /// The version line comes from the context, and the strings are what
     /// drivers actually report — including Apple's, which puts "Metal" in it.
     #[test]
-    fn the_shader_version_follows_the_context() {
-        assert_eq!(version_line("OpenGL ES GLSL ES 3.20").unwrap(), "#version 300 es");
-        assert_eq!(version_line("OpenGL ES GLSL ES 3.00").unwrap(), "#version 300 es");
-        assert_eq!(version_line("3.30").unwrap(), "#version 330 core");
-        assert_eq!(version_line("4.10 Metal - 90.1").unwrap(), "#version 330 core");
+    fn the_dialect_follows_the_context() {
+        assert_eq!(dialect_for("OpenGL ES GLSL ES 3.20").unwrap(), Dialect::Modern("#version 300 es"));
+        assert_eq!(dialect_for("3.30").unwrap(), Dialect::Modern("#version 330 core"));
+        assert_eq!(dialect_for("4.10 Metal - 90.1").unwrap(), Dialect::Modern("#version 330 core"));
+        // The one SDL's own renderer hands back on macOS, which is what this
+        // whole second dialect exists for.
+        assert_eq!(dialect_for("1.20").unwrap(), Dialect::Legacy("#version 120"));
+        assert_eq!(dialect_for("OpenGL ES GLSL ES 1.00").unwrap(), Dialect::Legacy("#version 100"));
     }
 
-    /// The context macOS hands back when nobody asks for a better one. It has
-    /// to say so rather than emit a version line the driver will reject.
+    /// The two dialects differ in three lines of preamble and nothing else,
+    /// and each has to declare what the body uses.
     #[test]
-    fn a_context_too_old_says_which_rather_than_failing_in_the_compiler() {
-        for old in ["1.20", "OpenGL ES GLSL ES 1.00", ""] {
-            let err = version_line(old).unwrap_err().to_string();
-            assert!(err.contains("GLSL"), "{old:?} gave an unhelpful message: {err}");
+    fn each_dialect_declares_what_the_body_needs() {
+        for d in [
+            Dialect::Modern("#version 330 core"),
+            Dialect::Modern("#version 300 es"),
+            Dialect::Legacy("#version 120"),
+            Dialect::Legacy("#version 100"),
+        ] {
+            let pre = d.fragment_preamble();
+            assert!(
+                pre.contains("out vec4 color") || pre.contains("#define color"),
+                "{d:?} never says where the colour goes"
+            );
+            assert!(d.vertex().contains("pos"), "{d:?} has no vertex input");
         }
+        // GLSL 1.20 has no precision statements; asking for one is an error.
+        assert!(!Dialect::Legacy("#version 120").fragment_preamble().contains("precision"));
+        // GLSL ES 1.00 must have one.
+        assert!(Dialect::Legacy("#version 100").fragment_preamble().contains("precision"));
+    }
+
+    #[test]
+    fn a_context_too_old_says_so() {
+        let err = dialect_for("").unwrap_err().to_string();
+        assert!(err.contains("GLSL"), "unhelpful message: {err}");
     }
 
     #[test]
