@@ -13,7 +13,7 @@
   const list = () => document.getElementById("list");
   const shown = () => {
     const l = list();
-    return `${l.querySelectorAll("img").length} imgs, ${
+    return `${l.querySelectorAll("img,canvas").length} pics / ${
       l.querySelectorAll(".gcard,.row").length
     } cards`;
   };
@@ -36,7 +36,7 @@
     card.click();
     for (let i = 0; i < 30 && !list().querySelector(".gcard,.row"); i++) await wait(500);
     await wait(4000);
-    note(`arcade open — ${shown()}`);
+    note(`ARCADE OPEN — ${shown()}`);
 
     const steps = 30;
     for (let i = 1; i <= steps; i++) {
@@ -46,9 +46,11 @@
       await wait(900);
       if (i % 6 === 0) note(`scrolled ${Math.round((i / steps) * 100)}% — ${shown()}`);
     }
-    note(`done — ${shown()}`);
-    await wait(6000);
-    note(`settled — ${shown()}`);
+    note(`SCROLLED — ${shown()}`);
+    await wait(12000);
+    note(`SETTLED — ${shown()}`);
+    await wait(20000);
+    note(`HELD — ${shown()}`);
   } catch (e) {
     note("failed: " + (e && e.stack ? e.stack : e));
   }
