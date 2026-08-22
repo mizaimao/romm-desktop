@@ -6,84 +6,59 @@
 > that is settled is the asset-request bug, and it is settled because it
 > reproduces every time.
 
-## Still unsettled: what a picture costs
+## Settled: a picture costs by its own size, not the size it is drawn
 
-Asked to verify the "half a megabyte a picture" claim rather than guess at it,
-the verification disagreed with the claim.
+Three earlier attempts at this contradicted each other, every time because the
+layout changed between runs and so did how many pictures were actually
+painted. This one holds the layout absolutely still — twenty slots of exactly
+200x150, `object-fit: cover`, all of them on screen, identical in every run —
+and varies only the resolution of the file behind each slot. Loaded one at a
+time, held at 1, 5, 10 and 20 long enough for the sampler outside to catch
+each step.
 
-The test: the same sixty 1,280x960 arcade miximages, loaded one at a time
-through the asset protocol into a full-screen overlay, at three tile sizes.
-Each run has its own empty baseline taken thirty seconds before anything
-loads, so the delta is within one process and cannot be confused by which
-screen the app happened to restore.
+| art | file | drawn at | 0 up | 1 | 5 | 10 | 20 | per picture |
+|---|---|---|---|---|---|---|---|---|
+| 3dboxes | 325x600 | 200x150 | 280.2 | 328 | 324 | 343 | **331.3** | **2.6 MB** |
+| miximages | 1280x960 | 200x150 | 239.4 | 263.1 | 326.2 | 361.9 | **471.1** | **10.9 MB** |
 
-| tile | empty | with 60 up | difference | per picture |
-|---|---|---|---|---|
-| 150x110 | 242.5 MB | 1,066 MB | +824 MB | 13.7 MB |
-| 300x225 | 245.0 MB | 412 MB | +167 MB | 2.8 MB |
-| 640x480 | 245.1 MB | 333 MB | +88 MB | 1.5 MB |
+The miximages column is clean — the spread across repeated samples at each
+step is 0.1 MB — and it is monotonic: 239, 263, 326, 362, 471. The slope from
+ten pictures to twenty is 10.9 MB each.
 
-Memory goes **down** as the pictures get bigger, which no theory offered so
-far predicts — not "decode at full size" (constant), not "decode at drawn
-size" (rising). And 13.7 MB a picture is nearly three times what a full-size
-decode of the file costs, so something beyond the decode is being held.
+**Both are drawn at exactly the same size. One costs four times the other.**
+The only thing that differs is the file: 1,228,800 pixels against 195,000, a
+ratio of 6.3. The cost ratio is 4.2 — not perfectly linear, because there is a
+fixed overhead per picture, but the direction is not in doubt.
 
-The obvious confound is that the overlay wraps: at 150px all sixty tiles are
-on the screen at once, at 640px only two or three are and the rest are laid
-out below the fold. So this may be measuring how many are *painted* rather
-than how they are decoded. That is a plausible story and it is not a
-measurement.
+So the claim made earlier in this file — that WebKit already decodes at the
+drawn size, the way Coil does with `inSampleSize` and QML with `sourceSize` —
+is **wrong**. It decodes at the file's size. 10.9 MB for a 1,280x960 picture
+is about 2.2x a plain RGBA decode of it, so there is a compositing or GPU copy
+on top of the decode as well.
 
-It also contradicts the earlier run in this same file that put sixty pictures
-up at 150x110 and read 256.6 MB — against 1,066 MB here for what should be
-the identical thing. One of those two is wrong and it is not yet known which.
+Frank's instinct throughout — that the size of the artwork must matter — was
+right, and three of my measurements said otherwise because all three were
+measuring the layout instead.
 
-**So the honest state is: what a picture costs in this app is not known.** The
-claim that WebKit already decodes at draw size is unverified, and so is the
-claim that it does not. Anything built on either is built on nothing.
+### What this makes possible
 
-What the next attempt needs: one picture at a time rather than sixty, so the
-cost of the first is unambiguous; a layout that does not change how many are
-painted when the tile size changes; and the per-process breakdown kept for
-every sample rather than the total.
+Ninety cards of miximage artwork is around 980 MB by this measurement, which
+is the arcade screen, and it is the whole problem.
 
-## The premise was wrong: a picture does not cost four bytes a pixel
+The fix does not touch a single file on disk. Fetch the picture as a blob,
+`createImageBitmap` it, draw it into a `<canvas>` the size of the tile, and
+`close()` the bitmap. What is *retained* is then the canvas — 200x150 at 2x is
+0.24 MB — instead of the decoded file. The full-resolution original is still
+what the detail pane opens, still exactly the bytes that were downloaded, and
+still the only copy that exists.
 
-Measured 2026-08-22, directly, with no UI in the way. Sixty of Frank's own
-1,280x960 arcade miximages put on screen at 150x110 through the asset
-protocol, and the process weighed before and after:
+Twenty pictures would go from 218 MB to about 5 MB. The peak becomes one
+decode at a time rather than ninety held at once.
 
-| | |
-|---|---|
-| app with an empty overlay | 228.3 MB |
-| the same, with 60 full-size pictures on it | 256.6 MB |
-
-**28 MB for sixty pictures. Under half a megabyte each.**
-
-Every calculation in this file before today assumed 1,280 x 960 x 4 =
-4.9 MB apiece. That is what the *file* would cost decoded at full size, and
-WebKit does not decode it at full size. It subsamples at decode time to
-something near the size the picture is drawn — 150x110 at 2x is 66,000
-pixels, and 0.26 MB is exactly four bytes of that. The measurement lands at
-0.48 MB, the same order.
-
-So WebKit already does the thing the Android libraries do with `inSampleSize`
-and QML does with `sourceSize`. **Decoding at draw size is not an optimisation
-available to us. It is already happening.**
-
-Frank said the arithmetic could not work, and it could not:
-
-> I strongly disaggree with your testing results. Showing fewer images eat the
-> same amount of ram this is mathmatically impossible.
-
-He was right twice over. Showing fewer pictures does use less memory — about
-half a megabyte less each. And that is far too little to explain a 400 MB
-arcade screen, which means **the artwork is not where the memory goes** and
-every optimisation proposed in this file was aimed at the wrong thing.
-
-Where it does go is not yet known. Ninety cards of artwork is around 40 MB of
-the roughly 200 MB that opening the arcade console adds. The other 160 MB is
-unaccounted for and is the only thing worth measuring next.
+Safari has historically ignored `createImageBitmap`'s `resizeWidth` options,
+so the intermediate bitmap may well be full size — but it is transient and
+closed immediately, and only one exists at a time. That is the difference
+between a 4.9 MB spike and a 980 MB resident set.
 
 ## A burst of asset requests wedges the page
 
