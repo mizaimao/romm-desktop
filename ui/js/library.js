@@ -1,6 +1,7 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
 import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
+import { fitted, boxSize } from "./fitpicture.js";
 import { resetNav, primeNav } from "./keys.js";
 import { currentOrder, defaultOrder, refreshSortButton, sorted } from "./sort.js";
 import { filtered, refreshFilterButton, activeFilters, clearFilters } from "./filter.js";
@@ -953,8 +954,6 @@ function pumpCovers() {
     const { art, url, star } = waiting.shift();
     if (!art.isConnected) continue;
     inFlight += 1;
-    const img = document.createElement("img");
-    img.alt = "";
     let settled = false;
     const finish = () => {
       if (settled) return;
@@ -962,16 +961,40 @@ function pumpCovers() {
       inFlight -= 1;
       pumpCovers();
     };
-    img.addEventListener("load", finish);
-    img.addEventListener("error", finish);
     // A request that never answers must not hold its place for ever. That is
-    // the wedge above: if it happens again the grid carries on with one
-    // picture missing rather than stopping.
+    // the wedge this throttle is for: if it happens again the grid carries on
+    // with one picture missing rather than stopping.
     setTimeout(finish, 10000);
+    drawCover(art, url, star).finally(finish);
+  }
+}
+
+/// Put one cover on one card, drawn at the size the card shows it.
+///
+/// The card holds a canvas rather than an `<img>` because an `<img>` keeps the
+/// picture decoded at the *file's* resolution — 10.9 MB for one of Frank's
+/// miximages, against 0.24 MB for the tile it is drawn into. See
+/// `fitpicture.js`. Nothing about the file on disk changes; the lightbox and
+/// the full-size views still open the original.
+async function drawCover(art, url, star) {
+  const [w, h] = boxSize(art);
+  const canvas = await fitted(url, w, h);
+  if (!art.isConnected) return;
+  if (canvas) {
+    art.replaceChildren(canvas);
+    if (star) art.insertAdjacentHTML("beforeend", star);
+    return;
+  }
+  // Whatever went wrong, a picture drawn the old way beats no picture.
+  await new Promise((done) => {
+    const img = document.createElement("img");
+    img.alt = "";
+    img.addEventListener("load", done);
+    img.addEventListener("error", done);
     art.replaceChildren(img);
     if (star) art.insertAdjacentHTML("beforeend", star);
     img.src = url;
-  }
+  });
 }
 
 /// Drop anything still queued. Called when the list is redrawn: those cards

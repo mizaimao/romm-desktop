@@ -60,6 +60,32 @@ so the intermediate bitmap may well be full size — but it is transient and
 closed immediately, and only one exists at a time. That is the difference
 between a 4.9 MB spike and a 980 MB resident set.
 
+## The baseline, at last: 235.6 MB with nothing of ours on the screen
+
+Asked for repeatedly and put off for too long while I chased the artwork.
+Measured with a full-screen opaque overlay, so no card, no cover and no
+backdrop is being painted, and with the per-process split kept for every
+sample:
+
+| | as loaded | fully covered |
+|---|---|---|
+| romm-gui (Rust: cache, API client, Tauri) | 48.7 MB | 48.7 MB |
+| WebKit GPU | 27.6 MB | 27.6 MB |
+| WebKit Networking | 6.2 MB | 6.2 MB |
+| WebKit WebContent (the page) | 153.1 MB | 153.0 MB |
+| **total** | **235.6 MB** | **235.5 MB** |
+
+Covering everything changes nothing — a tenth of a megabyte. So on the console
+screen the floor is structural, not painted: it is the runtime, the page, the
+row data and WebKit's own baseline, and hiding things does not touch it.
+
+Two thirds of it is WebContent. A blank WKWebView is usually somewhere around
+60–90 MB before a page is loaded, so our page is plausibly another 60–90 on
+top — but that split has *not* been measured and should not be quoted as if it
+had.
+
+This is the number every optimisation gets measured against.
+
 ## A burst of asset requests wedges the page
 
 Found on the way. Sixty `<img>` pointed at `asset://` URLs *at once* never

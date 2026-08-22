@@ -1,6 +1,7 @@
 // The sidebar: artwork, metadata, and the play/download actions.
 
 import { el, state, invoke, convertFileSrc, rememberRom } from "./state.js";
+import { fitted, boxSize } from "./fitpicture.js";
 import { tintFor } from "./tint.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
 import { openLightbox, setOpenHook } from "./lightbox.js";
@@ -203,7 +204,7 @@ export async function selectRom(id) {
   // The other half of the morph: same name as the tagged card art, so the
   // browser treats them as one element moving rather than two fading.
   const cover = d.cover
-    ? `<img class="cover" style="view-transition-name: cover" src="${convertFileSrc(d.cover)}" alt="" />`
+    ? `<img class="cover" data-fit="1" style="view-transition-name: cover" src="${convertFileSrc(d.cover)}" alt="" />`
     : "";
 
   // What this game has, as three small tags rather than a button here and two
@@ -283,6 +284,7 @@ export async function selectRom(id) {
   wireArtwork(d);
   wireShelf(d);
   wireAutofire(d);
+  fitPictures(el.detail);
 
   document.getElementById("play").addEventListener("click", () => play(d));
   document.getElementById("dl").addEventListener("click", () => download(d.id, false));
@@ -534,7 +536,7 @@ function artStrip(d) {
     .map(
       ([k, label]) =>
         `<figure data-art="${k}" title="${label}">
-           <img src="${convertFileSrc(d.art[k])}" alt="${label}" loading="lazy" />
+           <img data-fit="1" src="${convertFileSrc(d.art[k])}" alt="${label}" loading="lazy" />
            <figcaption>${label}</figcaption>
          </figure>`
     )
@@ -791,4 +793,34 @@ export function scrollDetail(amount) {
   if (!pane || el.detail.hidden) return false;
   pane.scrollTop += amount;
   return true;
+}
+
+
+/// Redraw every `data-fit` picture in `root` at the size it is shown.
+///
+/// The same trade as the grid: an `<img>` keeps the picture decoded at the
+/// file's resolution however small it is drawn, and this pane shows one large
+/// cover plus a gallery of every art type a game has — a dozen 1,280x960 files
+/// at once on one that is well scraped. The file on disk is not touched, and
+/// the lightbox still opens the original at full size.
+///
+/// Anything that will not convert is left exactly as it was.
+async function fitPictures(root) {
+  for (const img of [...root.querySelectorAll("img[data-fit]")]) {
+    const url = img.currentSrc || img.src;
+    if (!url) continue;
+    // Measured against the box it is stretched to fill, not its own size.
+    const [boxW] = boxSize(img.parentElement ?? img);
+    const width = boxW || img.clientWidth;
+    if (!width) continue;
+    // Twice the width as the height bound: these are all portrait-ish or
+    // landscape box art, and the width is what actually constrains them.
+    const canvas = await fitted(url, width, width * 2);
+    if (!canvas || !img.isConnected) continue;
+    canvas.className = img.className;
+    canvas.style.cssText = img.style.cssText;
+    canvas.style.width = "100%";
+    canvas.style.height = "auto";
+    img.replaceWith(canvas);
+  }
 }

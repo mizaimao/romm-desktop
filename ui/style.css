@@ -608,6 +608,15 @@ body.has-pad #tabbar .bumper { display: inline; }
   object-fit: contain;
   display: block;
 }
+/* A cover drawn into a canvas rather than loaded into an `<img>`, which is
+   what keeps a 1,280x960 file from sitting in memory at 1,280x960 to fill a
+   200-pixel tile. The canvas is already sized to fit, so `contain` is built
+   in; these two rules are a guard for the moment before layout settles. */
+.gcard .art canvas {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
 .gcard .art .ph {
   color: var(--dim);
   font-size: 26px;
@@ -700,7 +709,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 #detail h2 { margin: 0 0 4px; font-size: 16px; }
 #detail .sub { color: var(--dim); font-size: 12px; margin-bottom: 14px; word-break: break-all; }
 
-#detail video, #detail img.cover {
+#detail video, #detail img.cover, #detail canvas.cover {
   width: 100%;
   border-radius: 8px;
   background: var(--panel-2);
