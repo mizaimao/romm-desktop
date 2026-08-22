@@ -22,8 +22,6 @@ use std::ffi::CString;
 /// and they cannot drift apart on how they read `u_strength` or how they
 /// darken at the edges.
 const HEAD: &str = r#"
-out vec4 color;
-
 uniform vec2  u_size;
 uniform float u_time;
 uniform vec3  u_low;
@@ -535,6 +533,16 @@ mod tests {
         // whole second dialect exists for.
         assert_eq!(dialect_for("1.20").unwrap(), Dialect::Legacy("#version 120"));
         assert_eq!(dialect_for("OpenGL ES GLSL ES 1.00").unwrap(), Dialect::Legacy("#version 100"));
+    }
+
+    /// Where the fragment colour goes is the preamble's business and nobody
+    /// else's. It was declared in both — the shared frame *and* the modern
+    /// preamble — which is a duplicate on one dialect and a compile error on
+    /// the other, and the error names a line the body does not contain.
+    #[test]
+    fn the_shared_frame_does_not_declare_the_output() {
+        assert!(!HEAD.contains("out vec4"), "the frame declares the output as well");
+        assert!(!HEAD.contains("gl_FragColor"), "the frame names a legacy-only builtin");
     }
 
     /// The two dialects differ in three lines of preamble and nothing else,
