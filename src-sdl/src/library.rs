@@ -58,7 +58,7 @@ impl Library {
             .into_iter()
             .map(|p| Console { slug: p.fs_slug, name: p.display_name, games: p.rom_count })
             .collect();
-        Ok(Library {
+        let mut lib = Library {
             cache,
             consoles,
             console_at: 0,
@@ -69,7 +69,12 @@ impl Library {
             chosen: Chosen::default(),
             moves: Moves::default(),
             columns: 1,
-        })
+        };
+        // The console list is a list before it is anything else, and the
+        // cursor has to be able to move on it. Without this the move table
+        // stayed empty until a console was opened — which needs the cursor.
+        lib.moves = gridnav::uniform(lib.consoles.len(), 1);
+        Ok(lib)
     }
 
     pub fn console(&self) -> Option<&Console> {
@@ -127,12 +132,19 @@ impl Library {
             .collect();
         self.view = View::Roms;
         self.at = 0;
+        // rearrange relayouts, but only after the view has changed — the
+        // table is built for whichever list is showing.
         self.rearrange();
         Ok(())
     }
 
     pub fn back(&mut self) {
         self.view = View::Platforms;
+        // Rebuilt outright rather than through `relayout`, which skips the
+        // work when the count looks unchanged — and a console list the same
+        // length as the games grid it came from is not impossible.
+        self.columns = 1;
+        self.moves = gridnav::uniform(self.consoles.len(), 1);
     }
 
     /// Work out which rows survive the filters and what order they go in.
@@ -149,7 +161,7 @@ impl Library {
         }
         self.arranged = ids.into_iter().filter_map(|id| by_id.get(&id).copied()).collect();
         self.at = self.at.min(self.arranged.len().saturating_sub(1));
-        self.relayout(self.columns);
+        self.moves = gridnav::uniform(self.arranged.len(), self.columns);
     }
 
     /// Tell it how wide the grid came out, so the cursor knows what is beside
@@ -159,12 +171,20 @@ impl Library {
     /// two numbers, which is also why it can answer for rows that were never
     /// drawn.
     pub fn relayout(&mut self, columns: usize) {
-        self.columns = columns.max(1);
+        let columns = columns.max(1);
         let count = match self.view {
             View::Platforms => self.consoles.len(),
             View::Roms => self.arranged.len(),
         };
-        self.moves = gridnav::uniform(count, self.columns);
+        // Only when it would come out different. This is called from the
+        // drawing, so it runs every frame, and the table is six vectors the
+        // length of the list — 15,000 allocations a frame on the arcade
+        // console for an answer that changes when the window is resized.
+        if columns == self.columns && count == self.moves.down.len() {
+            return;
+        }
+        self.columns = columns;
+        self.moves = gridnav::uniform(count, columns);
     }
 
     /// Do what a key or a button asked for. Returns whether anything changed.
@@ -319,6 +339,58 @@ mod tests {
         assert_eq!(lib.filters(), ["fav"]);
         assert_eq!(lib.shown(), 1);
         assert!(lib.at < lib.shown(), "the cursor was left past the end");
+    }
+
+    /// End to end, against the cache the other front ends read.
+    ///
+    /// Skipped where there is no cache — CI has none — but on a machine that
+    /// has one this is the test that would have caught the console list
+    /// drawing and nothing else happening.
+    #[test]
+    fn a_real_console_opens_and_has_games_in_it() {
+        // `cargo test` runs from the crate directory, not the workspace root.
+        let db = Path::new("../cache.sqlite3");
+        if !db.is_file() {
+            eprintln!("no cache.sqlite3 here; skipping");
+            return;
+        }
+        let mut lib = Library::open(db).expect("opening the cache");
+        assert!(!lib.consoles.is_empty(), "a cache with no consoles in it");
+
+        // The first console with anything in it, since a library can hold
+        // empty ones.
+        let at = lib
+            .consoles
+            .iter()
+            .position(|c| c.games > 0)
+            .expect("no console has any games");
+        lib.console_at = at;
+        lib.act("activate").expect("opening a console");
+
+        assert_eq!(lib.view, View::Roms, "activate did not open the console");
+        assert!(lib.shown() > 0, "the console opened with nothing in it");
+        assert!(lib.selected().is_some(), "nothing is under the cursor");
+    }
+
+    /// The console list has to be navigable before anything is opened.
+    ///
+    /// It was not: the move table was only ever worked out for the games
+    /// grid, so on the console screen every direction did nothing and the
+    /// cursor sat on whatever was first.
+    #[test]
+    fn the_console_cursor_moves_before_a_console_is_opened() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.view = View::Platforms;
+        lib.consoles = vec![
+            Console { slug: "a".into(), name: "A".into(), games: 1 },
+            Console { slug: "b".into(), name: "B".into(), games: 2 },
+            Console { slug: "c".into(), name: "C".into(), games: 3 },
+        ];
+        lib.relayout(1);
+        assert!(lib.act("down").unwrap(), "down did nothing on the console list");
+        assert_eq!(lib.console_at, 1);
+        assert!(lib.act("last").unwrap());
+        assert_eq!(lib.console_at, 2);
     }
 
     #[test]

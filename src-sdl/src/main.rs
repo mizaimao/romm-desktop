@@ -366,9 +366,16 @@ fn draw(
         },
         if filters.is_empty() { String::new() } else { format!(" · {}", filters.join("+")) },
     );
+    // What the two buttons do. Obvious once you know, and invisible until
+    // then — a console list you cannot get past looks like a broken app
+    // rather than one waiting to be told which console.
+    let hint = if showing_games { "Esc back · s sort · f filter" } else { "Enter opens a console" };
+    let spec = text::Spec::new(hint, 11.0, screen.scale.factor());
+    painter.draw(canvas, &spec, px(size::GAP), screen.height_px - px(size::GAP + 14.0), paint::FAINT);
+
     if let Some(row) = lib.selected() {
         let name = text::Spec::new(&row.name, 12.0, screen.scale.factor());
-        painter.draw(canvas, &name, px(size::GAP), screen.height_px - px(size::GAP + 16.0), paint::DIM);
+        painter.draw(canvas, &name, px(size::GAP), screen.height_px - px(size::GAP + 30.0), paint::DIM);
     }
     let spec = text::Spec::new(readout, 11.0, screen.scale.factor());
     let (w, h) = painter.measure(&spec);
