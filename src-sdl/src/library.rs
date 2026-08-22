@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use romm_desktop::cache::Cache;
 use romm_desktop::gamelist::{self, Chosen, Row};
 use romm_desktop::gridnav::{self, Moves};
+use romm_desktop::layout::Panes;
 use romm_desktop::{gamefilter, gamesort};
 use std::path::{Path, PathBuf};
 
@@ -80,6 +81,56 @@ pub const SECTIONS: &[Section] = &[
     Section { id: "browse", label: "RomM browse", ready: false },
 ];
 
+/// One game in the Continue playing strip.
+pub struct Recent {
+    pub id: i64,
+    pub name: String,
+    pub platform: String,
+    pub stem: String,
+    pub downloaded: bool,
+}
+
+/// How the window is arranged.
+///
+/// The choice `ui/js/shell.js` calls Sofa and Desk, and it is a preference
+/// rather than a measurement: the window's width is a ceiling — see
+/// `layout::Panes::at_most` — and this is what is wanted under it.
+///
+/// Sofa is one pane at a time with a back button, which is what a handheld
+/// always gets and what a television across a room wants: big tiles, one thing
+/// to look at. Desk is the columns, which wants a mouse and a monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Sofa,
+    Desk,
+}
+
+impl Mode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Sofa => "Sofa",
+            Mode::Desk => "Desk",
+        }
+    }
+
+    /// The most panes this arrangement ever wants.
+    pub fn panes(self) -> Panes {
+        match self {
+            Mode::Sofa => Panes::One,
+            Mode::Desk => Panes::Three,
+        }
+    }
+
+    pub fn other(self) -> Mode {
+        match self {
+            Mode::Sofa => Mode::Desk,
+            Mode::Desk => Mode::Sofa,
+        }
+    }
+}
+
+pub const MODES: [Mode; 2] = [Mode::Sofa, Mode::Desk];
+
 /// Which screen is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -117,6 +168,9 @@ pub struct Library {
     arranged: Vec<usize>,
     /// Which tab is open.
     pub section: usize,
+    /// Sofa or Desk. Not what the window can hold — what is wanted.
+    pub mode: Mode,
+    recent: Vec<Recent>,
     /// Where the cursor is, as a place in `arranged`.
     pub at: usize,
     /// The shape of this console's box art, width over height.
@@ -156,6 +210,8 @@ impl Library {
             stems: Vec::new(),
             arranged: Vec::new(),
             section: 0,
+            mode: Mode::Sofa,
+            recent: Vec::new(),
             at: 0,
             aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
@@ -163,11 +219,39 @@ impl Library {
             moves: Moves::default(),
             columns: 1,
         };
+        // One more than fits in the strip, so it can say there is a "more"
+        // without a second query.
+        lib.recent = lib
+            .cache
+            .recently_played(21)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| Recent {
+                downloaded: lib.roms_dir.join(&r.platform_slug).join(&r.fs_name).exists(),
+                stem: Path::new(&r.fs_name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| r.fs_name.clone()),
+                id: r.id,
+                name: r.name,
+                platform: r.platform_slug,
+            })
+            .collect();
+
         // The console list is a list before it is anything else, and the
         // cursor has to be able to move on it. Without this the move table
         // stayed empty until a console was opened — which needs the cursor.
         lib.moves = gridnav::uniform(lib.consoles.len(), 1);
         Ok(lib)
+    }
+
+    /// The games played most recently, for the strip above the consoles.
+    ///
+    /// Server timestamps, so it is the same list on every machine — the point
+    /// is picking up where you left off, and that is rarely the machine you
+    /// are sitting at now.
+    pub fn recent(&self) -> &[Recent] {
+        &self.recent
     }
 
     /// Whether Back has anywhere left to go.
@@ -389,6 +473,13 @@ impl Library {
                 self.relayout(self.columns);
                 Ok(true)
             }
+            // Sofa or Desk. The one control that changes the shape of the
+            // whole window, so it is on a binding of its own rather than
+            // buried in a menu.
+            "layout" => {
+                self.mode = self.mode.other();
+                Ok(true)
+            }
             // The shoulder buttons, and q/e. The cheapest navigation there is,
             // which is why they move between tabs rather than within one.
             "prevSection" | "nextSection" => {
@@ -456,6 +547,8 @@ mod tests {
             rows,
             arranged: Vec::new(),
             section: 0,
+            mode: Mode::Sofa,
+            recent: Vec::new(),
             at: 0,
             aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
@@ -604,6 +697,24 @@ mod tests {
         assert_eq!(lib.section, 0);
         lib.act("prevSection").unwrap();
         assert_eq!(lib.section, SECTIONS.len() - 1, "going back from the first did not wrap");
+    }
+
+    /// The window's width is a ceiling and the preference lives under it, so
+    /// a narrow window asking for Desk still gets one pane — and the handheld
+    /// never gets three however it is set.
+    #[test]
+    fn the_arrangement_is_wanted_but_the_window_decides() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        assert_eq!(lib.mode, Mode::Sofa);
+        lib.act("layout").unwrap();
+        assert_eq!(lib.mode, Mode::Desk);
+
+        let wide = Panes::fitting(1400.0);
+        let pocket = Panes::fitting(640.0);
+        assert_eq!(wide.at_most(lib.mode.panes()), Panes::Three);
+        assert_eq!(pocket.at_most(lib.mode.panes()), Panes::One, "the handheld got columns");
+        lib.act("layout").unwrap();
+        assert_eq!(wide.at_most(lib.mode.panes()), Panes::One, "Sofa is one pane on any screen");
     }
 
     #[test]

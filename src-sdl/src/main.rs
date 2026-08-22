@@ -208,7 +208,9 @@ fn main() -> Result<()> {
                 Event::MouseButtonDown { mouse_btn, x, y, .. } => match mouse_btn {
                     sdl2::mouse::MouseButton::Left => {
                         let (x, y) = pointer(&window, x, y);
-                        if let Some(tab) = hits.tab_at(x, y) {
+                        if let Some(mode) = hits.mode_at(x, y) {
+                            lib.mode = mode;
+                        } else if let Some(tab) = hits.tab_at(x, y) {
                             lib.section = tab;
                         } else if let Some(at) = hits.at(x, y) {
                             lib.point_at(at);
@@ -481,6 +483,11 @@ mod size {
     pub const TILE_ART: f32 = 104.0;
     pub const TILE_CAPTION: f32 = 50.0;
     pub const ROUND: f32 = 10.0;
+    /// The Sofa/Desk control in the tab row.
+    pub const SWITCH: f32 = 130.0;
+    /// The Continue playing strip: a heading, a row of covers, their names.
+    pub const STRIP: f32 = 210.0;
+    pub const STRIP_ART: f32 = 130.0;
     pub const ROUND_SMALL: f32 = 6.0;
     pub const PAD: Edges = Edges::all(GAP);
 
@@ -498,6 +505,7 @@ mod size {
 pub struct Hits {
     rows: Vec<(Rect, usize)>,
     tabs: Vec<(Rect, usize)>,
+    modes: Vec<(Rect, library::Mode)>,
 }
 
 impl Hits {
@@ -507,6 +515,14 @@ impl Hits {
 
     fn tab(&mut self, at: Rect, index: usize) {
         self.tabs.push((at, index));
+    }
+
+    fn mode(&mut self, at: Rect, mode: library::Mode) {
+        self.modes.push((at, mode));
+    }
+
+    fn mode_at(&self, x: f32, y: f32) -> Option<library::Mode> {
+        self.modes.iter().find(|(r, _)| r.contains(x, y)).map(|(_, m)| *m)
     }
 
     fn at(&self, x: f32, y: f32) -> Option<usize> {
@@ -639,7 +655,10 @@ fn draw(
     // How many columns the body gets, and which. The picker is only a column
     // of its own where there is room; below that it is the whole body until a
     // console is opened, which is the handheld's arrangement.
-    let panes = screen.panes();
+    // The window's width is a ceiling and Sofa/Desk is what is wanted under
+    // it — see `layout::Panes::at_most`. A narrow window asking for columns
+    // still gets one pane, and the handheld never gets three.
+    let panes = screen.panes().at_most(lib.mode.panes());
     let showing_games = lib.view == library::View::Roms;
     let wants = match (panes, showing_games) {
         (Panes::Three, _) => vec![
@@ -675,7 +694,19 @@ fn draw(
         );
         f.label_centred(&spec, page, paint::DIM);
     } else if let Some(picker) = picker {
-        draw_consoles(&mut f, lib, picker.inset(size::PAD), !showing_games);
+        // The strip of recently played games, above the consoles and only
+        // where the column is wide enough to be a grid — a 260-point picker
+        // has no room for a row of covers, and the webview does not draw one
+        // there either.
+        let area = picker.inset(size::PAD);
+        let area = if picker.w >= size::TILE * 2.0 + size::GAP && !lib.recent().is_empty() {
+            let (strip, rest) = area.split_top(size::STRIP);
+            draw_recent(&mut f, lib, strip);
+            rest.inset(Edges { top: size::GAP, ..Edges::default() })
+        } else {
+            area
+        };
+        draw_consoles(&mut f, lib, area, !showing_games);
     } else if !showing_games {
         draw_consoles(&mut f, lib, games.inset(size::PAD), true);
     }
@@ -725,6 +756,22 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
         x += width;
     }
 
+    // Sofa or Desk, as a segmented control — the one thing in the header that
+    // changes the shape of the whole window, so it sits in the tab row where
+    // it is always reachable rather than inside a screen.
+    let switch = Rect::new(tabs.right() - size::GAP - size::SWITCH, tabs.y + 7.0, size::SWITCH, tabs.h - 14.0);
+    f.fill(switch, paint::MARK, size::ROUND_SMALL);
+    let halves = switch.row(0.0, &[Size::Grow(1.0), Size::Grow(1.0)]);
+    for (mode, half) in library::MODES.iter().zip(halves) {
+        let on = *mode == lib.mode;
+        if on {
+            f.fill(half, paint::CURSOR, size::ROUND_SMALL);
+        }
+        let spec = f.spec(mode.label(), 12.0);
+        f.label_centred(&spec, half, if on { paint::TEXT } else { paint::DIM });
+        f.hits.mode(f.px(half), *mode);
+    }
+
     // Where you are on the left, how the list is arranged on the right.
     let inner = header.inset(Edges::xy(size::GAP, 0.0));
     let here = match lib.view {
@@ -749,6 +796,40 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
         };
         let spec = f.spec(arranged, 12.0);
         f.label_right(&spec, Rect { x: inner.x, ..centred }, paint::DIM);
+    }
+}
+
+/// Continue playing: one row that runs off the side.
+///
+/// A shortcut rather than a second library — the webview stops at twenty for
+/// the same reason, and past that it is a screen above the screen you wanted.
+fn draw_recent(f: &mut Frame, lib: &library::Library, area: Rect) {
+    let (heading, row) = area.split_top(22.0);
+    let spec = f.spec("CONTINUE PLAYING", 11.0);
+    f.label(&spec, heading, paint::FAINT);
+
+    // As many as fit, and no wrapping: this is one row by definition.
+    let card = size::CARD * 0.8;
+    let across = row.fits(size::GAP, card);
+    let grid = row.tracks(size::GAP, across);
+    for (i, game) in lib.recent().iter().take(across).enumerate() {
+        let cell = grid.cell(i, row.h);
+        let (art, caption) = cell.split_top(size::STRIP_ART);
+        if !f.cover(game.id, &game.platform, &game.stem, art, size::ROUND_SMALL) {
+            f.pane(art, paint::CARD, size::ROUND_SMALL);
+        }
+        let name = f.wrapped(&game.name, 12.0, caption.w, 1);
+        let used = f.label(&name, caption.inset(Edges { top: 4.0, ..Edges::default() }), paint::DIM);
+        // The console under the name, with the mark that says whether it will
+        // play offline — the strip mixes consoles, so the row cannot say which
+        // one it is on.
+        let under = Rect { y: caption.y + used + 6.0, h: 14.0, ..caption };
+        let [dot, where_] =
+            <[Rect; 2]>::try_from(under.row(4.0, &[Size::Fixed(9.0), Size::Grow(1.0)])).unwrap();
+        let spec = f.spec(if game.downloaded { "●" } else { "○" }, 9.0);
+        f.label(&spec, dot, if game.downloaded { paint::HERE } else { paint::AWAY });
+        let spec = f.spec(&game.platform, 10.0);
+        f.label(&spec, where_, paint::FAINT);
     }
 }
 
