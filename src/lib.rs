@@ -18,6 +18,7 @@ mod config_files;
 pub mod coremap;
 pub mod coverage;
 pub mod cores;
+pub mod datadir;
 pub mod diskspace;
 pub mod download;
 pub mod esde;

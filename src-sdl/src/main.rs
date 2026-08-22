@@ -42,6 +42,14 @@ const POCKET: (u32, u32) = (960, 720);
 const DESK_CM: f32 = 60.0;
 
 fn main() -> Result<()> {
+    // Where the app's files are. Config, cache and library are all addressed
+    // relative to one directory, and which one depends on how this was
+    // started — see `romm_desktop::datadir`. Without it `cache.sqlite3` is
+    // opened relative to whatever directory the binary was launched from, and
+    // `Cache::open` *creates* the file, so instead of failing it makes an
+    // empty database and shows a library of nothing.
+    romm_desktop::datadir::anchor();
+
     let sdl = sdl2::init().map_err(anyhow::Error::msg).context("starting SDL")?;
     let video = sdl.video().map_err(anyhow::Error::msg).context("opening the display")?;
 
@@ -74,6 +82,12 @@ fn main() -> Result<()> {
     // read. Nothing is fetched and nothing is written.
     let mut lib = library::Library::open(std::path::Path::new("cache.sqlite3"))
         .context("opening the library")?;
+    if lib.consoles.is_empty() {
+        eprintln!(
+            "warning: no consoles in {}/cache.sqlite3 — run `romm-desktop sync` to fill it",
+            std::env::current_dir().unwrap_or_default().display()
+        );
+    }
     println!("{} consoles", lib.consoles.len());
 
     let mut screen = viewport(&canvas, scale);
@@ -305,7 +319,25 @@ fn draw(
         right = screen.width() - size::ASIDE - size::GAP;
     }
 
-    if picker_column || !showing_games {
+    if lib.consoles.is_empty() {
+        // A blank window is indistinguishable from a broken one. The library
+        // being empty is a thing that happens — a fresh install, or a cache
+        // that was never synced — and the app has to say which.
+        let spec = text::Spec::new(
+            "No consoles in this library.\nRun `romm-desktop sync` to fill it.",
+            size::TITLE,
+            screen.scale.factor(),
+        )
+        .wrapped(screen.width() - size::GAP * 4.0, 2);
+        let (w, h) = painter.measure(&spec);
+        painter.draw(
+            canvas,
+            &spec,
+            (screen.width_px - w as f32) / 2.0,
+            (screen.height_px - h as f32) / 2.0,
+            paint::DIM,
+        );
+    } else if picker_column || !showing_games {
         let width = if picker_column { size::PICKER } else { screen.width() };
         draw_consoles(canvas, painter, lib, screen, width, !showing_games || !picker_column);
     }

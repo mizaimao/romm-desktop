@@ -3,6 +3,40 @@
 Still worth doing, deliberately not being done now. In the order I would take
 them. `handover.md` is the wider brief; this is just the queue.
 
+## 0. An Android build
+
+Parked on 2026-08-21, once the SDL front end existed and the question became
+askable:
+
+> If we have this SDL build, how far are we from getting an Android build? …
+> I think it's doable because ES-DE's Android port got it figured out alright
+> and there are a shit load of Android frontends doing it already, we can just
+> piggyback from their open source repos. … Maybe I will drop that Linux
+> support, it turned out that I don't really like this Miniloong device.
+
+**Browsing is close.** SDL2 has first-class Android support, `cosmic-text` is
+pure Rust and reads `/system/fonts` (where Android's own Noto CJK lives, which
+also settles the Han unification question there), and `rusqlite` is already on
+the `bundled` feature so SQLite compiles for ARM. What is missing is a
+toolchain and a shell: `cargo-ndk`, a thin Gradle project carrying SDL's own
+`SDLActivity.java` to load our `.so`, and a TLS story — `rustls-platform-
+verifier` wants JNI on Android. A fortnight, roughly.
+
+**Playing is a different project.** The core launches RetroArch as a
+subprocess (`src/retroarch.rs`), and on Android that is an Intent to
+RetroArch's app instead. Add scoped storage for ROMs and saves and it is not a
+port of the launch path, it is a second one. `src/launch.rs` plans the launch
+and does not spawn anything, which is the half that survives.
+
+**Do not start from ES-DE.** Its Android port is not open source. The ones to
+read are the frontends that are — Daijishō and Lemuroid both drive RetroArch
+by Intent from Kotlin, which is exactly the piece we would be writing.
+
+**If Linux is dropped, this changes shape entirely**: the handheld work in
+`handheld-device.md` and `handheld-frontend.md` task 3 is all RK3566, and an
+Android handheld would replace it rather than join it. Worth deciding before
+picking either up again.
+
 ## 1. Cheats
 
 Parked on 2026-08-20: "I don't use cheats very often so don't bother. Park it
