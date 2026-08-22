@@ -105,6 +105,35 @@ pub enum Mode {
     Desk,
 }
 
+/// How a console's games are shown: as artwork, or as names.
+///
+/// `state.layout` in the webview, and the same default - a wall of covers,
+/// because that is what a library of games looks like. A list is what you
+/// switch to when you already know the name.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Look {
+    Grid,
+    List,
+}
+
+impl Look {
+    pub fn other(self) -> Look {
+        match self {
+            Look::Grid => Look::List,
+            Look::List => Look::Grid,
+        }
+    }
+
+    /// What the button offers, which is the *other* one - a button saying
+    /// "Grid" while you are looking at a grid says nothing.
+    pub fn offers(self) -> &'static str {
+        match self {
+            Look::Grid => "List",
+            Look::List => "Grid",
+        }
+    }
+}
+
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
@@ -121,6 +150,11 @@ impl Mode {
         }
     }
 
+    /// The one that is not this. Used by the test below; the switch in the
+    /// tab row sets the mode it was clicked on rather than flipping, and the
+    /// binding this used to be on now belongs to grid and list, where every
+    /// other front end has it.
+    #[allow(dead_code)]
     pub fn other(self) -> Mode {
         match self {
             Mode::Sofa => Mode::Desk,
@@ -170,6 +204,7 @@ pub struct Library {
     pub section: usize,
     /// Sofa or Desk. Not what the window can hold — what is wanted.
     pub mode: Mode,
+    pub look: Look,
     recent: Vec<Recent>,
     /// Where the cursor is, as a place in `arranged`.
     pub at: usize,
@@ -211,6 +246,7 @@ impl Library {
             arranged: Vec::new(),
             section: 0,
             mode: Mode::Sofa,
+            look: Look::Grid,
             recent: Vec::new(),
             at: 0,
             aspect: DEFAULT_ASPECT,
@@ -473,11 +509,17 @@ impl Library {
                 self.relayout(self.columns);
                 Ok(true)
             }
-            // Sofa or Desk. The one control that changes the shape of the
-            // whole window, so it is on a binding of its own rather than
-            // buried in a menu.
+            // A wall of covers, or a list of names. The same binding the
+            // webview puts it on, and the same two shapes: artwork is how you
+            // recognise a game you have seen and a name is how you find one
+            // you are looking for, and no single layout does both.
+            //
+            // Sofa and Desk is *not* this. It was on this binding for a day,
+            // which took `layout` away from the thing every other front end
+            // has it doing; it is a click in the tab row instead, where a
+            // control that reshapes the whole window belongs.
             "layout" => {
-                self.mode = self.mode.other();
+                self.look = self.look.other();
                 Ok(true)
             }
             // The shoulder buttons, and q/e. The cheapest navigation there is,
@@ -548,6 +590,7 @@ mod tests {
             arranged: Vec::new(),
             section: 0,
             mode: Mode::Sofa,
+            look: Look::Grid,
             recent: Vec::new(),
             at: 0,
             aspect: DEFAULT_ASPECT,
@@ -706,15 +749,29 @@ mod tests {
     fn the_arrangement_is_wanted_but_the_window_decides() {
         let mut lib = seeded(rows(&[("a", false)]));
         assert_eq!(lib.mode, Mode::Sofa);
-        lib.act("layout").unwrap();
+        lib.mode = lib.mode.other();
         assert_eq!(lib.mode, Mode::Desk);
 
         let wide = Panes::fitting(1400.0);
         let pocket = Panes::fitting(640.0);
         assert_eq!(wide.at_most(lib.mode.panes()), Panes::Three);
         assert_eq!(pocket.at_most(lib.mode.panes()), Panes::One, "the handheld got columns");
-        lib.act("layout").unwrap();
+        lib.mode = lib.mode.other();
         assert_eq!(wide.at_most(lib.mode.panes()), Panes::One, "Sofa is one pane on any screen");
+    }
+
+    /// `layout` is grid-or-list everywhere else in this project, and a binding
+    /// that means one thing in the webview and another here is a binding
+    /// nobody can learn.
+    #[test]
+    fn the_layout_binding_switches_the_wall_for_a_list() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        let was = lib.mode;
+        assert_eq!(lib.look, Look::Grid);
+        lib.act("layout").unwrap();
+        assert_eq!(lib.look, Look::List);
+        assert_eq!(lib.look.offers(), "Grid", "the button offers what you are not looking at");
+        assert_eq!(lib.mode, was, "grid or list must not reshape the window");
     }
 
     #[test]

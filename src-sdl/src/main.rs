@@ -179,6 +179,10 @@ fn main() -> Result<()> {
     // only order that works, since what is on screen is decided while drawing
     // it.
     let mut hits: Hits = Hits::default();
+    // What the pointer is over, which is not what is chosen.
+    let mut hover: Option<usize> = None;
+
+    let mut frames = 0u32;
 
     'running: loop {
         let now = ticks(&timer);
@@ -199,16 +203,22 @@ fn main() -> Result<()> {
                 // The mouse. ES-DE makes this hard and it is the complaint
                 // Frank had about it; here it is the same cursor the pad
                 // moves, pointed at instead of stepped to.
+                // Moving the pointer lights a row up. It does not *choose*
+                // it: choosing scrolls the list to keep the choice on screen,
+                // the scroll moves a different row under the pointer, and the
+                // next motion event chooses that one — so the grid ran away
+                // from the mouse. `.row:hover` in the stylesheet is a
+                // background colour and nothing else, for the same reason.
                 Event::MouseMotion { x, y, .. } => {
                     let (x, y) = pointer(&window, x, y);
-                    if let Some(at) = hits.at(x, y) {
-                        lib.point_at(at);
-                    }
+                    hover = hits.at(x, y);
                 }
                 Event::MouseButtonDown { mouse_btn, x, y, .. } => match mouse_btn {
                     sdl2::mouse::MouseButton::Left => {
                         let (x, y) = pointer(&window, x, y);
-                        if let Some(mode) = hits.mode_at(x, y) {
+                        if let Some(action) = hits.button_at(x, y) {
+                            act(&mut lib, action);
+                        } else if let Some(mode) = hits.mode_at(x, y) {
                             lib.mode = mode;
                         } else if let Some(tab) = hits.tab_at(x, y) {
                             lib.section = tab;
@@ -295,8 +305,27 @@ fn main() -> Result<()> {
         if let Some(backdrop) = &backdrop {
             unsafe { backdrop.draw(screen.width_px, screen.height_px, seconds) };
         }
-        hits = draw(&gfx, frosted.as_ref(), &mut painter, &mut art, &mut lib, &screen);
+        hits = draw(&gfx, frosted.as_ref(), &mut painter, &mut art, &mut lib, &screen, hover);
         window.gl_swap_window();
+
+        // A portrait, and then out. Taken after a handful of frames rather
+        // than the first: covers are decoded as they are asked for, so frame
+        // one is a picture of an empty cache.
+        if let Some((path, _)) = shot_wanted() {
+            frames += 1;
+            // Longer than eight when asked: taking a portrait is one job, and
+            // watching what the process weighs while it draws is another.
+            let want: u32 = std::env::var("ROMM_SDL_FRAMES")
+                .ok()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(8);
+            if frames >= want {
+                unsafe { gl::Finish() };
+                save_shot(&window, &path).with_context(|| format!("saving {path}"))?;
+                println!("shot: {path}");
+                break 'running;
+            }
+        }
     }
     Ok(())
 }
@@ -316,9 +345,74 @@ fn pointer(window: &sdl2::video::Window, x: i32, y: i32) -> (f32, f32) {
     (x as f32 * across, y as f32 * down)
 }
 
+/// A portrait of one frame, written to a file, and then nothing.
+///
+/// `ROMM_SDL_SHOT=/tmp/a.png romm-sdl` draws the interface once and saves it.
+/// It exists because the alternative was Frank opening the app and describing
+/// what looked wrong, and a description is not a pixel — the console grid
+/// spilling out of its panel took four rounds of that, and one look at a file
+/// to find.
+///
+/// `ROMM_SDL_SIZE=1460x1046` sets the window; the default is the handheld's.
+fn shot_wanted() -> Option<(String, (u32, u32))> {
+    let path = std::env::var("ROMM_SDL_SHOT").ok()?;
+    let size = std::env::var("ROMM_SDL_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once(['x', 'X'])?;
+            Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+        })
+        .unwrap_or(POCKET);
+    Some((path, size))
+}
+
+/// Read the finished frame back and write it out.
+///
+/// GL hands rows back bottom-up, so they are flipped — the sort of thing that
+/// makes a picture look fine until you read a word in it.
+fn save_shot(window: &sdl2::video::Window, path: &str) -> Result<()> {
+    use sdl2::image::SaveSurface;
+    let (w, h) = window.drawable_size();
+    let mut flipped = vec![0u8; (w * h * 4) as usize];
+    unsafe {
+        gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+        gl::ReadPixels(
+            0,
+            0,
+            w as i32,
+            h as i32,
+            gl::RGBA,
+            gl::UNSIGNED_BYTE,
+            flipped.as_mut_ptr() as *mut _,
+        );
+    }
+    let stride = (w * 4) as usize;
+    let mut rows = Vec::with_capacity(flipped.len());
+    for row in (0..h as usize).rev() {
+        rows.extend_from_slice(&flipped[row * stride..row * stride + stride]);
+    }
+    let surface = sdl2::surface::Surface::from_data(
+        &mut rows,
+        w,
+        h,
+        stride as u32,
+        sdl2::pixels::PixelFormatEnum::ABGR8888,
+    )
+    .map_err(anyhow::Error::msg)?;
+    surface.save(path).map_err(anyhow::Error::msg)?;
+    Ok(())
+}
+
 fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, String> {
-    video
-        .window("RomM", POCKET.0, POCKET.1)
+    let shot = shot_wanted();
+    let (w, h) = shot.as_ref().map(|(_, size)| *size).unwrap_or(POCKET);
+    let mut builder = video.window("RomM", w, h);
+    // Taking a portrait should not throw a window at whoever is using the
+    // machine, so it happens off screen.
+    if shot.is_some() {
+        builder.hidden();
+    }
+    builder
         .position_centered()
         .resizable()
         // Retina and the like. Without this the window is described in points
@@ -455,6 +549,9 @@ mod paint {
     pub const DIM: Rgba = Rgba::rgb(150, 154, 168);
     pub const FAINT: Rgba = Rgba::rgb(104, 108, 124);
     /// The plate a mark sits on, so it reads against artwork of any colour.
+    /// `.row:hover` — the pointer saying where it is, which is not the same
+    /// as the cursor saying what is chosen.
+    pub const HOVER: Rgba = Rgba(1.0, 1.0, 1.0, 0.07);
     pub const MARK: Rgba = Rgba(0.0, 0.0, 0.0, 0.45);
     pub const STAR: Rgba = Rgba::rgb(240, 200, 90);
     /// On this machine, and on the server.
@@ -506,6 +603,13 @@ pub struct Hits {
     rows: Vec<(Rect, usize)>,
     tabs: Vec<(Rect, usize)>,
     modes: Vec<(Rect, library::Mode)>,
+    /// Header controls, each remembered as the action it fires.
+    ///
+    /// One list rather than one field per button: a control in the header is
+    /// a name and a rectangle, and everything it does is already an `act`
+    /// case because the pad has to be able to do it too. Adding a button is
+    /// then a call, not a field, a variant and a branch.
+    buttons: Vec<(Rect, &'static str)>,
 }
 
 impl Hits {
@@ -519,6 +623,14 @@ impl Hits {
 
     fn mode(&mut self, at: Rect, mode: library::Mode) {
         self.modes.push((at, mode));
+    }
+
+    fn button(&mut self, at: Rect, action: &'static str) {
+        self.buttons.push((at, action));
+    }
+
+    fn button_at(&self, x: f32, y: f32) -> Option<&'static str> {
+        self.buttons.iter().find(|(r, _)| r.contains(x, y)).map(|(_, a)| *a)
     }
 
     fn mode_at(&self, x: f32, y: f32) -> Option<library::Mode> {
@@ -543,6 +655,9 @@ struct Frame<'a> {
     painter: &'a mut text::Painter,
     art: &'a mut covers::Covers,
     screen: &'a Viewport,
+    /// Which row the pointer is over, if any. Separate from the cursor: see
+    /// the motion handler.
+    hover: Option<usize>,
     hits: Hits,
 }
 
@@ -606,6 +721,34 @@ impl Frame<'_> {
         self.painter.put_centred(self.gfx, spec, at, colour);
     }
 
+    /// The pointer's mark on a row, drawn under everything else in it.
+    fn hovering(&self, index: usize, at: Rect, round: f32) {
+        if self.hover == Some(index) {
+            self.fill(at, paint::HOVER, round);
+        }
+    }
+
+    /// A header control: a pill with a word in it, and a rectangle the mouse
+    /// can find it by.
+    ///
+    /// The pad reaches these through their bindings, so the button carries the
+    /// action name rather than a closure — one string is the label, the hit
+    /// and the behaviour.
+    fn button(&mut self, label: &str, action: &'static str, at: Rect) {
+        self.fill(at, paint::MARK, size::ROUND_SMALL);
+        let spec = self.spec(label.to_owned(), 12.0);
+        self.label_centred(&spec, at, paint::DIM);
+        let px = self.px(at);
+        self.hits.button(px, action);
+    }
+
+    /// How wide a pill has to be to hold a word.
+    fn button_width(&mut self, label: &str) -> f32 {
+        let spec = self.spec(label.to_owned(), 12.0);
+        let (w, _) = self.painter.measure(self.gfx, &spec);
+        self.screen.scale.pt(w as f32) + size::GAP * 1.4
+    }
+
     /// A console's own picture, in a box.
     fn console_art(&mut self, slug: &str, at: Rect, round: f32) {
         let at = self.px(at);
@@ -643,8 +786,10 @@ fn draw(
     art: &mut covers::Covers,
     lib: &mut library::Library,
     screen: &Viewport,
+    hover: Option<usize>,
 ) -> Hits {
-    let mut f = Frame { gfx, glass: frosted, painter, art, screen, hits: Hits::default() };
+    let mut f =
+        Frame { gfx, glass: frosted, painter, art, screen, hover, hits: Hits::default() };
     let page = Rect::new(0.0, 0.0, screen.width(), screen.height());
 
     let [tabs, header, body] = split3(page.column(
@@ -788,6 +933,14 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
     f.label(&title, Rect { x: inner.x, ..centred }, paint::TEXT);
 
     if lib.view == library::View::Roms {
+        // The grid/list switch, pinned right, and how the list is arranged to
+        // the left of it. A control the pad already has on `layout` — this is
+        // the same action with somewhere to click.
+        let label = lib.look.offers();
+        let width = f.button_width(label);
+        let pill = Rect::new(inner.right() - width, header.y + 6.0, width, header.h - 12.0);
+        f.button(label, "layout", pill);
+
         let filters = lib.filters();
         let arranged = if filters.is_empty() {
             lib.order_label().to_owned()
@@ -795,7 +948,8 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
             format!("{}  ·  {}", lib.order_label(), filters.join(" + "))
         };
         let spec = f.spec(arranged, 12.0);
-        f.label_right(&spec, Rect { x: inner.x, ..centred }, paint::DIM);
+        let room = Rect { x: inner.x, w: pill.x - inner.x - size::GAP, ..centred };
+        f.label_right(&spec, room, paint::DIM);
     }
 }
 
@@ -848,6 +1002,7 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
             );
             f.hits.row(f.px(slot), offset);
             let on = offset == lib.console_at;
+            f.hovering(offset, slot, size::ROUND_SMALL);
             if on {
                 match focused {
                     true => f.fill(slot, paint::CURSOR, size::ROUND_SMALL),
@@ -885,6 +1040,7 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
         let on = offset == lib.console_at;
 
         f.pane(tile, paint::CARD, size::ROUND);
+        f.hovering(offset, tile, size::ROUND);
         if on {
             f.outline(tile, 2.0, paint::CURSOR, size::ROUND);
         }
@@ -905,8 +1061,12 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
     }
 }
 
-/// One console's games, as a wall of covers.
+/// One console's games: a wall of covers, or a list of names.
 fn draw_games(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    if lib.look == library::Look::List {
+        draw_game_list(f, lib, area);
+        return;
+    }
     let cover_h = size::art(lib.aspect);
     let step = cover_h + size::CAPTION;
     let across = area.fits(size::GAP, size::CARD);
@@ -948,6 +1108,7 @@ fn draw_games(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         if !f.cover(id, &platform, &stem, art, size::ROUND_SMALL) {
             f.pane(art, paint::CARD, size::ROUND_SMALL);
         }
+        f.hovering(i, card, size::ROUND_SMALL);
         if on {
             f.outline(art, 3.0, paint::CURSOR, size::ROUND_SMALL);
         }
@@ -978,6 +1139,75 @@ fn draw_games(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             caption.inset(Edges { top: 4.0, ..Edges::default() }),
             if on { paint::TEXT } else { paint::DIM },
         );
+    }
+}
+
+/// The same games as rows: a mark, a name, the console, a size.
+///
+/// The layout `.row` in `ui/style.css` describes - one flex line, the name
+/// taking what is left, the numbers pinned right - which is `Rect::row` with
+/// one `Grow` in it. Nothing here measures a cover, so a thousand games cost a
+/// thousand short strings and no decoding at all: this is the layout to be in
+/// on the handheld with an arcade library open.
+fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    let step = size::ROW;
+    lib.relayout(1);
+
+    let (shown, at, was) = (lib.shown(), lib.at, lib.scrolled);
+    let ask = |top: f32| rowwindow::Ask::new(shown, 1, step, top, area.h);
+    let top = rowwindow::scroll_to(at, ask(was)).unwrap_or(was);
+    lib.scrolled = top;
+    let band = rowwindow::band(ask(top));
+
+    let rows: Vec<_> = lib
+        .showing()
+        .enumerate()
+        .skip(band.first)
+        .take(band.count)
+        .map(|(i, (r, _))| {
+            (i, r.name.clone(), r.favourite, r.downloaded, r.platform.clone(), r.size_bytes)
+        })
+        .collect();
+
+    for (i, name, favourite, downloaded, platform, bytes) in rows {
+        let line = Rect::new(area.x, area.y + i as f32 * step - top, area.w, step);
+        if line.bottom() < area.y || line.y > area.bottom() {
+            continue;
+        }
+        f.hits.row(f.px(line), i);
+        let on = i == lib.at;
+        f.hovering(i, line, size::ROUND_SMALL);
+        if on {
+            f.pane(line, paint::CURSOR, size::ROUND_SMALL);
+        }
+
+        let inside = line.inset(Edges::xy(10.0, 6.0));
+        let [mark, title, console, size] = <[Rect; 4]>::try_from(inside.row(
+            10.0,
+            &[Size::Fixed(14.0), Size::Grow(1.0), Size::Fixed(92.0), Size::Fixed(78.0)],
+        ))
+        .unwrap();
+
+        let spec = f.spec(if downloaded { "\u{25cf}" } else { "\u{25cb}" }, 11.0);
+        f.label(&spec, mark, if downloaded { paint::HERE } else { paint::AWAY });
+
+        // The star sits before the name rather than beside it, so a starred
+        // game and a plain one line their names up anyway.
+        let mut left = title;
+        if favourite {
+            let spec = f.spec("\u{2605}", 11.0);
+            let (w, _) = f.painter.measure(f.gfx, &spec);
+            let w = f.screen.scale.pt(w as f32) + 5.0;
+            f.label(&spec, left, paint::STAR);
+            left = Rect { x: left.x + w, w: left.w - w, ..left };
+        }
+        let spec = f.wrapped(&name, size::LABEL, left.w, 1);
+        f.label(&spec, left, if on { paint::TEXT } else { paint::DIM });
+
+        let spec = f.spec(&platform, 11.0);
+        f.label(&spec, console, paint::FAINT);
+        let spec = f.spec(romm_desktop::util::human(bytes.max(0) as u64), 11.0);
+        f.label_right(&spec, size, paint::DIM);
     }
 }
 

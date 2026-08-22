@@ -140,6 +140,7 @@ fn main() {
     a_label_after_the_backdrop_still_has_gaps();
     the_glass_actually_blurs();
     a_panel_shows_what_is_behind_it();
+    rounded_corners_follow_the_quad_not_the_texture();
     println!("all rendering checks passed");
 }
 
@@ -490,4 +491,53 @@ fn a_panel_shows_what_is_behind_it() {
     let right = pixel(&frame, 160, 60);
     assert!(left.0 > left.2, "the left panel is not showing the red behind it: {left:?}");
     assert!(right.2 > right.0, "the right panel is showing the same as the left: {right:?}");
+}
+
+/// Corner rounding belongs to the quad, not to the texture it samples.
+///
+/// The two are the same thing until something draws a *piece* of a texture,
+/// which is exactly what a frosted panel does: it takes the part of the
+/// blurred backdrop that sits behind it. The shader was measuring the corner
+/// from the texture coordinate, so every glass panel had its alpha cut along a
+/// diagonal somewhere in the middle of itself — black wedges at the bottom of
+/// every console tile, which is what Frank saw and reported.
+fn rounded_corners_follow_the_quad_not_the_texture() {
+    let mut frame = Vec::new();
+    if !with_gfx(|gfx| {
+        gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+        // A solid white picture, so anything missing is the corner cut and not
+        // the picture.
+        let texture = gfx.upload_rgba(2, 2, &[255u8; 16]);
+        // The bottom-right quarter of it, which is the sort of window a panel
+        // near the corner of the screen asks for.
+        gfx.rounded(8.0, || {
+            gfx.image_part(
+                &texture,
+                40.0,
+                20.0,
+                120.0,
+                80.0,
+                (0.5, 0.5, 1.0, 1.0),
+                romm_sdl::gfx::Rgba::WHITE,
+            )
+        });
+        frame = read_pixels();
+    }) {
+        return;
+    }
+    // Every edge's midpoint is inside a rounded rectangle, whatever the
+    // radius. A cut across the middle takes at least one of them.
+    for (x, y, edge) in
+        [(100, 22, "top"), (100, 97, "bottom"), (42, 60, "left"), (157, 60, "right")]
+    {
+        assert_eq!(
+            pixel(&frame, x, y),
+            (255, 255, 255),
+            "the {edge} edge was cut: the corner rounding is measuring the texture \
+             instead of the quad"
+        );
+    }
+    // And the corners themselves are still cut, or this passes with rounding
+    // switched off entirely.
+    assert_eq!(pixel(&frame, 41, 21), (0, 0, 0), "the top-left corner was not rounded");
 }

@@ -28,9 +28,19 @@ const VERTEX: &str = r#"
 in vec2 a_pos;
 in vec2 a_uv;
 out vec2 v_uv;
+/// Where this pixel is inside its own quad, 0 to 1 in each direction.
+///
+/// Not `a_uv`: that is where the pixel is inside the *texture*, and the two
+/// part company the moment anything draws a piece of a texture rather than
+/// all of it. The corner rounding is about the quad's shape, so it gets a
+/// coordinate of its own.
+out vec2 v_quad;
 uniform vec2 u_screen;
+/// The quad, in pixels: where it is and how big.
+uniform vec4 u_rect;
 void main() {
   v_uv = a_uv;
+  v_quad = (a_pos - u_rect.xy) / max(u_rect.zw, vec2(1.0));
   vec2 clip = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
   gl_Position = vec4(clip, 0.0, 1.0);
 }
@@ -56,6 +66,7 @@ void main() {
 /// debug view looks like.
 const FRAGMENT: &str = r#"
 in vec2 v_uv;
+in vec2 v_quad;
 out vec4 color;
 uniform sampler2D u_texture;
 uniform vec4 u_tint;
@@ -72,7 +83,7 @@ float rounded(vec2 p, vec2 half_size, float r) {
 void main() {
   vec4 texel = texture(u_texture, v_uv) * u_tint;
   if (u_radius > 0.0) {
-    vec2 p = (v_uv - 0.5) * 2.0 * u_half;
+    vec2 p = (v_quad - 0.5) * 2.0 * u_half;
     // Smoothed across one pixel, which is what stops a rounded corner looking
     // like a staircase.
     texel.a *= 1.0 - smoothstep(-1.0, 1.0, rounded(p, u_half, u_radius));
@@ -162,6 +173,7 @@ pub struct Gfx {
     u_tint: i32,
     u_half: i32,
     u_radius: i32,
+    u_rect: i32,
     /// How round the next quad's corners are, in pixels. Set around a draw
     /// rather than passed to it, so the twenty call sites that want square
     /// corners say nothing.
@@ -207,6 +219,7 @@ impl Gfx {
                 u_tint: uniform(program, "u_tint"),
                 u_half: uniform(program, "u_half"),
                 u_radius: uniform(program, "u_radius"),
+                u_rect: uniform(program, "u_rect"),
                 radius: std::cell::Cell::new(0.0),
                 program,
                 vao,
@@ -322,6 +335,7 @@ impl Gfx {
             gl::Uniform2f(self.u_screen, self.width, self.height);
             gl::Uniform4f(self.u_tint, tint.0, tint.1, tint.2, tint.3);
             gl::Uniform2f(self.u_half, w / 2.0, h / 2.0);
+            gl::Uniform4f(self.u_rect, x, y, w, h);
             // Never more than half the shorter side, or the corners meet in
             // the middle and the quad turns into a lozenge.
             gl::Uniform1f(self.u_radius, self.radius.get().min(w.min(h) / 2.0));
