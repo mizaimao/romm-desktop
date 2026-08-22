@@ -107,7 +107,19 @@ beforeEach(() => {
 });
 
 /// A turn of the loop: covers are fetched in a batch, 80ms behind the scroll.
-const settle = () => new Promise((r) => dom.window.setTimeout(r, 120));
+/// Let the queued work run, then tell every picture on the page that it has
+/// arrived.
+///
+/// jsdom does not fetch images, so an `<img>` there never fires `load` or
+/// `error` and would sit in the in-flight count for ever. A browser always
+/// answers one way or the other; this makes the stand-in do the same, which is
+/// what the throttle in `pumpCovers` is written against.
+const settle = async () => {
+  await new Promise((r) => dom.window.setTimeout(r, 120));
+  for (const img of document.querySelectorAll("#list img"))
+    img.dispatchEvent(new dom.window.Event("load"));
+  await new Promise((r) => dom.window.setTimeout(r, 20));
+};
 
 const art = (id) => document.querySelector(`.gcard[data-id="${id}"] .art`);
 const hasImage = (id) => !!art(id)?.querySelector("img");
@@ -198,5 +210,46 @@ describe("covers well away from it", () => {
     const before = art(3).innerHTML;
     far().fire(false);
     assert.equal(art(3).innerHTML, before, "the placeholder was rewritten over itself");
+  });
+});
+
+
+/// A burst of `asset://` requests wedges the page: measured 2026-08-22, sixty
+/// at once neither loaded nor failed — no `onload`, no `onerror`, nothing in
+/// two minutes, the process perfectly still. The same sixty one after another
+/// all succeeded. `flushCovers` was setting forty `src`s in a single pass.
+///
+/// So the number in the air is the thing to hold down, and it is the only part
+/// of this a test can see.
+describe("covers are not all asked for at once", () => {
+  test("no more than six are in the air", async () => {
+    // Far more cards than slots, all coming into view together.
+    near().fire(true);
+    await new Promise((r) => dom.window.setTimeout(r, 140));
+    assert.ok(
+      lib.coversInFlight() <= 6,
+      `${lib.coversInFlight()} pictures in the air at once — a burst that size wedges`
+    );
+  });
+
+  /// A slot must come back when the picture arrives, or the grid stops after
+  /// the first six and never draws another — which is a worse bug than the one
+  /// the throttle is for.
+  test("answering the first six lets the rest through", async () => {
+    near().fire(true);
+    await new Promise((r) => dom.window.setTimeout(r, 140));
+    const first = document.querySelectorAll("#list img").length;
+    // Answer, repeatedly, the way a browser would as each arrives.
+    for (let round = 0; round < 4; round++) {
+      for (const img of document.querySelectorAll("#list img"))
+        img.dispatchEvent(new dom.window.Event("load"));
+      await new Promise((r) => dom.window.setTimeout(r, 20));
+    }
+    const after = document.querySelectorAll("#list img").length;
+    assert.ok(
+      after >= first,
+      `the grid went backwards, ${first} pictures to ${after}`
+    );
+    assert.ok(lib.coversInFlight() <= 6, "the count ran away");
   });
 });

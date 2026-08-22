@@ -1,7 +1,51 @@
 # What the app weighs, and why
 
-> **Read this section first.** Everything below it was written on a premise
-> that turned out to be false, and is kept only so the mistake is legible.
+> **Read this section first.** The measurements in this file contradict each
+> other and none of the conclusions drawn from them are safe. What follows is
+> kept so the record is legible, not because it is right. The one thing here
+> that is settled is the asset-request bug, and it is settled because it
+> reproduces every time.
+
+## Still unsettled: what a picture costs
+
+Asked to verify the "half a megabyte a picture" claim rather than guess at it,
+the verification disagreed with the claim.
+
+The test: the same sixty 1,280x960 arcade miximages, loaded one at a time
+through the asset protocol into a full-screen overlay, at three tile sizes.
+Each run has its own empty baseline taken thirty seconds before anything
+loads, so the delta is within one process and cannot be confused by which
+screen the app happened to restore.
+
+| tile | empty | with 60 up | difference | per picture |
+|---|---|---|---|---|
+| 150x110 | 242.5 MB | 1,066 MB | +824 MB | 13.7 MB |
+| 300x225 | 245.0 MB | 412 MB | +167 MB | 2.8 MB |
+| 640x480 | 245.1 MB | 333 MB | +88 MB | 1.5 MB |
+
+Memory goes **down** as the pictures get bigger, which no theory offered so
+far predicts — not "decode at full size" (constant), not "decode at drawn
+size" (rising). And 13.7 MB a picture is nearly three times what a full-size
+decode of the file costs, so something beyond the decode is being held.
+
+The obvious confound is that the overlay wraps: at 150px all sixty tiles are
+on the screen at once, at 640px only two or three are and the rest are laid
+out below the fold. So this may be measuring how many are *painted* rather
+than how they are decoded. That is a plausible story and it is not a
+measurement.
+
+It also contradicts the earlier run in this same file that put sixty pictures
+up at 150x110 and read 256.6 MB — against 1,066 MB here for what should be
+the identical thing. One of those two is wrong and it is not yet known which.
+
+**So the honest state is: what a picture costs in this app is not known.** The
+claim that WebKit already decodes at draw size is unverified, and so is the
+claim that it does not. Anything built on either is built on nothing.
+
+What the next attempt needs: one picture at a time rather than sixty, so the
+cost of the first is unambiguous; a layout that does not change how many are
+painted when the tile size changes; and the per-process breakdown kept for
+every sample rather than the total.
 
 ## The premise was wrong: a picture does not cost four bytes a pixel
 

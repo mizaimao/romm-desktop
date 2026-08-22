@@ -878,6 +878,7 @@ function placeholder(card) {
 
 export function observeCovers() {
   const margins = coverMargins();
+  forgetPendingCovers();
   coverObserver?.disconnect();
   coverReleaser?.disconnect();
   coverQueue = [];
@@ -918,6 +919,67 @@ export function observeCovers() {
   }
 }
 
+/// How many pictures may be in the air at once.
+///
+/// Forty `src`s were being set in a single pass, and a burst of `asset://`
+/// requests that size wedges: measured 2026-08-22, sixty at once neither
+/// loaded nor failed — no `onload`, no `onerror`, nothing in two minutes, and
+/// the process sitting perfectly still. The same sixty one after another all
+/// succeeded, every time. Six is a browser's own per-host limit and is plenty
+/// to keep a scrolling grid fed.
+const AT_ONCE = 6;
+
+let waiting = [];
+let inFlight = 0;
+
+/// Put a cover on a card, as soon as there is room to ask for one.
+///
+/// The card is written exactly as it was before — the `<img>` goes straight
+/// into the page and fills in when it arrives. The only thing that changed is
+/// how many are allowed to be asking at once.
+function showCover(art, url, star) {
+  waiting.push({ art, url, star });
+  pumpCovers();
+}
+
+/// How many are in the air right now. Exported so a test can say so, since
+/// the whole point of this is a number that must never go above `AT_ONCE`.
+export function coversInFlight() {
+  return inFlight;
+}
+
+function pumpCovers() {
+  while (inFlight < AT_ONCE && waiting.length) {
+    const { art, url, star } = waiting.shift();
+    if (!art.isConnected) continue;
+    inFlight += 1;
+    const img = document.createElement("img");
+    img.alt = "";
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      inFlight -= 1;
+      pumpCovers();
+    };
+    img.addEventListener("load", finish);
+    img.addEventListener("error", finish);
+    // A request that never answers must not hold its place for ever. That is
+    // the wedge above: if it happens again the grid carries on with one
+    // picture missing rather than stopping.
+    setTimeout(finish, 10000);
+    art.replaceChildren(img);
+    if (star) art.insertAdjacentHTML("beforeend", star);
+    img.src = url;
+  }
+}
+
+/// Drop anything still queued. Called when the list is redrawn: those cards
+/// are gone, and the ones that replace them will ask again.
+export function forgetPendingCovers() {
+  waiting = [];
+}
+
 async function flushCovers() {
   const ids = coverQueue.splice(0, 40);
   if (!ids.length) return;
@@ -934,7 +996,7 @@ async function flushCovers() {
         : "";
       // The star is kept. Replacing the whole of `.art` with the image took it
       // away, so a starred game lost its star the moment its cover arrived.
-      art.innerHTML = `<img src="${convertFileSrc(cover)}" alt="" />${star}`;
+      showCover(art, convertFileSrc(cover), star);
     }
   } catch (e) {
     // Placeholders stay — a failed batch is not worth interrupting browsing —
