@@ -88,6 +88,14 @@ impl Library {
         Ok(lib)
     }
 
+    /// Whether Back has anywhere left to go.
+    ///
+    /// On the console list it has not, and on a handheld with no window to
+    /// close that is where Back means leave.
+    pub fn at_top(&self) -> bool {
+        self.view == View::Platforms
+    }
+
     pub fn console(&self) -> Option<&Console> {
         self.consoles.get(self.console_at)
     }
@@ -420,7 +428,9 @@ mod tests {
     #[test]
     fn back_returns_to_the_consoles() {
         let mut lib = seeded(rows(&[("a", false)]));
+        assert!(!lib.at_top(), "a console's games are not the top level");
         assert!(lib.act("back").unwrap());
         assert_eq!(lib.view, View::Platforms);
+        assert!(lib.at_top(), "back left us somewhere that is not the top");
     }
 }

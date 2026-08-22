@@ -23,7 +23,6 @@ use anyhow::{Context, Result};
 use romm_desktop::layout::{Panes, Scale, Viewport};
 use romm_desktop::{binds, padpoll, rowwindow};
 use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
 use std::collections::BTreeSet;
 
@@ -185,10 +184,18 @@ fn main() -> Result<()> {
                     say_where_we_are(&screen);
                 }
                 Event::KeyDown { keycode: Some(key), repeat: false, .. } => {
-                    if key == Keycode::Escape {
-                        break 'running;
-                    }
+                    // Escape is bound to Back, not to quit — it was hardcoded
+                    // here in the first commit and never taken out, so going
+                    // back from a console closed the app instead. The window
+                    // closes the window; Cmd-Q and Alt-F4 do what they always
+                    // do.
                     if let Some(action) = input::action_for_key(&bindings, key) {
+                        // Back at the top level leaves, which is what Back
+                        // means on a handheld with no window to close and no
+                        // Cmd-Q to press. Nothing is lost by it: this browses.
+                        if matches!(action, "back" | "back2") && lib.at_top() {
+                            break 'running;
+                        }
                         act(&mut lib, action);
                     }
                 }
@@ -202,6 +209,9 @@ fn main() -> Result<()> {
         let pressed = pads.pressed(&pad_map);
         for action in &pressed {
             if repeat.fire(action, now) {
+                if matches!(action.as_str(), "back" | "back2") && lib.at_top() {
+                    break 'running;
+                }
                 act(&mut lib, action);
             }
         }
@@ -215,7 +225,15 @@ fn main() -> Result<()> {
         canvas.set_draw_color(paint::BACKGROUND);
         canvas.clear();
         if let Some(backdrop) = &backdrop {
-            unsafe { backdrop.draw(screen.width_px, screen.height_px, now as f32 / 1000.0) };
+            // The clear above is *queued*, not done. SDL batches its drawing
+            // and issues it at `present`, so without this our quad goes down
+            // first and the clear lands on top of it — a backdrop that runs
+            // perfectly and is painted over every frame, which is exactly what
+            // it did.
+            unsafe {
+                canvas.render_flush();
+                backdrop.draw(screen.width_px, screen.height_px, now as f32 / 1000.0);
+            }
         }
         draw(&mut canvas, &mut painter, &mut art, &mut lib, &screen);
         canvas.present();
