@@ -1,31 +1,55 @@
 // A scripted browse, for measuring what the app weighs while it fills with
-// artwork. Run with `ROMM_MEASURE=tools/browse.js` and weigh the process from
-// outside; the notes below say where it has got to.
+// artwork. `ROMM_MEASURE=tools/browse.js romm-gui`, and weigh the process from
+// outside; the notes say where it has got to and — the important part — how
+// many pictures are on the page when each weight was taken.
+//
+// Without that count a memory number means nothing: a figure that does not
+// move could be a cache that will not let go, or a change that never took
+// effect, and those want opposite fixes.
 (async () => {
   const { invoke } = window.__TAURI__.core;
-  const note = (m) => invoke("measure_note", { text: m }).catch(() => {});
+  const note = (m) => invoke("measure_note", { text: String(m) }).catch(() => {});
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const list = () => document.getElementById("list");
+  const shown = () => {
+    const l = list();
+    return `${l.querySelectorAll("img").length} imgs, ${
+      l.querySelectorAll(".gcard,.row").length
+    } cards`;
+  };
   try {
-    note("script running");
-    const list = document.getElementById("list");
-    // Clicked, not called. Going straight at `showRoms` skips whatever the
-    // click sets up first and hangs there instead, which cost one run.
-    note("opening arcade");
-    const card = document.querySelector('[data-slug="arcade"]');
-    if (!card) throw new Error("no arcade card on this screen");
+    note(`script running — ${shown()}`);
+    // Home first. The app restores whatever screen it was last on, so the
+    // console card is not reliably there — which is what made two earlier runs
+    // stop dead with nothing to say.
+    for (const tab of document.querySelectorAll(".stab")) {
+      if (tab.dataset.id === "library") tab.click();
+    }
+    await wait(2500);
+    note(`at home — ${shown()}`);
+
+    let card = document.querySelector('[data-slug="arcade"]');
+    if (!card) {
+      note(`no arcade card; screen has ${document.querySelectorAll("[data-slug]").length} consoles`);
+      return;
+    }
     card.click();
-    for (let i = 0; i < 40 && !list.querySelector(".gcard,.row"); i++) await wait(500);
+    for (let i = 0; i < 30 && !list().querySelector(".gcard,.row"); i++) await wait(500);
     await wait(4000);
-    note(`arcade open, ${list.querySelectorAll(".gcard,.row").length} cards`);
+    note(`arcade open — ${shown()}`);
+
     const steps = 30;
     for (let i = 1; i <= steps; i++) {
-      list.scrollTop = (list.scrollHeight - list.clientHeight) * (i / steps);
-      list.dispatchEvent(new Event("scroll"));
+      const l = list();
+      l.scrollTop = (l.scrollHeight - l.clientHeight) * (i / steps);
+      l.dispatchEvent(new Event("scroll"));
       await wait(900);
-      if (i % 5 === 0) note(`scrolled ${Math.round((i / steps) * 100)}%`);
+      if (i % 6 === 0) note(`scrolled ${Math.round((i / steps) * 100)}% — ${shown()}`);
     }
-    note("done");
+    note(`done — ${shown()}`);
+    await wait(6000);
+    note(`settled — ${shown()}`);
   } catch (e) {
-    note("failed: " + e);
+    note("failed: " + (e && e.stack ? e.stack : e));
   }
 })();

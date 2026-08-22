@@ -157,7 +157,42 @@ Not measured, and worth doing before anything is built on this:
   from a session-restore rather than a confirmed scripted browse.
 
 
-## Tightening the margins did nothing, and that is the finding
+## Correction, 2026-08-22: the measurements below are not trustworthy
+
+Frank, on being told that showing fewer pictures cost the same memory:
+
+> I strongly disaggree with your testing results. Showing fewer images eat the
+> same amount of ram this is mathmatically impossible.
+
+He is right, and the claim is withdrawn. It rested on one pair of numbers —
+436 MB before the margin change, 439 MB after — and **the image count was
+never measured**, so it was never established that fewer pictures were on the
+page at all. A number that does not move is equally consistent with a cache
+that will not let go and with a change that never took effect, and those want
+opposite fixes. Asserting the first one without checking was the error.
+
+Three attempts to check it since have all failed, and they failed in ways that
+say the rig is wrong rather than the app:
+
+* Opening the arcade console from a script freezes the page. Twice through
+  `showRoms`, once through a synthetic click on the card. No error, no further
+  notes, memory flat. Frank does it by hand daily without trouble.
+* A direct experiment — sixty full-size miximages put on screen through the
+  asset protocol, weighed, removed, weighed again — never got past putting
+  them up. Neither `onload` nor `onerror` fired for any of the sixty in two
+  minutes, and the footprint never moved off 228 MB. Assets requested this way
+  hang rather than fail, which is worth understanding on its own.
+
+So the only figure below that came from a confirmed browse is the `3dboxes`
+row. The `miximages` row came from a session restore. Everything derived from
+comparing them — including "WebKit already has ES-DE's budget" — is a
+hypothesis with one leg to stand on, not a finding.
+
+**Nothing should be built on this until the rig is fixed.** What the rig needs:
+a browse that is confirmed to have happened, a count of the pictures on the
+page beside every weight, and a sampler faster than four seconds.
+
+## Tightening the margins did nothing — unverified
 
 Frank's idea, on 2026-08-22:
 
@@ -172,15 +207,17 @@ the least memory hoarded the most. That is worth fixing whatever else is true,
 and it is fixed: both margins are now a fraction of the list's own height,
 0.4 screens to load and 1.0 to release.
 
-It moved the number by three megabytes. 436 MB before, 439 after.
+It moved the number by three megabytes. 436 MB before, 439 after — and see the
+correction above: nothing counted the pictures, so this does not show what it
+was claimed to show. The margin change is right regardless, because eight
+screenfuls of hoarding on a handheld is wrong whatever it costs.
 
-Which says the thing worth writing down: **releasing the `<img>` does not
-release the decode.** WebKit's image cache is keyed by URL and outlives the
-element. `observeCovers` has been putting the placeholder back for weeks and
-the pictures never went anywhere. The count of cards on screen is not the
-lever; the cache's own byte budget is, and it is not ours.
+The hypothesis it suggested — that releasing the `<img>` does not release the
+decode, because WebKit's image cache is keyed by URL and outlives the element —
+is a real and documented behaviour, but it has not been demonstrated *here*.
+It is the first thing the fixed rig should settle.
 
-So there are exactly two things that work:
+If it turns out to be true, two things work:
 
 1. **Serve fewer bytes.** Resize in the asset protocol, source untouched. A
    500 KB cover instead of a 4.9 MB one means the same budget holds ten times
@@ -196,3 +233,51 @@ So there are exactly two things that work:
    Frank's "twelve pictures".
 
 Both are worth doing and (1) is most of the win for a tenth of the work.
+
+
+## What the open-source Android frontends actually do
+
+Asked for on 2026-08-22, because "praised on a 2 GB device" and "brute-force
+the RAM" cannot both be true. They are not doing anything exotic. They are
+doing four ordinary things, and **not one of them touches the source file.**
+
+**1. Decode at the size you are going to draw.** Universal, and the big one.
+Coil and Glide do it through `inSampleSize` — read the header, work out the
+factor, decode at a fraction (Lemuroid and Emulair are both Coil). Pegasus does
+it through QML's `sourceSize`, which Qt's own documentation is blunt about:
+images are usually the greatest user of memory in a QML interface, and anything
+not part of the interface should have its size bounded this way. Flutter's
+`ResizeImage` is the same idea for Yuno.
+
+This is not reducing anyone's artwork. The file stays 1280x960. What changes is
+that the decoder is not asked to produce a million pixels for a tile that can
+show fifty thousand. The full file is still what the detail pane opens.
+
+**2. A memory cache measured in bytes, with LRU eviction.** Coil's default is
+`maxSizePercent(context, 0.25)` — a quarter of what the device has, so it is
+80 MB on a 2 GB handheld and 800 MB on a desktop, with no code change.
+ES-DE's `MaxVRAM` is the same idea with a manual slider, 128–2048 MiB, and its
+eviction drops the GPU texture *and* the decoded bytes.
+
+**3. A disk cache of the decoded result**, so the resize happens once ever
+rather than once per scroll. Coil's is `DiskCache.maxSizePercent(0.02)`. This
+is exactly Frank's own suggestion — build a thumbnail cache at first launch,
+keep the full-resolution files intact — arrived at independently.
+
+**4. Two things that only exist on Android**, and are most of why a 2 GB phone
+copes at all:
+
+* `Bitmap.Config.RGB_565` — half the bytes of `ARGB_8888` at the *same*
+  resolution, for artwork with no transparency. Glide used it by default for
+  years.
+* **Hardware bitmaps** (`Bitmap.Config.HARDWARE`, Coil's default on API 28+).
+  The decoded image lives in graphics memory rather than the app's heap, so it
+  does not count against the per-app limit at all.
+
+A webview has (1) — `createImageBitmap` into a tile-sized canvas — and can be
+given (2) and (3). It has no equivalent of (4), and that is a real structural
+disadvantage of shipping a webview to Android rather than a native view.
+
+The fallback Frank named is also what the field does: ES-DE's list view, and
+most others' default, show one piece of artwork for the selected game and
+nothing for the rest. One picture on screen is one picture in memory.
