@@ -138,6 +138,8 @@ fn main() {
     a_drawn_word_has_gaps_in_it();
     a_wrapped_label_at_retina_scale_has_gaps_too();
     a_label_after_the_backdrop_still_has_gaps();
+    the_glass_actually_blurs();
+    a_panel_shows_what_is_behind_it();
     println!("all rendering checks passed");
 }
 
@@ -405,4 +407,87 @@ fn a_label_after_the_backdrop_still_has_gaps() {
         "{lit} lit against {dark} dark — the label is a solid block, because \
          something before it left blending off"
     );
+}
+
+/// A blur that does not blur.
+///
+/// Measured rather than looked at: a sharp edge has a big jump between
+/// neighbouring pixels and a blurred one does not, so the largest step along a
+/// row is the whole of the test. The effect is the app's look, and "it renders
+/// something" is not the same as "it is soft".
+fn the_glass_actually_blurs() {
+    let screen = screen().expect("checked");
+    let mut gfx = unsafe { romm_sdl::gfx::Gfx::new(&screen.video) }.expect("a renderer");
+    gfx.resize(WIDTH as f32, HEIGHT as f32);
+    let mut glass = unsafe { romm_sdl::glass::Glass::new(WIDTH, HEIGHT) }.expect("glass");
+    unsafe { glass.resize(WIDTH, HEIGHT) }.expect("resized");
+
+    // Half black, half white, with one hard edge down the middle.
+    let (bw, bh) = glass.blurred_size();
+    unsafe {
+        glass.capture(&mut gfx, |g| {
+            g.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+            g.rect(bw as f32 / 2.0, 0.0, bw as f32 / 2.0, bh as f32, romm_sdl::gfx::Rgba::WHITE);
+        });
+    }
+
+    // Draw the blurred copy back out at full size and read the edge.
+    gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+    gfx.image(glass.blurred(), 0.0, 0.0, WIDTH as f32, HEIGHT as f32, romm_sdl::gfx::Rgba::WHITE);
+    let soft = read_pixels();
+
+    // And the same edge with no blur at all, for something to compare against.
+    gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+    gfx.rect(WIDTH as f32 / 2.0, 0.0, WIDTH as f32 / 2.0, HEIGHT as f32, romm_sdl::gfx::Rgba::WHITE);
+    let sharp = read_pixels();
+    screen.window.gl_swap_window();
+
+    let biggest_step = |frame: &[u8]| {
+        (1..WIDTH)
+            .map(|x| pixel(frame, x, 60).0.abs_diff(pixel(frame, x - 1, 60).0))
+            .max()
+            .unwrap_or(0)
+    };
+    let (soft_step, sharp_step) = (biggest_step(&soft), biggest_step(&sharp));
+    assert!(sharp_step > 200, "the unblurred edge is not an edge ({sharp_step})");
+    assert!(
+        soft_step < sharp_step / 3,
+        "the blurred edge steps by {soft_step} against {sharp_step} unblurred — \
+         it is not blurred"
+    );
+}
+
+/// A panel shows what is behind *itself*, not the same picture everywhere.
+///
+/// The difference between glass and wallpaper, and the easiest thing to get
+/// wrong: sampling the whole blurred texture into every panel looks plausible
+/// on one panel and obviously wrong on two.
+fn a_panel_shows_what_is_behind_it() {
+    let screen = screen().expect("checked");
+    let mut gfx = unsafe { romm_sdl::gfx::Gfx::new(&screen.video) }.expect("a renderer");
+    gfx.resize(WIDTH as f32, HEIGHT as f32);
+    let mut glass = unsafe { romm_sdl::glass::Glass::new(WIDTH, HEIGHT) }.expect("glass");
+    unsafe { glass.resize(WIDTH, HEIGHT) }.expect("resized");
+
+    let (bw, bh) = glass.blurred_size();
+    unsafe {
+        glass.capture(&mut gfx, |g| {
+            g.clear(romm_sdl::gfx::Rgba::rgb(255, 0, 0));
+            g.rect(bw as f32 / 2.0, 0.0, bw as f32 / 2.0, bh as f32, romm_sdl::gfx::Rgba::rgb(0, 0, 255));
+        });
+    }
+
+    // Two panels, one over each half, and a tint that lets the blur through.
+    gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+    let whole = (WIDTH as f32, HEIGHT as f32);
+    let clear = romm_sdl::gfx::Rgba(0.0, 0.0, 0.0, 0.0);
+    glass.panel(&gfx, whole, 10.0, 10.0, 60.0, 100.0, clear);
+    glass.panel(&gfx, whole, 130.0, 10.0, 60.0, 100.0, clear);
+    let frame = read_pixels();
+    screen.window.gl_swap_window();
+
+    let left = pixel(&frame, 40, 60);
+    let right = pixel(&frame, 160, 60);
+    assert!(left.0 > left.2, "the left panel is not showing the red behind it: {left:?}");
+    assert!(right.2 > right.0, "the right panel is showing the same as the left: {right:?}");
 }

@@ -29,6 +29,7 @@ use std::collections::BTreeSet;
 mod backdrop;
 mod covers;
 mod gfx;
+mod glass;
 mod input;
 mod library;
 mod text;
@@ -111,6 +112,16 @@ fn main() -> Result<()> {
     //
     // Not fatal: a machine whose driver will not compile it still gets a
     // library, and the message says why rather than the window being black.
+    // The frosted panels. Not fatal either: a driver that will not draw into a
+    // texture still gets a library, with flat panels instead of glass.
+    let mut frosted = match unsafe { glass::Glass::new(POCKET.0, POCKET.1) } {
+        Ok(g) => Some(g),
+        Err(e) => {
+            eprintln!("no glass: {e:#}");
+            None
+        }
+    };
+
     let backdrop = match unsafe { backdrop::Backdrop::build(&video, "blobs") } {
         Ok(b) => {
             println!("backdrop: {}", b.style_label());
@@ -206,18 +217,28 @@ fn main() -> Result<()> {
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
-        // The backdrop first, straight into the buffer, then the interface on
-        // top of it. `RenderFlush` is what keeps the two apart: the renderer
-        // batches, and our GL calls landing in the middle of a batch it has
-        // not issued yet would leave its state describing something else.
         gfx.resize(screen.width_px, screen.height_px);
-        gfx.clear(paint::BACKGROUND);
-        // The backdrop fills the frame, then the interface goes on top of it.
-        // One context, in one order, with nothing batching behind our back.
-        if let Some(backdrop) = &backdrop {
-            unsafe { backdrop.draw(screen.width_px, screen.height_px, now as f32 / 1000.0) };
+
+        // The backdrop is drawn twice, deliberately. Once small, into a
+        // texture that is then blurred — which is what the panels sample —
+        // and once at full size behind everything. Reading the finished frame
+        // back would save the second draw and cannot be done before the frame
+        // exists, which is the whole reason `backdrop-filter` is expensive in
+        // a browser too.
+        let seconds = now as f32 / 1000.0;
+        if let (Some(glass), Some(backdrop)) = (&mut frosted, &backdrop) {
+            unsafe {
+                let _ = glass.resize(screen.width_px as u32, screen.height_px as u32);
+                let (w, h) = glass.blurred_size();
+                glass.capture(&mut gfx, |_| backdrop.draw(w as f32, h as f32, seconds));
+            }
         }
-        draw(&gfx, &mut painter, &mut art, &mut lib, &screen);
+
+        gfx.clear(paint::BACKGROUND);
+        if let Some(backdrop) = &backdrop {
+            unsafe { backdrop.draw(screen.width_px, screen.height_px, seconds) };
+        }
+        draw(&gfx, frosted.as_ref(), &mut painter, &mut art, &mut lib, &screen);
         window.gl_swap_window();
     }
     Ok(())
@@ -380,6 +401,7 @@ mod size {
 
 fn draw(
     gfx: &Gfx,
+    frosted: Option<&glass::Glass>,
     painter: &mut text::Painter,
     art: &mut covers::Covers,
     lib: &mut library::Library,
@@ -393,15 +415,29 @@ fn draw(
     // The picker column, where there is room for one. Where there is not, it
     // is the whole pane until a console is opened — which is the one-pane
     // arrangement, and the handheld's.
+    let whole = (screen.width_px, screen.height_px);
+    let pane = |x: f32, y: f32, w: f32, h: f32, tint| match frosted {
+        Some(glass) => glass.panel(gfx, whole, x, y, w, h, tint),
+        // No glass on this machine: a flat panel, the same shape and the same
+        // colour, that simply does not show what is behind it.
+        None => gfx.rect(x, y, w, h, tint),
+    };
+
     let picker_column = panes >= Panes::Two;
     let mut left = 0.0;
     if picker_column {
-                gfx.rect(0.0, 0.0, px(size::PICKER), screen.height_px, paint::COLUMN);
+        pane(0.0, 0.0, px(size::PICKER), screen.height_px, paint::COLUMN);
         left = size::PICKER + size::GAP;
     }
     let mut right = screen.width();
     if panes == Panes::Three {
-                gfx.rect(px(screen.width() - size::ASIDE), 0.0, px(size::ASIDE), screen.height_px, paint::COLUMN);
+        pane(
+            px(screen.width() - size::ASIDE),
+            0.0,
+            px(size::ASIDE),
+            screen.height_px,
+            paint::COLUMN,
+        );
         right = screen.width() - size::ASIDE - size::GAP;
     }
 
@@ -425,14 +461,14 @@ fn draw(
         );
     } else if picker_column || !showing_games {
         let width = if picker_column { size::PICKER } else { screen.width() };
-        draw_consoles(gfx, painter, lib, screen, width, !showing_games || !picker_column);
+        draw_consoles(gfx, frosted, painter, lib, screen, width, !showing_games || !picker_column);
     }
 
     if showing_games {
         let middle = (right - left - size::GAP).max(0.0);
         let columns = (((middle + size::GAP) / (size::CARD + size::GAP)).floor() as usize).max(1);
         lib.relayout(columns);
-        draw_games(gfx, painter, art, lib, screen, left, columns);
+        draw_games(gfx, frosted, painter, art, lib, screen, left, columns);
     }
 
     // What the window thinks it is. On screen rather than in the terminal
@@ -478,6 +514,7 @@ fn draw(
 /// The consoles, as a column of names.
 fn draw_consoles(
     gfx: &Gfx,
+    frosted: Option<&glass::Glass>,
     painter: &mut text::Painter,
     lib: &mut library::Library,
     screen: &Viewport,
@@ -494,13 +531,24 @@ fn draw_consoles(
         let y = size::GAP + (offset - first) as f32 * size::ROW;
         let on = offset == lib.console_at;
         if on {
-            gfx.rect(
+            let (hx, hy, hw, hh) = (
                 px(size::GAP / 2.0),
                 px(y - 3.0),
                 px(width - size::GAP),
                 px(size::ROW - 2.0),
-                if focused { paint::CURSOR } else { paint::CARD },
             );
+            match (focused, frosted) {
+                // The cursor is a solid colour wherever it is: a highlight you
+                // can see through is one you have to look for.
+                (true, _) => gfx.rect(hx, hy, hw, hh, paint::CURSOR),
+                (false, Some(glass)) => glass.panel(
+                    gfx,
+                    (screen.width_px, screen.height_px),
+                    hx, hy, hw, hh,
+                    paint::CARD,
+                ),
+                (false, None) => gfx.rect(hx, hy, hw, hh, paint::CARD),
+            }
         }
         let spec = text::Spec::new(&console.name, size::TITLE, screen.scale.factor())
             .wrapped(width - size::GAP * 3.0 - 40.0, 1);
@@ -519,8 +567,10 @@ fn draw_consoles(
 }
 
 /// One console's games, as covers with their names under them.
+#[allow(clippy::too_many_arguments)]
 fn draw_games(
     gfx: &Gfx,
+    frosted: Option<&glass::Glass>,
     painter: &mut text::Painter,
     art: &mut covers::Covers,
     lib: &mut library::Library,
@@ -566,10 +616,19 @@ fn draw_games(
         let frame = (px(x), px(y), px(size::CARD), px(size::ART));
         match art.get(gfx, id, &platform, &stem) {
             Some(cover) => gfx.image(cover, frame.0, frame.1, frame.2, frame.3, Rgba::WHITE),
-            // No artwork on this machine. A flat card rather than nothing, so
-            // the grid keeps its shape and a game with no cover is still a
-            // thing you can put the cursor on.
-            None => gfx.rect(frame.0, frame.1, frame.2, frame.3, paint::CARD),
+            // No artwork on this machine. A pane of glass rather than nothing,
+            // so the grid keeps its shape and a game with no cover is still a
+            // thing you can put the cursor on — and it looks like an empty
+            // card rather than a hole.
+            None => match frosted {
+                Some(glass) => glass.panel(
+                    gfx,
+                    (screen.width_px, screen.height_px),
+                    frame.0, frame.1, frame.2, frame.3,
+                    paint::CARD,
+                ),
+                None => gfx.rect(frame.0, frame.1, frame.2, frame.3, paint::CARD),
+            },
         }
         if on {
             outline(gfx, frame.0, frame.1, frame.2, frame.3, px(3.0), paint::CURSOR);

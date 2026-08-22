@@ -51,6 +51,53 @@ void main() {
 }
 "#;
 
+/// Somewhere to draw that is not the screen.
+///
+/// The glass needs one: the backdrop goes into a texture, the texture is
+/// blurred, and the panels sample the result. None of that is possible while
+/// drawing straight at the window.
+pub struct Offscreen {
+    frame: u32,
+    pub texture: Texture,
+}
+
+impl Offscreen {
+    /// # Safety
+    ///
+    /// A context must be current.
+    pub unsafe fn new(width: u32, height: u32) -> Result<Self> {
+        unsafe {
+            let texture = upload_empty(width.max(1), height.max(1));
+            let mut frame = 0;
+            gl::GenFramebuffers(1, &mut frame);
+            gl::BindFramebuffer(gl::FRAMEBUFFER, frame);
+            gl::FramebufferTexture2D(
+                gl::FRAMEBUFFER,
+                gl::COLOR_ATTACHMENT0,
+                gl::TEXTURE_2D,
+                texture.id,
+                0,
+            );
+            let ok = gl::CheckFramebufferStatus(gl::FRAMEBUFFER) == gl::FRAMEBUFFER_COMPLETE;
+            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            if !ok {
+                return Err(anyhow!("this driver will not draw into a texture that size"));
+            }
+            Ok(Offscreen { frame, texture })
+        }
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.texture.width, self.texture.height)
+    }
+}
+
+impl Drop for Offscreen {
+    fn drop(&mut self) {
+        unsafe { gl::DeleteFramebuffers(1, &self.frame) }
+    }
+}
+
 /// A colour, 0 to 1.
 #[derive(Debug, Clone, Copy)]
 pub struct Rgba(pub f32, pub f32, pub f32, pub f32);
@@ -67,9 +114,7 @@ pub struct Texture {
     id: u32,
     /// Its own size in pixels. Not what it is drawn at — a cover is stretched
     /// to the card — but what it would be at one to one.
-    #[allow(dead_code)]
     pub width: u32,
-    #[allow(dead_code)]
     pub height: u32,
 }
 
@@ -162,18 +207,32 @@ impl Gfx {
     }
 
     fn quad(&self, texture: &Texture, x: f32, y: f32, w: f32, h: f32, tint: Rgba) {
+        self.quad_uv(texture, x, y, w, h, (0.0, 0.0, 1.0, 1.0), tint);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn quad_uv(
+        &self,
+        texture: &Texture,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        (u0, v0, u1, v1): (f32, f32, f32, f32),
+        tint: Rgba,
+    ) {
         if w <= 0.0 || h <= 0.0 {
             return;
         }
         let (l, t, r, b) = (x, y, x + w, y + h);
         #[rustfmt::skip]
         let vertices: [f32; 24] = [
-            l, t, 0.0, 0.0,
-            r, t, 1.0, 0.0,
-            l, b, 0.0, 1.0,
-            l, b, 0.0, 1.0,
-            r, t, 1.0, 0.0,
-            r, b, 1.0, 1.0,
+            l, t, u0, v0,
+            r, t, u1, v0,
+            l, b, u0, v1,
+            l, b, u0, v1,
+            r, t, u1, v0,
+            r, b, u1, v1,
         ];
         unsafe {
             // Set here rather than once at startup. Anything else drawing on
@@ -221,6 +280,51 @@ impl Gfx {
     }
 }
 
+impl Gfx {
+    /// Draw onto `target` instead of the window, for as long as the closure
+    /// runs.
+    ///
+    /// The viewport goes with it and comes back: a texture is rarely the size
+    /// of the screen, and a viewport left describing the wrong one draws the
+    /// next frame into a corner.
+    ///
+    /// # Safety
+    ///
+    /// A context must be current.
+    pub unsafe fn draw_onto(&mut self, target: &Offscreen, body: impl FnOnce(&mut Gfx)) {
+        let (was_w, was_h) = (self.width, self.height);
+        let (w, h) = target.size();
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, target.frame);
+        }
+        self.resize(w as f32, h as f32);
+        body(self);
+        unsafe {
+            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+        }
+        self.resize(was_w, was_h);
+    }
+
+    /// Draw part of a texture, rather than all of it.
+    ///
+    /// What the glass needs: a panel shows the blurred backdrop from *behind
+    /// itself*, so it samples the rectangle it occupies and no other.
+    /// `source` is in texture coordinates, 0 to 1, top-left origin.
+    #[allow(clippy::too_many_arguments)]
+    pub fn image_part(
+        &self,
+        texture: &Texture,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        source: (f32, f32, f32, f32),
+        tint: Rgba,
+    ) {
+        self.quad_uv(texture, x, y, w, h, source, tint);
+    }
+}
+
 impl Drop for Gfx {
     fn drop(&mut self) {
         unsafe {
@@ -231,7 +335,16 @@ impl Drop for Gfx {
     }
 }
 
+/// A texture with nothing in it yet, to be drawn into.
+unsafe fn upload_empty(width: u32, height: u32) -> Texture {
+    unsafe { upload_raw(width, height, std::ptr::null()) }
+}
+
 unsafe fn upload(width: u32, height: u32, pixels: &[u8]) -> Texture {
+    unsafe { upload_raw(width, height, pixels.as_ptr() as *const _) }
+}
+
+unsafe fn upload_raw(width: u32, height: u32, pixels: *const std::ffi::c_void) -> Texture {
     unsafe {
         let mut id = 0;
         gl::GenTextures(1, &mut id);
@@ -257,7 +370,7 @@ unsafe fn upload(width: u32, height: u32, pixels: &[u8]) -> Texture {
             0,
             gl::RGBA,
             gl::UNSIGNED_BYTE,
-            pixels.as_ptr() as *const _,
+            pixels,
         );
         gl::BindTexture(gl::TEXTURE_2D, 0);
         Texture { id, width, height }
@@ -313,6 +426,61 @@ pub fn version_line() -> Result<&'static str> {
         _ => Err(anyhow!(
             "reports GLSL {reported:?}; this needs GLSL 3.30 or GLSL ES 3.00"
         )),
+    }
+}
+
+impl Texture {
+    /// The name GL knows it by, for the passes that bind it themselves.
+    pub fn raw(&self) -> u32 {
+        self.id
+    }
+}
+
+/// Draw a quad covering the whole target, with no program of our own bound.
+///
+/// For the shader passes that supply their own — the blur, and anything after
+/// it. The vertices are in clip space, so nothing has to know how big the
+/// target is.
+///
+/// # Safety
+///
+/// A context must be current, and a program bound.
+pub unsafe fn draw_full_quad() {
+    unsafe {
+        static mut QUAD: (u32, u32) = (0, 0);
+        if QUAD.0 == 0 {
+            let corners: [f32; 24] = [
+                -1.0, -1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, 1.0,
+                -1.0, 1.0, 0.0, 1.0, 1.0, -1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+            ];
+            let (mut vao, mut vbo) = (0, 0);
+            gl::GenVertexArrays(1, &mut vao);
+            gl::GenBuffers(1, &mut vbo);
+            gl::BindVertexArray(vao);
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                size_of_val(&corners) as isize,
+                corners.as_ptr() as *const _,
+                gl::STATIC_DRAW,
+            );
+            for (index, offset) in [(0u32, 0usize), (1, 2)] {
+                gl::EnableVertexAttribArray(index);
+                gl::VertexAttribPointer(
+                    index,
+                    2,
+                    gl::FLOAT,
+                    gl::FALSE,
+                    (4 * std::mem::size_of::<f32>()) as i32,
+                    (offset * std::mem::size_of::<f32>()) as *const _,
+                );
+            }
+            gl::BindVertexArray(0);
+            QUAD = (vao, vbo);
+        }
+        gl::BindVertexArray(QUAD.0);
+        gl::DrawArrays(gl::TRIANGLES, 0, 6);
+        gl::BindVertexArray(0);
     }
 }
 

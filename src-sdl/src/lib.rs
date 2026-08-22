@@ -8,6 +8,7 @@
 pub mod backdrop;
 pub mod covers;
 pub mod gfx;
+pub mod glass;
 pub mod input;
 pub mod library;
 pub mod text;
