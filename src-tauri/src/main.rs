@@ -3902,6 +3902,29 @@ fn main() {
                     let _ = apply_app_icon(app.handle(), icon.id, &dir);
                 }
             }
+            // A scripted browse, for measuring what the app weighs.
+            //
+            // `ROMM_MEASURE=path/to/script.js` runs that file in the page a
+            // few seconds after launch. Nothing ships enabled and the page
+            // itself knows nothing about it: the alternative was asking Frank
+            // to open a platform and scroll to the bottom while somebody
+            // watched Activity Monitor, which is not a measurement anyone can
+            // repeat.
+            if let Ok(path) = std::env::var("ROMM_MEASURE")
+                && let Some(win) = app.get_webview_window("main")
+            {
+                match std::fs::read_to_string(&path) {
+                    Ok(script) => {
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(4));
+                            if let Err(e) = win.eval(&script) {
+                                eprintln!("measure: {e}");
+                            }
+                        });
+                    }
+                    Err(e) => eprintln!("measure: cannot read {path}: {e}"),
+                }
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

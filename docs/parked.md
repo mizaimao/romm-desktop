@@ -3,7 +3,39 @@
 Still worth doing, deliberately not being done now. In the order I would take
 them. `handover.md` is the wider brief; this is just the queue.
 
-## 0. An Android build
+## 0. The SDL front end
+
+Parked on 2026-08-22, in Frank's words:
+
+> Like I said I don't like that minilong handheld and therefore don't need to
+> have an arm-linux build therefore kills half of the reasons to go to SDL. …
+> Becuase sofar what I can see the visual difference between SDL and Tauri is
+> day and night, maybe two generations. … Yes park this SDL branch idea and
+> commit current works. I may occosionaly come back and see if it's possible
+> to do SDL.
+
+The branch is `sdl-port`, unmerged, and it builds. What is on it: a GL
+renderer with rounded corners and frosted panels, `cosmic-text` with script
+detection and font fallback, the shader backdrop, box art with a bounded
+cache, mouse and pad input, Sofa and Desk, the console grid, the game wall,
+the game list, the Continue playing strip, the detail pane, and a rendering
+test suite that reads pixels back.
+
+What was never written: search, collections, sort and filter menus, the header
+controls, an on-screen keyboard, launching a game, and everything the settings
+window does.
+
+Nothing is stranded. `layout.rs`, `script.rs`, `gamelist.rs`, `gamesort.rs`,
+`gamefilter.rs`, `pagefilter.rs`, `pickorder.rs`, `gridnav.rs`, `padpoll.rs`,
+`rowwindow.rs`, `binds.rs` and `datadir.rs` all live in the core crate and
+serve whatever draws them — the SDL work is what forced most of them out of
+the webview in the first place.
+
+The two reasons to come back: an ARM-Linux handheld he actually likes, or
+Tauri's memory turning out to be unfixable on a 2 GB Android device. See
+`memory.md` for where that stands.
+
+## 1. An Android build
 
 Parked on 2026-08-21, once the SDL front end existed and the question became
 askable:
@@ -37,7 +69,7 @@ by Intent from Kotlin, which is exactly the piece we would be writing.
 Android handheld would replace it rather than join it. Worth deciding before
 picking either up again.
 
-## 1. Cheats
+## 2. Cheats
 
 Parked on 2026-08-20: "I don't use cheats very often so don't bother. Park it
 we will revisit."
@@ -78,7 +110,7 @@ is the same failure that kept rapid fire on the wrong button for ten rounds.
 save states, rewind and fast-forward. Handing someone the means to invalidate
 their own achievements silently would be worse than not having the feature.
 
-## 2. First-run onboarding
+## 3. First-run onboarding
 
 Asked for on 2026-08-19, deliberately deferred:
 
@@ -100,7 +132,7 @@ already knows four things that nothing on screen says:
 The shape it wants is probably a panel on an empty library rather than a wizard:
 each step says what it is for, and disappears once it is satisfied.
 
-## 3. An ES-DE icon-set preview tab
+## 4. An ES-DE icon-set preview tab
 
 Asked for on 2026-08-17, in these words:
 
@@ -120,20 +152,20 @@ What exists to build on: `src/theme.rs` has `IconStyle` with five variants and
 throws the themes away. The fetch machinery is there; the set list, the tab and
 the previews are not.
 
-## 4. Per-backdrop controls
+## 5. Per-backdrop controls
 
 Parked mid-session with "we dedicate a session for controls-per-backdrop".
 Directions for Sweep and the other directional styles, and per-style slider
 ranges — Motion means something different to Static than it does to Blobs, and
 one shared range serves neither well.
 
-## 5. Japanese titles in the voted lists
+## 6. Japanese titles in the voted lists
 
 `sfc` and `famicom` cannot match against the published rankings until the raw
 lists in `data/community/raw/` carry `English Title | 日本語タイトル` pairs.
 `norm()` handles both scripts now; the source lists only carry one.
 
-## 6. Push a Windows build and find out what is broken
+## 7. Push a Windows build and find out what is broken
 
 Everything since 0.1.12 has run only on macOS: save states, play history,
 sorting, four controllers, the shader fix, the window placement, the whole
@@ -148,53 +180,53 @@ arithmetic that put the game window at the right-hand edge of a scaled macOS
 display. Windows display scaling at 125% or 150% is the same shape of problem
 and is the default on most laptops.
 
-## 7. `install-retroarch` in the GUI
+## 8. `install-retroarch` in the GUI
 
 It exists as a CLI subcommand and has zero references in `src-tauri`. A fresh
 machine cannot set itself up, which is the one step that still assumes someone
 did something by hand first.
 
-## 8. A "what is missing" page, built from data already collected
+## 9. A "what is missing" page, built from data already collected
 
 `docs/` holds 2,504 arcade probe verdicts, the missing-ROM list, label
 mismatches, BIOS coverage and 125 core reassignments. None of it is visible in
 the app. This is a page over files that already exist, not new work.
 
-## 9. Save states from other machines
+## 10. Save states from other machines
 
 States sync with the server, but `states::shelf` reads local directories only.
 A state made on the handheld is not offerable here until something pulls it
 down.
 
-## 10. Per-game shader override
+## 11. Per-game shader override
 
 The core is choosable per game; the shader is per platform only. The machinery
 (`shader_overrides`) is already threaded through the launch path — this is a
 control, not a feature.
 
-## 11. Per-game aspect for vertical arcade games
+## 12. Per-game aspect for vertical arcade games
 
 Arcade gets a 4:3 window and keeps whatever shape the game reports, so a
 vertical shooter is pillarboxed. The probe logs recorded each game's geometry,
 so the real shape could come from data rather than a guess.
 
-## 12. Paging on the controller
+## 13. Paging on the controller
 
 Lost when the stick clicks became sorting. PageUp/PageDown still work on the
 keyboard.
 
-## 13. ScreenScraper developer ID
+## 14. ScreenScraper developer ID
 
 Requested, never arrived. Scraping still goes through the server's own account.
 
-## 14. Windowing the middle column — **done in 0.2.606**
+## 15. Windowing the middle column — **done in 0.2.606**
 
 Both halves. Covers are released once a card is well off screen, and a flat
 list over 400 rows draws only the band around the viewport: 2,506 cards to 100,
 `renderRows` 447ms to 21ms. See `docs/handheld-frontend.md` task 2 for what had
 to change to get there. The rest of this entry is what it looked like before.
 
-## 14. Windowing the middle column
+### What it looked like before
 
 The arcade list is 2,506 games and every one of them is inserted into the
 document on each platform switch. The oldest performance item here. The per-row listeners are gone — one
@@ -230,14 +262,14 @@ times a second. Debouncing the pane, so it draws for where the cursor stopped
 rather than for every row it passed over, is a smaller and more separable job
 than windowing and would probably be felt first.
 
-## 15. The two rough edges left in three columns
+## 16. The two rough edges left in three columns
 
 Coming back up from a collection's games still uses the one-pane trail, and
 Continue playing is only drawn in one of the two panes. Neither is wrong on
 screen often enough to have been worth stopping for, and both want the same
 answer: what "back" means in a window where nothing is ever replaced.
 
-## 16. RetroArch's per-core overrides, at the source
+## 17. RetroArch's per-core overrides, at the source
 
 `config/<Core>/<Core>.cfg` is loaded after everything passed with
 `--appendconfig`, so anything in there wins over what a launch was asked for.
