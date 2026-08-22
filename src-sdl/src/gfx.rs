@@ -118,8 +118,6 @@ impl Gfx {
             bind_attribute(program, "a_uv", 2)?;
             gl::BindVertexArray(0);
 
-            gl::Enable(gl::BLEND);
-            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
             gl::Disable(gl::DEPTH_TEST);
 
             let blank = upload(1, 1, &[255, 255, 255, 255]);
@@ -178,6 +176,14 @@ impl Gfx {
             r, b, 1.0, 1.0,
         ];
         unsafe {
+            // Set here rather than once at startup. Anything else drawing on
+            // this context — the backdrop turns blending off for its own quad,
+            // which is opaque and covers the frame — leaves the state it
+            // wanted behind, and a coverage mask drawn without blending is a
+            // solid rectangle the colour of its tint. Which is what every
+            // label in the library became.
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
             gl::UseProgram(self.program);
             gl::Uniform2f(self.u_screen, self.width, self.height);
             gl::Uniform4f(self.u_tint, tint.0, tint.1, tint.2, tint.3);
@@ -310,6 +316,11 @@ pub fn version_line() -> Result<&'static str> {
     }
 }
 
+/// One of GL's own strings — the version, the renderer, the shading language.
+///
+/// # Safety
+///
+/// A context must be current.
 pub unsafe fn reported(name: u32) -> String {
     unsafe {
         let raw = gl::GetString(name);
@@ -320,6 +331,11 @@ pub unsafe fn reported(name: u32) -> String {
     }
 }
 
+/// Compile and link a program, reporting the whole log if it will not.
+///
+/// # Safety
+///
+/// A context must be current.
 pub unsafe fn link(vertex: &str, fragment: &str) -> Result<u32> {
     unsafe {
         let v = compile(gl::VERTEX_SHADER, vertex)?;

@@ -9,6 +9,13 @@ edition = "2024"
 # It draws; it decides nothing. Sort orders, filters, bindings, cursor
 # movement and the layout units all come from `romm_desktop`, which is why
 # tasks 1 and 2 came first.
+# The drawing is a library as well as a binary, so it can be tested against a
+# real context — see tests/rendering.rs. Three of the last four bugs were
+# invisible to `cargo test` and obvious in a screenshot.
+[lib]
+name = "romm_sdl"
+path = "src/lib.rs"
+
 [[bin]]
 name = "romm-sdl"
 path = "src/main.rs"
@@ -50,3 +57,12 @@ default-features = false
 # Debian answers the same question the same way, so this is not a Mac
 # workaround — it is the portable form.
 features = ["use-pkgconfig", "image"]
+
+# No libtest harness: on macOS SDL's video subsystem must be initialised on the
+# real main thread, and libtest runs every test on a spawned one — so
+# `sdl.video()` fails with "No available video device" and the checks skip.
+# Silently, which is how this file reported nine passes over a screen full of
+# grey blocks. `harness = false` gives us `fn main` on the thread SDL wants.
+[[test]]
+name = "rendering"
+harness = false
