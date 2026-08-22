@@ -139,7 +139,7 @@ fn main() -> Result<()> {
 
     // The library, straight out of the metadata cache the other front ends
     // read. Nothing is fetched and nothing is written.
-    let mut lib = library::Library::open(std::path::Path::new("cache.sqlite3"))
+    let mut lib = library::Library::open(std::path::Path::new("cache.sqlite3"), config.media_dir())
         .context("opening the library")?;
     if lib.consoles.is_empty() {
         eprintln!(
@@ -166,6 +166,12 @@ fn main() -> Result<()> {
     // What the pad is holding, so the drawing can show that input arrived.
     let mut held: BTreeSet<String> = BTreeSet::new();
 
+    // Where each thing was drawn last frame, so the mouse knows what it is
+    // over. Filled by the drawing and read by the next event — which is the
+    // only order that works, since what is on screen is decided while drawing
+    // it.
+    let mut hits: Hits = Hits::default();
+
     'running: loop {
         let now = ticks(&timer);
 
@@ -181,6 +187,43 @@ fn main() -> Result<()> {
                     scale = scale_for(&video, on, held_at);
                     screen = viewport(&window, scale);
                     say_where_we_are(&screen);
+                }
+                // The mouse. ES-DE makes this hard and it is the complaint
+                // Frank had about it; here it is the same cursor the pad
+                // moves, pointed at instead of stepped to.
+                Event::MouseMotion { x, y, .. } => {
+                    if let Some(at) = hits.at(x as f32, y as f32) {
+                        lib.point_at(at);
+                    }
+                }
+                Event::MouseButtonDown { mouse_btn, x, y, .. } => match mouse_btn {
+                    sdl2::mouse::MouseButton::Left => {
+                        if let Some(at) = hits.at(x as f32, y as f32) {
+                            lib.point_at(at);
+                            // A click opens what it is on, which is what a
+                            // double-click does in the webview — but there is
+                            // nothing else a click on a console could mean.
+                            act(&mut lib, "activate");
+                        }
+                    }
+                    // The right button goes back, the way it does in every
+                    // file manager.
+                    sdl2::mouse::MouseButton::Right => {
+                        if lib.at_top() {
+                            break 'running;
+                        }
+                        act(&mut lib, "back");
+                    }
+                    _ => {}
+                },
+                Event::MouseWheel { y, .. } => {
+                    // A wheel notch is a row, not a pixel: the cursor is what
+                    // scrolls here, and a list that moves without it leaves
+                    // the selection off screen.
+                    let step = if y > 0 { "up" } else { "down" };
+                    for _ in 0..y.unsigned_abs().min(4) {
+                        act(&mut lib, step);
+                    }
                 }
                 Event::KeyDown { keycode: Some(key), repeat: false, .. } => {
                     // Escape is bound to Back, not to quit — it was hardcoded
@@ -238,7 +281,7 @@ fn main() -> Result<()> {
         if let Some(backdrop) = &backdrop {
             unsafe { backdrop.draw(screen.width_px, screen.height_px, seconds) };
         }
-        draw(&gfx, frosted.as_ref(), &mut painter, &mut art, &mut lib, &screen);
+        hits = draw(&gfx, frosted.as_ref(), &mut painter, &mut art, &mut lib, &screen);
         window.gl_swap_window();
     }
     Ok(())
@@ -390,8 +433,11 @@ mod size {
     pub const GAP: f32 = 14.0;
     pub const PICKER: f32 = 260.0;
     pub const ASIDE: f32 = 320.0;
-    /// Cover art is 3:4, so a card is taller than it is wide.
-    pub const ART: f32 = CARD / 0.75;
+    /// How tall a card's artwork is, for a console whose covers are this
+    /// shape. Not a constant: a PSP UMD case is 0.58 and a SNES box 1.37.
+    pub fn art(aspect: f32) -> f32 {
+        CARD / aspect.clamp(0.3, 3.0)
+    }
     pub const LABEL: f32 = 13.0;
     /// Two lines of label, and the gap above them.
     pub const CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0;
@@ -406,8 +452,8 @@ fn draw(
     art: &mut covers::Covers,
     lib: &mut library::Library,
     screen: &Viewport,
-) {
-
+) -> Hits {
+    let mut hits = Hits::default();
     let px = |points: f32| screen.scale.px(points);
     let panes = screen.panes();
     let showing_games = lib.view == library::View::Roms;
@@ -439,6 +485,7 @@ fn draw(
             paint::COLUMN,
         );
         right = screen.width() - size::ASIDE - size::GAP;
+        draw_detail(gfx, painter, art, lib, screen, screen.width() - size::ASIDE);
     }
 
     if lib.consoles.is_empty() {
@@ -461,14 +508,14 @@ fn draw(
         );
     } else if picker_column || !showing_games {
         let width = if picker_column { size::PICKER } else { screen.width() };
-        draw_consoles(gfx, frosted, painter, lib, screen, width, !showing_games || !picker_column);
+        draw_consoles(gfx, frosted, painter, lib, screen, &mut hits, width, !showing_games || !picker_column);
     }
 
     if showing_games {
         let middle = (right - left - size::GAP).max(0.0);
         let columns = (((middle + size::GAP) / (size::CARD + size::GAP)).floor() as usize).max(1);
         lib.relayout(columns);
-        draw_games(gfx, frosted, painter, art, lib, screen, left, columns);
+        draw_games(gfx, frosted, painter, art, lib, screen, &mut hits, left, columns);
     }
 
     // What the window thinks it is. On screen rather than in the terminal
@@ -509,15 +556,19 @@ fn draw(
         screen.height_px - h as f32 - px(size::GAP),
         paint::FAINT,
     );
+
+    hits
 }
 
 /// The consoles, as a column of names.
+#[allow(clippy::too_many_arguments)]
 fn draw_consoles(
     gfx: &Gfx,
     frosted: Option<&glass::Glass>,
     painter: &mut text::Painter,
     lib: &mut library::Library,
     screen: &Viewport,
+    hits: &mut Hits,
     width: f32,
     focused: bool,
 ) {
@@ -529,6 +580,7 @@ fn draw_consoles(
 
     for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
         let y = size::GAP + (offset - first) as f32 * size::ROW;
+        hits.add(0.0, px(y - 3.0), px(width), px(size::ROW), offset);
         let on = offset == lib.console_at;
         if on {
             let (hx, hy, hw, hh) = (
@@ -575,11 +627,15 @@ fn draw_games(
     art: &mut covers::Covers,
     lib: &mut library::Library,
     screen: &Viewport,
+    hits: &mut Hits,
     left: f32,
     columns: usize,
 ) {
     let px = |points: f32| screen.scale.px(points);
-    let step = size::ART + size::CAPTION + size::GAP;
+    // The artwork's own shape, so a console of tall boxes gets tall cards and
+    // one of wide ones gets wide.
+    let cover_height = size::art(lib.aspect);
+    let step = cover_height + size::CAPTION + size::GAP;
 
     // Which rows to draw at all. `rowwindow` is the webview's own arithmetic,
     // ported into the core — on 2,506 arcade games this is the difference
@@ -613,9 +669,16 @@ fn draw_games(
         }
 
         let on = i == lib.at;
-        let frame = (px(x), px(y), px(size::CARD), px(size::ART));
+        let frame = (px(x), px(y), px(size::CARD), px(cover_height));
+        // The whole card, artwork and caption, is what a pointer is over.
+        hits.add(frame.0, frame.1, frame.2, px(cover_height + size::CAPTION), i);
         match art.get(gfx, id, &platform, &stem) {
-            Some(cover) => gfx.image(cover, frame.0, frame.1, frame.2, frame.3, Rgba::WHITE),
+            // Fitted, not stretched. The slot is the console's shape and the
+            // picture keeps its own, so a stray landscape screenshot among the
+            // box art is letterboxed rather than squashed.
+            Some(cover) => {
+                gfx.image_fitted(cover, frame.0, frame.1, frame.2, frame.3, Rgba::WHITE)
+            }
             // No artwork on this machine. A pane of glass rather than nothing,
             // so the grid keeps its shape and a game with no cover is still a
             // thing you can put the cursor on — and it looks like an empty
@@ -640,12 +703,87 @@ fn draw_games(
             gfx,
             &spec,
             px(x),
-            px(y + size::ART + 4.0),
+            px(y + cover_height + 4.0),
             if on { paint::TEXT } else { paint::DIM },
         );
         if favourite {
             let star = text::Spec::new("★", 11.0, screen.scale.factor());
             painter.draw(gfx, &star, px(x + 4.0), px(y + 4.0), paint::TEXT);
+        }
+    }
+}
+
+/// Where each row of the list on screen was drawn, in pixels.
+///
+/// The mouse needs it and nothing else does: a pointer arrives at a place and
+/// has to be told which row that is. Rebuilt every frame, because that is when
+/// the answer is known.
+#[derive(Default)]
+pub struct Hits {
+    spots: Vec<(f32, f32, f32, f32, usize)>,
+}
+
+impl Hits {
+    fn add(&mut self, x: f32, y: f32, w: f32, h: f32, index: usize) {
+        self.spots.push((x, y, w, h, index));
+    }
+
+    /// Which row is under this point, if any.
+    fn at(&self, x: f32, y: f32) -> Option<usize> {
+        self.spots
+            .iter()
+            .find(|(sx, sy, w, h, _)| x >= *sx && y >= *sy && x < sx + w && y < sy + h)
+            .map(|(_, _, _, _, index)| *index)
+    }
+}
+
+/// The preview column: the cover, the name, and what is known about it.
+fn draw_detail(
+    gfx: &Gfx,
+    painter: &mut text::Painter,
+    art: &mut covers::Covers,
+    lib: &library::Library,
+    screen: &Viewport,
+    left: f32,
+) {
+    let px = |points: f32| screen.scale.px(points);
+    let Some(detail) = lib.detail() else { return };
+    let width = size::ASIDE - size::GAP * 2.0;
+    let mut y = size::GAP;
+
+    // The cover, as large as the column allows and in its own shape.
+    let tall = size::art(lib.aspect);
+    if let Some(cover) = art.get(gfx, detail.id, &detail.platform, &detail.stem) {
+        let height = tall * (width / size::CARD);
+        gfx.image_fitted(cover, px(left + size::GAP), px(y), px(width), px(height), Rgba::WHITE);
+        y += height + size::GAP;
+    }
+
+    // The name, over as many lines as it takes. This is the one place a title
+    // is not cut short — the card above had to fit it into 150 points and this
+    // column is where the whole thing goes.
+    let name = text::Spec::new(&detail.name, size::TITLE, screen.scale.factor())
+        .wrapped(width, 4);
+    let (_, name_height) = painter.measure(gfx, &name);
+    painter.draw(gfx, &name, px(left + size::GAP), px(y), paint::TEXT);
+    y += screen.scale.pt(name_height as f32) + size::GAP;
+
+    if detail.favourite {
+        let star = text::Spec::new("★ Starred", 11.0, screen.scale.factor());
+        painter.draw(gfx, &star, px(left + size::GAP), px(y), paint::TEXT);
+        y += 18.0;
+    }
+
+    // Label on the left, value on the right, which is the shape the webview's
+    // pane uses and the one a list of facts wants.
+    for (label, value) in detail.facts() {
+        let l = text::Spec::new(label, 11.0, screen.scale.factor());
+        let v = text::Spec::new(&value, 11.0, screen.scale.factor()).wrapped(width * 0.55, 2);
+        painter.draw(gfx, &l, px(left + size::GAP), px(y), paint::FAINT);
+        painter.draw(gfx, &v, px(left + size::GAP + width * 0.45), px(y), paint::DIM);
+        y += 17.0;
+        if y > screen.height() - size::GAP {
+            break;
         }
     }
 }

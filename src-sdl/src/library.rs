@@ -12,7 +12,49 @@ use romm_desktop::cache::Cache;
 use romm_desktop::gamelist::{self, Chosen, Row};
 use romm_desktop::gridnav::{self, Moves};
 use romm_desktop::{gamefilter, gamesort};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// What a cover is shaped like before anything has been measured. Three by
+/// four, which is most console box art and all of the placeholder cards.
+pub const DEFAULT_ASPECT: f32 = 0.75;
+
+/// Everything the preview column says about one game.
+pub struct Detail {
+    pub id: i64,
+    pub name: String,
+    pub platform: String,
+    /// What its artwork is filed under.
+    pub stem: String,
+    pub size: String,
+    pub favourite: bool,
+    pub last_played: Option<String>,
+    pub downloaded: bool,
+    pub hardware: Option<&'static str>,
+    pub maker: Option<&'static str>,
+}
+
+impl Detail {
+    /// The pane's rows, as label and value. Skipping what is not known rather
+    /// than printing a blank: a field with nothing in it is a question the
+    /// pane cannot answer, and a dash is not an answer.
+    pub fn facts(&self) -> Vec<(&'static str, String)> {
+        let mut out = vec![("Console", self.platform.clone()), ("Size", self.size.clone())];
+        if let Some(maker) = self.maker {
+            out.push(("Made by", maker.to_owned()));
+        }
+        if let Some(hardware) = self.hardware {
+            out.push(("Hardware", hardware.to_owned()));
+        }
+        match &self.last_played {
+            // The date only. The time it was started is not something anybody
+            // is looking for here.
+            Some(when) => out.push(("Last played", when.chars().take(10).collect())),
+            None => out.push(("Last played", "never".to_owned())),
+        }
+        out.push(("On this machine", if self.downloaded { "yes" } else { "no" }.to_owned()));
+        out
+    }
+}
 
 /// Which screen is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +73,7 @@ pub struct Console {
 
 pub struct Library {
     cache: Cache,
+    media_root: PathBuf,
     pub consoles: Vec<Console>,
     /// Which console the picker is on, always — the picker column shows it
     /// highlighted whether or not its games are open.
@@ -48,6 +91,13 @@ pub struct Library {
     arranged: Vec<usize>,
     /// Where the cursor is, as a place in `arranged`.
     pub at: usize,
+    /// The shape of this console's box art, width over height.
+    ///
+    /// Measured off what is actually on disk — a PSP UMD case is 0.58 and a
+    /// SNES box 1.37, and one ratio for all of them crops most systems. Per
+    /// console rather than per game so the grid stays regular, which is also
+    /// what lets the cursor move by arithmetic.
+    pub aspect: f32,
     /// How far the grid is scrolled, in points. Owned here rather than by the
     /// drawing so it survives a redraw and a resize.
     pub scrolled: f32,
@@ -59,7 +109,7 @@ pub struct Library {
 
 impl Library {
     /// Open the metadata cache and read the consoles.
-    pub fn open(path: &Path) -> Result<Self> {
+    pub fn open(path: &Path, media_root: PathBuf) -> Result<Self> {
         let cache = Cache::open(path).with_context(|| format!("opening {}", path.display()))?;
         let consoles = cache
             .platforms()
@@ -69,6 +119,7 @@ impl Library {
             .collect();
         let mut lib = Library {
             cache,
+            media_root,
             consoles,
             console_at: 0,
             view: View::Platforms,
@@ -76,6 +127,7 @@ impl Library {
             stems: Vec::new(),
             arranged: Vec::new(),
             at: 0,
+            aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
             chosen: Chosen::default(),
             moves: Moves::default(),
@@ -110,6 +162,29 @@ impl Library {
 
     pub fn shown(&self) -> usize {
         self.arranged.len()
+    }
+
+    /// What the third column shows about the game under the cursor.
+    ///
+    /// Assembled here rather than by the drawing, so the pane is a list of
+    /// facts to lay out rather than a place where things are worked out. What
+    /// is *in* the list comes from the row and from `platformfacts`, both
+    /// already in the core.
+    pub fn detail(&self) -> Option<Detail> {
+        let row = self.selected()?;
+        let stem = self.arranged.get(self.at).and_then(|i| self.stems.get(*i))?;
+        Some(Detail {
+            name: row.name.clone(),
+            platform: row.platform.clone(),
+            stem: stem.clone(),
+            id: row.id,
+            size: romm_desktop::util::human(row.size_bytes as u64),
+            favourite: row.favourite,
+            last_played: row.last_played.clone(),
+            downloaded: row.downloaded,
+            hardware: romm_desktop::platformfacts::of(&row.platform).map(|f| f.hardware),
+            maker: romm_desktop::platformfacts::of(&row.platform).map(|f| f.manufacturer),
+        })
     }
 
     pub fn selected(&self) -> Option<&Row> {
@@ -159,6 +234,9 @@ impl Library {
                 ..Row::default()
             })
             .collect();
+        self.aspect = romm_desktop::media::cover_aspect(&self.media_root, &slug)
+            .filter(|a| a.is_finite() && *a > 0.1 && *a < 4.0)
+            .unwrap_or(DEFAULT_ASPECT);
         self.view = View::Roms;
         self.at = 0;
         self.scrolled = 0.0;
@@ -215,6 +293,25 @@ impl Library {
         }
         self.columns = columns;
         self.moves = gridnav::uniform(count, columns);
+    }
+
+    /// Put the cursor on a particular row, if it is one.
+    ///
+    /// For the mouse, which does not step — it arrives.
+    pub fn point_at(&mut self, index: usize) -> bool {
+        let cursor = match self.view {
+            View::Platforms => &mut self.console_at,
+            View::Roms => &mut self.at,
+        };
+        let count = match self.view {
+            View::Platforms => self.consoles.len(),
+            View::Roms => self.arranged.len(),
+        };
+        if index >= count || *cursor == index {
+            return false;
+        }
+        *cursor = index;
+        true
     }
 
     /// Do what a key or a button asked for. Returns whether anything changed.
@@ -302,6 +399,7 @@ mod tests {
     fn seeded(rows: Vec<Row>) -> Library {
         let mut lib = Library {
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),
+            media_root: PathBuf::new(),
             consoles: vec![Console { slug: "snes".into(), name: "SNES".into(), games: 3 }],
             console_at: 0,
             view: View::Roms,
@@ -309,6 +407,7 @@ mod tests {
             rows,
             arranged: Vec::new(),
             at: 0,
+            aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
             chosen: Chosen::default(),
             moves: Moves::default(),
@@ -386,7 +485,8 @@ mod tests {
             eprintln!("no cache.sqlite3 here; skipping");
             return;
         }
-        let mut lib = Library::open(db).expect("opening the cache");
+        let mut lib = Library::open(db, PathBuf::from("../library/downloaded_media"))
+            .expect("opening the cache");
         assert!(!lib.consoles.is_empty(), "a cache with no consoles in it");
 
         // The first console with anything in it, since a library can hold
@@ -423,6 +523,19 @@ mod tests {
         assert_eq!(lib.console_at, 1);
         assert!(lib.act("last").unwrap());
         assert_eq!(lib.console_at, 2);
+    }
+
+    /// The mouse arrives rather than stepping, so it must not be able to land
+    /// outside the list — a pointer over the gap below the last row is a
+    /// common thing and must not move the cursor there.
+    #[test]
+    fn pointing_outside_the_list_moves_nothing() {
+        let mut lib = seeded(rows(&[("a", false), ("b", false)]));
+        assert!(lib.point_at(1));
+        assert_eq!(lib.at, 1);
+        assert!(!lib.point_at(9), "the cursor followed the pointer off the end");
+        assert_eq!(lib.at, 1);
+        assert!(!lib.point_at(1), "pointing at where it already is counts as a change");
     }
 
     #[test]

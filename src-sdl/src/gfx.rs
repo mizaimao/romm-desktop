@@ -198,6 +198,19 @@ impl Gfx {
         self.quad(&self.blank, x, y, w, h, color);
     }
 
+    /// An image, whole, inside a box, keeping its own shape.
+    ///
+    /// Letterboxed rather than stretched: box art is 0.58 for a PSP UMD case
+    /// and 1.37 for a SNES box, and a card sized for one squashes the other.
+    /// The grid stays regular — the *slot* is the same everywhere — and what
+    /// goes in it is not distorted.
+    pub fn image_fitted(&self, texture: &Texture, x: f32, y: f32, w: f32, h: f32, tint: Rgba) {
+        let (iw, ih) = (texture.width.max(1) as f32, texture.height.max(1) as f32);
+        let scale = (w / iw).min(h / ih);
+        let (dw, dh) = (iw * scale, ih * scale);
+        self.image(texture, x + (w - dw) / 2.0, y + (h - dh) / 2.0, dw, dh, tint);
+    }
+
     /// An image, stretched to fit.
     ///
     /// `tint` multiplies it, which is what makes one text raster serve every
