@@ -24,11 +24,11 @@ use romm_desktop::layout::{Panes, Scale, Viewport};
 use romm_desktop::{binds, padpoll};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use std::collections::BTreeSet;
 
 mod input;
+mod library;
 mod text;
 
 /// The handheld's panel, and this window's default.
@@ -70,6 +70,12 @@ fn main() -> Result<()> {
     let mut painter = text::Painter::new(&creator).context("finding fonts")?;
     check_fonts(&mut painter);
 
+    // The library, straight out of the metadata cache the other front ends
+    // read. Nothing is fetched and nothing is written.
+    let mut lib = library::Library::open(std::path::Path::new("cache.sqlite3"))
+        .context("opening the library")?;
+    println!("{} consoles", lib.consoles.len());
+
     let mut screen = viewport(&canvas, scale);
     say_where_we_are(&screen);
 
@@ -107,7 +113,7 @@ fn main() -> Result<()> {
                         break 'running;
                     }
                     if let Some(action) = input::action_for_key(&bindings, key) {
-                        act(action, now);
+                        act(&mut lib, action);
                     }
                 }
                 _ => {}
@@ -120,13 +126,13 @@ fn main() -> Result<()> {
         let pressed = pads.pressed(&pad_map);
         for action in &pressed {
             if repeat.fire(action, now) {
-                act(action, now);
+                act(&mut lib, action);
             }
         }
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
-        draw(&mut canvas, &mut painter, &screen, &held);
+        draw(&mut canvas, &mut painter, &mut lib, &screen);
         canvas.present();
     }
     Ok(())
@@ -196,13 +202,17 @@ fn check_fonts(painter: &mut text::Painter) {
             println!("  {what:<12} asked {asked:<20} got {face}{note}");
         }
     }
-    let cut = SAMPLE
-        .iter()
-        .filter(|name| {
-            painter.is_clipped(&text::Spec::new(**name, 13.0, 1.0).wrapped(150.0, 2))
-        })
-        .count();
-    println!("{cut} of {} sample titles are cut short at a 150pt card", SAMPLE.len());
+    // A title long enough that it must be cut, and one short enough that it
+    // must not. Both, because an ellipsis that never appears and one that
+    // always does are the same bug from opposite sides.
+    let long = "Mortal Kombat II: The Very Long Subtitle Nobody Asked For, Special Edition";
+    let at_card = |t: &str| text::Spec::new(t, size::LABEL, 1.0).wrapped(size::CARD, 2);
+    if !painter.is_clipped(&at_card(long)) {
+        eprintln!("warning: a title far too long for a card was not cut short");
+    }
+    if painter.is_clipped(&at_card("Metroid")) {
+        eprintln!("warning: a short title was cut short");
+    }
 }
 
 fn say_where_we_are(screen: &Viewport) {
@@ -218,10 +228,16 @@ fn say_where_we_are(screen: &Viewport) {
     );
 }
 
-/// Nothing acts yet. Printed rather than swallowed, so a binding that resolves
-/// to nothing is visible now rather than at the end of phase four.
-fn act(action: &str, now: f64) {
-    println!("[{now:>8.0}ms] {action}");
+/// Hand an action to the library, and say if anything came of it.
+///
+/// A binding that resolves to nothing is printed rather than swallowed: an
+/// action nobody handles looks exactly like a button that is not working.
+fn act(lib: &mut library::Library, action: &str) {
+    match lib.act(action) {
+        Ok(true) => {}
+        Ok(false) => println!("nothing does {action} yet"),
+        Err(e) => eprintln!("{action}: {e:#}"),
+    }
 }
 
 /// A grid of cards, in points, and the columns the window has room for.
@@ -229,116 +245,193 @@ fn act(action: &str, now: f64) {
 /// Not a design. It is the smallest thing that is wrong on screen if the units
 /// are wrong: cards that change physical size when the window is dragged
 /// between displays, or a column that appears at the wrong width.
-/// Names that between them break every naive way of drawing text.
-///
-/// Not a placeholder: a Latin title far too long for its card, a Japanese one
-/// with no spaces to break at, an accented one, and a short one that must be
-/// left alone. If all four look right at every window size, the hard part of
-/// phase two is done.
-const SAMPLE: &[&str] = &[
-    "Metroid",
-    "ゼルダの伝説 神々のトライフォース",
-    "Castlevania: Symphony of the Night",
-    "Pokémon Crystal",
-    "ドラゴンクエストIII そして伝説へ",
-    "Mortal Kombat II: The Very Long Subtitle Nobody Asked For",
-    "Sonic the Hedgehog 2",
-    "スーパーマリオブラザーズ3",
-];
+/// The colours, in one place. A palette rather than numbers scattered through
+/// the drawing, because the next phase is the glass and it will want to talk
+/// about these by name.
+mod paint {
+    use sdl2::pixels::Color;
+
+    pub const BACKGROUND: Color = Color::RGB(18, 18, 22);
+    pub const COLUMN: Color = Color::RGB(26, 26, 32);
+    pub const CARD: Color = Color::RGB(44, 44, 54);
+    pub const CURSOR: Color = Color::RGB(90, 130, 190);
+    pub const TEXT: Color = Color::RGB(228, 230, 238);
+    pub const DIM: Color = Color::RGB(140, 142, 152);
+    pub const FAINT: Color = Color::RGB(96, 98, 108);
+}
+
+/// The sizes, in points. Nothing here is a pixel.
+mod size {
+    pub const CARD: f32 = 150.0;
+    pub const GAP: f32 = 14.0;
+    pub const PICKER: f32 = 260.0;
+    pub const ASIDE: f32 = 320.0;
+    /// Cover art is 3:4, so a card is taller than it is wide.
+    pub const ART: f32 = CARD / 0.75;
+    pub const LABEL: f32 = 13.0;
+    /// Two lines of label, and the gap above them.
+    pub const CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0;
+    pub const ROW: f32 = 30.0;
+    pub const TITLE: f32 = 15.0;
+}
 
 fn draw(
     canvas: &mut sdl2::render::WindowCanvas,
     painter: &mut text::Painter,
+    lib: &mut library::Library,
     screen: &Viewport,
-    held: &BTreeSet<String>,
 ) {
-    const CARD: f32 = 150.0;
-    const GAP: f32 = 14.0;
-    const PICKER: f32 = 260.0;
-    const ASIDE: f32 = 320.0;
-    /// Cover art is 3:4, so a card is taller than it is wide, and the name
-    /// sits under it.
-    const ART: f32 = CARD / 0.75;
-    const LABEL: f32 = 13.0;
-    /// Two lines of label, and the gap above them.
-    const CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0;
-
-    canvas.set_draw_color(Color::RGB(18, 18, 22));
+    canvas.set_draw_color(paint::BACKGROUND);
     canvas.clear();
 
     let px = |points: f32| screen.scale.px(points);
     let panes = screen.panes();
+    let showing_games = lib.view == library::View::Roms;
 
-    // The picker column, where there is room for one.
+    // The picker column, where there is room for one. Where there is not, it
+    // is the whole pane until a console is opened — which is the one-pane
+    // arrangement, and the handheld's.
+    let picker_column = panes >= Panes::Two;
     let mut left = 0.0;
-    if panes >= Panes::Two {
-        canvas.set_draw_color(Color::RGB(30, 30, 38));
-        fill(canvas, 0.0, 0.0, px(PICKER), screen.height_px);
-        left = PICKER + GAP;
+    if picker_column {
+        canvas.set_draw_color(paint::COLUMN);
+        fill(canvas, 0.0, 0.0, px(size::PICKER), screen.height_px);
+        left = size::PICKER + size::GAP;
     }
-    // The preview, where there is room for that too.
     let mut right = screen.width();
     if panes == Panes::Three {
-        canvas.set_draw_color(Color::RGB(30, 30, 38));
-        fill(canvas, px(screen.width() - ASIDE), 0.0, px(ASIDE), screen.height_px);
-        right = screen.width() - ASIDE - GAP;
+        canvas.set_draw_color(paint::COLUMN);
+        fill(canvas, px(screen.width() - size::ASIDE), 0.0, px(size::ASIDE), screen.height_px);
+        right = screen.width() - size::ASIDE - size::GAP;
     }
 
-    // Covers, at whatever the middle can hold. The same arithmetic
-    // `gridnav::uniform` navigates by, which is why it needs no geometry.
-    let middle = (right - left - GAP).max(0.0);
-    let columns = (((middle + GAP) / (CARD + GAP)).floor() as usize).max(1);
-    let lit = if held.is_empty() { 0 } else { 1 };
-    for i in 0..(columns * 4) {
-        let (row, col) = (i / columns, i % columns);
-        let x = left + GAP + col as f32 * (CARD + GAP);
-        let y = GAP + row as f32 * (ART + CAPTION + GAP);
-        if y + ART + CAPTION > screen.height() {
-            break;
-        }
-        canvas.set_draw_color(if i == lit {
-            Color::RGB(90, 130, 190)
-        } else {
-            Color::RGB(44, 44, 54)
-        });
-        fill(canvas, px(x), px(y), px(CARD), px(ART));
-
-
-        // The name, in the width the card actually has, over two lines, cut
-        // short with an ellipsis if it does not fit. This is the whole of
-        // phase two on screen.
-        let name = SAMPLE[i % SAMPLE.len()];
-        let spec = text::Spec::new(name, LABEL, screen.scale.factor()).wrapped(CARD, 2);
-        painter.draw(
-            canvas,
-            &spec,
-            px(x),
-            px(y + ART + 4.0),
-            if i == lit { Color::RGB(235, 240, 250) } else { Color::RGB(190, 190, 200) },
-        );
+    if picker_column || !showing_games {
+        let width = if picker_column { size::PICKER } else { screen.width() };
+        draw_consoles(canvas, painter, lib, screen, width, !showing_games || !picker_column);
     }
 
-    // What the window currently thinks it is, in the corner. On screen rather
-    // than in the terminal because the thing worth watching is what happens
-    // *while* an edge is being dragged — the moment a column appears, and
-    // whether the cards stay the same physical size across displays.
+    if showing_games {
+        let middle = (right - left - size::GAP).max(0.0);
+        let columns = (((middle + size::GAP) / (size::CARD + size::GAP)).floor() as usize).max(1);
+        lib.relayout(columns);
+        draw_games(canvas, painter, lib, screen, left, columns);
+    }
+
+    // What the window thinks it is. On screen rather than in the terminal
+    // because what is worth watching is what happens while an edge is dragged.
+    let filters = lib.filters();
     let readout = format!(
-        "{:.0}x{:.0}pt · {:.2}x · {:?} · {} columns",
+        "{:.0}x{:.0}pt · {:.2}x · {:?} · {} · {}{}",
         screen.width(),
         screen.height(),
         screen.scale.factor(),
         panes,
-        columns,
+        lib.order_label(),
+        if showing_games {
+            format!("{} games", lib.shown())
+        } else {
+            format!("{} consoles", lib.consoles.len())
+        },
+        if filters.is_empty() { String::new() } else { format!(" · {}", filters.join("+")) },
     );
+    if let Some(row) = lib.selected() {
+        let name = text::Spec::new(&row.name, 12.0, screen.scale.factor());
+        painter.draw(canvas, &name, px(size::GAP), screen.height_px - px(size::GAP + 16.0), paint::DIM);
+    }
     let spec = text::Spec::new(readout, 11.0, screen.scale.factor());
     let (w, h) = painter.measure(&spec);
     painter.draw(
         canvas,
         &spec,
-        screen.width_px - w as f32 - px(GAP),
-        screen.height_px - h as f32 - px(GAP),
-        Color::RGB(120, 120, 132),
+        screen.width_px - w as f32 - px(size::GAP),
+        screen.height_px - h as f32 - px(size::GAP),
+        paint::FAINT,
     );
+}
+
+/// The consoles, as a column of names.
+fn draw_consoles(
+    canvas: &mut sdl2::render::WindowCanvas,
+    painter: &mut text::Painter,
+    lib: &mut library::Library,
+    screen: &Viewport,
+    width: f32,
+    focused: bool,
+) {
+    let px = |points: f32| screen.scale.px(points);
+    // Scrolled to keep the cursor on screen. A console list is thirty-five
+    // rows, so this is the whole of the windowing it needs.
+    let fits = ((screen.height() - size::GAP * 2.0) / size::ROW).floor().max(1.0) as usize;
+    let first = lib.console_at.saturating_sub(fits.saturating_sub(1));
+
+    for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
+        let y = size::GAP + (offset - first) as f32 * size::ROW;
+        let on = offset == lib.console_at;
+        if on {
+            canvas.set_draw_color(if focused { paint::CURSOR } else { paint::CARD });
+            fill(canvas, px(size::GAP / 2.0), px(y - 3.0), px(width - size::GAP), px(size::ROW - 2.0));
+        }
+        let spec = text::Spec::new(&console.name, size::TITLE, screen.scale.factor())
+            .wrapped(width - size::GAP * 3.0 - 40.0, 1);
+        painter.draw(canvas, &spec, px(size::GAP), px(y), if on { paint::TEXT } else { paint::DIM });
+
+        let count = text::Spec::new(console.games.to_string(), 11.0, screen.scale.factor());
+        let (cw, _) = painter.measure(&count);
+        painter.draw(
+            canvas,
+            &count,
+            px(width - size::GAP) - cw as f32,
+            px(y + 3.0),
+            if on { paint::TEXT } else { paint::FAINT },
+        );
+    }
+}
+
+/// One console's games, as covers with their names under them.
+fn draw_games(
+    canvas: &mut sdl2::render::WindowCanvas,
+    painter: &mut text::Painter,
+    lib: &mut library::Library,
+    screen: &Viewport,
+    left: f32,
+    columns: usize,
+) {
+    let px = |points: f32| screen.scale.px(points);
+    let step = size::ART + size::CAPTION + size::GAP;
+    let visible_rows = ((screen.height() - size::GAP) / step).floor().max(1.0) as usize;
+    // The band around the cursor. `visible.js` does this properly for the
+    // webview and `slice()` is the thing to port here; this is the two lines
+    // that keep the cursor on screen until then.
+    let cursor_row = lib.at / columns;
+    let first_row = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
+
+    let rows: Vec<_> = lib.showing().map(|r| (r.name.clone(), r.favourite)).collect();
+    for (i, (name, favourite)) in rows.iter().enumerate() {
+        let (row, col) = (i / columns, i % columns);
+        if row < first_row || row >= first_row + visible_rows {
+            continue;
+        }
+        let x = left + size::GAP + col as f32 * (size::CARD + size::GAP);
+        let y = size::GAP + (row - first_row) as f32 * step;
+
+        let on = i == lib.at;
+        canvas.set_draw_color(if on { paint::CURSOR } else { paint::CARD });
+        fill(canvas, px(x), px(y), px(size::CARD), px(size::ART));
+
+        let spec = text::Spec::new(name, size::LABEL, screen.scale.factor())
+            .wrapped(size::CARD, 2);
+        painter.draw(
+            canvas,
+            &spec,
+            px(x),
+            px(y + size::ART + 4.0),
+            if on { paint::TEXT } else { paint::DIM },
+        );
+        if *favourite {
+            let star = text::Spec::new("★", 11.0, screen.scale.factor());
+            painter.draw(canvas, &star, px(x + 4.0), px(y + 4.0), paint::TEXT);
+        }
+    }
 }
 
 fn fill(canvas: &mut sdl2::render::WindowCanvas, x: f32, y: f32, w: f32, h: f32) {
