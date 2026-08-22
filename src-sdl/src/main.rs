@@ -183,12 +183,13 @@ fn main() -> Result<()> {
     let mut pads = input::Pads::open_first(&controller);
     let mut repeat = padpoll::Repeat::default();
 
+    let timer = sdl.timer().map_err(anyhow::Error::msg).context("starting the clock")?;
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
     // What the pad is holding, so the drawing can show that input arrived.
     let mut held: BTreeSet<String> = BTreeSet::new();
 
     'running: loop {
-        let now = ticks(&sdl);
+        let now = ticks(&timer);
 
         for event in events.poll_iter() {
             match event {
@@ -277,8 +278,13 @@ fn open_window(video: &sdl2::VideoSubsystem, gl: bool) -> Result<sdl2::video::Wi
 }
 
 /// Milliseconds since SDL started, which is what `padpoll` counts in.
-fn ticks(sdl: &sdl2::Sdl) -> f64 {
-    sdl.timer().map(|t| t.ticks64() as f64).unwrap_or(0.0)
+///
+/// The subsystem is held rather than asked for each frame: `Sdl::timer`
+/// initialises it, and doing that sixty times a second for a number is work
+/// for nothing — and if it ever failed, time would silently stop and the
+/// backdrop would freeze with nothing to say why.
+fn ticks(timer: &sdl2::TimerSubsystem) -> f64 {
+    timer.ticks64() as f64
 }
 
 /// What the window is, in points.

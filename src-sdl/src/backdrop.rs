@@ -201,6 +201,12 @@ pub const STYLES: &[Style] = &[
     },
 ];
 
+/// What the motion slider sits at before anyone touches it.
+///
+/// From `ui/js/backdrop.js`, where it is shared across styles and each one's
+/// `pace` scales it. The range there is 0 to 7.
+pub const DEFAULT_SPEED: f32 = 4.0;
+
 pub fn style(id: &str) -> &'static Style {
     STYLES.iter().find(|s| s.id == id).unwrap_or(&STYLES[0])
 }
@@ -327,7 +333,11 @@ impl Backdrop {
                 },
                 scheme: Scheme::default(),
                 strength: 0.5,
-                speed: 1.0,
+                // The webview's own default, and it matters: this is
+                // multiplied by the style's `pace` and then by the small
+                // constants in the body — Blobs drifts at 0.02 of it — so at
+                // 1.0 the picture moves and nobody can tell.
+                speed: DEFAULT_SPEED,
                 pace: chosen.pace,
                 label: chosen.label,
                 dialect,
