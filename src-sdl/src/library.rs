@@ -56,6 +56,27 @@ impl Detail {
     }
 }
 
+/// The tabs across the top.
+///
+/// The same five the webview has, in the same order and with the same names —
+/// `ui/js/tabs.js`. Only the first two do anything yet; the rest are drawn
+/// because a tab row with holes in it is worse than one with tabs that are
+/// not finished, and because the shoulder buttons move between them and have
+/// to have somewhere to go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Section {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub ready: bool,
+}
+
+pub const SECTIONS: &[Section] = &[
+    Section { id: "library", label: "Library", ready: true },
+    Section { id: "mine", label: "My collections", ready: false },
+    Section { id: "history", label: "History", ready: false },
+    Section { id: "browse", label: "RomM browse", ready: false },
+];
+
 /// Which screen is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -74,6 +95,8 @@ pub struct Console {
 pub struct Library {
     cache: Cache,
     media_root: PathBuf,
+    /// Where downloads land, for deciding what will play offline.
+    roms_dir: PathBuf,
     pub consoles: Vec<Console>,
     /// Which console the picker is on, always — the picker column shows it
     /// highlighted whether or not its games are open.
@@ -89,6 +112,8 @@ pub struct Library {
     /// shape a *list* needs, and where a file sits is not part of that.
     stems: Vec<String>,
     arranged: Vec<usize>,
+    /// Which tab is open.
+    pub section: usize,
     /// Where the cursor is, as a place in `arranged`.
     pub at: usize,
     /// The shape of this console's box art, width over height.
@@ -109,7 +134,7 @@ pub struct Library {
 
 impl Library {
     /// Open the metadata cache and read the consoles.
-    pub fn open(path: &Path, media_root: PathBuf) -> Result<Self> {
+    pub fn open(path: &Path, media_root: PathBuf, roms_dir: PathBuf) -> Result<Self> {
         let cache = Cache::open(path).with_context(|| format!("opening {}", path.display()))?;
         let consoles = cache
             .platforms()
@@ -120,12 +145,14 @@ impl Library {
         let mut lib = Library {
             cache,
             media_root,
+            roms_dir,
             consoles,
             console_at: 0,
             view: View::Platforms,
             rows: Vec::new(),
             stems: Vec::new(),
             arranged: Vec::new(),
+            section: 0,
             at: 0,
             aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
@@ -209,6 +236,7 @@ impl Library {
     pub fn open_console(&mut self) -> Result<()> {
         let Some(slug) = self.console().map(|c| c.slug.clone()) else { return Ok(()) };
         let favourites = self.cache.favourite_ids().unwrap_or_default();
+        let roms_dir = self.roms_dir.clone();
         let fetched = self.cache.roms_for(&slug).with_context(|| format!("reading {slug}"))?;
         self.stems = fetched
             .iter()
@@ -223,6 +251,16 @@ impl Library {
             .into_iter()
             .map(|r| Row {
                 favourite: favourites.contains(&r.id),
+                // Whether it will play with the server off. The row's own
+                // path if it has one, and the library folder otherwise —
+                // which is where a download lands.
+                downloaded: r
+                    .local_path
+                    .as_deref()
+                    .map(Path::new)
+                    .filter(|p| p.exists())
+                    .is_some()
+                    || roms_dir.join(&r.platform_slug).join(&r.fs_name).exists(),
                 id: r.id,
                 name: r.name,
                 platform: r.platform_slug,
@@ -348,6 +386,13 @@ impl Library {
                 self.relayout(self.columns);
                 Ok(true)
             }
+            // The shoulder buttons, and q/e. The cheapest navigation there is,
+            // which is why they move between tabs rather than within one.
+            "prevSection" | "nextSection" => {
+                let delta = if action == "nextSection" { 1 } else { SECTIONS.len() - 1 };
+                self.section = (self.section + delta) % SECTIONS.len();
+                Ok(true)
+            }
             "sortCycle" if self.view == View::Roms => {
                 let scope = self.scope();
                 let next = gamesort::cycle(self.chosen.order(&scope).id, 1);
@@ -400,12 +445,14 @@ mod tests {
         let mut lib = Library {
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),
             media_root: PathBuf::new(),
+            roms_dir: PathBuf::new(),
             consoles: vec![Console { slug: "snes".into(), name: "SNES".into(), games: 3 }],
             console_at: 0,
             view: View::Roms,
             stems: rows.iter().map(|r| r.name.clone()).collect(),
             rows,
             arranged: Vec::new(),
+            section: 0,
             at: 0,
             aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
@@ -485,8 +532,12 @@ mod tests {
             eprintln!("no cache.sqlite3 here; skipping");
             return;
         }
-        let mut lib = Library::open(db, PathBuf::from("../library/downloaded_media"))
-            .expect("opening the cache");
+        let mut lib = Library::open(
+            db,
+            PathBuf::from("../library/downloaded_media"),
+            PathBuf::from("../library/roms"),
+        )
+        .expect("opening the cache");
         assert!(!lib.consoles.is_empty(), "a cache with no consoles in it");
 
         // The first console with anything in it, since a library can hold
@@ -536,6 +587,20 @@ mod tests {
         assert!(!lib.point_at(9), "the cursor followed the pointer off the end");
         assert_eq!(lib.at, 1);
         assert!(!lib.point_at(1), "pointing at where it already is counts as a change");
+    }
+
+    /// The tabs wrap, both ways, and there are as many as the webview has.
+    #[test]
+    fn the_shoulders_walk_the_tabs_and_wrap() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        assert_eq!(SECTIONS.len(), 4);
+        assert_eq!(lib.section, 0);
+        lib.act("nextSection").unwrap();
+        assert_eq!(lib.section, 1);
+        lib.act("prevSection").unwrap();
+        assert_eq!(lib.section, 0);
+        lib.act("prevSection").unwrap();
+        assert_eq!(lib.section, SECTIONS.len() - 1, "going back from the first did not wrap");
     }
 
     #[test]

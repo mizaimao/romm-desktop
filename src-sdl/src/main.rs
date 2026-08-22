@@ -139,7 +139,11 @@ fn main() -> Result<()> {
 
     // The library, straight out of the metadata cache the other front ends
     // read. Nothing is fetched and nothing is written.
-    let mut lib = library::Library::open(std::path::Path::new("cache.sqlite3"), config.media_dir())
+    let mut lib = library::Library::open(
+        std::path::Path::new("cache.sqlite3"),
+        config.media_dir(),
+        config.local_roms_dir(),
+    )
         .context("opening the library")?;
     if lib.consoles.is_empty() {
         eprintln!(
@@ -192,13 +196,17 @@ fn main() -> Result<()> {
                 // Frank had about it; here it is the same cursor the pad
                 // moves, pointed at instead of stepped to.
                 Event::MouseMotion { x, y, .. } => {
-                    if let Some(at) = hits.at(x as f32, y as f32) {
+                    let (x, y) = pointer(&window, x, y);
+                    if let Some(at) = hits.at(x, y) {
                         lib.point_at(at);
                     }
                 }
                 Event::MouseButtonDown { mouse_btn, x, y, .. } => match mouse_btn {
                     sdl2::mouse::MouseButton::Left => {
-                        if let Some(at) = hits.at(x as f32, y as f32) {
+                        let (x, y) = pointer(&window, x, y);
+                        if let Some(tab) = hits.tab_at(x, y) {
+                            lib.section = tab;
+                        } else if let Some(at) = hits.at(x, y) {
                             lib.point_at(at);
                             // A click opens what it is on, which is what a
                             // double-click does in the webview — but there is
@@ -285,6 +293,21 @@ fn main() -> Result<()> {
         window.gl_swap_window();
     }
     Ok(())
+}
+
+/// Where the pointer is, in the pixels everything is drawn in.
+///
+/// SDL reports the mouse in *window* coordinates and we draw in *drawable*
+/// ones, and on a retina display those differ by two — so a click near the
+/// middle of the window lands a quarter of the way in, and one in the bottom
+/// half lands nowhere at all. Not the layout's scale, which is about how big
+/// things should look; this is about which pixels the platform means.
+fn pointer(window: &sdl2::video::Window, x: i32, y: i32) -> (f32, f32) {
+    let (dw, dh) = window.drawable_size();
+    let (ww, wh) = window.size();
+    let across = if ww > 0 { dw as f32 / ww as f32 } else { 1.0 };
+    let down = if wh > 0 { dh as f32 / wh as f32 } else { 1.0 };
+    (x as f32 * across, y as f32 * down)
 }
 
 fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, String> {
@@ -425,6 +448,15 @@ mod paint {
     pub const TEXT: Rgba = Rgba::rgb(228, 230, 238);
     pub const DIM: Rgba = Rgba::rgb(140, 142, 152);
     pub const FAINT: Rgba = Rgba::rgb(96, 98, 108);
+    /// The bar across the top. Darker than a panel, because it is furniture
+    /// rather than content and should not compete with the artwork.
+    pub const BAR: Rgba = Rgba(0.06, 0.06, 0.09, 0.72);
+    /// The plate a mark sits on, so it reads against artwork of any colour.
+    pub const MARK: Rgba = Rgba(0.0, 0.0, 0.0, 0.45);
+    pub const STAR: Rgba = Rgba::rgb(240, 200, 90);
+    /// On this machine, and on the server.
+    pub const HERE: Rgba = Rgba::rgb(120, 200, 140);
+    pub const AWAY: Rgba = Rgba::rgb(150, 160, 180);
 }
 
 /// The sizes, in points. Nothing here is a pixel.
@@ -443,6 +475,12 @@ mod size {
     pub const CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0;
     pub const ROW: f32 = 30.0;
     pub const TITLE: f32 = 15.0;
+    /// The tab row, and the header under it. The webview's tab bar is 42px
+    /// and this is the same number in points.
+    pub const TABS: f32 = 42.0;
+    pub const HEADER: f32 = 38.0;
+    /// What the two together take off the top of everything else.
+    pub const CHROME: f32 = TABS + HEADER;
 }
 
 fn draw(
@@ -462,6 +500,7 @@ fn draw(
     // is the whole pane until a console is opened — which is the one-pane
     // arrangement, and the handheld's.
     let whole = (screen.width_px, screen.height_px);
+    let top = size::CHROME;
     let pane = |x: f32, y: f32, w: f32, h: f32, tint| match frosted {
         Some(glass) => glass.panel(gfx, whole, x, y, w, h, tint),
         // No glass on this machine: a flat panel, the same shape and the same
@@ -472,16 +511,16 @@ fn draw(
     let picker_column = panes >= Panes::Two;
     let mut left = 0.0;
     if picker_column {
-        pane(0.0, 0.0, px(size::PICKER), screen.height_px, paint::COLUMN);
+        pane(0.0, px(top), px(size::PICKER), screen.height_px - px(top), paint::COLUMN);
         left = size::PICKER + size::GAP;
     }
     let mut right = screen.width();
     if panes == Panes::Three {
         pane(
             px(screen.width() - size::ASIDE),
-            0.0,
+            px(top),
             px(size::ASIDE),
-            screen.height_px,
+            screen.height_px - px(top),
             paint::COLUMN,
         );
         right = screen.width() - size::ASIDE - size::GAP;
@@ -547,6 +586,8 @@ fn draw(
         let name = text::Spec::new(&row.name, 12.0, screen.scale.factor());
         painter.draw(gfx, &name, px(size::GAP), screen.height_px - px(size::GAP + 30.0), paint::DIM);
     }
+    draw_chrome(gfx, frosted, painter, lib, screen, &mut hits);
+
     let spec = text::Spec::new(readout, 11.0, screen.scale.factor());
     let (w, h) = painter.measure(gfx, &spec);
     painter.draw(
@@ -575,11 +616,12 @@ fn draw_consoles(
     let px = |points: f32| screen.scale.px(points);
     // Scrolled to keep the cursor on screen. A console list is thirty-five
     // rows, so this is the whole of the windowing it needs.
-    let fits = ((screen.height() - size::GAP * 2.0) / size::ROW).floor().max(1.0) as usize;
+    let top = size::CHROME + size::GAP;
+    let fits = ((screen.height() - top - size::GAP) / size::ROW).floor().max(1.0) as usize;
     let first = lib.console_at.saturating_sub(fits.saturating_sub(1));
 
     for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
-        let y = size::GAP + (offset - first) as f32 * size::ROW;
+        let y = top + (offset - first) as f32 * size::ROW;
         hits.add(0.0, px(y - 3.0), px(width), px(size::ROW), offset);
         let on = offset == lib.console_at;
         if on {
@@ -645,7 +687,7 @@ fn draw_games(
     // there is no pointer on a handheld. `scroll_to` answers with nothing when
     // it is already there, which is what stops the list moving under the
     // reader on every keypress.
-    let viewport = (screen.height() - size::GAP).max(step);
+    let viewport = (screen.height() - size::CHROME - size::GAP).max(step);
     let (shown, at, was) = (lib.shown(), lib.at, lib.scrolled);
     let ask = |top: f32| rowwindow::Ask::new(shown, columns, step, top, viewport);
     let top = rowwindow::scroll_to(at, ask(was)).unwrap_or(was);
@@ -657,14 +699,18 @@ fn draw_games(
         .enumerate()
         .skip(band.first)
         .take(band.count)
-        .map(|(i, (r, stem))| (i, r.id, r.name.clone(), r.favourite, r.platform.clone(), stem.to_owned()))
+        .map(|(i, (r, stem))| {
+            (i, r.id, r.name.clone(), r.favourite, r.downloaded, r.platform.clone(), stem.to_owned())
+        })
         .collect();
 
-    for (i, id, name, favourite, platform, stem) in rows {
+    for (i, id, name, favourite, downloaded, platform, stem) in rows {
         let (row, col) = (i / columns, i % columns);
         let x = left + size::GAP + col as f32 * (size::CARD + size::GAP);
-        let y = size::GAP + row as f32 * step - top;
-        if y + step < 0.0 || y > screen.height() {
+        let y = size::CHROME + size::GAP + row as f32 * step - top;
+        // Clipped against the chrome as well as the bottom: a card sliding up
+        // under the tab row must not be pointed at through it.
+        if y + step < size::CHROME || y > screen.height() {
             continue;
         }
 
@@ -706,10 +752,129 @@ fn draw_games(
             px(y + cover_height + 4.0),
             if on { paint::TEXT } else { paint::DIM },
         );
+        // The two marks the webview puts on a card, and for the same reason:
+        // a symbol that appears on some cards and explains itself nowhere is a
+        // symbol that makes people guess. A starred game is one you said you
+        // wanted at hand; the disc says it will play with the server off.
+        let mut mark_x = x + 5.0;
         if favourite {
-            let star = text::Spec::new("★", 11.0, screen.scale.factor());
-            painter.draw(gfx, &star, px(x + 4.0), px(y + 4.0), paint::TEXT);
+            let star = text::Spec::new("★", 12.0, screen.scale.factor());
+            let (w, _) = painter.measure(gfx, &star);
+            gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK);
+            painter.draw(gfx, &star, px(mark_x), px(y + 5.0), paint::STAR);
+            mark_x += screen.scale.pt(w as f32) + 8.0;
         }
+        {
+            // "On this machine" and "on the server" are different answers and
+            // both are drawn — no mark at all is not an answer anybody can
+            // read, especially on a console where everything is downloaded.
+            let (glyph, colour) =
+                if downloaded { ("●", paint::HERE) } else { ("○", paint::AWAY) };
+            let mark = text::Spec::new(glyph, 12.0, screen.scale.factor());
+            let (w, _) = painter.measure(gfx, &mark);
+            gfx.rect(px(mark_x - 3.0), px(y + 4.0), w as f32 + px(6.0), px(16.0), paint::MARK);
+            painter.draw(gfx, &mark, px(mark_x), px(y + 5.0), colour);
+        }
+    }
+}
+
+/// The tab row and the header, across the top.
+///
+/// The shape the webview has: tabs, then a bar carrying where you are and how
+/// the list is arranged. Drawn after the columns so it sits over them, which
+/// is also how the stylesheet does it.
+fn draw_chrome(
+    gfx: &Gfx,
+    frosted: Option<&glass::Glass>,
+    painter: &mut text::Painter,
+    lib: &library::Library,
+    screen: &Viewport,
+    hits: &mut Hits,
+) {
+    let px = |points: f32| screen.scale.px(points);
+    let whole = (screen.width_px, screen.height_px);
+    match frosted {
+        Some(glass) => {
+            glass.panel(gfx, whole, 0.0, 0.0, screen.width_px, px(size::CHROME), paint::BAR)
+        }
+        None => gfx.rect(0.0, 0.0, screen.width_px, px(size::CHROME), paint::BAR),
+    }
+
+    // The tabs. Laid out by their own width rather than in equal columns, so
+    // "Library" does not get the same room as "My collections".
+    let mut x = size::GAP;
+    for (i, section) in library::SECTIONS.iter().enumerate() {
+        let label = text::Spec::new(section.label, 13.0, screen.scale.factor());
+        let (w, h) = painter.measure(gfx, &label);
+        let width = screen.scale.pt(w as f32) + size::GAP * 1.5;
+        let on = i == lib.section;
+        if on {
+            gfx.rect(
+                px(x),
+                px(size::TABS - 3.0),
+                px(width),
+                px(3.0),
+                paint::CURSOR,
+            );
+        }
+        painter.draw(
+            gfx,
+            &label,
+            px(x + size::GAP * 0.75),
+            px(size::TABS / 2.0) - h as f32 / 2.0,
+            // A tab that does nothing yet says so by being dimmer, rather
+            // than by being missing.
+            if on {
+                paint::TEXT
+            } else if section.ready {
+                paint::DIM
+            } else {
+                paint::FAINT
+            },
+        );
+        hits.add_tab(px(x), 0.0, px(width), px(size::TABS), i);
+        x += width;
+    }
+
+    // The header: where you are on the left, how the list is arranged on the
+    // right. The same two facts the webview's title and buttons carry.
+    let here = match lib.view {
+        library::View::Platforms => format!("{} consoles", lib.consoles.len()),
+        library::View::Roms => match lib.console() {
+            Some(c) => format!("{} — {} games", c.name, lib.shown()),
+            None => String::new(),
+        },
+    };
+    let title = text::Spec::new(&here, size::TITLE, screen.scale.factor());
+    let (_, th) = painter.measure(gfx, &title);
+    painter.draw(
+        gfx,
+        &title,
+        px(size::GAP),
+        px(size::TABS) + (px(size::HEADER) - th as f32) / 2.0,
+        paint::TEXT,
+    );
+
+    if lib.view == library::View::Roms {
+        let filters = lib.filters();
+        let arranged = format!(
+            "{}{}",
+            lib.order_label(),
+            if filters.is_empty() {
+                String::new()
+            } else {
+                format!("  ·  {}", filters.join(" + "))
+            }
+        );
+        let spec = text::Spec::new(&arranged, 12.0, screen.scale.factor());
+        let (w, h) = painter.measure(gfx, &spec);
+        painter.draw(
+            gfx,
+            &spec,
+            screen.width_px - w as f32 - px(size::GAP),
+            px(size::TABS) + (px(size::HEADER) - h as f32) / 2.0,
+            paint::DIM,
+        );
     }
 }
 
@@ -721,11 +886,25 @@ fn draw_games(
 #[derive(Default)]
 pub struct Hits {
     spots: Vec<(f32, f32, f32, f32, usize)>,
+    tabs: Vec<(f32, f32, f32, f32, usize)>,
 }
 
 impl Hits {
     fn add(&mut self, x: f32, y: f32, w: f32, h: f32, index: usize) {
         self.spots.push((x, y, w, h, index));
+    }
+
+    fn add_tab(&mut self, x: f32, y: f32, w: f32, h: f32, index: usize) {
+        self.tabs.push((x, y, w, h, index));
+    }
+
+    /// Which tab is under this point, if any. Checked before the rows,
+    /// because the tab row is drawn over them.
+    fn tab_at(&self, x: f32, y: f32) -> Option<usize> {
+        self.tabs
+            .iter()
+            .find(|(sx, sy, w, h, _)| x >= *sx && y >= *sy && x < sx + w && y < sy + h)
+            .map(|(_, _, _, _, index)| *index)
     }
 
     /// Which row is under this point, if any.
@@ -749,7 +928,7 @@ fn draw_detail(
     let px = |points: f32| screen.scale.px(points);
     let Some(detail) = lib.detail() else { return };
     let width = size::ASIDE - size::GAP * 2.0;
-    let mut y = size::GAP;
+    let mut y = size::CHROME + size::GAP;
 
     // The cover, as large as the column allows and in its own shape.
     let tall = size::art(lib.aspect);
