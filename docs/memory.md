@@ -60,6 +60,52 @@ so the intermediate bitmap may well be full size — but it is transient and
 closed immediately, and only one exists at a time. That is the difference
 between a 4.9 MB spike and a 980 MB resident set.
 
+## The peak is the list, not the pictures
+
+Three completed runs of the same browse, same build, one flag apart:
+
+| scrolling the arcade console | peak |
+|---|---|
+| no artwork at all (`no-covers`) | **573.7 MB** |
+| covers drawn into canvases | 653.6 MB |
+| covers as plain `<img>` | 972.3 MB |
+
+So of the 654 MB peak, **574 MB is there with no pictures on the screen at
+all.** The artwork is the difference between 574 and 654; before the canvas
+change it was the difference between 574 and 972. That part is dealt with. The
+list is not.
+
+At the peak, 451 MB of the 574 was the page process.
+
+### The suspect, untested
+
+`backdrop-filter` appears eighteen times in `ui/style.css`, and one of them is
+on `.gcard .art`. That means every card on screen is its own compositing layer
+holding its own blurred copy of what is behind it. One is cheap; eighty-five,
+replaced wholesale every time a windowed list jumps, is the obvious candidate
+for 451 MB of page process.
+
+`body.plain-cards` turns it off and leaves a flat panel of the same colour. It
+is in the stylesheet and inert — nothing sets it but the measuring switch — and
+it is worth having as a real "reduce transparency" setting whatever the
+measurement says, because a handheld wants it anyway.
+
+**It has not been measured.** Three attempts to measure it wedged, which is the
+next section.
+
+### The blocker: opening a big console wedges the page
+
+Clicking into the arcade console from the console screen freezes the page.
+Reliably today, intermittently before: five runs in a row got as far as the
+console screen and never sent another note, with the process sitting perfectly
+still. The same session, when the app happens to *restore* into arcade rather
+than being clicked into it, browses and scrolls fine.
+
+That is the same signature as the asset-request burst — no error, no timeout,
+nothing running — and it is very likely what "it feels slow and laggy when
+browsing platform games" has been all along. It now blocks measuring anything
+else, so it goes first.
+
 ## What drawing at the shown size saved
 
 One build, one browse, one flag — `ROMM_MEASURE_FLAGS=no-canvas` turns

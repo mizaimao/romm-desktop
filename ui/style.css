@@ -2810,3 +2810,23 @@ code {
 /* Severity, as a marker rather than a colour wash: the point is which line to
    read first, not to make the dialog alarming. */
 #conflict-overlay .cfg-wrong b { color: color-mix(in srgb, var(--accent) 70%, white 30%); }
+
+
+/* Cards without glass.
+ *
+ * `backdrop-filter` is on `.gcard .art`, so every card on screen is its own
+ * compositing layer holding its own blurred copy of what is behind it. One is
+ * cheap. Eighty-five of them, replaced wholesale every time a windowed list
+ * scrolls, is not: measured 2026-08-23, scrolling the arcade console with *no
+ * artwork at all* still peaked at 573.7 MB, 451 of it in the page process.
+ *
+ * This turns the glass off and leaves a flat panel of the same colour. Set by
+ * the measuring switch today; a "reduce transparency" setting tomorrow, which
+ * is a thing worth having on a handheld anyway.
+ */
+body.plain-cards .gcard .art,
+body.plain-cards .card,
+body.plain-cards .row.sel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

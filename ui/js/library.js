@@ -1006,6 +1006,10 @@ export function forgetPendingCovers() {
 async function flushCovers() {
   const ids = coverQueue.splice(0, 40);
   if (!ids.length) return;
+  // A measuring switch, never set in normal use: with no artwork at all, what
+  // is left while scrolling is the list itself. It is the only way to tell a
+  // picture problem from a document problem.
+  if (globalThis.__ROMM_FLAGS?.includes("no-covers")) return;
   try {
     for (const { id, cover } of await invoke("rom_covers", { ids })) {
       if (!cover) continue;

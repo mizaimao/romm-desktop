@@ -18,7 +18,13 @@
     } cards`;
   };
   try {
-    note(`script running — ${shown()}`);
+    // The measuring switches. Applied here rather than in `state.js`, which is
+    // imported long before `ROMM_MEASURE_FLAGS` is put on the window — so the
+    // flag read there was always empty and one whole comparison measured
+    // nothing at all.
+    if (globalThis.__ROMM_FLAGS?.includes("no-glass"))
+      document.body.classList.add("plain-cards");
+    note(`script running — ${shown()} flags=${globalThis.__ROMM_FLAGS ?? "none"}`);
     // Home first. The app restores whatever screen it was last on, so the
     // console card is not reliably there — which is what made two earlier runs
     // stop dead with nothing to say.
@@ -29,6 +35,19 @@
     note(`at home — ${shown()}`);
 
     let card = document.querySelector('[data-slug="arcade"]');
+    if (!card) {
+      // Already inside a console, because the app restores the screen it was
+      // last on. Back out and try again — otherwise whether a run browses at
+      // all depends on how the previous run happened to end, and two passes
+      // of an A/B stop being comparable.
+      note("not at the consoles; backing out");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await wait(2500);
+      for (const tab of document.querySelectorAll(".stab"))
+        if (tab.dataset.id === "library") tab.click();
+      await wait(2500);
+      card = document.querySelector('[data-slug="arcade"]');
+    }
     if (!card) {
       note(`no arcade card; screen has ${document.querySelectorAll("[data-slug]").length} consoles`);
       return;

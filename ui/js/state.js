@@ -100,3 +100,4 @@ export function rememberedRom(rows) {
   const want = state.lastRom[key];
   return rows.some((r) => r.id === want) ? want : null;
 }
+
