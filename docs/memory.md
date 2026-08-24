@@ -1,5 +1,57 @@
 # What the app weighs, and why
 
+> **The decomposition, 2026-08-24 — start here.** Everything the app cannot
+> avoid on macOS is 192 MB, and it is not our document.
+
+## Where 300 MB actually is
+
+Measured by counting from *inside* the page and weighing from outside at the
+same moment, then taking the whole document away and weighing again.
+
+| step | total | page | Rust | GPU | what the page held |
+|---|---|---|---|---|---|
+| console screen | 356.8 | 261.5 | 55.6 | 32.1 | 393 nodes, 34 pictures |
+| arcade open | 335.7 | 237.2 | 57.8 | 33.0 | 456 nodes, 1 picture, 2,504 rows (475 KB) |
+| scrolled to the bottom | 334.5 | 237.3 | 56.7 | 32.8 | 449 nodes |
+| **left alone 20 seconds** | **193.0** | **106.5** | 49.2 | 29.6 | same |
+| **document deleted entirely** | **192.2** | **106.5** | 49.1 | 28.9 | 7 nodes, no arrays, no stylesheet |
+
+Read the last two rows twice. **Deleting the whole document — every node,
+every array, the stylesheet disabled — changed the page process by nothing at
+all.** 106.5 MB before, 106.5 MB after.
+
+So:
+
+* **192 MB is floor.** WebKit 106, our Rust process 49, the GPU process 29,
+  networking 6. None of it is the interface, and none of it comes back by
+  making the interface smaller.
+* **~130 MB is WebKit's cache**, which it holds for twenty to thirty seconds
+  after browsing and then returns without being asked. That is the "300 MB"
+  and most of the "560 MB peak".
+* **The document itself is nothing.** 449 nodes. One picture. 475 KB of row
+  data for two and a half thousand games. All of it together does not show up
+  against a floor twenty times its size.
+
+Four separate optimisations were proposed in this file before this measurement
+and three of them were aimed at the document: the artwork, the glass, the
+backdrop. Only the artwork was worth anything, and only for the peak.
+
+### What is actually worth attacking
+
+* **The Rust process at 49 MB.** A Tauri app with nothing in it idles at
+  30–80 MB *in total*; ours spends 49 on the native half alone. That is
+  entirely ours — SQLite's page cache, the tokio runtime, the API client, and
+  whatever the cache holds between calls — and it is the one number here that
+  no framework is imposing.
+* **WebKit's 106 MB floor.** Not ours to set. It is the price of a webview and
+  it is the honest cost of the Tauri decision. Worth knowing before the
+  Android port, where the WebView is in-process and this floor lands inside
+  the app's own limit.
+* **The 34 console pictures**, which were the last artwork in the app still
+  loading the old way and cost about 44 MB of the console screen. Fixed in
+  0.2.782 — `fitConsoleArt` draws them at tile size like everything else.
+
+
 > **Read this section first.** The measurements in this file contradict each
 > other and none of the conclusions drawn from them are safe. What follows is
 > kept so the record is legible, not because it is right. The one thing here

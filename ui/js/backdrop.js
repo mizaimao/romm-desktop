@@ -565,6 +565,11 @@ function rgb(hex, fallbackVar, fallbackRgb) {
 /// an old driver, a software renderer, a webview with WebGL switched off. The
 /// app is fully usable without it, so every failure here is silent.
 export function startBackdrop() {
+  // A measuring switch, never set in normal use. The shader runs on a canvas
+  // the size of the window and never stops, so it is one of the few things in
+  // the app that could plausibly cost tens of megabytes on its own — and the
+  // only way to know is to be able to turn it off.
+  if (globalThis.__ROMM_FLAGS?.includes("no-backdrop")) return;
   try {
     return build();
   } catch (e) {

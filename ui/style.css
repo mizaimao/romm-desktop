@@ -444,8 +444,10 @@ body.has-pad #tabbar .bumper { display: inline; }
   .card .logo img.wordmark { filter: invert(1) brightness(.55); }
 }
 /* Hardware art is busier than a wordmark, so give it more room. */
-.card .logo img.art { max-height: 100%; }
-.card .logo:has(img.art) { height: 76px; }
+.card .logo img.art,
+.card .logo canvas.art { max-height: 100%; }
+.card .logo:has(img.art),
+.card .logo:has(canvas.art) { height: 76px; }
 .card .logo .ph { color: var(--dim); font-size: 12px; letter-spacing: .05em; }
 .card .name { font-weight: 600; margin-bottom: 4px; }
 .card .meta { color: var(--dim); font-size: 12px; display: flex; gap: 6px; align-items: center; }

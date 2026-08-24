@@ -74,11 +74,13 @@ export async function showPlatforms() {
         `<div class="empty">Nothing here yet — sync with the server first.</div>`;
     }
     restorePlatformCursor();
+    fitConsoleArt();
     return;
   }
   await showRecent();
 
   restorePlatformCursor();
+  fitConsoleArt();
   // Fill the pane straight away if it is meant to be open. It only ever got
   // its contents from a cursor *move*, so on a fresh start with the toggle on
   // the column sat empty and hidden until the first D-pad press — which read
@@ -298,7 +300,7 @@ function platformCard(p) {
       <div class="card" data-slug="${p.slug}">
         <div class="logo">${
           p.logo
-            ? `<img class="${p.logo_wordmark ? "wordmark" : "art"}" src="${convertFileSrc(p.logo)}" alt="" />`
+            ? `<img data-fit="1" class="${p.logo_wordmark ? "wordmark" : "art"}" src="${convertFileSrc(p.logo)}" alt="" />`
             : `<span class="wordtype">${escapeHtml(p.slug)}</span>`
         }</div>
         <div class="name">${escapeHtml(p.name)}</div>
@@ -806,6 +808,7 @@ export function setLayout(next) {
   if (state.view === "platforms") {
     renderPlatforms(state.platforms);
     restorePlatformCursor();
+    fitConsoleArt();
   } else if (state.rows.length) {
     renderRows(state.rows, state.view === "search");
   }
@@ -966,6 +969,31 @@ function pumpCovers() {
     // with one picture missing rather than stopping.
     setTimeout(finish, 10000);
     drawCover(art, url, star).finally(finish);
+  }
+}
+
+/// Redraw the console pictures at the size the tiles show them.
+///
+/// The console screen was the one place still loading artwork the old way, and
+/// it is thirty-four pictures at once: measured 2026-08-24, it costs about
+/// 44 MB more than the same screen with them gone. They are hardware renders,
+/// often a thousand pixels wide, shown in a box a hundred and fifty points
+/// across.
+///
+/// Sequential, and after the tiles are in the page, because a burst of asset
+/// requests wedges — the reason `AT_ONCE` exists.
+export async function fitConsoleArt(root = el.list) {
+  for (const img of [...root.querySelectorAll("img[data-fit]")]) {
+    const url = img.currentSrc || img.src;
+    const box = img.parentElement ?? img;
+    const [w, h] = boxSize(box);
+    if (!url || !(w > 0)) continue;
+    const canvas = await fitted(url, w, h || w);
+    if (!canvas || !img.isConnected) continue;
+    canvas.className = img.className;
+    canvas.style.maxWidth = "100%";
+    canvas.style.maxHeight = "100%";
+    img.replaceWith(canvas);
   }
 }
 
