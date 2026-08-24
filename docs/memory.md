@@ -3,6 +3,39 @@
 > **The decomposition, 2026-08-24 — start here.** Everything the app cannot
 > avoid on macOS is 192 MB, and it is not our document.
 
+## A full scroll does not cost more than a short one
+
+The obvious question, and the answer is not the obvious one. Same console, same
+build, one flag: scroll a tenth of the way down and stop, against scrolling to
+the bottom.
+
+| | peak |
+|---|---|
+| scrolled to the bottom | 692.9 MB |
+| scrolled a tenth of the way | 791.7 MB, 674.5 MB |
+
+**Going ten times as far costs nothing extra.** Whatever this is, it is not
+accumulating as the list is travelled.
+
+And the shape of it says where it comes from. Weighed at each step of the
+short scroll:
+
+    2%: 761 MB   4%: 678 MB   6%: 516 MB   8%: 524 MB
+
+It is at its highest at the *start* and comes down from there. The peak arrives
+within a second or two of the first scroll and is a high-water mark; everything
+after is WebKit giving memory back faster than the scrolling takes it.
+
+So "a full scroll costs 700 MB" was the wrong way to read the number. What
+costs 700 MB is **opening a big console and touching the scroll wheel once**.
+Whether you then read one screen or two thousand makes no difference at all.
+
+That moves where the fix has to be. Not the scrolling — the first draw: a list
+of 2,504 rows laid out into a container eighty thousand pixels tall, forty
+covers asked for at once, and the whole thing rasterised for the first time.
+Row recycling, which was the plan, would not touch this. Asking for fewer
+covers in the first pass and letting the list settle before filling it might.
+
 ## Why the floor is 192 and browsing costs 600
 
 Both numbers are right and they are not in conflict. 192 MB is what the app

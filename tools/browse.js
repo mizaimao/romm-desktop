@@ -59,13 +59,18 @@
     await wait(4000);
     note(`ARCADE OPEN — ${shown()}`);
 
+    // How far down to go. A tenth against the whole thing, so "why does a full
+    // scroll cost so much" can be answered by whether the cost follows the
+    // distance travelled or is a fixed price for scrolling at all.
+    const reach = globalThis.__ROMM_FLAGS?.includes("short-scroll") ? 0.1 : 1;
     const steps = 30;
     for (let i = 1; i <= steps; i++) {
       const l = list();
-      l.scrollTop = (l.scrollHeight - l.clientHeight) * (i / steps);
+      l.scrollTop = (l.scrollHeight - l.clientHeight) * reach * (i / steps);
       l.dispatchEvent(new Event("scroll"));
       await wait(900);
-      if (i % 6 === 0) note(`scrolled ${Math.round((i / steps) * 100)}% — ${shown()}`);
+      if (i % 6 === 0)
+        note(`scrolled ${Math.round((i / steps) * reach * 100)}% — ${shown()}`);
     }
     note(`SCROLLED — ${shown()}`);
     await wait(12000);
