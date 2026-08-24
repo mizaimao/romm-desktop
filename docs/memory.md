@@ -93,6 +93,54 @@ measurement says, because a handheld wants it anyway.
 **It has not been measured.** Three attempts to measure it wedged, which is the
 next section.
 
+### The rig, repeatable at last — and the glass is not the answer
+
+Three passes per setting, every pass from the same screen, no artwork loaded
+at all, and a process counter that says out loud when it has not found exactly
+four processes. Every one of the six browsed.
+
+| | peak | at rest | page at rest |
+|---|---|---|---|
+| `no-covers` | 561.1 MB (spread 17) | 298.1 MB (spread 5) | 209 MB |
+| `no-covers,no-glass` | 560.0 MB (spread 39) | 300.5 MB (spread 4) | 208 MB |
+
+**`backdrop-filter` costs nothing measurable.** One megabyte between them at
+the peak and two at rest, against a spread of up to thirty-nine. The suspect
+that had been named twice in this file is cleared. `body.plain-cards` stays as
+a "reduce transparency" setting, which is worth having on its own terms, but it
+is not a memory fix and this file should not have implied it would be.
+
+The rig itself took three goes to get right, and each wrong version produced a
+confident number: `pid+8` guessing missed the helpers entirely and read 54 MB;
+counting every WebKit process on the machine picked up Safari's and read
+2,476 MB. It now records which WebKit processes existed before launch and
+counts only the ones that did not, and prints a warning when the count is not
+four. One sample in this run tripped it and was discarded.
+
+### So where the memory actually is
+
+Three numbers, all of them now repeatable:
+
+* **236 MB** — idle on the console screen, nothing of ours painted.
+* **299 MB** — a console with 2,504 games open, sitting still, no artwork.
+* **561 MB** — the same, while being scrolled top to bottom.
+
+The list at rest costs about **63 MB** over the floor, which for 2,504 rows is
+reasonable. The peak is a **260 MB transient that arrives during scrolling and
+falls away afterwards**, and it is neither the artwork (there is none in these
+runs) nor the glass (it is the same with it off).
+
+What is left is the churn: the windowed list throws away eighty-five cards and
+builds eighty-five more on every jump, thirty times over the length of this
+browse, and WebKit does not hand the memory back until well afterwards. The
+scroll here is a deliberate worst case — thirty instant jumps, each replacing
+the whole window — where a person scrolling would reuse most of the rows.
+
+The fix, if this is worth fixing, is the one every native list view uses:
+recycle the row elements instead of rebuilding them. That is a real piece of
+work in `visible.js` and it is now the only image-free optimisation on the
+table.
+
 ### There is no wedge. It was the rig.
 
 The section that stood here said opening a big console froze the page, and
