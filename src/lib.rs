@@ -24,6 +24,7 @@ pub mod download;
 pub mod esde;
 pub mod gamefilter;
 pub mod gamelist;
+pub mod focusring;
 pub mod gamesort;
 pub mod gridnav;
 pub mod iconart;
