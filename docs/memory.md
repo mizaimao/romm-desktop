@@ -93,18 +93,61 @@ measurement says, because a handheld wants it anyway.
 **It has not been measured.** Three attempts to measure it wedged, which is the
 next section.
 
-### The blocker: opening a big console wedges the page
+### There is no wedge. It was the rig.
 
-Clicking into the arcade console from the console screen freezes the page.
-Reliably today, intermittently before: five runs in a row got as far as the
-console screen and never sent another note, with the process sitting perfectly
-still. The same session, when the app happens to *restore* into arcade rather
-than being clicked into it, browses and scrolls fine.
+The section that stood here said opening a big console froze the page, and
+that it was probably behind "it feels slow and laggy when browsing platform
+games". Both claims were wrong and they are withdrawn.
 
-That is the same signature as the asset-request burst — no error, no timeout,
-nothing running — and it is very likely what "it feels slow and laggy when
-browsing platform games" has been all along. It now blocks measuring anything
-else, so it goes first.
+What settles it: a diagnostic that ticks a counter every 100 ms and traces
+every command in and out, so a blocked thread and a Rust call that never
+answers can be told apart. Clicking into arcade —
+
+    about to click arcade: found
+    click returned after 3 ms
+    beat +19 in flight: none
+    cards appeared: 50 after 1s
+
+Nineteen to twenty beats every two seconds throughout, never a dropped one,
+never a command outstanding. **The console opens in one second and the page is
+never blocked.**
+
+The freeze was mine. The measuring script killed the app and relaunched it
+three seconds later, and three seconds is not enough — the new instance came up
+beside the previous one's WebKit helpers, which outlive their parent, and sat
+there doing nothing. `peak.sh` now waits for the process to actually be gone
+and then waits six seconds more, and every pass since has browsed.
+
+Two days were spent chasing a bug in a test harness and reported as a bug in
+the app. The lesson is in the rig now: a run that does not reach `scrolled 80%`
+is a run that did not happen, and it is checked rather than assumed.
+
+### Whether the glass costs anything: still not known
+
+`body.plain-cards` exists and works. What it is worth does not survive
+measurement:
+
+| | peak | at rest |
+|---|---|---|
+| `no-covers,no-glass` | 577.5 MB | 301.9 MB |
+| `canvas` | 805.7 MB | 322.9 MB |
+| `canvas,no-glass` | 1,023.6 MB | 777.7 MB |
+
+The last row is impossible — turning the glass *off* cannot cost 450 MB — so
+the run-to-run variance is larger than the effect being looked for. An earlier
+`no-covers` run peaked at 573.7 MB and this one at 577.5, which is
+reassuringly close; `canvas` peaked at 653.6 MB before and 805.7 now, which is
+not.
+
+What the rig still needs before this question can be asked again: an identical
+starting screen every run rather than whatever the app restored, a fixed number
+of covers loaded, and several passes per configuration so the spread is visible
+instead of being mistaken for a result. Until then, no claim.
+
+The one thing that did survive is the earlier three-way run, where all three
+passes completed and the ordering was large and consistent: **574 MB with no
+artwork at all, 654 with canvases, 972 with `<img>`.** The list dominates the
+peak and the artwork change is worth about 300 MB of it.
 
 ## What drawing at the shown size saved
 

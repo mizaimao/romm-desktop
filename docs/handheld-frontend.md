@@ -24,14 +24,13 @@ Flutter and PySide6, the criteria were desktop feel and macOS notarization, and
 the prototype was TUI-only. SDL2 was never a candidate because the requirement
 that makes it necessary did not exist yet.
 
-That requirement now exists. ArkOS/dArkOS-lineage firmware runs its frontend
-directly on DRM/KMS with SDL2 and **no display server at all** — not X11, not
-Wayland. Tauri needs `webkit2gtk-4.1` + GTK3, which needs one of them. So it is
-not that Tauri is too heavy for the device; it is that there is nothing for it
-to draw into.
+That requirement now exists. The device runs its frontend directly on DRM/KMS
+with SDL2 and **no display server at all** — not X11, not Wayland. Tauri needs
+`webkit2gtk-4.1` + GTK3, which needs one of them. So it is not that Tauri is
+too heavy for the device; it is that there is nothing for it to draw into.
 
-**The target is RK3566** (MiniLoong Pocket 1 class): quad Cortex-A55 @ 1.8 GHz,
-Mali-G52 2EE, GLES 3.2, 1 GB RAM, 4" 960x720. Allwinner A33 / Mali-400 is
+**The target is the Miyoo Flip**: RK3566, quad Cortex-A55 @ 1.8 GHz, Mali-G52
+2EE, GLES 3.2, 1 GB LPDDR4, 3.5" **640x480**. Allwinner A33 / Mali-400 is
 explicitly **not** a target — it is GLES 2.0 only and the shaders would need
 downgrading to GLSL ES 1.00 with `mediump` fragment precision.
 
@@ -329,10 +328,13 @@ there, so the loop stays at desktop speed until integration. NextUI ships a
 runtime; the same binary source covers Mac, desktop Linux and handheld.
 
 **Cross-compiling is the only real friction**, because SDL2 is C and needs
-headers and libs for the target. Cheapest first: build on the device (dArkOS is
-Debian, `apt install libsdl2-dev build-essential`); then `cross`; then the
-`sdl2` crate's bundled feature, which builds SDL from source and links it
-statically and sidesteps version drift between build box and device.
+headers and libs for the target. Building on the device is not an option here:
+the Flip's stock userland is Buildroot 2021.11 with no toolchain and no package
+manager. So: `cross` against `aarch64-unknown-linux-gnu`, or the `sdl2` crate's
+bundled feature, which builds SDL from source and links it statically and
+sidesteps version drift between build box and device. The card already carries
+SDL2 2.30.8, 2.28.5 and 2.0.22 alongside SDL2_image/ttf/mixer, so linking
+against the device's own copy is the third option.
 
 **Do not port the backdrop last.** It is the most portable thing in the front end
 and getting it up early proves the GL context works on the device.

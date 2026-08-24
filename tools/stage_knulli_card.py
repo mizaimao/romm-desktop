@@ -40,10 +40,10 @@ from concurrent.futures import ThreadPoolExecutor
 # RomM slug -> ArkOS folder. Only systems asked for; ArkOS keeps nes/famicom and
 # snes/sfc separate, so unlike the MinUI-family cards there are no collisions.
 DEST = [
-    ("famicom", "famicom"), ("gamegear", "gamegear"), ("gb", "gb"),
-    ("nes", "nes"), ("gbc", "gbc"), ("snes", "snes"), ("n64", "n64"),
-    ("sfc", "sfc"), ("neogeoaes", "neogeo"), ("gba", "gba"),
-    ("arcade", "arcade"), ("dc", "dreamcast"), ("psx", "psx"),
+    ("famicom", "nes"), ("gb", "gb"), ("nes", "nes"), ("gbc", "gbc"),
+    ("snes", "snes"), ("n64", "n64"), ("sfc", "snes"), ("megadrive", "megadrive"),
+    ("neogeoaes", "neogeo"), ("gba", "gba"), ("arcade", "fbneo"),
+    ("dc", "dreamcast"), ("psx", "psx"),
 ]
 
 # Server collections whose members become ES favourites.
@@ -51,10 +51,14 @@ BEST_OF_PREFIX = "★ Best of "
 
 ART_KINDS = ["miximages", "covers"]
 ART_EXTS = ["png", "jpg", "webp"]
-ART_PX = 512
+ART_PX = 640
+PREBUILT = pathlib.Path("library/media-640")
 
 
 def art_for(media_root, slug, stem):
+    pre = PREBUILT / slug / f"{stem}.png"
+    if pre.exists():
+        return pre
     for kind in ART_KINDS:
         for ext in ART_EXTS:
             p = media_root / slug / kind / f"{stem}.{ext}"
@@ -156,8 +160,8 @@ def main():
     args = ap.parse_args()
 
     card = pathlib.Path(args.card)
-    if not (card / "bios").is_dir():
-        sys.exit(f"{card} does not look like an EASYROMS partition")
+    if not (card / "roms").is_dir():
+        sys.exit(f"{card} does not look like a KNULLI SHARE partition")
     lib, media = pathlib.Path(args.library), pathlib.Path(args.media)
 
     cfg = tomllib.loads(pathlib.Path(args.config).read_text())["server"]
@@ -178,7 +182,7 @@ def main():
     for slug, sysname in DEST:
         if args.only and slug != args.only:
             continue
-        folder = card / sysname
+        folder = card / "roms" / sysname
         if not folder.is_dir():
             print(f"skip {slug}: no {sysname} folder", file=sys.stderr)
             continue
@@ -245,12 +249,12 @@ def main():
             # 64-bit device: the wiki says drop pico8_dyn so pico8_64 is used
             if f.name == "pico8_dyn":
                 continue
-            t = card / "pico-8" / f.name
+            t = card / "roms" / "pico8" / f.name
             if not t.exists():
                 shutil.copy2(f, t); n8 += 1
-        print(f"pico-8: {n8} files -> {card/'pico-8'} (pico8_dyn omitted, 64-bit device)")
+        print(f"pico8: {n8} files -> {card/'pico-8'} (pico8_dyn omitted, 64-bit device)")
     else:
-        print(f"pico-8: {p8} not found, skipped")
+        print(f"pico8: {p8} not found, skipped")
 
     # ---- games ------------------------------------------------------------
     lists, done, failed, arted = {}, 0, [], []
@@ -286,7 +290,7 @@ def main():
                         raise IOError("short write to the card")
             fields = dict(i["fields"])
             if i["art"]:
-                fields["image"] = f"./images/{i['stem']}.png"
+                fields["image"] = f"./images/{i['stem']}-image.png"
                 arted.append(i)
             lists.setdefault(i["folder"], []).append((rel, fields, i["fav"]))
             done += 1
@@ -302,8 +306,12 @@ def main():
         print(f"\nresizing {len(arted):,} images to {ART_PX}px…")
 
         def job(i):
-            out = i["folder"] / "images" / f"{i['stem']}.png"
-            if not out.exists():
+            out = i["folder"] / "images" / f"{i['stem']}-image.png"
+            if out.exists():
+                return
+            if i["art"].parent.parent == PREBUILT:
+                shutil.copy2(i["art"], out)
+            else:
                 subprocess.run(["sips", "-Z", str(ART_PX), "-s", "format", "png",
                                 str(i["art"]), "--out", str(out)],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -316,7 +324,7 @@ def main():
         print(f"  gamelist.xml: {folder.name} ({len(entries)} games, "
               f"{sum(1 for e in entries if e[2])} favourites)")
 
-    for f in sorted({i["folder"] for i in items} | {card / "bios", card / "pico-8"}):
+    for f in sorted({i["folder"] for i in items} | {card / "bios", card / "roms" / "pico8"}):
         subprocess.run(["dot_clean", "-m", str(f)], check=False)
 
     print(f"\ncopied {done}/{len(items)}")

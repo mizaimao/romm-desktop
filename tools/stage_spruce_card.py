@@ -33,19 +33,23 @@ from concurrent.futures import ThreadPoolExecutor
 
 # RomM slug -> spruce Roms folder, smallest system first.
 DEST = [
-    ("neo-geo-pocket", "NGP"), ("mastersystem", "MS"), ("gamegear", "GG"),
-    ("gb", "GB"), ("wonderswancolor", "WSC"), ("nes", "FC"), ("famicom", "FC"),
-    ("wonderswan", "WS"), ("pcengine", "PCE"), ("gbc", "GBC"),
-    ("megadrive", "MD"), ("snes", "SFC"), ("sfc", "SFC"),
-    ("neogeoaes", "NEOGEO"), ("gba", "GBA"), ("arcade", "FBNEO"), ("psx", "PS"),
+    ("famicom", "FC"), ("gb", "GB"), ("nes", "FC"), ("gbc", "GBC"),
+    ("snes", "SFC"), ("n64", "N64"), ("sfc", "SFC"), ("megadrive", "MD"),
+    ("neogeoaes", "NEOGEO"), ("gba", "GBA"), ("arcade", "FBNEO"),
+    ("dc", "DC"), ("psx", "PS"),
 ]
 
 ART_KINDS = ["miximages", "covers"]
 ART_EXTS = ["png", "jpg", "webp"]
-ART_PX = 512
+ART_PX = 640
+PREBUILT = pathlib.Path("library/media-640")
 
 
 def art_for(media_root, slug, stem):
+    # Prefer the set already built at the right size — no resize, straight copy.
+    pre = PREBUILT / slug / f"{stem}.png"
+    if pre.exists():
+        return pre
     for kind in ART_KINDS:
         for ext in ART_EXTS:
             p = media_root / slug / kind / f"{stem}.{ext}"
@@ -129,9 +133,13 @@ def main():
         if not folder.is_dir():
             print(f"skip {slug}: no {sysname} folder on the card", file=sys.stderr)
             continue
-        for rid, fs, size, multi in db.execute(
-            "SELECT id, fs_name, COALESCE(fs_size_bytes,0), multi_file FROM roms "
-            "WHERE platform_slug = ? ORDER BY fs_name", (slug,)):
+        q = ("SELECT id, fs_name, COALESCE(fs_size_bytes,0), multi_file FROM roms "
+             "WHERE platform_slug = ?")
+        if slug == "n64":
+            # Two server rows are whole region folders indexed as one game,
+            # 6.5 GB between them. Not games.
+            q += " AND fs_name NOT IN ('USA','Europe')"
+        for rid, fs, size, multi in db.execute(q + " ORDER BY fs_name", (slug,)):
             stem = pathlib.PurePath(fs).stem
             items.append({"id": rid, "slug": slug, "fs": fs, "stem": stem,
                           "size": size, "multi": bool(multi), "folder": folder,

@@ -34,11 +34,3 @@ rather than drawing empty boxes.
 ## Icons — ISC
 
 Lucide, vendored into `ui/icons/`. See `ui/icons/README.md`.
-
-## The handheld image
-
-Built from [dArkOS](https://github.com/christianhaitian/arkos), which is a
-build system rather than an image and carries its own `LICENSES.md`. What it
-assembles is Debian arm64, a GPL kernel, and three binaries that are neither:
-the vendor U-Boot, ARM's Mali userspace driver, and radio firmware. See
-`docs/handheld-device.md` for where each comes from.
