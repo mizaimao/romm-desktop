@@ -52,6 +52,41 @@ What it would *not* buy: the 49 MB our own Rust process uses. That is ours, it
 is the one number no framework is imposing, and it comes along whichever way we
 go.
 
+## Against the four things the interface actually needs
+
+Frank's constraints, 2026-08-24: frosted glass over a moving backdrop, glow,
+layout that reads like HTML and CSS, and the shader backdrop. That changes the
+ranking, because most toolkits do not have a backdrop blur at all.
+
+| | glass over a backdrop | glow | layout | shader backdrop | Rust core | floor |
+|---|---|---|---|---|---|---|
+| **Tauri, today** | `backdrop-filter`, one line | `box-shadow`, one line | it *is* CSS | WebGL canvas | untouched | 192 MB |
+| **Flutter** | `BackdropFilter`, plus GLSL through `FragmentProgram` | `BoxShadow` | Flex/Row/Column, close in spirit | `FragmentProgram` | behind a bridge | 40–80 MB |
+| **Qt / QML** | `MultiEffect` blur | `MultiEffect` glow | anchors and Layouts, less CSS-like | `ShaderEffect` | behind C++ | 40–70 MB |
+| **Slint** | **none** — [slint#2066](https://github.com/slint-ui/slint/issues/2066) is still open | drop shadow only | flexbox-ish | limited | native | 30–50 MB |
+| **SDL2** (parked) | we wrote it | we wrote it | we wrote the layout engine | we wrote it | native | 30–60 MB |
+
+**Slint is out.** The one thing it cannot do is the thing the whole look is
+built on: blurring what is behind a rectangle is an open feature request, not a
+feature. That reverses the recommendation made higher up this page before the
+constraints were known.
+
+That leaves Flutter and Qt as the only migrations that keep the look, and
+**Tauri as the best fit for these four constraints by some distance** — three
+of them are one line of CSS each, and the fourth already works.
+
+## What Tauri actually ships
+
+Worth being exact, because it changes the judgement. **Tauri does not bundle a
+browser.** That is Electron, which ships all of Chromium in every app. Tauri
+uses the web view the operating system already has — WKWebView on macOS,
+WebView2 on Windows, WebKitGTK on Linux, the system WebView on Android — so
+the binary is small and nothing is duplicated on disk.
+
+What it costs is not disk, it is the 106 MB that WebKit process occupies at
+run time. Shared code, private memory. So the trade is real but it is not
+"we ship a browser with the app".
+
 ## The recommendation
 
 **Not yet, and fix the 49 MB first.** It is free, it helps under every option,
@@ -60,7 +95,12 @@ either.
 
 After that it is a judgement about devices, not about elegance: 192 MB is
 nothing on a 6 or 16 GB handheld and is a real constraint on the 2 GB one that
-Frank rarely uses. If the 2 GB device stops being hypothetical, the answer is
-**Slint** rather than SDL — same reach, same Rust, and the UI is written as
-markup instead of drawn as rectangles, which is precisely the gap that made the
-SDL branch look two generations behind.
+Frank rarely uses.
+
+And with the four constraints on the table, staying is the stronger case than
+it looked an hour ago. Frosted glass, glow and the layout are one line of CSS
+each; in every alternative they are a widget, an effect node or a shader we
+maintain. If the 2 GB device ever stops being hypothetical the answer is
+**Flutter** — the only one that keeps the whole look and reaches every platform
+— and the price is the app being written in two languages with the Rust core
+behind a bridge.
