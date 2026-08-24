@@ -2832,3 +2832,34 @@ body.plain-cards .row.sel {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+
+
+/* Letting WebKit forget the cards it is not showing.
+ *
+ * The floor is 192 MB and browsing takes it to 600. None of that is the
+ * document — deleting the whole thing changes the page process by nothing —
+ * so it is WebKit's own working memory: layer backing stores, decoded
+ * pictures, and the tiled backing for a scroller that is eighty thousand
+ * pixels tall.
+ *
+ * `contain` promises that a card's layout and paint cannot affect anything
+ * outside it, and `content-visibility: auto` lets the engine skip rendering
+ * one that is off screen and drop what it had rendered. `contain-intrinsic-size`
+ * is what stops the scrollbar jumping about while it does: without it a
+ * skipped card measures zero and the page collapses.
+ *
+ * Measured 2026-08-24, two passes each: the peak over a full scroll of the
+ * arcade console falls from 853 MB to 704, against a spread of about twenty.
+ * At rest it makes no difference — this is a peak fix, and the peak is what
+ * gets a process killed on a phone.
+ */
+.gcard,
+.card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--card, 150px) auto 260px;
+}
+/* Off again, for measuring what it is worth. */
+body.uncontained .gcard,
+body.uncontained .card {
+  content-visibility: visible;
+}

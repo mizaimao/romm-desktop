@@ -24,6 +24,8 @@
     // nothing at all.
     if (globalThis.__ROMM_FLAGS?.includes("no-glass"))
       document.body.classList.add("plain-cards");
+    if (globalThis.__ROMM_FLAGS?.includes("uncontained"))
+      document.body.classList.add("uncontained");
     note(`script running — ${shown()} flags=${globalThis.__ROMM_FLAGS ?? "none"}`);
     // Home first. The app restores whatever screen it was last on, so the
     // console card is not reliably there — which is what made two earlier runs

@@ -233,3 +233,56 @@ systemd (use `custom.sh` instead); gain: **it boots, deep sleep is available,
 biggest toolset, durable vendor-lineage kernel, easy releases, GammaLoader-proven
 dual-boot.** ROCKNIX/Zetarancio stays the **kernel/hardware reference** (the RE
 repo), not the runtime base.
+
+---
+
+# Hardware layer — KNULLI (BSP 5.10), measured on-device 2026-08-24
+
+The platform-module facts for our front end. Node names are the KNULLI/BSP 5.10
+tree's; the RE repo's stock/BSP docs are the reference for these.
+
+## Input (`/proc/bus/input/devices`)
+| Device | Node | Role |
+|---|---|---|
+| `Miyoo Flip Controller` | `js0` / **`event5`** | gamepad — buttons + sticks (our main input) |
+| `hall wake key` | **`event1`** | **lid** (hall sensor) — open/close |
+| `rk805 pwrkey` | `event2` | power key |
+| `gpio-keys-polled` | `event0` | polled GPIO keys (volume, etc.) |
+| `rockchip-rk817 Headset` | `event3` | headphone jack detect |
+| `hdmi_cec_key` | `event4` | HDMI-CEC |
+
+So: read the pad from **`/dev/input/event5`**, the lid from **`event1`** — a
+proper input device here (nicer than stock's raw `hall-mh248` sysfs read),
+though the platform node `/sys/devices/platform/hall-mh248` also exists.
+
+## Backlight
+- `/sys/class/backlight/backlight/` — **`brightness` 0–255** (`max_brightness`=255).
+- Prefer the wrapper **`knulli-brightness`** over poking sysfs directly.
+
+## Power / battery (`/sys/class/power_supply/`)
+- Nodes: **`ac`**, **`battery`**, **`usb`**.
+- `battery/capacity` = percent (read 33 mid-charge), `*/status` = `Charging`.
+- Charge state: `ac/online` or `usb/online`; helper **`knulli-battery-check`**.
+- Banner extras: battery reads **87% / 3.93 V** but **"Battery Calibrated: No"**
+  — the gauge is uncalibrated, so percentages may be rough until calibrated.
+
+## System (from login banner)
+- Board `miyoo-flip`, Linux **5.10.209**, 4× A55, **max 1992 MHz**, 640×480@60,
+  ~970 MB RAM, idle temp ~51 °C, OS `scarab 2026/05/10`.
+- **`/userdata` is exfat, ~155 G free.** (exfat, not ext4 — fine for our data,
+  but note no POSIX perms/symlinks, like FAT.)
+
+## Front-end platform module — what to wire
+- Input: `/dev/input/event5` (pad), `event1` (lid), `event0` (volume keys).
+- Brightness: `knulli-brightness` (or `/sys/class/backlight/backlight/brightness`).
+- Battery/charge: `battery/capacity`, `ac|usb/online` (or `knulli-battery-check`).
+- Sleep: `echo mem > /sys/power/state` (deep available — see above).
+- Reuse `knulli-*` wrappers first; drop to sysfs only where none exists.
+
+**Hardware map complete — nothing left pending.**
+
+## SSH note (for the dev loop)
+`root` / `linux` works. Interactive login is instant. Automated
+`ssh host "cmd"` **must use `-tt`** (force a PTY) or KNULLI's login flow stalls;
+and don't fire rapid retries. Key auth needs `StrictModes no` (/userdata is
+world-writable) — optional; password is fine.

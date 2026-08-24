@@ -3,6 +3,43 @@
 > **The decomposition, 2026-08-24 — start here.** Everything the app cannot
 > avoid on macOS is 192 MB, and it is not our document.
 
+## Why the floor is 192 and browsing costs 600
+
+Both numbers are right and they are not in conflict. 192 MB is what the app
+weighs when it has finished and been left alone. The rest is WebKit's *working*
+memory, which it takes while drawing and hands back twenty to thirty seconds
+later — decoded pictures, compositing layer backing stores, and the tiled
+backing for a scroller that is eighty thousand pixels tall.
+
+It is not the document. Deleting the entire document changes the page process
+by nothing; the table below shows that.
+
+Which means the lever is not "have less on the page" — there is barely anything
+on the page — it is "let WebKit throw away what it is not showing".
+
+### Containment: 853 MB down to 704
+
+`content-visibility: auto` tells the engine it may skip rendering a card that
+is off screen, and drop what it had already rendered for it.
+`contain-intrinsic-size` is what stops the scrollbar jumping about while it
+does: a skipped card with no intrinsic size measures zero and the page
+collapses.
+
+Two passes each, spread about twenty megabytes:
+
+| | peak over a full scroll | at rest |
+|---|---|---|
+| as it was | 852.6 MB | 325.9 MB |
+| with containment | **704.1 MB** | 335.5 MB |
+
+**148 MB off the peak.** At rest it makes no difference, and that is the right
+shape: this is a fix for what the app weighs while it is being used hard, and
+the peak is what kills a process on a phone rather than a steady state nobody
+is waiting on.
+
+On by default since 0.2.785. `body.uncontained` turns it off, which is how the
+table above was measured.
+
 ## Where 300 MB actually is
 
 Measured by counting from *inside* the page and weighing from outside at the

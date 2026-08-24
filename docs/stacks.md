@@ -64,6 +64,7 @@ ranking, because most toolkits do not have a backdrop blur at all.
 | **Flutter** | `BackdropFilter`, plus GLSL through `FragmentProgram` | `BoxShadow` | Flex/Row/Column, close in spirit | `FragmentProgram` | behind a bridge | 40–80 MB |
 | **Qt / QML** | `MultiEffect` blur | `MultiEffect` glow | anchors and Layouts, less CSS-like | `ShaderEffect` | behind C++ | 40–70 MB |
 | **Slint** | **none** — [slint#2066](https://github.com/slint-ui/slint/issues/2066) is still open | drop shadow only | flexbox-ish | limited | native | 30–50 MB |
+| **Cocoon** (Kotlin + Jetpack Compose + Coil 3, Android only) | `Modifier.blur` / Haze | `shadow` | Compose modifiers | AGSL | would be a rewrite | — |
 | **SDL2** (parked) | we wrote it | we wrote it | we wrote the layout engine | we wrote it | native | 30–60 MB |
 
 **Slint is out.** The one thing it cannot do is the thing the whole look is
