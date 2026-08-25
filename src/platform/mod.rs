@@ -158,6 +158,16 @@ pub trait Platform: Sync {
     fn wifi(&self) -> Option<Wifi> {
         None
     }
+
+    /// Where the device keeps front-end themes.
+    ///
+    /// Worth knowing because they carry console artwork — a KNULLI theme has
+    /// `_inc/systems/<look>/<slug>.webp` for every system it draws, which is
+    /// the same shape as the icon sets this app downloads. A handheld that has
+    /// never synced has no artwork of ours and a folder full of somebody's.
+    fn theme_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 /// The scheme this build selected.

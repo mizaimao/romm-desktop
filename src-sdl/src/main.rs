@@ -389,6 +389,73 @@ fn collect<E>(woke: Option<E>, queued: impl IntoIterator<Item = E>) -> Vec<E> {
     woke.into_iter().chain(queued).collect()
 }
 
+/// Where the cursor is drawn, which is not always where it is.
+///
+/// The cursor jumped: pressing down moved a bright bar one row instantly, and
+/// on a list of two thousand games that is the whole screen changing with
+/// nothing to say which way it went. It slides now — over 90 milliseconds,
+/// which is short enough that it never delays anything and long enough that the
+/// eye follows the bar rather than re-finding it.
+///
+/// Only the drawing. What is *selected* changes the instant the button is
+/// pressed, because a settings screen that acts on a value 90 milliseconds late
+/// is a settings screen that feels broken.
+#[derive(Default)]
+struct Gliding {
+    /// Where it was drawn last frame.
+    from: Option<Rect>,
+    /// Where it is going, and when it set off.
+    to: Option<Rect>,
+    started: f64,
+}
+
+impl Gliding {
+    /// How long the slide lasts.
+    const MS: f64 = 90.0;
+
+    /// The rectangle to draw this frame, given where the cursor really is.
+    fn at(&mut self, target: Rect, now: f64, animate: bool) -> Rect {
+        if !animate {
+            self.from = Some(target);
+            self.to = Some(target);
+            return target;
+        }
+        let same = |a: Option<Rect>, b: Rect| {
+            a.map(|r| (r.x - b.x).abs() < 0.5 && (r.y - b.y).abs() < 0.5 && (r.h - b.h).abs() < 0.5)
+                .unwrap_or(false)
+        };
+        if !same(self.to, target) {
+            // Set off from wherever it is *now*, not from where the last move
+            // was going — interrupting a slide half way should carry on from
+            // there rather than snap back.
+            self.from = Some(self.showing(now));
+            self.to = Some(target);
+            self.started = now;
+        }
+        self.showing(now)
+    }
+
+    fn showing(&self, now: f64) -> Rect {
+        let (Some(from), Some(to)) = (self.from, self.to) else {
+            return self.to.or(self.from).unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
+        };
+        let t = ((now - self.started) / Self::MS).clamp(0.0, 1.0) as f32;
+        // Eased out, like the page transition: quick away, settling in.
+        let e = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+        Rect::new(
+            from.x + (to.x - from.x) * e,
+            from.y + (to.y - from.y) * e,
+            from.w + (to.w - from.w) * e,
+            from.h + (to.h - from.h) * e,
+        )
+    }
+
+    /// Whether it still has somewhere to get to, so the loop keeps drawing.
+    fn moving(&self, now: f64) -> bool {
+        self.to.is_some() && now - self.started < Self::MS
+    }
+}
+
 /// A page on its way out, and which way it is going.
 struct Slide {
     started: f64,
@@ -658,6 +725,8 @@ fn main() -> Result<()> {
     // Starts true — the first frame has never been drawn.
     let mut dirty = true;
     let mut drawn_at = 0.0f64;
+    // Where the cursor is drawn, which lags where it is by a few frames.
+    let mut glide = Gliding::default();
     // The corner as the screen last showed it. The clock changing is a reason
     // to redraw and nothing else notices it.
     let mut corner = status.parts();
@@ -852,6 +921,9 @@ fn main() -> Result<()> {
                     break 'running;
                 }
                 act(&mut lib, action);
+                if lib.quitting {
+                    break 'running;
+                }
                 dirty = true;
             }
         }
@@ -983,8 +1055,9 @@ fn main() -> Result<()> {
             was_section = lib.section;
             dirty = true;
         }
-        // A slide is motion, so it draws every frame it lasts.
-        if slide.is_some() {
+        // A slide is motion, so it draws every frame it lasts. So is the
+        // cursor on its way to a new row.
+        if slide.is_some() || glide.moving(now) {
             dirty = true;
         }
 
@@ -1037,6 +1110,9 @@ fn main() -> Result<()> {
                     &status,
                     glass_tint,
                     &scanning,
+                    &mut glide,
+                    now,
+                    showing.animations,
                 );
             });
         }
@@ -1508,6 +1584,12 @@ mod size {
     /// And how many down. Three by two on a handheld: six consoles at a glance,
     /// each big enough to recognise by its picture rather than by reading it.
     pub const GRID_ROWS: usize = 2;
+    /// How much smaller a card is than its place in the grid.
+    ///
+    /// Air, not spacing: the grid's own gap separates the slots, and this makes
+    /// the card sit inside its slot rather than fill it. Six cards edge to edge
+    /// read as one panel with lines drawn on it.
+    pub const TILE_INSET: f32 = 7.0;
     /// Below this much room per tile the grid becomes a list. Not the tile
     /// size — there is no fixed tile size any more.
     pub const TILE_MIN: f32 = 84.0;
@@ -1585,6 +1667,12 @@ struct Frame<'a> {
     /// What panels are tinted with, from the color scheme. A constant here was
     /// the same gray whichever scheme was chosen.
     glass_tint: Rgba,
+    /// Where the cursor is drawn, sliding towards where it actually is.
+    glide: &'a mut Gliding,
+    /// The loop's clock, for that slide.
+    now: f64,
+    /// Whether to animate at all — the one switch in Appearance.
+    animate: bool,
 }
 
 impl Frame<'_> {
@@ -1751,6 +1839,9 @@ fn draw(
     status: &status::Status,
     glass_tint: Rgba,
     scanning: &str,
+    glide: &mut Gliding,
+    now: f64,
+    animate: bool,
 ) -> Hits {
     let mut f = Frame {
         gfx,
@@ -1761,6 +1852,9 @@ fn draw(
         hover,
         hits: Hits::default(),
         glass_tint,
+        glide,
+        now,
+        animate,
     };
     let page = Rect::new(0.0, 0.0, screen.width(), screen.height());
 
@@ -1885,9 +1979,13 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     // The games, and the facts about the one under the cursor. The list is
     // always a list here — a wall of covers and a sidebar do not both fit, and
     // between the two the list is what answers "what is in this console".
-    let [list, aside] =
-        <[Rect; 2]>::try_from(area.cols(size::GAP, &[8, 4]))
-            .unwrap();
+    // Half and half.
+    //
+    // The list gave two thirds to names and a column of file sizes, and the
+    // pane got what was left. A size is not why anybody is looking at a game
+    // list — it is in the pane, where the questions about one game live — and
+    // the room it took is better spent on the pane being readable.
+    let [list, aside] = <[Rect; 2]>::try_from(area.cols(size::GAP, &[6, 6])).unwrap();
     draw_game_list(f, lib, list);
     f.pane(aside, f.glass_tint, size::ROUND);
     draw_detail(f, lib, aside.inset(size::PAD));
@@ -3150,7 +3248,14 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
         if row < first_row || row >= first_row + rows {
             continue;
         }
-        let tile = grid.cell(offset - first_row * across, tile_h);
+        let slot = grid.cell(offset - first_row * across, tile_h);
+        // The card is smaller than the space it sits in, and centred there.
+        //
+        // Filling the slot edge to edge made six cards that touched, which
+        // reads as one panel divided by lines rather than as six things. The
+        // grid still decides where they go — three across, two down — and the
+        // card just takes less of it.
+        let tile = slot.inset(Edges::all(size::TILE_INSET));
         f.hits.row(f.px(tile), offset);
         let on = offset == lib.console_at;
 
@@ -3205,10 +3310,10 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         .enumerate()
         .skip(band.first)
         .take(band.count)
-        .map(|(i, (r, _))| (i, r.name.clone(), r.favorite, r.downloaded, r.size_bytes))
+        .map(|(i, (r, _))| (i, r.name.clone(), r.favorite, r.downloaded))
         .collect();
 
-    for (i, name, favorite, downloaded, bytes) in rows {
+    for (i, name, favorite, downloaded) in rows {
         let line = Rect::new(area.x, area.y + i as f32 * step - top, area.w, step);
         if line.bottom() < area.y || line.bottom() > area.bottom() {
             continue;
@@ -3217,7 +3322,9 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         let on = i == lib.at;
         f.hovering(i, line, size::ROUND_SMALL);
         if on {
-            f.pane(line, paint::CURSOR, size::ROUND_SMALL);
+            // Drawn where the cursor is *getting to*. See `Gliding`.
+            let at = f.glide.at(line, f.now, f.animate);
+            f.pane(at, paint::CURSOR, size::ROUND_SMALL);
         }
 
         // No console column. Every row in this list is the console named in
@@ -3225,11 +3332,12 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         // and took ninety points the titles needed — "Alex Kidd in the..." was
         // being cut off to print "megadrive" beside it.
         let inside = line.inset(Edges::xy(8.0, 5.0));
-        let [mark, title, size] = <[Rect; 3]>::try_from(inside.row(
-            8.0,
-            &[Size::Fixed(12.0), Size::Grow(1.0), Size::Fixed(66.0)],
-        ))
-        .unwrap();
+        // No size column either. It was sixty-six points of every row saying
+        // how big a file is, which is a thing you look up once about one game
+        // and never scan down a list for — so it lives in the pane now, where
+        // the questions about one game are answered.
+        let [mark, title] =
+            <[Rect; 2]>::try_from(inside.row(8.0, &[Size::Fixed(12.0), Size::Grow(1.0)])).unwrap();
 
         let spec = f.spec(if downloaded { "\u{25cf}" } else { "\u{25cb}" }, 11.0);
         f.label(
@@ -3253,11 +3361,7 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             };
         }
         let spec = f.wrapped(&name, size::LABEL, left.w, 1);
-        f.label(&spec, left, if on { paint::TEXT } else { paint::DIM });
-
-        let spec = f.spec(romm_desktop::util::human(bytes.max(0) as u64), 11.0);
-        f.label_right(&spec, size, paint::DIM);
-    }
+        f.label(&spec, left, if on { paint::TEXT } else { paint::DIM });    }
 }
 
 /// The preview column: the cover, the name, and what is known about it.
@@ -3265,7 +3369,13 @@ fn draw_detail(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     let Some(detail) = lib.detail_full() else {
         return;
     };
-    let (art, rest) = area.split_top(area.w / lib.aspect.clamp(0.3, 3.0));
+    // The picture takes its shape from the cover and its limit from the pane.
+    //
+    // Height from the aspect alone was fine when the column was a third of the
+    // screen; at half the width the same rule makes it tall enough to push the
+    // name and every fact off the bottom. Half the pane, at most.
+    let tall = (area.w / lib.aspect.clamp(0.3, 3.0)).min(area.h * 0.52);
+    let (art, rest) = area.split_top(tall);
     // The game's own cover if there is one, and the console's picture if not.
     //
     // And if neither — which is every game in a library scanned from a card

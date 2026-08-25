@@ -38,6 +38,8 @@ pub struct Covers {
     media_root: PathBuf,
     /// Where the ROMs are, for artwork the device scraped beside them.
     roms_root: PathBuf,
+    /// Where the device keeps front-end themes, which carry console pictures.
+    theme_dirs: Vec<PathBuf>,
     /// Which game artwork to prefer, from `[media] list_art`.
     look: String,
     /// Which console picture the grid draws, from `[icons] style`, and which
@@ -62,6 +64,7 @@ impl Covers {
         Covers {
             media_root,
             roms_root,
+            theme_dirs: romm_desktop::platform::current().theme_dirs(),
             look,
             console_look: icons.0,
             console_set: icons.1,
@@ -101,7 +104,8 @@ impl Covers {
         let path = romm_desktop::theme::look_art(&self.media_root, slug, &set, &look)
             .or_else(|| romm_desktop::theme::look_art(&self.media_root, slug, &set, "systemart"))
             .or_else(|| romm_desktop::theme::look_art(&self.media_root, slug, &set, "consolegame"))
-            .or_else(|| romm_desktop::platformicon::installed(&self.media_root, slug));
+            .or_else(|| romm_desktop::platformicon::installed(&self.media_root, slug))
+            .or_else(|| self.in_a_theme(slug));
         let Some(path) = path else {
             self.known.insert(key, State::None);
             return None;
@@ -205,6 +209,64 @@ impl Covers {
                 None
             }
         }
+    }
+
+    /// A console picture out of a front-end theme already on the device.
+    ///
+    /// Asked for five times, and each time the answer was "there is no icon set
+    /// here" — which is true and beside the point. A KNULLI install has themes
+    /// in `/userdata/themes`, and every one of them draws these systems: the
+    /// pictures are at `<theme>/_inc/systems/<look>/<slug>.webp`, which is the
+    /// same shape as the sets this app downloads. Nothing needed fetching; we
+    /// were looking in one folder and they were in another.
+    ///
+    /// Art before icons before logos: a rendered machine says which console it
+    /// is at a glance, and a wordmark has to be read. SVG is skipped — it is a
+    /// logo format here, and the raster ones are what the grid wants.
+    fn in_a_theme(&self, slug: &str) -> Option<PathBuf> {
+        for root in &self.theme_dirs {
+            let Ok(themes) = std::fs::read_dir(root) else {
+                continue;
+            };
+            let mut themes: Vec<PathBuf> = themes.flatten().map(|t| t.path()).collect();
+            themes.sort();
+            for theme in themes {
+                let systems = theme.join("_inc").join("systems");
+                if !systems.is_dir() {
+                    continue;
+                }
+                let mut looks: Vec<PathBuf> = std::fs::read_dir(&systems)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|d| d.path())
+                    .collect();
+                // Directory names vary by theme — `carousel-icons-art`,
+                // `artwork (modern)`, `systemart`. Sorting puts "art" before
+                // "icons" before "logos" often enough, and the explicit
+                // preference below does the rest.
+                looks.sort_by_key(|p| {
+                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    let rank = if name.contains("art") {
+                        0
+                    } else if name.contains("icon") {
+                        1
+                    } else {
+                        2
+                    };
+                    (rank, name)
+                });
+                for look in looks {
+                    for ext in ["webp", "png", "jpg"] {
+                        let at = look.join(format!("{slug}.{ext}"));
+                        if at.is_file() {
+                            return Some(at);
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Artwork the device scraped for itself, next to the ROM.

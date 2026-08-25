@@ -380,6 +380,8 @@ pub struct Library {
     /// The last game looked up in full, and what came back — its blurb and its
     /// genres, which the list rows do not carry.
     looked_up: (i64, Option<String>, Vec<String>),
+    /// Set when the Exit row is chosen, and read by the loop.
+    pub quitting: bool,
     /// A set of console pictures being downloaded, if one is.
     pub fetching: Option<crate::iconfetch::Fetch>,
     /// Sample pictures for whichever set the picker is sitting on.
@@ -486,6 +488,7 @@ impl Library {
             files: Vec::new(),
             peeked: (String::new(), Vec::new()),
             looked_up: (0, None, Vec::new()),
+            quitting: false,
             fetching: None,
             previews: None,
             cache,
@@ -1370,6 +1373,15 @@ impl Library {
                             _ => {}
                         }
                     }
+                    // Leaving. A row rather than a button nobody can see: the
+                    // only way out was B at the top level, which the help bar
+                    // called "back" and which on a handheld is indistinguishable
+                    // from a button that does nothing.
+                    if self.option_here().is_some_and(|e| e.label.starts_with("Back to")) {
+                        self.quitting = true;
+                        return Ok(true);
+                    }
+
                     // Getting console pictures: pick which set, and the pick
                     // starts the download rather than writing a setting.
                     if self.option_here().is_some_and(|e| e.label == "Get pictures") {
@@ -1502,6 +1514,7 @@ mod tests {
             files: Vec::new(),
             peeked: (String::new(), Vec::new()),
             looked_up: (0, None, Vec::new()),
+            quitting: false,
             fetching: None,
             previews: None,
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),

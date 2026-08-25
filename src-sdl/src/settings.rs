@@ -710,6 +710,17 @@ pub fn panes(
             entries: device_entries(),
         },
         Pane {
+            id: "exit",
+            label: "Exit",
+            blurb: "Leave RomM and go back to the device's own menu.",
+            entries: vec![Entry {
+                field: "",
+                label: "Back to EmulationStation",
+                help: "Closes RomM. The device's own front end comes back where it left off.",
+                kind: Kind::Action,
+            }],
+        },
+        Pane {
             id: "about",
             label: "About",
             blurb: "This build, and what it is running on.",
@@ -1612,8 +1623,9 @@ mod tests {
     ///
     /// This drifted once already: the first version invented Device, Library,
     /// Accounts, Emulators, Controls and About, which is a settings screen you
-    /// have to relearn per machine for no reason. The one addition is Device,
-    /// because a laptop has no backlight you would set from an app.
+    /// have to relearn per machine for no reason. Two additions: Device,
+    /// because a laptop has no backlight you would set from an app, and Exit,
+    /// because a laptop has a window with a close button on it.
     #[test]
     fn the_panes_match_the_desktops() {
         let ids: Vec<_> = built().iter().map(|p| p.id).collect();
@@ -1627,6 +1639,9 @@ mod tests {
                 "emulators",
                 "iconsets",
                 "device",
+                // Not a desktop pane: a windowed app is closed with its window,
+                // and a handheld has neither a window nor a visible way out.
+                "exit",
                 "about"
             ],
             "the handheld's settings no longer line up with the desktop's"

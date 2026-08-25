@@ -124,6 +124,17 @@ impl Platform for Knulli {
 
     /// 0..=255, confirmed on device. The vendor wrapper is preferred because
     /// it handles whatever else the board couples to the backlight.
+    /// Themes, in the order to prefer them: the user's own first.
+    ///
+    /// `/userdata/themes` is what somebody installed; the one under
+    /// `/usr/share` ships with the image. Both hold console pictures.
+    fn theme_dirs(&self) -> Vec<PathBuf> {
+        vec![
+            PathBuf::from("/userdata/themes"),
+            PathBuf::from("/usr/share/emulationstation/themes"),
+        ]
+    }
+
     fn brightness(&self) -> Option<Brightness> {
         Some(Brightness {
             path: PathBuf::from("/sys/class/backlight/backlight/brightness"),
