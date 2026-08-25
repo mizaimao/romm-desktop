@@ -271,6 +271,21 @@ though the platform node `/sys/devices/platform/hall-mh248` also exists.
 - **`/userdata` is exfat, ~155 G free.** (exfat, not ext4 — fine for our data,
   but note no POSIX perms/symlinks, like FAT.)
 
+## Wi-Fi, audio and the clock (measured 2026-08-25)
+
+For the status corner and the Device settings pane.
+
+| | |
+|---|---|
+| Wi-Fi helper | **`knulli-wifi`**, with `scanlist` and `list` subcommands. There is **no `batocera-wifi`** on this image. |
+| Signal, cheaply | `/proc/net/wireless` — one row per interface, third column is link quality out of 70. A plain file read, so the corner can poll it. |
+| Signal, fully | `iw dev wlan0 link` gives SSID and dBm. A process, so settings only, never per frame. |
+| Also present | `wpa_cli`, `connmanctl` |
+| Audio | `knulli-audio`, `knulli-mixer`, `amixer` |
+| Clock | `date` is correct and `/etc/timezone` reads `America/New_York`, so the device knows its own zone — `localtime_r` is enough, no date library needed. |
+
+Read at the time: `wlan0`, quality **40 of 70**, connected to `Chicken24` at **-52 dBm**.
+
 ## Front-end platform module — what to wire
 - Input: `/dev/input/event5` (pad), `event1` (lid), `event0` (volume keys).
 - Brightness: `knulli-brightness` (or `/sys/class/backlight/backlight/brightness`).

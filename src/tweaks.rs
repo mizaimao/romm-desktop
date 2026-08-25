@@ -33,7 +33,7 @@ pub type Opt = (&'static str, &'static str);
 /// a face button, which meant either living with a held shot underneath the
 /// repeat or remapping the fire button somewhere else — and a game where
 /// holding fire means something, like Pulstar's charge shot, cannot survive
-/// either. Holding a shoulder is RetroArch's own oldest turbo behaviour and
+/// either. Holding a shoulder is RetroArch's own oldest turbo behavior and
 /// changes nothing about the pad until you ask: hold LB and *then* hold A, and
 /// A repeats for as long as both are down. Let go of LB and A is one press,
 /// one shot, with nothing remapped and nothing to undo.
@@ -472,7 +472,7 @@ mod rapidfire_tests {
         for on in [AutoFire::Off, AutoFire::LeftBumper, AutoFire::RightBumper, AutoFire::Top] {
             assert_eq!(AutoFire::parse(on.key()), on, "{on:?} did not survive its own key");
         }
-        // Anything unrecognised is off rather than a guess, and an unknown
+        // Anything unrecognized is off rather than a guess, and an unknown
         // fire button is the primary one rather than a random face button.
         assert_eq!(AutoFire::parse("banana"), AutoFire::Off);
     }

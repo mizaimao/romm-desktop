@@ -35,7 +35,7 @@ pub const ICONS: &[AppIcon] = &[
     },
 ];
 
-/// What a fresh install wears, and what an unrecognised id falls back to.
+/// What a fresh install wears, and what an unrecognized id falls back to.
 pub const DEFAULT: &str = "arcade";
 
 /// The icon with this id, if it is one that ships.

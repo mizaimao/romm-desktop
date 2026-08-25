@@ -128,7 +128,7 @@ describe("the styles", () => {
     assert.ok(backdrop.BACKDROPS.length >= 5, "one shape suits one room");
     for (const b of backdrop.BACKDROPS) {
       assert.ok(b.id && b.label && b.hint, `${b.id} is missing its name or note`);
-      assert.match(b.body, /base\s*=/, `${b.id} never sets a colour`);
+      assert.match(b.body, /base\s*=/, `${b.id} never sets a color`);
     }
     const ids = backdrop.BACKDROPS.map((b) => b.id);
     assert.equal(new Set(ids).size, ids.length, "two styles share an id");
@@ -136,6 +136,27 @@ describe("the styles", () => {
 
   test("an unknown style falls back rather than failing", () => {
     assert.equal(backdrop.backdropStyle("no-such-thing").id, backdrop.BACKDROPS[0].id);
+  });
+
+  /// A style is a long object literal ending in a shader body, and the bodies
+  /// are long enough that the brace closing one is a screen away from the
+  /// brace opening the next. Drop that pair while editing and the two entries
+  /// merge into one: still valid JavaScript, still parses, but the later
+  /// `id:` quietly wins and the earlier style is simply gone from the list —
+  /// no error, no failing test, just a shape that never appears in Settings.
+  ///
+  /// Counting the ids in the source against the ids in the array catches it,
+  /// because the merged object still has both `id:` lines in the file.
+  test("no style has been swallowed by the one after it", () => {
+    const src = readFileSync(join(uiDir, "js/backdrop.js"), "utf8");
+    const arr = /export const BACKDROPS = \[([\s\S]*?)\n\];/.exec(src)?.[1] ?? "";
+    assert.ok(arr.length > 500, "the styles array was not found; update this test");
+    const written = [...arr.matchAll(/^\s{4}id: "([^"]+)"/gm)].map((m) => m[1]);
+    assert.deepEqual(
+      written,
+      backdrop.BACKDROPS.map((b) => b.id),
+      "a style is written in the file but missing from the array"
+    );
   });
 
   /// Switching style rebuilds the program and looks its uniforms up again. A
@@ -160,7 +181,7 @@ describe("the styles", () => {
 /// read from was the one surface that matched nothing around it — and the
 /// slider that was supposed to fix that was a second control over an idea the
 /// stylesheet only has one of. `--tint` is the opacity every sheet of glass
-/// mixes its colour in at; the pane is a large card and takes the same one.
+/// mixes its color in at; the pane is a large card and takes the same one.
 describe("the glass", () => {
   const css = () =>
     readFileSync(join(uiDir, "style.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");

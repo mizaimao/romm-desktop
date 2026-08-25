@@ -194,7 +194,7 @@ export async function showAllRecent() {
 /// Both shapes carry the same three facts — name, how many games, whether a
 /// core is installed — so switching layout changes the density and nothing
 /// else. The list is for finding a console you can name; the grid is for
-/// recognising one you cannot.
+/// recognizing one you cannot.
 /// Light up the console whose games are showing, in the left column.
 ///
 /// The column stays on screen while the middle changes, so without this there
@@ -318,7 +318,7 @@ function platformRow(p) {
   // movement code selects `.card, .gcard, .row, .tcard`, and a row that is not
   // one of those is unreachable without a mouse.
   // The dot says whether an emulator for this console is installed — green for
-  // yes, grey for no. It is a fair signal on a wide row where the words "no
+  // yes, gray for no. It is a fair signal on a wide row where the words "no
   // core" are beside it, and a riddle in a 240px column where they are not, so
   // the row says so in words and the title says it in full.
   return `
@@ -698,9 +698,9 @@ function groupedMarkup(rows) {
 /// rows that are not on the page. See `visible.js`.
 function rowMarkup(r, showPlatform, at) {
   return `
-      <div class="row${r.favourite ? " fav" : ""}" data-id="${r.id}" data-at="${at}">
+      <div class="row${r.favorite ? " fav" : ""}" data-id="${r.id}" data-at="${at}">
         <span class="have">${here(r)}</span>
-        <span class="nm">${r.favourite ? `<span class="star" title="Starred — in one of your starred collections">★</span>` : ""}${escapeHtml(r.name)}</span>
+        <span class="nm">${r.favorite ? `<span class="star" title="Starred — in one of your starred collections">★</span>` : ""}${escapeHtml(r.name)}</span>
         ${showPlatform ? `<span class="pf">${r.platform}</span>` : ""}
         <span class="sz">${human(r.size_bytes)}</span>
       </div>`;
@@ -741,14 +741,14 @@ function gridAspect(platform) {
 function cardMarkup(r, uniform, at) {
   return `
       <div class="gcard" data-id="${r.id}" data-at="${at}" data-name="${escapeHtml(r.name.slice(0, 2))}"${
-        r.favourite ? ` data-fav="1"` : ""
+        r.favorite ? ` data-fav="1"` : ""
       }${
         !uniform && state.aspects[r.platform]
           ? ` style="--ar:${state.aspects[r.platform].toFixed(3)}"`
           : ""
       }>
         <div class="art"><span class="ph">${escapeHtml(r.name.slice(0, 2))}</span>${
-          r.favourite
+          r.favorite
             ? `<span class="star" title="Starred — in one of your starred collections">★</span>`
             : ""
         }</div>

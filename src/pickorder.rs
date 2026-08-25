@@ -105,7 +105,7 @@ pub fn sort(rows: &[PickerRow], order_id: Option<&str>) -> Vec<usize> {
     let mut out: Vec<usize> = (0..rows.len()).collect();
     out.sort_by(|&a, &b| {
         let (a, b) = (&rows[a], &rows[b]);
-        // Favourites first whatever else is chosen — a starred collection is
+        // Favorites first whatever else is chosen — a starred collection is
         // one you said you wanted at hand.
         if a.is_favorite != b.is_favorite {
             return if a.is_favorite { Ordering::Less } else { Ordering::Greater };
@@ -191,7 +191,7 @@ mod tests {
     /// A starred collection is one you said you wanted at hand, so it stays at
     /// the top whatever else is chosen.
     #[test]
-    fn favourites_stay_on_top_of_any_order() {
+    fn favorites_stay_on_top_of_any_order() {
         let starred = vec![
             PickerRow { name: "Zebra".into(), rom_count: 1, local_count: 0, is_favorite: true },
             row("Alpha", 500, 500),

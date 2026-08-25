@@ -28,7 +28,7 @@ use std::ffi::CString;
 /// which is why the radius below is small.
 const SHRINK: u32 = 4;
 
-// Nine taps: the centre and four either side, written out in the shader
+// Nine taps: the center and four either side, written out in the shader
 // below. At a quarter scale that reaches sixteen screen pixels, which is where
 // `blur(10px)` on a retina display lands.
 
@@ -44,7 +44,7 @@ void main() {
 
 /// One direction of the blur, plus the saturation the stylesheet asks for.
 ///
-/// Weights are a five-tap Gaussian, normalised. Written out rather than
+/// Weights are a five-tap Gaussian, normalized. Written out rather than
 /// computed: it is nine samples in a loop that runs for every pixel of the
 /// screen every frame, and a loop with a computed bound is the thing a mobile
 /// shader compiler is worst at.
@@ -69,10 +69,10 @@ void main() {
   sum += texture(u_source, v_uv - u_step * 4.0) * 0.0162162162;
 
   // saturate(150%), the other half of what the stylesheet asks for. Blurring
-  // averages colours towards grey, and glass that has lost the colour of what
+  // averages colors towards gray, and glass that has lost the color of what
   // is behind it reads as fog rather than as glass.
-  float grey = dot(sum.rgb, vec3(0.2126, 0.7152, 0.0722));
-  color = vec4(mix(vec3(grey), sum.rgb, u_saturate), 1.0);
+  float gray = dot(sum.rgb, vec3(0.2126, 0.7152, 0.0722));
+  color = vec4(mix(vec3(gray), sum.rgb, u_saturate), 1.0);
 }
 "#;
 
@@ -180,7 +180,7 @@ impl Glass {
     /// Draw a panel: the blurred backdrop from behind it, under a tint.
     ///
     /// The tint is what makes it glass rather than a window — a pane has a
-    /// colour of its own, and the stylesheet's `--glass` is that colour. Its
+    /// color of its own, and the stylesheet's `--glass` is that color. Its
     /// alpha is how much of the blur shows through.
     #[allow(clippy::too_many_arguments)]
     pub fn panel(

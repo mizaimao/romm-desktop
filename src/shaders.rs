@@ -49,8 +49,8 @@ pub const CATALOGUE: &[ShaderOption] = &[
     // --- Handheld ---
     ShaderOption { path: "handheld/gameboy", label: "Game Boy DMG", note: "Green dot matrix", display: Display::Handheld },
     ShaderOption { path: "handheld/sameboy-lcd", label: "SameBoy LCD", note: "Accurate DMG panel", display: Display::Handheld },
-    ShaderOption { path: "handheld/gameboy-pocket", label: "Game Boy Pocket", note: "Grey panel", display: Display::Handheld },
-    ShaderOption { path: "handheld/gameboy-color-dot-matrix", label: "GBC dot matrix", note: "Colour dot matrix", display: Display::Handheld },
+    ShaderOption { path: "handheld/gameboy-pocket", label: "Game Boy Pocket", note: "Gray panel", display: Display::Handheld },
+    ShaderOption { path: "handheld/gameboy-color-dot-matrix", label: "GBC dot matrix", note: "Color dot matrix", display: Display::Handheld },
     ShaderOption { path: "handheld/agb001", label: "GBA (AGB-001)", note: "Original, unlit — very dark", display: Display::Handheld },
     ShaderOption { path: "handheld/ags001", label: "GBA SP (AGS-001)", note: "Front-lit SP — the default", display: Display::Handheld },
     ShaderOption { path: "presets/handheld-plus-color-mod/lcd-grid-v2-sp101-color", label: "GBA SP backlit (AGS-101)", note: "Brightest — the backlit SP revision", display: Display::Handheld },
@@ -146,7 +146,7 @@ pub fn resolve(ra: &RetroArch, preset: &str) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
-/// Catalogue entries this install can actually load, for the given display.
+/// Catalog entries this install can actually load, for the given display.
 pub fn available(ra: &RetroArch, display: Display) -> Vec<&'static ShaderOption> {
     CATALOGUE
         .iter()
@@ -240,7 +240,7 @@ const SHADER_PACK: &str = "https://buildbot.libretro.com/assets/frontend/shaders
 ///
 /// Presets are useless without it: `resolve` returns None for every entry, so
 /// shaders silently do nothing. The pack is a few megabytes and covers every
-/// preset in the catalogue, which is far simpler than fetching them one at a
+/// preset in the catalog, which is far simpler than fetching them one at a
 /// time — and RetroArch itself ships no shaders in the base download.
 ///
 /// Returns true when it downloaded something.
@@ -331,10 +331,10 @@ mod tests {
         assert_eq!(default_for("gba"), Some("handheld/ags001"));
     }
 
-    /// Every shipped default has to exist in the catalogue, or the Settings
+    /// Every shipped default has to exist in the catalog, or the Settings
     /// list shows a shader the app itself chose but cannot name.
     #[test]
-    fn every_default_is_in_the_catalogue() {
+    fn every_default_is_in_the_catalog() {
         for platform in [
             "gb", "gbc", "gba", "nds", "psp", "gamegear", "wonderswan",
             "wonderswancolor", "neo-geo-pocket", "snes", "genesis", "arcade",
@@ -342,7 +342,7 @@ mod tests {
             let preset = default_for(platform).expect("every platform has a default");
             assert!(
                 CATALOGUE.iter().any(|o| o.path == preset),
-                "{platform} defaults to {preset}, which is not in the catalogue"
+                "{platform} defaults to {preset}, which is not in the catalog"
             );
         }
     }

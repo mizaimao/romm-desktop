@@ -300,7 +300,7 @@ export async function selectRom(id) {
 /// game, open RetroArch's menu, and guess at a slot number.
 ///
 /// The picture is the point. RetroArch saves the frame beside the state, and
-/// "the cave with the two doors" is a thing you recognise instantly where
+/// "the cave with the two doors" is a thing you recognize instantly where
 /// "slot 3" is a thing you have to remember.
 function stateShelf(states) {
   if (!states.length) return "";
@@ -333,7 +333,7 @@ function wireShelf(d) {
     // `noresume` rather than `disabled`. A disabled button fires no mouse
     // events at all — not click, not contextmenu — so marking the autosave
     // disabled also made it impossible to right-click, which is the only way
-    // to delete one. It is greyed the same way and simply does not launch.
+    // to delete one. It is grayed the same way and simply does not launch.
     if (!btn.classList.contains("noresume")) {
       btn.addEventListener("click", () => {
         // Same launch path as the Play button, so a state that needs a core

@@ -1,7 +1,7 @@
-# Licences of things this app ships
+# Licenses of things this app ships
 
 The app itself is in this repository. These are the parts that are not, and
-what their licences ask of us.
+what their licenses ask of us.
 
 ## Fonts — SIL Open Font License 1.1
 
@@ -14,10 +14,10 @@ SHA-256 in `assets/fonts/MANIFEST.tsv`, downloaded by
 of somebody else's binary, and a hash in a text file gets everyone the same
 bytes just as well.
 
-**What the licence asks.** OFL 1.1 permits redistribution, bundling and sale
+**What the license asks.** OFL 1.1 permits redistribution, bundling and sale
 as part of a larger work. Three conditions matter to us:
 
-* the licence travels with the fonts — `OFL.txt` is in the manifest and is
+* the license travels with the fonts — `OFL.txt` is in the manifest and is
   fetched alongside them, and lands wherever they do;
 * they are not sold on their own, which we do not do;
 * they keep their reserved names, so we must not modify a font and still call

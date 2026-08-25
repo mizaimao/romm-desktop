@@ -128,7 +128,7 @@ Selecting a console shows it in the preview, the way an ES-DE theme does: who
 made it, when it arrived, whether it is a console, a handheld or a cabinet, a
 line about what it was, and then the game count, the emulator and shader it
 will use, and whether that emulator is installed at all.
-The top-right tag says which server it is talking to, with a coloured dot for
+The top-right tag says which server it is talking to, with a colored dot for
 whether it is reachable; hovering gives the game count, the cores, the disk
 usage and the folders everything lives in. **Settings → About**, and the macOS
 About panel, carry the version and the source.
@@ -264,7 +264,7 @@ A game carries one of two: a **disk** if it is on this machine and will play
 with the server off, a **cloud** if it is still on the server and will be
 fetched when you play it. A **star** means it is in one of your starred
 collections. Beside a console, a **green dot** means an emulator for it is
-installed and a grey one means nothing there will start. `?` shows the same
+installed and a gray one means nothing there will start. `?` shows the same
 list, so nothing here has to be remembered.
 
 ## Status

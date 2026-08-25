@@ -90,7 +90,7 @@ friends rather than poking sysfs — see `handheld-os.md`.
 
 ## The ES-DE format question is already answered in the code
 
-You asked how to organise files on the Flip while still conforming to ES-DE.
+You asked how to organize files on the Flip while still conforming to ES-DE.
 `src/esde.rs` already has the mechanism:
 
 ```rust
@@ -101,7 +101,7 @@ pub fn new(esde_root: &Path, roms: Option<&Path>) -> Self
 
 **ES-DE already separates ROMs from media by design.** That is the whole answer.
 
-### Android — nothing to organise
+### Android — nothing to organize
 
 Point `Layout` at the on-device ES-DE install and read it where it lies. The
 core map was built from ES-DE's *Android* system list in the first place, so

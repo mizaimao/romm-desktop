@@ -18,7 +18,7 @@
 /// Empty text keeps everything, which is how clearing the box puts the page
 /// back.
 pub fn matches(name: &str, query: &str) -> bool {
-    let query = normalise(query);
+    let query = normalize(query);
     query.is_empty() || name.to_lowercase().contains(&query)
 }
 
@@ -26,13 +26,13 @@ pub fn matches(name: &str, query: &str) -> bool {
 ///
 /// Exposed because callers hold the query across many rows and normalising it
 /// once per row on 2,506 games is 2,506 allocations per keystroke.
-pub fn normalise(query: &str) -> String {
+pub fn normalize(query: &str) -> String {
     query.trim().to_lowercase()
 }
 
 /// Which of `names` survive.
 pub fn visible(names: &[String], query: &str) -> Vec<bool> {
-    let query = normalise(query);
+    let query = normalize(query);
     if query.is_empty() {
         return vec![true; names.len()];
     }
@@ -48,7 +48,7 @@ pub fn visible(names: &[String], query: &str) -> Vec<bool> {
 /// A heading with no members at all stays: an empty group is the page's own
 /// business, and hiding it would make an unfiltered page differ from itself.
 pub fn empty_groups(groups: &[Vec<usize>], visible: &[bool], query: &str) -> Vec<bool> {
-    if normalise(query).is_empty() {
+    if normalize(query).is_empty() {
         return vec![false; groups.len()];
     }
     groups

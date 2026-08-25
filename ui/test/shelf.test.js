@@ -177,7 +177,7 @@ describe("the save-state shelf", () => {
 
     const auto = document.querySelector(".state");
     assert.ok(auto, "the autosave should still be visible");
-    // Greyed, but not `disabled`: a disabled button fires no mouse events at
+    // Grayed, but not `disabled`: a disabled button fires no mouse events at
     // all, so marking it disabled also made it impossible to right-click —
     // and right-click is the only way to delete a state.
     assert.equal(auto.disabled, false, "a disabled button cannot be right-clicked");

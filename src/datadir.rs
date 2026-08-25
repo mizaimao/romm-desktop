@@ -233,7 +233,7 @@ mod tests {
     }
 
     /// Nothing configured and no checkout: the app lives where it was put. The
-    /// previous behaviour — inventing ~/RomM and writing a core map into it —
+    /// previous behavior — inventing ~/RomM and writing a core map into it —
     /// is what this asserts is gone.
     #[test]
     fn with_nothing_to_go_on_it_anchors_beside_the_app_not_in_home() {

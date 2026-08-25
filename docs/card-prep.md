@@ -24,7 +24,7 @@ the short version you actually follow.
 5. **Build the manifest and show it** before copying. Platforms the device
    cannot run are a waste of hours; platforms with no folder are impossible.
 6. **Stage**: ROMs, art, gamelists (if ES-based), BIOS, saves, collections,
-   favourites, cores.
+   favorites, cores.
 7. **Verify, then eject.** Checklist at the bottom.
 
 ## Layout, by firmware
@@ -36,7 +36,7 @@ the short version you actually follow.
 | Art path | `.media/<stem>.png` | `Imgs/<stem>.png` | `images/<stem>.png` | `images/<stem>-image.png` |
 | Art size | screen-sized | **640x480**, converted to QOI on device | free choice | free choice |
 | Gamelist | none | none | `gamelist.xml` | `gamelist.xml` |
-| Favourites | n/a | `Saves/pyui-favorites.json` | `<favorite>true</favorite>` | `<favorite>true</favorite>` |
+| Favorites | n/a | `Saves/pyui-favorites.json` | `<favorite>true</favorite>` | `<favorite>true</favorite>` |
 | Collections | n/a | `Collections/collections.json` | ES `custom-*.cfg` (on rootfs) | `system/configs/emulationstation/collections` (on SHARE) |
 | Saves sorted by | core | **core**, with arch suffix | core | **system** |
 | Per-system core | folder tag | `Emu/<SYS>/config.json` | `<alternativeEmulator><label>` | `<system>.core=` in `knulli.conf` |
@@ -102,14 +102,14 @@ FBNeo and FB Alpha identify sets by MAME romset id (`2020bb.zip`). Only 8 of 163
 match, so those cores fail on the rest. Either use geolith, or rename via
 `data/arcade-names.json`, which maps 147 of 163.
 
-**Silent path validation.** PyUI drops any collection or favourite whose
+**Silent path validation.** PyUI drops any collection or favorite whose
 `rom_file_path` does not resolve, without a word. Build those against what is
 actually on the card and verify zero broken paths before ejecting.
 
 ## Saves — mapping, moving, renaming
 
 The hardest part of a card, and the only one where a plausible-looking copy can
-silently do nothing. `backups/saves` is organised **by core**. Where it lands
+silently do nothing. `backups/saves` is organized **by core**. Where it lands
 depends on the firmware, and *which* folder depends on the core the target
 actually runs.
 
@@ -210,7 +210,7 @@ ssh -tt root@<device> "knulli-systems" | awk '/^> /{s=substr($0,3)} \
 ```
 
 It prints only problems: `MISSING` (absent) and `UNTESTED` (present, md5 not one
-it recognises — a different revision of the right file, which may or may not
+it recognizes — a different revision of the right file, which may or may not
 work).
 
 ### Trap 1 — the manifest does not know every file the device wants
@@ -279,7 +279,7 @@ card while it is in the reader.
     tools/stage_knulli_card.py   KNULLI / Batocera
     tools/stage_sp_card.py       NextUI
     tools/copy_to_card.py        top up an existing ES-DE card from the server
-    tools/card_collections.py    ES-DE collections and favourites
+    tools/card_collections.py    ES-DE collections and favorites
 
 All are dry by default; `--apply` is the only thing that writes.
 

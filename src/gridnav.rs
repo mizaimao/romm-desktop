@@ -153,14 +153,14 @@ pub fn move_x(cards: &[Card], selected: Option<usize>, step: i32) -> Option<usiz
 
 /// Up or down a row, keeping the column you were in.
 ///
-/// Matched on horizontal centre rather than index, so a short last row, a row
+/// Matched on horizontal center rather than index, so a short last row, a row
 /// of differently-shaped cards, or the next console's section all land
 /// somewhere that looks directly above or below where you were.
 ///
 /// Returns `None` at the edges — staying put, rather than clamping to the
 /// first or last card. Note that this applies to paging as well as to single
 /// steps: PageDown within three rows of the bottom stays where it is rather
-/// than jumping to the end. That is the behaviour this replaces, kept
+/// than jumping to the end. That is the behavior this replaces, kept
 /// deliberately; `first`/`last` are the way to reach the ends.
 pub fn move_y(cards: &[Card], selected: Option<usize>, step: i32) -> Option<usize> {
     let grid = rows(cards);
@@ -207,7 +207,7 @@ pub fn uniform(count: usize, columns: usize) -> Moves {
                 let target = target as usize;
                 // Landing on a short last row: the column you were in may not
                 // exist there, so take the nearest that does — which is what
-                // matching on horizontal centre comes to when every card is
+                // matching on horizontal center comes to when every card is
                 // the same width.
                 let last = (count - target * cols).min(cols) - 1;
                 Some(target * cols + c.min(last))
@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(move_y(&cards, Some(13), 1), None, "down from the last row moved");
     }
 
-    /// Matched on horizontal centre, so a short last row lands under the card
+    /// Matched on horizontal center, so a short last row lands under the card
     /// you were on rather than at an index that no longer exists.
     #[test]
     fn a_short_last_row_is_entered_below_where_you_were() {

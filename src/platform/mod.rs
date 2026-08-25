@@ -39,6 +39,22 @@ pub struct Brightness {
     pub helper: Option<&'static str>,
 }
 
+/// A wireless connection that can be read without spawning anything.
+///
+/// `/proc/net/wireless` is one line per interface and holds the link quality,
+/// so a status bar can read it every couple of seconds for the cost of opening
+/// a file. The SSID needs `iw`, which is a process — that belongs on a settings
+/// screen, not in the corner of every frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Wifi {
+    pub proc_wireless: PathBuf,
+    pub interface: &'static str,
+    /// The largest value the quality column reports, for turning it into bars.
+    pub max_quality: u32,
+    /// Lists and joins networks. A process, so it is only for settings.
+    pub helper: Option<&'static str>,
+}
+
 /// A battery that can be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Battery {
@@ -110,6 +126,10 @@ pub trait Platform: Sync {
     }
 
     fn battery(&self) -> Option<Battery> {
+        None
+    }
+
+    fn wifi(&self) -> Option<Wifi> {
         None
     }
 }

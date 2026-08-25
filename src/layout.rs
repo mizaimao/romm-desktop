@@ -272,12 +272,12 @@ impl Rect {
         (Rect { x: self.right() - w, w, ..self }, Rect { w: self.w - w, ..self })
     }
 
-    /// A box of this size, centred in this one.
-    pub fn centre(self, w: f32, h: f32) -> Self {
+    /// A box of this size, centered in this one.
+    pub fn center(self, w: f32, h: f32) -> Self {
         Rect { x: self.x + (self.w - w) / 2.0, y: self.y + (self.h - h) / 2.0, w, h }
     }
 
-    /// A box of this shape, as large as fits, centred. What a picture that
+    /// A box of this shape, as large as fits, centered. What a picture that
     /// must not be distorted goes in.
     pub fn fit(self, aspect: f32) -> Self {
         let aspect = if aspect > 0.0 { aspect } else { 1.0 };
@@ -286,7 +286,7 @@ impl Rect {
         } else {
             (self.w, self.w / aspect)
         };
-        self.centre(w, h)
+        self.center(w, h)
     }
 
     /// Lay children left to right, with `gap` between them.
@@ -650,13 +650,13 @@ mod boxes {
 
     /// A picture that must not be distorted, in a box that is not its shape.
     #[test]
-    fn fitting_keeps_the_shape_and_centres_what_is_left() {
+    fn fitting_keeps_the_shape_and_centers_what_is_left() {
         // A tall box art in a wide box: letterboxed left and right.
         let box_ = Rect::new(0.0, 0.0, 200.0, 100.0);
         let art = box_.fit(0.75);
         assert_eq!(art.h, 100.0);
         assert!((art.w - 75.0).abs() < 0.01);
-        assert!((art.x - 62.5).abs() < 0.01, "not centred");
+        assert!((art.x - 62.5).abs() < 0.01, "not centered");
 
         // And the other way round.
         let wide = Rect::new(0.0, 0.0, 100.0, 200.0).fit(1.37);

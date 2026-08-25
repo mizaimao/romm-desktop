@@ -76,7 +76,7 @@ impl Spec {
 
 /// A laid-out, rasterised piece of text: coverage, and how big it came out.
 ///
-/// Greyscale rather than colour, because the colour is decided by whatever
+/// Grayscale rather than color, because the color is decided by whatever
 /// draws it — a name is dim in one place and bright in another, and
 /// rasterising it twice for that would be silly.
 pub struct Raster {
@@ -437,8 +437,8 @@ fn blit(page: &mut [u8], w: u32, h: u32, x: i32, y: i32, image: &cosmic_text::Sw
 /// is done once and the result is a texture.
 ///
 /// The texture is white with the coverage as its alpha, tinted at draw time.
-/// One raster then serves a name however it is coloured — dim in the metadata
-/// line, bright under the cursor — instead of one per colour.
+/// One raster then serves a name however it is colored — dim in the metadata
+/// line, bright under the cursor — instead of one per color.
 pub struct Painter {
     fonts: Fonts,
     cache: HashMap<Spec, Drawn>,
@@ -509,10 +509,10 @@ impl Painter {
         self.draw(gfx, spec, at.right() - w as f32, at.y, color);
     }
 
-    /// The same, centred in it.
-    pub fn put_centred(&mut self, gfx: &Gfx, spec: &Spec, at: Rect, color: Rgba) {
+    /// The same, centered in it.
+    pub fn put_centered(&mut self, gfx: &Gfx, spec: &Spec, at: Rect, color: Rgba) {
         let (w, h) = self.measure(gfx, spec);
-        let box_ = at.centre(w as f32, h as f32);
+        let box_ = at.center(w as f32, h as f32);
         self.draw(gfx, spec, box_.x, box_.y, color);
     }
 

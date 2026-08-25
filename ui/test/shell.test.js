@@ -231,7 +231,7 @@ describe("a layout this app does not have", () => {
           platform: "arcade",
           size_bytes: 1,
           downloaded: true,
-          favourite: false,
+          favorite: false,
         },
       ],
       false
@@ -306,7 +306,7 @@ describe("three columns, in the real page", () => {
           platform: "arcade",
           size_bytes: 1,
           downloaded: true,
-          favourite: false,
+          favorite: false,
         },
       ],
       false
@@ -371,7 +371,7 @@ describe("three columns, in the real page", () => {
     assert.equal(shell.storedMode(), "columns");
     shell.chooseMode("single");
     assert.equal(shell.storedMode(), "single");
-    // Anything unrecognised is the one being worked on, which is the default
+    // Anything unrecognized is the one being worked on, which is the default
     // while three columns is being built.
     shell.chooseMode("nonsense");
     assert.equal(shell.shellMode(), "columns");
@@ -900,7 +900,7 @@ describe("a console in the preview pane", () => {
   });
 
   /// The one fact that decides whether anything here will start, and it was
-  /// only visible as a coloured dot in the list — or in Settings, two windows
+  /// only visible as a colored dot in the list — or in Settings, two windows
   /// away.
   test("a console with no emulator says so, in words", async () => {
     await detail.showPlatformInfo("3do");

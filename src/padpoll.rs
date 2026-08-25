@@ -21,13 +21,13 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const FIRST_REPEAT_MS: f64 = 380.0;
 pub const REPEAT_MS: f64 = 110.0;
 
-/// Below this a stick is resting, or drifting. Sticks wear and centre badly,
+/// Below this a stick is resting, or drifting. Sticks wear and center badly,
 /// and a cursor that creeps on its own is worse than one that needs a firmer
 /// push.
 pub const STICK_DEADZONE: f64 = 0.55;
 
 /// Below this a trigger is resting, or being brushed. Lower than the stick's
-/// because a trigger is pulled deliberately and has no centre to drift around.
+/// because a trigger is pulled deliberately and has no center to drift around.
 pub const TRIGGER_DEADZONE: f64 = 0.06;
 
 /// Pixels a frame at a full pull. About a screen every third of a second on a

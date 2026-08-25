@@ -495,7 +495,7 @@ pub fn drop_stale_sets(media_root: &Path, current: &BTreeMap<String, String>) ->
         }
         let name = e.file_name().to_string_lossy().to_string();
         // A set no longer in the table is left alone: it is not wrong, just
-        // unrecognised, and deleting a user's pictures on that basis would be
+        // unrecognized, and deleting a user's pictures on that basis would be
         // presumptuous.
         let Some(want) = current.get(&name) else { continue };
         if set_mapping(media_root, &name).as_deref() != Some(want.as_str())
@@ -818,7 +818,7 @@ mod tests {
         assert_eq!(dropped, ["iconic-es-de", "meringue-es-de"]);
         assert!(!sets.join("iconic-es-de").exists(), "the stale set is gone");
         assert!(sets.join("razor-es-de").exists(), "a current set is kept");
-        assert!(sets.join("hand-made").exists(), "an unrecognised set is not ours to delete");
+        assert!(sets.join("hand-made").exists(), "an unrecognized set is not ours to delete");
     }
 
     /// An unstamped download is a stale one: those are exactly the fetches made

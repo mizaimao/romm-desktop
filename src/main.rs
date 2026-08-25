@@ -583,7 +583,7 @@ async fn cmd_sync(full: bool) -> Result<()> {
                 && v != romm_desktop::VERIFIED_AGAINST
             {
                 eprintln!(
-                    "warning: server is RomM {v}, but this client's server-specific behaviour\n\
+                    "warning: server is RomM {v}, but this client's server-specific behavior\n\
                      (archive hashing, query params) was verified against {}. Re-check\n\
                      `hash-parity` and a download or two.",
                     romm_desktop::VERIFIED_AGAINST

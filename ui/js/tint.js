@@ -90,8 +90,8 @@ function measure(url) {
 ///
 /// A flat average of box art is nearly always a muddy brown: most covers are
 /// mostly background, and averaging a bright logo with a dark border gives
-/// neither. Weighting by how far a pixel is from grey lets the color that
-/// makes the cover recognisable win, which is the one worth showing.
+/// neither. Weighting by how far a pixel is from gray lets the color that
+/// makes the cover recognizable win, which is the one worth showing.
 export function pick(data) {
   let r = 0;
   let g = 0;
@@ -104,7 +104,7 @@ export function pick(data) {
     const [pr, pg, pb] = [data[i], data[i + 1], data[i + 2]];
     const max = Math.max(pr, pg, pb);
     const min = Math.min(pr, pg, pb);
-    // Distance from grey, and away from both black and white — a pixel at
+    // Distance from gray, and away from both black and white — a pixel at
     // either end carries no hue to borrow.
     const w = (max - min) / 255 + 0.15 * (1 - Math.abs(max + min - 255) / 255);
     r += pr * w;
@@ -114,7 +114,7 @@ export function pick(data) {
   }
 
   if (weight < 0.001) return null;
-  return normalise(r / weight, g / weight, b / weight);
+  return normalize(r / weight, g / weight, b / weight);
 }
 
 /// Lift the color to something that reads as light on a dark interface.
@@ -127,10 +127,10 @@ export function pick(data) {
 /// that is mostly deep blue has every channel low, and multiplying by a bounded
 /// factor leaves it dim; multiplying by an unbounded one blows the largest
 /// channel to white and takes the hue with it.
-function normalise(r, g, b) {
+function normalize(r, g, b) {
   const [h, s, l] = toHsl(r / 255, g / 255, b / 255);
 
-  // Nearly grey. There is no hue here to borrow, and stretching what little
+  // Nearly gray. There is no hue here to borrow, and stretching what little
   // there is would invent a color the cover does not have.
   if (s < 0.15) return null;
 

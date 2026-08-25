@@ -169,8 +169,8 @@ pub fn nearest(spots: &[Spot], from: usize, dir: Dir) -> Option<usize> {
 
 /// Is `there` far enough that way to count?
 ///
-/// Measured on the leading edge rather than the centre: a tall preview column
-/// beside a short card has a centre far below it and is still plainly to the
+/// Measured on the leading edge rather than the center: a tall preview column
+/// beside a short card has a center far below it and is still plainly to the
 /// right.
 fn beyond(here: &Spot, there: &Spot, dir: Dir) -> bool {
     match dir {
@@ -191,7 +191,7 @@ fn forward(here: &Spot, there: &Spot, dir: Dir) -> f64 {
     }
 }
 
-/// How far off the line of travel, centre to centre.
+/// How far off the line of travel, center to center.
 fn sideways(here: &Spot, there: &Spot, dir: Dir) -> f64 {
     match dir {
         Dir::Left | Dir::Right => (here.mid_y() - there.mid_y()).abs(),
@@ -298,7 +298,7 @@ mod tests {
     }
 
     /// A tall box beside a short one is still to the right of it, even though
-    /// its centre is a long way below. Measured on edges for this reason.
+    /// its center is a long way below. Measured on edges for this reason.
     #[test]
     fn a_tall_column_is_beside_the_card_not_below_it() {
         let s = screen();

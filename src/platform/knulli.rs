@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Battery, Brightness, Platform};
+use super::{Battery, Brightness, Platform, Wifi};
 use crate::esde;
 
 pub struct Knulli;
@@ -103,6 +103,18 @@ impl Platform for Knulli {
             path: PathBuf::from("/sys/class/backlight/backlight/brightness"),
             max: 255,
             helper: Some("knulli-brightness"),
+        })
+    }
+
+    /// Measured on the device: `wlan0`, quality 40 of 70 while connected to
+    /// "Chicken24" at -52 dBm. `knulli-wifi` has `scanlist` and `list`
+    /// subcommands for the settings screen.
+    fn wifi(&self) -> Option<Wifi> {
+        Some(Wifi {
+            proc_wireless: PathBuf::from("/proc/net/wireless"),
+            interface: "wlan0",
+            max_quality: 70,
+            helper: Some("knulli-wifi"),
         })
     }
 

@@ -243,3 +243,31 @@ mod webview_path_tests {
         }
     }
 }
+
+/// The wall clock, as `HH:MM` in local time.
+///
+/// Through libc rather than a date crate: the only thing wanted is two numbers
+/// in the corner of a handheld, and `chrono` is a dependency and a build for
+/// four fields of a struct the C library already fills in. The device knows its
+/// own zone — `/etc/timezone` on the Flip reads America/New_York — and
+/// `localtime_r` is what reads it.
+///
+/// `None` if the clock cannot be read, which is a real answer: a handheld that
+/// has been off the network since it was made has no idea what time it is, and
+/// a wrong time in the corner is worse than no time.
+pub fn local_hhmm() -> Option<String> {
+    // SAFETY: `localtime_r` fills a caller-owned `tm`, so there is no shared
+    // buffer to race over — which is the reason it exists rather than
+    // `localtime`.
+    unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        if now == -1 {
+            return None;
+        }
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&now, &mut tm).is_null() {
+            return None;
+        }
+        Some(format!("{:02}:{:02}", tm.tm_hour, tm.tm_min))
+    }
+}

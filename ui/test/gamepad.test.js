@@ -955,7 +955,7 @@ describe("walking the reel with a pad", () => {
   });
 });
 
-// Which order a list opens in, what each one does to it, that favourites stay
+// Which order a list opens in, what each one does to it, that favorites stay
 // on top, and that an order belongs to the console it was set on are asserted
 // in `gamesort::tests` and `gamelist::tests` — against the implementation
 // rather than through a page.
@@ -1127,7 +1127,7 @@ describe("search results group the twins together", () => {
     platform,
     size_bytes: 1,
     downloaded: true,
-    favourite: false,
+    favorite: false,
   });
 
   /// The NES release and the Famicom one are the same game on the same

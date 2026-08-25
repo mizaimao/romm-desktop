@@ -8,7 +8,7 @@
 //     The lookup returned null, `.addEventListener` threw, and everything after
 //     it in that pane — the wiring for every text field and toggle on the tab —
 //     never ran. So editing the server URL or the library folder did nothing.
-//   * Appearance called `cssColour()`, which was defined nowhere at all, so
+//   * Appearance called `cssColor()`, which was defined nowhere at all, so
 //     wiring that tab threw partway through and the backdrop's own controls
 //     were never connected.
 //   * Both reset buttons called `closeSettings()` and `toggleSettings()`, which
@@ -256,9 +256,9 @@ describe("the settings panes read as settings", () => {
 describe("the console pictures row", () => {
   /// Reported from Windows as not being able to cycle them at all — which is
   /// exactly what a row of disabled buttons is. "Nothing has been fetched yet"
-  /// and "this style has none" looked identical: every button greyed, no
+  /// and "this style has none" looked identical: every button grayed, no
   /// explanation, and a Get button below that nobody connects to the row above.
-  test("nothing installed says so, rather than greying everything", async () => {
+  test("nothing installed says so, rather than graying everything", async () => {
     const box = dom.window.document.createElement("div");
     box.innerHTML = panes.paneHtml("appearance");
     dom.window.document.body.appendChild(box);

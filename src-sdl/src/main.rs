@@ -19,9 +19,9 @@
 // It opens at 960x720 on purpose. That is the handheld, and living at 4:3
 // every day is what stops the constrained case being a surprise at the end.
 
-use anyhow::{Context, Result};
-use romm_desktop::layout::{Edges, Panes, Rect, Scale, Size, Viewport};
 use crate::gfx::{Gfx, Rgba};
+use anyhow::{Context, Result};
+use romm_desktop::layout::{Edges, Rect, Scale, Size, Viewport};
 use romm_desktop::{padpoll, rowwindow};
 use sdl2::event::{Event, WindowEvent};
 use std::collections::BTreeSet;
@@ -31,18 +31,32 @@ mod covers;
 mod gfx;
 mod glass;
 mod input;
+mod keyboard;
 mod library;
+mod status;
 mod text;
 
-/// The handheld's panel, and this window's default.
-const POCKET: (u32, u32) = (960, 720);
-
-/// How far away a screen is assumed to be when nothing says otherwise: a desk.
+/// The handheld's panel, in points — and the size every layout below is
+/// written against.
 ///
-/// The handheld says otherwise, in `[appearance] viewing_distance_cm`. It has
-/// to: a 4" 960x720 panel is around 300 DPI, and at desk distance that is a
-/// scale of three and a screen with room for two covers on it.
-const DESK_CM: f32 = 60.0;
+/// The Miyoo Flip is 640x480. That is not a window size, it is the *unit*: on
+/// the device one point is one pixel, and on this Mac the window is opened four
+/// times larger and `scale_for` divides back down, so the layout is 640x480
+/// points either way and what is on screen here is what will be on screen
+/// there. Getting that wrong is how a design that reads fine on a desk turns
+/// out to be four words per line on the device.
+const PANEL: (u32, u32) = (640, 480);
+
+/// How much bigger than the panel the preview window is, in each direction.
+///
+/// Four, because at 1:1 a 640x480 window on a retina Mac is a postage stamp
+/// nobody can judge a layout in. Asked for as *points*, so the window is
+/// requested at half this and the display's own doubling supplies the rest —
+/// on a retina Mac that lands on 2560x1920 pixels, four device pixels per panel
+/// pixel. It does not have to land exactly: `viewport` divides whatever
+/// drawable it gets by 640, so the layout is a 640-point panel either way and
+/// only the physical size of the preview changes.
+const PREVIEW: u32 = 4;
 
 fn main() -> Result<()> {
     // Where the app's files are. Config, cache and library are all addressed
@@ -57,8 +71,13 @@ fn main() -> Result<()> {
     // shaders need a context to be in. SDL picks Metal first on macOS and
     // would give us one we cannot draw into; the handheld has only GL anyway,
     // so this makes both machines the same rather than special-casing one.
-    let sdl = sdl2::init().map_err(anyhow::Error::msg).context("starting SDL")?;
-    let video = sdl.video().map_err(anyhow::Error::msg).context("opening the display")?;
+    let sdl = sdl2::init()
+        .map_err(anyhow::Error::msg)
+        .context("starting SDL")?;
+    let video = sdl
+        .video()
+        .map_err(anyhow::Error::msg)
+        .context("opening the display")?;
 
     // Ask for the context the shader needs, *before* the window is made —
     // SDL fixes the attributes at creation and there is no changing them
@@ -80,19 +99,22 @@ fn main() -> Result<()> {
         }
     }
 
-    let window = open_window(&video).map_err(anyhow::Error::msg).context("opening a window")?;
+    let window = open_window(&video)
+        .map_err(anyhow::Error::msg)
+        .context("opening a window")?;
 
     // The config, read once. Everything the front end needs from it is settled
     // before the first frame; nothing below re-reads a file.
     let config = romm_desktop::config::Config::load().unwrap_or_default();
-    let held_at = config.appearance.viewing_distance_cm.unwrap_or(DESK_CM);
 
     // The context, ours. Everything below draws through it.
     let _context = window
         .gl_create_context()
         .map_err(anyhow::Error::msg)
         .context("creating an OpenGL context")?;
-    window.gl_set_context_to_current().map_err(anyhow::Error::msg)?;
+    window
+        .gl_set_context_to_current()
+        .map_err(anyhow::Error::msg)?;
     let mut gfx = unsafe { Gfx::new(&video) }.context("setting up the renderer")?;
     println!(
         "gl: {} · {}",
@@ -102,8 +124,6 @@ fn main() -> Result<()> {
     // Vertical sync, so a menu does not run the fan up.
     let _ = video.gl_set_swap_interval(sdl2::video::SwapInterval::VSync);
 
-    let display = window.display_index().unwrap_or(0);
-    let mut scale = scale_for(&video, display, held_at);
     let mut painter = text::Painter::new().context("finding fonts")?;
     check_fonts(&mut painter);
 
@@ -114,7 +134,7 @@ fn main() -> Result<()> {
     // library, and the message says why rather than the window being black.
     // The frosted panels. Not fatal either: a driver that will not draw into a
     // texture still gets a library, with flat panels instead of glass.
-    let mut frosted = match unsafe { glass::Glass::new(POCKET.0, POCKET.1) } {
+    let mut frosted = match unsafe { glass::Glass::new(PANEL.0 * PREVIEW, PANEL.1 * PREVIEW) } {
         Ok(g) => Some(g),
         Err(e) => {
             eprintln!("no glass: {e:#}");
@@ -147,8 +167,9 @@ fn main() -> Result<()> {
         std::path::Path::new("cache.sqlite3"),
         config.media_dir(),
         config.local_roms_dir(),
+        config.library.romm_collections,
     )
-        .context("opening the library")?;
+    .context("opening the library")?;
     if lib.consoles.is_empty() {
         eprintln!(
             "warning: no consoles in {}/cache.sqlite3 — run `romm-desktop sync` to fill it",
@@ -156,8 +177,9 @@ fn main() -> Result<()> {
         );
     }
     println!("{} consoles", lib.consoles.len());
+    start_at(&mut lib);
 
-    let mut screen = viewport(&window, scale);
+    let mut screen = viewport(&window);
     say_where_we_are(&screen);
 
     // The bindings the desktop app writes. Resolved once — the loop below runs
@@ -169,7 +191,10 @@ fn main() -> Result<()> {
     let mut pads = input::Pads::open_first(&controller);
     let mut repeat = padpoll::Repeat::default();
 
-    let timer = sdl.timer().map_err(anyhow::Error::msg).context("starting the clock")?;
+    let timer = sdl
+        .timer()
+        .map_err(anyhow::Error::msg)
+        .context("starting the clock")?;
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
     // What the pad is holding, so the drawing can show that input arrived.
     let mut held: BTreeSet<String> = BTreeSet::new();
@@ -182,6 +207,13 @@ fn main() -> Result<()> {
     // What the pointer is over, which is not what is chosen.
     let mut hover: Option<usize> = None;
 
+    // The open text field, when something asked for one. While it is here the
+    // pad drives the keyboard and nothing else — a field you are typing into
+    // owns the input until it is finished with.
+    let mut typing: Option<keyboard::Keyboard> = demo_keyboard();
+    // The corner: clock, signal, charge. Read on a timer, not per frame.
+    let mut status = status::Status::default();
+
     let mut frames = 0u32;
 
     'running: loop {
@@ -190,14 +222,18 @@ fn main() -> Result<()> {
         for event in events.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
-                Event::Window { win_event: WindowEvent::SizeChanged(..), .. }
-                | Event::Window { win_event: WindowEvent::Moved(..), .. } => {
+                Event::Window {
+                    win_event: WindowEvent::SizeChanged(..),
+                    ..
+                }
+                | Event::Window {
+                    win_event: WindowEvent::Moved(..),
+                    ..
+                } => {
                     // Moved as well as resized: dragging a window between a
                     // retina display and a plain one changes the scale
                     // without changing the size in points.
-                    let on = window.display_index().unwrap_or(0);
-                    scale = scale_for(&video, on, held_at);
-                    screen = viewport(&window, scale);
+                    screen = viewport(&window);
                     say_where_we_are(&screen);
                 }
                 // The mouse. ES-DE makes this hard and it is the complaint
@@ -208,20 +244,20 @@ fn main() -> Result<()> {
                 // the scroll moves a different row under the pointer, and the
                 // next motion event chooses that one — so the grid ran away
                 // from the mouse. `.row:hover` in the stylesheet is a
-                // background colour and nothing else, for the same reason.
+                // background color and nothing else, for the same reason.
                 Event::MouseMotion { x, y, .. } => {
                     let (x, y) = pointer(&window, x, y);
                     hover = hits.at(x, y);
                 }
-                Event::MouseButtonDown { mouse_btn, x, y, .. } => match mouse_btn {
+                Event::MouseButtonDown {
+                    mouse_btn, x, y, ..
+                } => match mouse_btn {
                     sdl2::mouse::MouseButton::Left => {
                         let (x, y) = pointer(&window, x, y);
                         if let Some(action) = hits.button_at(x, y) {
                             act(&mut lib, action);
-                        } else if let Some(mode) = hits.mode_at(x, y) {
-                            lib.mode = mode;
                         } else if let Some(tab) = hits.tab_at(x, y) {
-                            lib.section = tab;
+                            lib.go_to_section(tab);
                         } else if let Some(at) = hits.at(x, y) {
                             lib.point_at(at);
                             // A click opens what it is on, which is what a
@@ -249,13 +285,28 @@ fn main() -> Result<()> {
                         act(&mut lib, step);
                     }
                 }
-                Event::KeyDown { keycode: Some(key), repeat: false, .. } => {
+                Event::KeyDown {
+                    keycode: Some(key),
+                    repeat: false,
+                    ..
+                } => {
                     // Escape is bound to Back, not to quit — it was hardcoded
                     // here in the first commit and never taken out, so going
                     // back from a console closed the app instead. The window
                     // closes the window; Cmd-Q and Alt-F4 do what they always
                     // do.
                     if let Some(action) = input::action_for_key(&bindings, key) {
+                        if let Some(kb) = typing.as_mut() {
+                            match kb.act(action) {
+                                keyboard::Outcome::Done => {
+                                    println!("typed: {}", kb.text);
+                                    typing = None;
+                                }
+                                keyboard::Outcome::Cancelled => typing = None,
+                                keyboard::Outcome::Typing => {}
+                            }
+                            continue;
+                        }
                         // Back at the top level leaves, which is what Back
                         // means on a handheld with no window to close and no
                         // Cmd-Q to press. Nothing is lost by it: this browses.
@@ -275,6 +326,17 @@ fn main() -> Result<()> {
         let pressed = pads.pressed(&pad_map);
         for action in &pressed {
             if repeat.fire(action, now) {
+                if let Some(kb) = typing.as_mut() {
+                    match kb.act(action) {
+                        keyboard::Outcome::Done => {
+                            println!("typed: {}", kb.text);
+                            typing = None;
+                        }
+                        keyboard::Outcome::Cancelled => typing = None,
+                        keyboard::Outcome::Typing => {}
+                    }
+                    continue;
+                }
                 if matches!(action.as_str(), "back" | "back2") && lib.at_top() {
                     break 'running;
                 }
@@ -284,6 +346,7 @@ fn main() -> Result<()> {
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
+        status.poll(now as u64);
         gfx.resize(screen.width_px, screen.height_px);
 
         // The backdrop is drawn twice, deliberately. Once small, into a
@@ -305,7 +368,17 @@ fn main() -> Result<()> {
         if let Some(backdrop) = &backdrop {
             unsafe { backdrop.draw(screen.width_px, screen.height_px, seconds) };
         }
-        hits = draw(&gfx, frosted.as_ref(), &mut painter, &mut art, &mut lib, &screen, hover);
+        hits = draw(
+            &gfx,
+            frosted.as_ref(),
+            &mut painter,
+            &mut art,
+            &mut lib,
+            &screen,
+            hover,
+            typing.as_ref(),
+            &status,
+        );
         window.gl_swap_window();
 
         // A portrait, and then out. Taken after a handful of frames rather
@@ -362,7 +435,7 @@ fn shot_wanted() -> Option<(String, (u32, u32))> {
             let (w, h) = s.split_once(['x', 'X'])?;
             Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
         })
-        .unwrap_or(POCKET);
+        .unwrap_or((PANEL.0 * PREVIEW / 2, PANEL.1 * PREVIEW / 2));
     Some((path, size))
 }
 
@@ -405,7 +478,10 @@ fn save_shot(window: &sdl2::video::Window, path: &str) -> Result<()> {
 
 fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, String> {
     let shot = shot_wanted();
-    let (w, h) = shot.as_ref().map(|(_, size)| *size).unwrap_or(POCKET);
+    let (w, h) = shot
+        .as_ref()
+        .map(|(_, size)| *size)
+        .unwrap_or((PANEL.0 * PREVIEW / 2, PANEL.1 * PREVIEW / 2));
     let mut builder = video.window("RomM", w, h);
     // Taking a portrait should not throw a window at whoever is using the
     // machine, so it happens off screen.
@@ -423,10 +499,58 @@ fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, Stri
         .map_err(|e| e.to_string())
 }
 
+/// Which tab and console to open on, for previews.
+///
+/// `ROMM_SDL_TAB=library ROMM_SDL_OPEN=megadrive` opens that console's games;
+/// `ROMM_SDL_TAB=mine ROMM_SDL_OPEN=user` opens that kind of collection. Only
+/// useful for judging a screen without pressing anything to get to it — the app
+/// opens on the first tab otherwise.
+fn start_at(lib: &mut library::Library) {
+    if let Ok(want) = std::env::var("ROMM_SDL_TAB")
+        && let Some(i) = library::SECTIONS.iter().position(|s| s.id == want)
+    {
+        lib.go_to_section(i);
+    }
+    // Put the cursor somewhere, for judging a screen that only looks different
+    // partway down it — a divider twenty-seven rows in, say.
+    if let Ok(at) = std::env::var("ROMM_SDL_AT")
+        && let Ok(n) = at.parse::<usize>()
+    {
+        for _ in 0..n {
+            let _ = lib.act("down");
+        }
+    }
+
+    let Ok(open) = std::env::var("ROMM_SDL_OPEN") else {
+        return;
+    };
+    // What "open" names depends on the tab: a console in the Library, a kind
+    // of collection in Collections.
+    let err = if lib.section().id == "mine" {
+        lib.shelf_at = lib
+            .shelves
+            .iter()
+            .position(|sh| sh.name().eq_ignore_ascii_case(&open))
+            .unwrap_or(0);
+        lib.open_shelf()
+    } else {
+        let at = open
+            .parse::<usize>()
+            .ok()
+            .or_else(|| lib.consoles.iter().position(|c| c.slug == open))
+            .unwrap_or(0);
+        lib.console_at = at.min(lib.consoles.len().saturating_sub(1));
+        lib.open_console()
+    };
+    if let Err(e) = err {
+        eprintln!("ROMM_SDL_OPEN={open}: {e:#}");
+    }
+}
+
 /// Milliseconds since SDL started, which is what `padpoll` counts in.
 ///
 /// The subsystem is held rather than asked for each frame: `Sdl::timer`
-/// initialises it, and doing that sixty times a second for a number is work
+/// initializes it, and doing that sixty times a second for a number is work
 /// for nothing — and if it ever failed, time would silently stop and the
 /// backdrop would freeze with nothing to say why.
 fn ticks(timer: &sdl2::TimerSubsystem) -> f64 {
@@ -437,26 +561,16 @@ fn ticks(timer: &sdl2::TimerSubsystem) -> f64 {
 ///
 /// The *drawable* size, not the window size: on a retina display those differ
 /// by the backing scale, and the drawable is the one with pixels in it.
-fn viewport(window: &sdl2::video::Window, scale: Scale) -> Viewport {
+fn viewport(window: &sdl2::video::Window) -> Viewport {
+    // One read of the drawable, used for both halves. Asking twice is how the
+    // scale and the size came from different numbers and the preview reported
+    // 1280x960 points on a window pinned to 640.
     let (w, h) = window.drawable_size();
-    Viewport::new(w as f32, h as f32, scale)
-}
-
-/// How big to draw, for the display this window is on.
-///
-/// Two corrections, and they are different things. The platform's own backing
-/// scale — retina — says how many pixels there are per point it reports.
-/// `viewed_from` says how big a point should be for a panel held at that
-/// distance, which is what stops a 300-DPI handheld getting a scale of three
-/// and a screen with room for two covers on it.
-fn scale_for(video: &sdl2::VideoSubsystem, display: i32, held_at_cm: f32) -> Scale {
-    let dpi = video
-        .display_dpi(display)
-        .map(|(d, _, _)| d)
-        // A display that will not say. One point is one pixel, which is what
-        // every screen did before anybody had two of them.
-        .unwrap_or(romm_desktop::layout::BASELINE_DPI);
-    Scale::viewed_from(dpi, held_at_cm)
+    Viewport::new(
+        w as f32,
+        h as f32,
+        Scale::new((w as f32 / PANEL.0 as f32).max(0.1)),
+    )
 }
 
 /// Say what the machine can and cannot draw, once, at startup.
@@ -488,7 +602,11 @@ fn check_fonts(painter: &mut text::Painter) {
     ] {
         let asked = painter.family_for(sample).unwrap_or("(any)").to_owned();
         if let Some(face) = painter.face_for(sample) {
-            let note = if face == asked || asked == "(any)" { "" } else { "  <- not what was asked for" };
+            let note = if face == asked || asked == "(any)" {
+                ""
+            } else {
+                "  <- not what was asked for"
+            };
             println!("  {what:<12} asked {asked:<20} got {face}{note}");
         }
     }
@@ -535,7 +653,7 @@ fn act(lib: &mut library::Library, action: &str) {
 /// Not a design. It is the smallest thing that is wrong on screen if the units
 /// are wrong: cards that change physical size when the window is dragged
 /// between displays, or a column that appears at the wrong width.
-/// The colours, in one place.
+/// The colors, in one place.
 mod paint {
     use crate::gfx::Rgba;
 
@@ -548,12 +666,19 @@ mod paint {
     pub const TEXT: Rgba = Rgba::rgb(232, 234, 242);
     pub const DIM: Rgba = Rgba::rgb(150, 154, 168);
     pub const FAINT: Rgba = Rgba::rgb(104, 108, 124);
-    /// The plate a mark sits on, so it reads against artwork of any colour.
+    /// The plate a mark sits on, so it reads against artwork of any color.
     /// `.row:hover` — the pointer saying where it is, which is not the same
     /// as the cursor saying what is chosen.
     pub const HOVER: Rgba = Rgba(1.0, 1.0, 1.0, 0.07);
-    pub const MARK: Rgba = Rgba(0.0, 0.0, 0.0, 0.45);
     pub const STAR: Rgba = Rgba::rgb(240, 200, 90);
+    /// A hairline between two halves of one list. Faint on purpose: it is
+    /// separating things, not labelling them.
+    /// Behind a keyboard: dark enough that the page under it stops competing.
+    pub const SCRIM: Rgba = Rgba(0.02, 0.02, 0.04, 0.95);
+    /// The keyboard's own panel. Opaque, not the translucent BAR — a game list
+    /// showing through the keys is exactly what makes them hard to read.
+    pub const SHEET: Rgba = Rgba::rgb(18, 19, 26);
+    pub const RULE: Rgba = Rgba(1.0, 1.0, 1.0, 0.13);
     /// On this machine, and on the server.
     pub const HERE: Rgba = Rgba::rgb(120, 200, 140);
     pub const AWAY: Rgba = Rgba::rgb(150, 160, 180);
@@ -563,35 +688,36 @@ mod paint {
 mod size {
     use romm_desktop::layout::Edges;
 
-    pub const GAP: f32 = 14.0;
-    /// The tab row and the header under it, as `ui/style.css` has them.
-    pub const TABS: f32 = 42.0;
-    pub const HEADER: f32 = 38.0;
-    pub const PICKER: f32 = 260.0;
-    pub const ASIDE: f32 = 320.0;
-    pub const CARD: f32 = 150.0;
-    pub const LABEL: f32 = 13.0;
-    pub const TITLE: f32 = 15.0;
-    /// Two lines of label under a cover, and the marks over it.
-    pub const CAPTION: f32 = LABEL * 1.3 * 2.0 + 6.0;
-    pub const ROW: f32 = 30.0;
+    // Everything here is in panel points, and the panel is 640x480. That is
+    // the whole budget: a 42-point tab row is a *tenth of the screen height*,
+    // which is what the desk-sized numbers these replaced were spending.
+    pub const GAP: f32 = 6.0;
+    /// The tab row. Six tabs across 640 points, so ~104 each.
+    pub const TABS: f32 = 26.0;
+    /// The line under the tabs saying where you are.
+    pub const HEADER: f32 = 20.0;
+    /// The info pane beside the games. Wide enough for a wrapped title and a
+    /// column of facts, and no wider — what is left is the list, and the list
+    /// is the thing being read.
+    pub const ASIDE: f32 = 224.0;
+    pub const CARD: f32 = 96.0;
+    pub const LABEL: f32 = 12.0;
+    pub const TITLE: f32 = 13.0;
+    /// A list row. Tall enough to touch, short enough that a 434-point body
+    /// shows sixteen of them.
+    pub const ROW: f32 = 26.0;
     /// A console tile: the machine's picture above, name and count below.
-    pub const TILE: f32 = 190.0;
-    pub const TILE_ART: f32 = 104.0;
-    pub const TILE_CAPTION: f32 = 50.0;
-    pub const ROUND: f32 = 10.0;
-    /// The Sofa/Desk control in the tab row.
-    pub const SWITCH: f32 = 130.0;
-    /// The Continue playing strip: a heading, a row of covers, their names.
-    pub const STRIP: f32 = 210.0;
-    pub const STRIP_ART: f32 = 130.0;
-    pub const ROUND_SMALL: f32 = 6.0;
+    pub const TILE: f32 = 148.0;
+    pub const TILE_ART: f32 = 66.0;
+    /// Two lines of console name — "Nintendo Entertainment System" needs
+    /// both — then the game count under it, then the tile's own padding.
+    /// Reserving less is what made the count bleed out of the tile and sit
+    /// under the row below.
+    pub const TILE_CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0 + 14.0 + 10.0;
+    pub const ROUND: f32 = 6.0;
+    pub const STRIP_ART: f32 = 96.0;
+    pub const ROUND_SMALL: f32 = 4.0;
     pub const PAD: Edges = Edges::all(GAP);
-
-    /// How tall a card's artwork is for covers of this shape.
-    pub fn art(aspect: f32) -> f32 {
-        CARD / aspect.clamp(0.3, 3.0)
-    }
 }
 
 /// Where each thing was drawn, so the mouse knows what it is over.
@@ -602,7 +728,6 @@ mod size {
 pub struct Hits {
     rows: Vec<(Rect, usize)>,
     tabs: Vec<(Rect, usize)>,
-    modes: Vec<(Rect, library::Mode)>,
     /// Header controls, each remembered as the action it fires.
     ///
     /// One list rather than one field per button: a control in the header is
@@ -621,29 +746,26 @@ impl Hits {
         self.tabs.push((at, index));
     }
 
-    fn mode(&mut self, at: Rect, mode: library::Mode) {
-        self.modes.push((at, mode));
-    }
-
-    fn button(&mut self, at: Rect, action: &'static str) {
-        self.buttons.push((at, action));
-    }
-
     fn button_at(&self, x: f32, y: f32) -> Option<&'static str> {
-        self.buttons.iter().find(|(r, _)| r.contains(x, y)).map(|(_, a)| *a)
-    }
-
-    fn mode_at(&self, x: f32, y: f32) -> Option<library::Mode> {
-        self.modes.iter().find(|(r, _)| r.contains(x, y)).map(|(_, m)| *m)
+        self.buttons
+            .iter()
+            .find(|(r, _)| r.contains(x, y))
+            .map(|(_, a)| *a)
     }
 
     fn at(&self, x: f32, y: f32) -> Option<usize> {
-        self.rows.iter().find(|(r, _)| r.contains(x, y)).map(|(_, i)| *i)
+        self.rows
+            .iter()
+            .find(|(r, _)| r.contains(x, y))
+            .map(|(_, i)| *i)
     }
 
     /// Checked before the rows, because the tab row is drawn over them.
     fn tab_at(&self, x: f32, y: f32) -> Option<usize> {
-        self.tabs.iter().find(|(r, _)| r.contains(x, y)).map(|(_, i)| *i)
+        self.tabs
+            .iter()
+            .find(|(r, _)| r.contains(x, y))
+            .map(|(_, i)| *i)
     }
 }
 
@@ -683,17 +805,17 @@ impl Frame<'_> {
         });
     }
 
-    fn fill(&self, at: Rect, colour: Rgba, round: f32) {
+    fn fill(&self, at: Rect, color: Rgba, round: f32) {
         let at = self.px(at);
         let gfx = self.gfx;
-        gfx.rounded(round * self.screen.scale.factor(), || gfx.fill(at, colour));
+        gfx.rounded(round * self.screen.scale.factor(), || gfx.fill(at, color));
     }
 
-    fn outline(&self, at: Rect, thickness: f32, colour: Rgba, round: f32) {
+    fn outline(&self, at: Rect, thickness: f32, color: Rgba, round: f32) {
         let at = self.px(at);
         let s = self.screen.scale.factor();
         let gfx = self.gfx;
-        gfx.rounded(round * s, || gfx.outline(at, thickness * s, colour));
+        gfx.rounded(round * s, || gfx.outline(at, thickness * s, color));
     }
 
     fn spec(&self, text: impl Into<String>, size: f32) -> text::Spec {
@@ -705,20 +827,20 @@ impl Frame<'_> {
     }
 
     /// A label at the top left of a box. Returns its height, in points.
-    fn label(&mut self, spec: &text::Spec, at: Rect, colour: Rgba) -> f32 {
+    fn label(&mut self, spec: &text::Spec, at: Rect, color: Rgba) -> f32 {
         let at = self.px(at);
-        let h = self.painter.put(self.gfx, spec, at, colour);
+        let h = self.painter.put(self.gfx, spec, at, color);
         self.screen.scale.pt(h)
     }
 
-    fn label_right(&mut self, spec: &text::Spec, at: Rect, colour: Rgba) {
+    fn label_right(&mut self, spec: &text::Spec, at: Rect, color: Rgba) {
         let at = self.px(at);
-        self.painter.put_right(self.gfx, spec, at, colour);
+        self.painter.put_right(self.gfx, spec, at, color);
     }
 
-    fn label_centred(&mut self, spec: &text::Spec, at: Rect, colour: Rgba) {
+    fn label_centered(&mut self, spec: &text::Spec, at: Rect, color: Rgba) {
         let at = self.px(at);
-        self.painter.put_centred(self.gfx, spec, at, colour);
+        self.painter.put_centered(self.gfx, spec, at, color);
     }
 
     /// The pointer's mark on a row, drawn under everything else in it.
@@ -733,21 +855,9 @@ impl Frame<'_> {
     ///
     /// The pad reaches these through their bindings, so the button carries the
     /// action name rather than a closure — one string is the label, the hit
-    /// and the behaviour.
-    fn button(&mut self, label: &str, action: &'static str, at: Rect) {
-        self.fill(at, paint::MARK, size::ROUND_SMALL);
-        let spec = self.spec(label.to_owned(), 12.0);
-        self.label_centred(&spec, at, paint::DIM);
-        let px = self.px(at);
-        self.hits.button(px, action);
-    }
+    /// and the behavior.
 
     /// How wide a pill has to be to hold a word.
-    fn button_width(&mut self, label: &str) -> f32 {
-        let spec = self.spec(label.to_owned(), 12.0);
-        let (w, _) = self.painter.measure(self.gfx, &spec);
-        self.screen.scale.pt(w as f32) + size::GAP * 1.4
-    }
 
     /// A console's own picture, in a box.
     fn console_art(&mut self, slug: &str, at: Rect, round: f32) {
@@ -787,81 +897,498 @@ fn draw(
     lib: &mut library::Library,
     screen: &Viewport,
     hover: Option<usize>,
+    typing: Option<&keyboard::Keyboard>,
+    status: &status::Status,
 ) -> Hits {
-    let mut f =
-        Frame { gfx, glass: frosted, painter, art, screen, hover, hits: Hits::default() };
+    let mut f = Frame {
+        gfx,
+        glass: frosted,
+        painter,
+        art,
+        screen,
+        hover,
+        hits: Hits::default(),
+    };
     let page = Rect::new(0.0, 0.0, screen.width(), screen.height());
 
     let [tabs, header, body] = split3(page.column(
         0.0,
-        &[Size::Fixed(size::TABS), Size::Fixed(size::HEADER), Size::Grow(1.0)],
+        &[
+            Size::Fixed(size::TABS),
+            Size::Fixed(size::HEADER),
+            Size::Grow(1.0),
+        ],
     ));
 
-    // How many columns the body gets, and which. The picker is only a column
-    // of its own where there is room; below that it is the whole body until a
-    // console is opened, which is the handheld's arrangement.
-    // The window's width is a ceiling and Sofa/Desk is what is wanted under
-    // it — see `layout::Panes::at_most`. A narrow window asking for columns
-    // still gets one pane, and the handheld never gets three.
-    let panes = screen.panes().at_most(lib.mode.panes());
-    let showing_games = lib.view == library::View::Roms;
-    let wants = match (panes, showing_games) {
-        (Panes::Three, _) => vec![
-            Size::Fixed(size::PICKER),
-            Size::Grow(1.0),
-            Size::Fixed(size::ASIDE),
-        ],
-        (Panes::Two, _) => vec![Size::Fixed(size::PICKER), Size::Grow(1.0)],
-        (Panes::One, _) => vec![Size::Grow(1.0)],
-    };
-    let columns = body.row(size::GAP, &wants);
-    let (picker, games, aside) = match panes {
-        Panes::Three => (Some(columns[0]), columns[1], Some(columns[2])),
-        Panes::Two => (Some(columns[0]), columns[1], None),
-        Panes::One if showing_games => (None, columns[0], None),
-        Panes::One => (Some(columns[0]), columns[0], None),
-    };
+    // One page at a time, chosen by the tab. There is no Sofa-or-Desk here and
+    // no column count to work out: the panel is 640 points wide and that is
+    // room for one list and one pane beside it, so the arrangement is not a
+    // question the window gets to answer differently on different days.
+    match library::SECTIONS[lib.section.min(library::SECTIONS.len() - 1)].id {
+        "continue" => draw_continue(&mut f, lib, body.inset(size::PAD)),
+        "library" => draw_library(&mut f, lib, body.inset(size::PAD)),
+        "mine" => draw_collections(&mut f, lib, body.inset(size::PAD)),
+        "history" => draw_history(&mut f, lib, body.inset(size::PAD)),
+        "syncing" => draw_syncing(&mut f, lib, body.inset(size::PAD)),
+        // Until Settings is built, its tab is where the keyboard can be looked
+        // at — it is the only screen that will ask for one.
 
-    if let Some(picker) = picker {
-        f.pane(picker, paint::COLUMN, size::ROUND);
-    }
-    if let Some(aside) = aside {
-        f.pane(aside, paint::COLUMN, size::ROUND);
-        draw_detail(&mut f, lib, aside.inset(size::PAD));
+        other => draw_unbuilt(&mut f, other, body),
     }
 
+    // The keyboard sits over whatever asked for it.
+    if let Some(kb) = typing {
+        draw_keyboard(&mut f, kb, page);
+    }
+
+    draw_chrome(&mut f, lib, tabs, header, status);
+    f.hits
+}
+
+/// The Library tab: consoles, then one console's games with a pane beside them.
+///
+/// Two screens rather than two columns. 640 points will not hold a console
+/// picker *and* a game list *and* an info pane, so the picker is the whole page
+/// until a console is opened and then gets out of the way — which is also how
+/// the handheld wants to be read, one thing at a time.
+fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     if lib.consoles.is_empty() {
         let spec = f.wrapped(
             "No consoles in this library.\nRun `romm-desktop sync` to fill it.",
             size::TITLE,
-            page.w * 0.6,
+            area.w * 0.8,
             2,
         );
-        f.label_centred(&spec, page, paint::DIM);
-    } else if let Some(picker) = picker {
-        // The strip of recently played games, above the consoles and only
-        // where the column is wide enough to be a grid — a 260-point picker
-        // has no room for a row of covers, and the webview does not draw one
-        // there either.
-        let area = picker.inset(size::PAD);
-        let area = if picker.w >= size::TILE * 2.0 + size::GAP && !lib.recent().is_empty() {
-            let (strip, rest) = area.split_top(size::STRIP);
-            draw_recent(&mut f, lib, strip);
-            rest.inset(Edges { top: size::GAP, ..Edges::default() })
-        } else {
-            area
-        };
-        draw_consoles(&mut f, lib, area, !showing_games);
-    } else if !showing_games {
-        draw_consoles(&mut f, lib, games.inset(size::PAD), true);
+        f.label_centered(&spec, area, paint::DIM);
+        return;
     }
 
-    if showing_games {
-        draw_games(&mut f, lib, games.inset(size::PAD));
+    if lib.view != library::View::Roms {
+        draw_consoles(f, lib, area, true);
+        return;
     }
 
-    draw_chrome(&mut f, lib, tabs, header);
-    f.hits
+    // The games, and the facts about the one under the cursor. The list is
+    // always a list here — a wall of covers and a sidebar do not both fit, and
+    // between the two the list is what answers "what is in this console".
+    let [list, aside] =
+        <[Rect; 2]>::try_from(area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]))
+            .unwrap();
+    draw_game_list(f, lib, list);
+    f.pane(aside, paint::COLUMN, size::ROUND);
+    draw_detail(f, lib, aside.inset(size::PAD));
+}
+
+/// The Continue tab: what you were last playing, biggest thing on the screen.
+///
+/// First tab because on a handheld it is the answer four times out of five.
+fn draw_continue(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    if lib.recent().is_empty() {
+        let spec = f.wrapped(
+            "Nothing played yet.\nOpen the Library tab and start something.",
+            size::TITLE,
+            area.w * 0.8,
+            2,
+        );
+        f.label_centered(&spec, area, paint::DIM);
+        return;
+    }
+    draw_recent(f, lib, area);
+}
+
+/// The Collections tab: kinds, then collections, then games.
+///
+/// Three levels because the data is three levels and the middle one is not
+/// optional — there are 1,024 company collections in this library, which is not
+/// a list anybody scrolls to the bottom of.
+fn draw_collections(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    match lib.view {
+        library::View::Groups => {
+            let rows: Vec<_> = lib
+                .shelves
+                .iter()
+                .map(|sh| (sh.name().to_owned(), sh.count().to_string()))
+                .collect();
+            draw_shelf(f, area, &rows, lib.shelf_at, lib.mine_count);
+        }
+        library::View::Collections => {
+            let rows: Vec<_> = lib
+                .cols
+                .iter()
+                .map(|c| (c.name.clone(), format!("{}", c.rom_count)))
+                .collect();
+            draw_picker(f, area, &rows, lib.col_at, lib.cols.len());
+        }
+        // A collection of games is a list of games: same list, same info pane.
+        library::View::Roms => {
+            let [list, aside] = <[Rect; 2]>::try_from(
+                area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]),
+            )
+            .unwrap();
+            draw_game_list(f, lib, list);
+            f.pane(aside, paint::COLUMN, size::ROUND);
+            draw_detail(f, lib, aside.inset(size::PAD));
+        }
+        // Not reachable: `go_to_section` puts this tab at `Groups` and only
+        // `back`/`activate` move it. Drawing the root beats drawing nothing.
+        _ => draw_picker(f, area, &[], 0, 0),
+    }
+}
+
+/// The History tab: what was actually played, most time first.
+///
+/// Not the same list as Continue. Continue answers "what was I doing"; this
+/// answers "what have I played", which wants time and counts rather than
+/// artwork, and reads as a table.
+fn draw_history(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    if lib.history.is_empty() {
+        let spec = f.wrapped(
+            "Nothing played yet.\nPlay time arrives with a sync.",
+            size::TITLE,
+            area.w * 0.8,
+            2,
+        );
+        f.label_centered(&spec, area, paint::DIM);
+        return;
+    }
+    let step = size::ROW;
+    lib.relayout(1);
+    let fits = (area.h / step).floor().max(1.0) as usize;
+    let first = lib.history_at.saturating_sub(fits.saturating_sub(1));
+
+    for (offset, game) in lib.history.iter().enumerate().skip(first).take(fits) {
+        let line = Rect::new(
+            area.x,
+            area.y + (offset - first) as f32 * step,
+            area.w,
+            step,
+        );
+        f.hits.row(f.px(line), offset);
+        let on = offset == lib.history_at;
+        f.hovering(offset, line, size::ROUND_SMALL);
+        if on {
+            f.pane(line, paint::CURSOR, size::ROUND_SMALL);
+        }
+
+        let inside = line.inset(Edges::xy(8.0, 5.0));
+        let [title, console, runs, time, when] = <[Rect; 5]>::try_from(inside.row(
+            8.0,
+            &[
+                Size::Grow(1.0),
+                Size::Fixed(74.0),
+                Size::Fixed(42.0),
+                Size::Fixed(54.0),
+                Size::Fixed(64.0),
+            ],
+        ))
+        .unwrap();
+
+        let spec = f.wrapped(&game.name, size::LABEL, title.w, 1);
+        f.label(&spec, title, if on { paint::TEXT } else { paint::DIM });
+        let spec = f.spec(&game.platform, 10.0);
+        f.label(&spec, console, paint::FAINT);
+        let spec = f.spec(
+            if game.runs == 1 {
+                "once".to_owned()
+            } else {
+                format!("{}x", game.runs)
+            },
+            10.0,
+        );
+        f.label_right(&spec, runs, paint::FAINT);
+        let spec = f.spec(played_for(game.seconds), 10.0);
+        f.label_right(&spec, time, if on { paint::TEXT } else { paint::DIM });
+        // The date only. Nobody is looking for the minute a session started.
+        let spec = f.spec(game.last.chars().take(10).collect::<String>(), 10.0);
+        f.label_right(&spec, when, paint::FAINT);
+    }
+}
+
+/// The Syncing tab: the state a sync would change.
+///
+/// Nothing here performs one — that needs the network on a thread the draw loop
+/// does not have yet. What it does is stop the tab being a lie: everything shown
+/// is read from the same cache the other front ends sync into, so it says
+/// truthfully how far behind this device is.
+fn draw_syncing(f: &mut Frame, lib: &library::Library, area: Rect) {
+    let s = &lib.sync;
+    let (games, sessions, seconds) = (s.games_played, s.sessions, s.seconds_played);
+    let facts: [(&str, String); 6] = [
+        (
+            "Server",
+            s.server_version
+                .clone()
+                .unwrap_or_else(|| "not recorded".into()),
+        ),
+        (
+            "Library synced through",
+            s.watermark
+                .as_ref()
+                .map(|w| w.chars().take(10).collect::<String>())
+                .unwrap_or_else(|| "never".into()),
+        ),
+        ("Games in the cache", s.games.to_string()),
+        ("Consoles", s.consoles.to_string()),
+        ("Collections", s.collections.to_string()),
+        (
+            "Play recorded",
+            if sessions == 0 {
+                "none".to_owned()
+            } else {
+                format!(
+                    "{games} games · {sessions} sessions · {}",
+                    played_for(seconds)
+                )
+            },
+        ),
+    ];
+
+    let (top, rest) = area.split_top(24.0);
+    let spec = f.spec("WHAT THIS DEVICE HOLDS", 10.0);
+    f.label(&spec, top, paint::FAINT);
+
+    let table = rest.inset(Edges {
+        top: 4.0,
+        ..Edges::default()
+    });
+    for (i, (label, value)) in facts.iter().enumerate() {
+        let line = Rect::new(table.x, table.y + i as f32 * 22.0, table.w.min(420.0), 20.0);
+        let [name, val] =
+            <[Rect; 2]>::try_from(line.row(10.0, &[Size::Fixed(150.0), Size::Grow(1.0)])).unwrap();
+        let spec = f.spec(*label, size::LABEL);
+        f.label(&spec, name, paint::FAINT);
+        let spec = f.spec(value.as_str(), size::LABEL);
+        f.label(&spec, val, paint::TEXT);
+    }
+
+    let note = Rect::new(
+        table.x,
+        table.y + facts.len() as f32 * 22.0 + 14.0,
+        table.w.min(430.0),
+        60.0,
+    );
+    let spec = f.wrapped(
+        "Pulling the library and pushing saves is not wired up here yet. Sync from \
+         the desktop app and this page will follow.",
+        size::LABEL,
+        note.w,
+        3,
+    );
+    f.label(&spec, note, paint::DIM);
+}
+
+/// A plain list of name and count — the shape both Collections levels take.
+fn draw_picker(f: &mut Frame, area: Rect, rows: &[(String, String)], at: usize, total: usize) {
+    draw_rule_list(f, area, rows, at, total, None)
+}
+
+/// The Collections root: yours, a rule, then RomM's kinds.
+///
+/// The rule is drawn *between* rows rather than being one, so the cursor never
+/// has to step over a thing that cannot be selected — which is the usual way a
+/// divider in a list turns into a navigation bug.
+fn draw_shelf(f: &mut Frame, area: Rect, rows: &[(String, String)], at: usize, mine: usize) {
+    let rule = (mine > 0 && mine < rows.len()).then_some(mine);
+    draw_rule_list(f, area, rows, at, rows.len(), rule)
+}
+
+fn draw_rule_list(
+    f: &mut Frame,
+    area: Rect,
+    rows: &[(String, String)],
+    at: usize,
+    total: usize,
+    rule_before: Option<usize>,
+) {
+    if rows.is_empty() {
+        let spec = f.spec("Nothing here.", size::TITLE);
+        f.label_centered(&spec, area, paint::DIM);
+        return;
+    }
+    let step = size::ROW;
+    // The rule's own space comes off the budget before the rows are counted.
+    // Left out, the last row is pushed past the bottom and dropped — and when
+    // that row is the cursor, the screen has no cursor on it at all.
+    let room = area.h - rule_before.map_or(0.0, |_| size::GAP * 1.6);
+    let fits = (room / step).floor().max(1.0) as usize;
+    let first = at
+        .saturating_sub(fits.saturating_sub(1))
+        .min(total.saturating_sub(1));
+    // The rule occupies space of its own, so everything below it shifts down
+    // rather than the rule being drawn over the row that follows.
+    let shift = |offset: usize| match rule_before {
+        Some(r) if offset >= r && r > first => size::GAP * 1.6,
+        _ => 0.0,
+    };
+
+    for (offset, (name, count)) in rows.iter().enumerate().skip(first).take(fits) {
+        let line = Rect::new(
+            area.x,
+            area.y + (offset - first) as f32 * step + shift(offset),
+            area.w,
+            step,
+        );
+        if line.bottom() > area.bottom() {
+            break;
+        }
+        if rule_before == Some(offset) && offset > first {
+            f.fill(
+                Rect::new(area.x, line.y - size::GAP * 0.8, area.w, 1.0),
+                paint::RULE,
+                0.0,
+            );
+        }
+        f.hits.row(f.px(line), offset);
+        let on = offset == at;
+        f.hovering(offset, line, size::ROUND_SMALL);
+        if on {
+            f.pane(line, paint::CURSOR, size::ROUND_SMALL);
+        }
+        let inside = line.inset(Edges::xy(8.0, 5.0));
+        let [title, n] =
+            <[Rect; 2]>::try_from(inside.row(8.0, &[Size::Grow(1.0), Size::Fixed(60.0)])).unwrap();
+        let spec = f.wrapped(name, size::LABEL, title.w, 1);
+        f.label(&spec, title, if on { paint::TEXT } else { paint::DIM });
+        let spec = f.spec(count.as_str(), 10.0);
+        f.label_right(&spec, n, paint::FAINT);
+    }
+}
+
+/// Seconds as something short enough for a column.
+fn played_for(seconds: i64) -> String {
+    match seconds {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m", s / 60),
+        s => format!("{}h {}m", s / 3600, (s % 3600) / 60),
+    }
+}
+
+/// A keyboard with something in it, for judging the layout.
+///
+/// `ROMM_SDL_KEYBOARD="RetroAchievements token"` or `=secret:Wi-Fi password`.
+/// Only a preview: the real one is opened by a settings field.
+fn demo_keyboard() -> Option<keyboard::Keyboard> {
+    let want = std::env::var("ROMM_SDL_KEYBOARD").ok()?;
+    let (secret, prompt) = match want.strip_prefix("secret:") {
+        Some(rest) => (true, rest.to_owned()),
+        None => (false, want),
+    };
+    let mut kb = keyboard::Keyboard::new(prompt, if secret { "hunter2" } else { "frank" }, secret);
+    kb.row = 1;
+    kb.col = 3;
+    Some(kb)
+}
+
+/// The on-screen keyboard, over whatever asked for it.
+///
+/// Drawn as a sheet across the bottom two thirds rather than a dialog in the
+/// middle: the field being filled has to stay visible while you type into it,
+/// and on a 480-point screen a centered box leaves room for neither.
+fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
+    // Block what is behind it. A keyboard you can read the library through is a
+    // keyboard you keep losing the cursor on, and the page underneath is not
+    // something you can act on while a field is open anyway.
+    f.fill(page, paint::SCRIM, 0.0);
+
+    // Laptop proportions: the key area is about two and a half times as wide as
+    // it is tall, so keys come out wider than they are deep. Filling the height
+    // instead gave 85-point rows — keys the size of postage stamps stacked into
+    // a wall, which is nothing like a keyboard and read as one.
+    let key_h = 34.0;
+    let rows = keyboard::ROWS + 1;
+    let keys_h = rows as f32 * key_h + size::GAP * (rows - 1) as f32;
+    let sheet_h = keys_h + 52.0 + size::GAP * 2.0;
+    let sheet = Rect::new(
+        page.x,
+        page.bottom() - sheet_h,
+        page.w,
+        sheet_h,
+    );
+    f.fill(sheet, paint::SHEET, 0.0);
+
+    let inner = sheet.inset(size::PAD);
+    let (top, keys) = inner.split_top(52.0);
+
+    // What is being asked for, and what has been typed so far.
+    let prompt = f.spec(kb.prompt.as_str(), size::LABEL);
+    f.label(&prompt, Rect { h: 15.0, ..top }, paint::FAINT);
+    let field = Rect { y: top.y + 17.0, h: 26.0, ..top };
+    f.pane(field, paint::CARD, size::ROUND_SMALL);
+    let shown = kb.shown();
+    let text = f.spec(if shown.is_empty() { "…" } else { shown.as_str() }, size::TITLE);
+    f.label(
+        &text,
+        field.inset(Edges::xy(8.0, 5.0)),
+        if shown.is_empty() { paint::FAINT } else { paint::TEXT },
+    );
+
+    let grid = kb.grid();
+    let cell_w = (keys.w - size::GAP * (keyboard::COLS - 1) as f32) / keyboard::COLS as f32;
+    let row_y = |row: usize| keys.y + row as f32 * (key_h + size::GAP);
+
+    for row in 0..keyboard::ROWS {
+        for col in 0..keyboard::COLS {
+            let cell = Rect::new(
+                keys.x + col as f32 * (cell_w + size::GAP),
+                row_y(row),
+                cell_w,
+                key_h,
+            );
+            let on = !kb.on_actions() && kb.row == row && kb.col == col;
+            f.pane(cell, if on { paint::CURSOR } else { paint::CARD }, size::ROUND_SMALL);
+            let ch: String = grid[row].chars().nth(col).into_iter().collect();
+            let spec = f.spec(ch.as_str(), size::TITLE);
+            f.label_centered(&spec, cell, if on { paint::TEXT } else { paint::DIM });
+        }
+    }
+
+    // The action row. Space is drawn wide because that is what a thumb expects,
+    // and stays one cell to the cursor.
+    let weights = [1.4, 1.2, 3.4, 1.4, 1.6];
+    let total: f32 = weights.iter().sum();
+    let usable = keys.w - size::GAP * (weights.len() - 1) as f32;
+    let mut x = keys.x;
+    for (i, action) in keyboard::ACTIONS.iter().enumerate() {
+        let w = usable * weights[i] / total;
+        let cell = Rect::new(x, row_y(keyboard::ROWS), w, key_h);
+        let on = kb.action() == Some(*action);
+        f.pane(cell, if on { paint::CURSOR } else { paint::CARD }, size::ROUND_SMALL);
+        let spec = f.spec(action.label(), size::LABEL);
+        f.label_centered(&spec, cell, if on { paint::TEXT } else { paint::DIM });
+        x += w + size::GAP;
+    }
+}
+
+/// A tab that is in the row but has nothing behind it yet.
+///
+/// It says which one and that it is coming, rather than drawing an empty
+/// frame. The shoulder buttons cycle every tab whether or not it is built, so
+/// landing here has to be legible — an empty page reads as a crash.
+fn draw_unbuilt(f: &mut Frame, id: &str, area: Rect) {
+    let (what, why) = match id {
+        "mine" => (
+            "Collections",
+            "Your RomM collections. The data is already in the cache; this page is not built yet.",
+        ),
+        "history" => ("History", "Everything played, and when. Not built yet."),
+        "syncing" => (
+            "Syncing",
+            "Pulling the library and pushing saves. Nothing here yet — this is the one that has to be written from scratch.",
+        ),
+        "settings" => (
+            "Settings",
+            "Bindings, artwork and the library path. Not built yet.",
+        ),
+        _ => ("Not built", "Nothing here yet."),
+    };
+    // Title and sentence as one block near the middle, not one at a third of
+    // the way down and the other at two thirds with the page between them.
+    let inner = area.inset(size::PAD);
+    let (top, rest) = inner.split_top(inner.h * 0.46);
+    let spec = f.spec(what, 20.0);
+    f.label_centered(&spec, top, paint::DIM);
+    let spec = f.wrapped(why, size::LABEL, rest.w.min(330.0), 4);
+    f.label_centered(&spec, Rect { h: 54.0, ..rest }, paint::FAINT);
 }
 
 fn split3(mut boxes: Vec<Rect>) -> [Rect; 3] {
@@ -870,8 +1397,18 @@ fn split3(mut boxes: Vec<Rect>) -> [Rect; 3] {
 }
 
 /// The tab row and the header, across the top.
-fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) {
-    f.pane(Rect::new(tabs.x, tabs.y, tabs.w, tabs.h + header.h), paint::BAR, 0.0);
+fn draw_chrome(
+    f: &mut Frame,
+    lib: &library::Library,
+    tabs: Rect,
+    header: Rect,
+    status: &status::Status,
+) {
+    f.pane(
+        Rect::new(tabs.x, tabs.y, tabs.w, tabs.h + header.h),
+        paint::BAR,
+        0.0,
+    );
 
     // Tabs, each as wide as its own name — "Library" should not get the same
     // room as "My collections".
@@ -883,9 +1420,13 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
         let slot = Rect::new(x, tabs.y, width, tabs.h);
         let on = i == lib.section;
         if on {
-            f.fill(Rect::new(slot.x, slot.bottom() - 3.0, slot.w, 3.0), paint::CURSOR, 2.0);
+            f.fill(
+                Rect::new(slot.x, slot.bottom() - 3.0, slot.w, 3.0),
+                paint::CURSOR,
+                2.0,
+            );
         }
-        f.label_centred(
+        f.label_centered(
             &spec,
             slot,
             // A tab that does nothing yet is dimmer rather than missing.
@@ -901,55 +1442,64 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
         x += width;
     }
 
-    // Sofa or Desk, as a segmented control — the one thing in the header that
-    // changes the shape of the whole window, so it sits in the tab row where
-    // it is always reachable rather than inside a screen.
-    let switch = Rect::new(tabs.right() - size::GAP - size::SWITCH, tabs.y + 7.0, size::SWITCH, tabs.h - 14.0);
-    f.fill(switch, paint::MARK, size::ROUND_SMALL);
-    let halves = switch.row(0.0, &[Size::Grow(1.0), Size::Grow(1.0)]);
-    for (mode, half) in library::MODES.iter().zip(halves) {
-        let on = *mode == lib.mode;
-        if on {
-            f.fill(half, paint::CURSOR, size::ROUND_SMALL);
-        }
-        let spec = f.spec(mode.label(), 12.0);
-        f.label_centred(&spec, half, if on { paint::TEXT } else { paint::DIM });
-        f.hits.mode(f.px(half), *mode);
+    // The corner every device has: clock, then signal, then charge. Laid out
+    // from the right edge inwards so the clock keeps its place as the other two
+    // appear and disappear — a time that shuffles sideways when the charger
+    // goes in is the sort of thing you notice every time.
+    let mut right = tabs.right() - size::GAP;
+    for part in status.parts().iter().rev() {
+        let spec = f.spec(part.as_str(), 10.0);
+        let (w, _) = f.painter.measure(f.gfx, &spec);
+        let w = f.screen.scale.pt(w as f32);
+        let slot = Rect::new(right - w, tabs.y, w, tabs.h);
+        f.label_centered(&spec, slot, paint::DIM);
+        right = slot.x - size::GAP;
     }
 
     // Where you are on the left, how the list is arranged on the right.
     let inner = header.inset(Edges::xy(size::GAP, 0.0));
-    let here = match lib.view {
-        library::View::Platforms => format!("{} consoles", lib.consoles.len()),
-        library::View::Roms => match lib.console() {
+    let here = match (lib.section().id, lib.view) {
+        ("library", library::View::Platforms) => format!("{} consoles", lib.consoles.len()),
+        ("library", library::View::Roms) => match lib.console() {
             Some(c) => format!("{} — {} games", c.name, lib.shown()),
             None => String::new(),
         },
+        ("continue", _) => format!("{} recently played", lib.recent().len()),
+        ("mine", library::View::Groups) => match lib.mine_count {
+            0 => format!("{} kinds", lib.shelves.len()),
+            n if n == lib.shelves.len() => format!("{n} collections"),
+            n => format!("{n} of yours, {} kinds", lib.shelves.len() - n),
+        },
+        ("mine", library::View::Collections) => format!("{} collections", lib.cols.len()),
+        ("mine", _) => format!("{} — {} games", lib.col_name, lib.shown()),
+        ("history", _) => format!("{} games played", lib.history.len()),
+        (_, _) => lib.section().label.to_owned(),
     };
     let title = f.spec(here, size::TITLE);
     let (_, th) = f.painter.measure(f.gfx, &title);
-    let centred = Rect::new(inner.x, inner.y, inner.w, inner.h)
-        .centre(inner.w, f.screen.scale.pt(th as f32));
-    f.label(&title, Rect { x: inner.x, ..centred }, paint::TEXT);
+    let centered =
+        Rect::new(inner.x, inner.y, inner.w, inner.h).center(inner.w, f.screen.scale.pt(th as f32));
+    f.label(
+        &title,
+        Rect {
+            x: inner.x,
+            ..centered
+        },
+        paint::TEXT,
+    );
 
+    // How the games are ordered, when there are games. No grid/list control:
+    // on this panel it is a list, and a button offering the arrangement that
+    // does not fit is a button that makes the screen worse.
     if lib.view == library::View::Roms {
-        // The grid/list switch, pinned right, and how the list is arranged to
-        // the left of it. A control the pad already has on `layout` — this is
-        // the same action with somewhere to click.
-        let label = lib.look.offers();
-        let width = f.button_width(label);
-        let pill = Rect::new(inner.right() - width, header.y + 6.0, width, header.h - 12.0);
-        f.button(label, "layout", pill);
-
         let filters = lib.filters();
         let arranged = if filters.is_empty() {
             lib.order_label().to_owned()
         } else {
             format!("{}  ·  {}", lib.order_label(), filters.join(" + "))
         };
-        let spec = f.spec(arranged, 12.0);
-        let room = Rect { x: inner.x, w: pill.x - inner.x - size::GAP, ..centred };
-        f.label_right(&spec, room, paint::DIM);
+        let spec = f.spec(arranged, 11.0);
+        f.label_right(&spec, centered, paint::DIM);
     }
 }
 
@@ -958,31 +1508,62 @@ fn draw_chrome(f: &mut Frame, lib: &library::Library, tabs: Rect, header: Rect) 
 /// A shortcut rather than a second library — the webview stops at twenty for
 /// the same reason, and past that it is a screen above the screen you wanted.
 fn draw_recent(f: &mut Frame, lib: &library::Library, area: Rect) {
-    let (heading, row) = area.split_top(22.0);
-    let spec = f.spec("CONTINUE PLAYING", 11.0);
-    f.label(&spec, heading, paint::FAINT);
+    // A wrapped grid rather than the single row this was when it lived in a
+    // 260-point column. It has the whole page now, so it uses it.
+    let across = area.fits(size::GAP, size::CARD).max(1);
+    let grid = area.tracks(size::GAP, across);
+    // Art, one line of name, one line of console. Reserving the two-line
+    // CAPTION here cost a whole row of the page for a second line nothing
+    // draws — the name is wrapped to one. `Tracks::cell` adds the gap on top
+    // of this, so three rows are 3 * step + 2 * GAP and the budget is 422.
+    let step = size::STRIP_ART + 40.0;
 
-    // As many as fit, and no wrapping: this is one row by definition.
-    let card = size::CARD * 0.8;
-    let across = row.fits(size::GAP, card);
-    let grid = row.tracks(size::GAP, across);
-    for (i, game) in lib.recent().iter().take(across).enumerate() {
-        let cell = grid.cell(i, row.h);
+    for (i, game) in lib.recent().iter().enumerate() {
+        let cell = grid.cell(i, step);
+        if cell.bottom() > area.bottom() {
+            break;
+        }
         let (art, caption) = cell.split_top(size::STRIP_ART);
         if !f.cover(game.id, &game.platform, &game.stem, art, size::ROUND_SMALL) {
             f.pane(art, paint::CARD, size::ROUND_SMALL);
         }
-        let name = f.wrapped(&game.name, 12.0, caption.w, 1);
-        let used = f.label(&name, caption.inset(Edges { top: 4.0, ..Edges::default() }), paint::DIM);
+        let name = f.wrapped(&game.name, size::LABEL, caption.w, 1);
+        let used = f.label(
+            &name,
+            caption.inset(Edges {
+                top: 3.0,
+                ..Edges::default()
+            }),
+            paint::DIM,
+        );
         // The console under the name, with the mark that says whether it will
-        // play offline — the strip mixes consoles, so the row cannot say which
+        // play offline — this page mixes consoles, so a row cannot say which
         // one it is on.
-        let under = Rect { y: caption.y + used + 6.0, h: 14.0, ..caption };
+        let under = Rect {
+            y: caption.y + used + 4.0,
+            h: 13.0,
+            ..caption
+        };
         let [dot, where_] =
-            <[Rect; 2]>::try_from(under.row(4.0, &[Size::Fixed(9.0), Size::Grow(1.0)])).unwrap();
-        let spec = f.spec(if game.downloaded { "●" } else { "○" }, 9.0);
-        f.label(&spec, dot, if game.downloaded { paint::HERE } else { paint::AWAY });
-        let spec = f.spec(&game.platform, 10.0);
+            <[Rect; 2]>::try_from(under.row(3.0, &[Size::Fixed(8.0), Size::Grow(1.0)])).unwrap();
+        let spec = f.spec(
+            if game.downloaded {
+                "\u{25cf}"
+            } else {
+                "\u{25cb}"
+            },
+            8.0,
+        );
+        f.label(
+            &spec,
+            dot,
+            if game.downloaded {
+                paint::HERE
+            } else {
+                paint::AWAY
+            },
+        );
+        let spec = f.spec(&game.platform, 9.0);
         f.label(&spec, where_, paint::FAINT);
     }
 }
@@ -1009,12 +1590,11 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
                     false => f.pane(slot, paint::CARD, size::ROUND_SMALL),
                 }
             }
-            let [name, count] =
-                <[Rect; 2]>::try_from(slot.inset(Edges::xy(8.0, 5.0)).row(
-                    6.0,
-                    &[Size::Grow(1.0), Size::Fixed(46.0)],
-                ))
-                .unwrap();
+            let [name, count] = <[Rect; 2]>::try_from(
+                slot.inset(Edges::xy(8.0, 5.0))
+                    .row(6.0, &[Size::Grow(1.0), Size::Fixed(46.0)]),
+            )
+            .unwrap();
             let spec = f.wrapped(&console.name, size::TITLE, name.w, 1);
             f.label(&spec, name, if on { paint::TEXT } else { paint::DIM });
             let spec = f.spec(console.games.to_string(), 11.0);
@@ -1027,7 +1607,9 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
     lib.relayout(across);
     let grid = area.tracks(size::GAP, across);
     let tile_h = size::TILE_ART + size::TILE_CAPTION;
-    let rows = (area.h / (tile_h + size::GAP)).ceil().max(1.0) as usize;
+    // Whole rows only. A part-row looked like more to scroll to and was
+    // really a row with its captions cut in half.
+    let rows = (area.h / (tile_h + size::GAP)).floor().max(1.0) as usize;
     let first_row = (lib.console_at / across).saturating_sub(rows.saturating_sub(2));
 
     for (offset, console) in lib.consoles.iter().enumerate() {
@@ -1049,9 +1631,13 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
         let (art, caption) = inner.split_top(size::TILE_ART - 10.0);
         f.console_art(&console.slug, art, 0.0);
 
-        let name = f.wrapped(&console.name, 13.0, caption.w, 2);
+        let name = f.wrapped(&console.name, size::LABEL, caption.w, 2);
         let used = f.label(&name, caption, if on { paint::TEXT } else { paint::DIM });
-        let under = Rect { y: caption.y + used + 4.0, h: 14.0, ..caption };
+        let under = Rect {
+            y: caption.y + used + 4.0,
+            h: 14.0,
+            ..caption
+        };
         let [dot, count] =
             <[Rect; 2]>::try_from(under.row(4.0, &[Size::Fixed(9.0), Size::Grow(1.0)])).unwrap();
         let spec = f.spec("●", 9.0);
@@ -1061,94 +1647,7 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
     }
 }
 
-/// One console's games: a wall of covers, or a list of names.
-fn draw_games(f: &mut Frame, lib: &mut library::Library, area: Rect) {
-    if lib.look == library::Look::List {
-        draw_game_list(f, lib, area);
-        return;
-    }
-    let cover_h = size::art(lib.aspect);
-    let step = cover_h + size::CAPTION;
-    let across = area.fits(size::GAP, size::CARD);
-    lib.relayout(across);
-    let grid = area.tracks(size::GAP, across);
-
-    // Which rows to draw, and where the list is scrolled to keep the cursor
-    // on screen. `rowwindow` answers both, and answers nothing when the
-    // cursor is already visible — which is what stops the wall moving under
-    // the reader on every keypress.
-    let (shown, at, was) = (lib.shown(), lib.at, lib.scrolled);
-    let ask = |top: f32| rowwindow::Ask::new(shown, across, step + size::GAP, top, area.h);
-    let top = rowwindow::scroll_to(at, ask(was)).unwrap_or(was);
-    lib.scrolled = top;
-    let band = rowwindow::band(ask(top));
-
-    let rows: Vec<_> = lib
-        .showing()
-        .enumerate()
-        .skip(band.first)
-        .take(band.count)
-        .map(|(i, (r, stem))| {
-            (i, r.id, r.name.clone(), r.favourite, r.downloaded, r.platform.clone(), stem.to_owned())
-        })
-        .collect();
-
-    for (i, id, name, favourite, downloaded, platform, stem) in rows {
-        let cell = grid.cell(i, step);
-        let card = Rect { y: cell.y - top, ..cell };
-        if card.bottom() < area.y || card.y > area.bottom() {
-            continue;
-        }
-        f.hits.row(f.px(card), i);
-        let (art, caption) = card.split_top(cover_h);
-        let on = i == lib.at;
-
-        // A pane of glass where there is no artwork, rather than a hole, so
-        // the wall keeps its shape.
-        if !f.cover(id, &platform, &stem, art, size::ROUND_SMALL) {
-            f.pane(art, paint::CARD, size::ROUND_SMALL);
-        }
-        f.hovering(i, card, size::ROUND_SMALL);
-        if on {
-            f.outline(art, 3.0, paint::CURSOR, size::ROUND_SMALL);
-        }
-
-        // The two marks: starred, and whether it will play with the server
-        // off. Both states are drawn, because no mark is not an answer.
-        let marks = Rect::new(art.x + 5.0, art.y + 5.0, art.w, 16.0);
-        let mut mark_x = marks.x;
-        for (glyph, colour) in [
-            favourite.then_some(("★", paint::STAR)),
-            Some(if downloaded { ("●", paint::HERE) } else { ("○", paint::AWAY) }),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let spec = f.spec(glyph, 12.0);
-            let (w, _) = f.painter.measure(f.gfx, &spec);
-            let w = f.screen.scale.pt(w as f32);
-            let plate = Rect::new(mark_x - 3.0, marks.y, w + 6.0, marks.h);
-            f.fill(plate, paint::MARK, 4.0);
-            f.label(&spec, Rect { x: mark_x, y: marks.y + 1.0, ..plate }, colour);
-            mark_x += w + 9.0;
-        }
-
-        let spec = f.wrapped(&name, size::LABEL, caption.w, 2);
-        f.label(
-            &spec,
-            caption.inset(Edges { top: 4.0, ..Edges::default() }),
-            if on { paint::TEXT } else { paint::DIM },
-        );
-    }
-}
-
-/// The same games as rows: a mark, a name, the console, a size.
-///
-/// The layout `.row` in `ui/style.css` describes - one flex line, the name
-/// taking what is left, the numbers pinned right - which is `Rect::row` with
-/// one `Grow` in it. Nothing here measures a cover, so a thousand games cost a
-/// thousand short strings and no decoding at all: this is the layout to be in
-/// on the handheld with an arcade library open.
+/// One console's games.
 fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     let step = size::ROW;
     lib.relayout(1);
@@ -1164,14 +1663,12 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         .enumerate()
         .skip(band.first)
         .take(band.count)
-        .map(|(i, (r, _))| {
-            (i, r.name.clone(), r.favourite, r.downloaded, r.platform.clone(), r.size_bytes)
-        })
+        .map(|(i, (r, _))| (i, r.name.clone(), r.favorite, r.downloaded, r.size_bytes))
         .collect();
 
-    for (i, name, favourite, downloaded, platform, bytes) in rows {
+    for (i, name, favorite, downloaded, bytes) in rows {
         let line = Rect::new(area.x, area.y + i as f32 * step - top, area.w, step);
-        if line.bottom() < area.y || line.y > area.bottom() {
+        if line.bottom() < area.y || line.bottom() > area.bottom() {
             continue;
         }
         f.hits.row(f.px(line), i);
@@ -1181,31 +1678,41 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             f.pane(line, paint::CURSOR, size::ROUND_SMALL);
         }
 
-        let inside = line.inset(Edges::xy(10.0, 6.0));
-        let [mark, title, console, size] = <[Rect; 4]>::try_from(inside.row(
-            10.0,
-            &[Size::Fixed(14.0), Size::Grow(1.0), Size::Fixed(92.0), Size::Fixed(78.0)],
+        // No console column. Every row in this list is the console named in
+        // the header, so it said the same word ninety-four times down the page
+        // and took ninety points the titles needed — "Alex Kidd in the..." was
+        // being cut off to print "megadrive" beside it.
+        let inside = line.inset(Edges::xy(8.0, 5.0));
+        let [mark, title, size] = <[Rect; 3]>::try_from(inside.row(
+            8.0,
+            &[Size::Fixed(12.0), Size::Grow(1.0), Size::Fixed(66.0)],
         ))
         .unwrap();
 
         let spec = f.spec(if downloaded { "\u{25cf}" } else { "\u{25cb}" }, 11.0);
-        f.label(&spec, mark, if downloaded { paint::HERE } else { paint::AWAY });
+        f.label(
+            &spec,
+            mark,
+            if downloaded { paint::HERE } else { paint::AWAY },
+        );
 
         // The star sits before the name rather than beside it, so a starred
         // game and a plain one line their names up anyway.
         let mut left = title;
-        if favourite {
+        if favorite {
             let spec = f.spec("\u{2605}", 11.0);
             let (w, _) = f.painter.measure(f.gfx, &spec);
             let w = f.screen.scale.pt(w as f32) + 5.0;
             f.label(&spec, left, paint::STAR);
-            left = Rect { x: left.x + w, w: left.w - w, ..left };
+            left = Rect {
+                x: left.x + w,
+                w: left.w - w,
+                ..left
+            };
         }
         let spec = f.wrapped(&name, size::LABEL, left.w, 1);
         f.label(&spec, left, if on { paint::TEXT } else { paint::DIM });
 
-        let spec = f.spec(&platform, 11.0);
-        f.label(&spec, console, paint::FAINT);
         let spec = f.spec(romm_desktop::util::human(bytes.max(0) as u64), 11.0);
         f.label_right(&spec, size, paint::DIM);
     }
@@ -1217,13 +1724,22 @@ fn draw_detail(f: &mut Frame, lib: &library::Library, area: Rect) {
     let (art, rest) = area.split_top(area.w / lib.aspect.clamp(0.3, 3.0));
     // The game's own cover if there is one, and the console's picture if not —
     // an empty pane at the top of the column reads as a broken panel.
-    if !f.cover(detail.id, &detail.platform, &detail.stem, art, size::ROUND_SMALL) {
+    if !f.cover(
+        detail.id,
+        &detail.platform,
+        &detail.stem,
+        art,
+        size::ROUND_SMALL,
+    ) {
         f.console_art(&detail.platform, art, size::ROUND_SMALL);
     }
 
     // The one place a title is not cut short: the card had to fit it into 150
     // points and this column is where the whole thing goes.
-    let below = rest.inset(Edges { top: size::GAP, ..Edges::default() });
+    let below = rest.inset(Edges {
+        top: size::GAP,
+        ..Edges::default()
+    });
     let name = f.wrapped(&detail.name, size::TITLE, below.w, 4);
     let used = f.label(&name, below, paint::TEXT);
     let mut y = below.y + used + size::GAP;

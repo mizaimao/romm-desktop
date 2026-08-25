@@ -47,13 +47,13 @@ pub const FILTERS: &[Filter] = &[
 /// the filter meaningless. It exists to narrow, and the honest answer to "we
 /// do not know" is to leave the row out.
 ///
-/// An id nothing recognises keeps everything, so a filter saved by a newer
+/// An id nothing recognizes keeps everything, so a filter saved by a newer
 /// build cannot empty a list on an older one.
 pub fn keeps(id: &str, row: &Row) -> bool {
     match id {
         "local" => row.downloaded,
         "missing" => !row.downloaded,
-        "fav" => row.favourite,
+        "fav" => row.favorite,
         "unplayed" => row.last_played.is_none(),
         "played" => row.last_played.is_some(),
         "great" => row.rating.unwrap_or(-1.0) >= 8.0,
@@ -92,10 +92,10 @@ mod tests {
     /// case decides whether the filter is useful or noise.
     fn rows() -> Vec<Row> {
         vec![
-            Row { id: 1, name: "Alpha".into(), downloaded: true, favourite: false, last_played: None, rating: Some(9.0), players: Some(1), ..Row::default() },
-            Row { id: 2, name: "Beta".into(), downloaded: false, favourite: true, last_played: Some("2026-01-01".into()), rating: Some(4.0), players: Some(2), ..Row::default() },
-            Row { id: 3, name: "Gamma".into(), downloaded: true, favourite: true, last_played: Some("2026-02-02".into()), rating: Some(8.0), players: Some(4), ..Row::default() },
-            Row { id: 4, name: "Delta".into(), downloaded: false, favourite: false, last_played: None, rating: None, players: None, ..Row::default() },
+            Row { id: 1, name: "Alpha".into(), downloaded: true, favorite: false, last_played: None, rating: Some(9.0), players: Some(1), ..Row::default() },
+            Row { id: 2, name: "Beta".into(), downloaded: false, favorite: true, last_played: Some("2026-01-01".into()), rating: Some(4.0), players: Some(2), ..Row::default() },
+            Row { id: 3, name: "Gamma".into(), downloaded: true, favorite: true, last_played: Some("2026-02-02".into()), rating: Some(8.0), players: Some(4), ..Row::default() },
+            Row { id: 4, name: "Delta".into(), downloaded: false, favorite: false, last_played: None, rating: None, players: None, ..Row::default() },
         ]
     }
 

@@ -507,7 +507,7 @@ async function wireIconStyles(box) {
     }
     if (!box.isConnected) return;
     // Nothing installed at all is a different answer from "this style has
-    // none", and it looked identical: every button greyed out, no explanation,
+    // none", and it looked identical: every button grayed out, no explanation,
     // and a Get button below that nobody connects to the row above. Reported
     // from Windows as not being able to cycle them at all, which is exactly
     // what a row of disabled buttons is.

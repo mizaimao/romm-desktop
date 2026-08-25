@@ -70,11 +70,11 @@ pub enum Resolution {
     UnknownCore,
 }
 
-/// Normalise a core display name for matching: lowercase, alphanumerics only.
+/// Normalize a core display name for matching: lowercase, alphanumerics only.
 /// RetroArch's desktop display names differ from ES-DE's labels — `"MAME"` vs
 /// `"MAME - Current"`, `"melonDS DS"` vs `melondsds` — so compare on a reduced
 /// form rather than exact strings.
-fn normalise(s: &str) -> String {
+fn normalize(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
@@ -317,7 +317,7 @@ fn collect(
             .next()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .unwrap_or_default();
-        let core = map.core_by_display_name(&core_dir, normalise);
+        let core = map.core_by_display_name(&core_dir, normalize);
 
         let resolution = match &core {
             None => Resolution::UnknownCore,
@@ -422,10 +422,10 @@ mod tests {
         );
     }
 
-    /// Anything unrecognised is skipped rather than guessed at. A wrong slot is
+    /// Anything unrecognized is skipped rather than guessed at. A wrong slot is
     /// worse than no candidate: it pairs against something on the server.
     #[test]
-    fn unrecognised_names_produce_no_candidate() {
+    fn unrecognized_names_produce_no_candidate() {
         for name in ["notes.txt", "Game.stateX", "Game.state-1", "Game", "retroarch.cfg"] {
             assert_eq!(split_slot(name), None, "{name} should not parse as a save");
         }
@@ -435,7 +435,7 @@ mod tests {
     /// deterministic. Unstable slots accumulate duplicates on the server
     /// without bound, which is the failure this guards.
     #[test]
-    fn every_recognised_save_gets_a_non_empty_stable_slot() {
+    fn every_recognized_save_gets_a_non_empty_stable_slot() {
         let names = [
             "A.srm", "A.sav", "A.state", "A.state0", "A.state9", "A.state.auto", "A.0.srm",
         ];
@@ -478,10 +478,10 @@ mod tests {
     /// reduced form of both.
     #[test]
     fn core_directory_names_reduce_to_a_comparable_form() {
-        assert_eq!(normalise("MAME - Current"), "mamecurrent");
-        assert_eq!(normalise("melonDS DS"), "melondsds");
-        assert_eq!(normalise("Snes9x"), "snes9x");
-        assert_eq!(normalise("Beetle PSX HW"), "beetlepsxhw");
+        assert_eq!(normalize("MAME - Current"), "mamecurrent");
+        assert_eq!(normalize("melonDS DS"), "melondsds");
+        assert_eq!(normalize("Snes9x"), "snes9x");
+        assert_eq!(normalize("Beetle PSX HW"), "beetlepsxhw");
     }
 
     fn map() -> CoreMap {

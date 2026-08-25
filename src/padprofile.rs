@@ -708,7 +708,7 @@ input_r2_axis = "+5"
         }
     }
 
-    /// Guards against the previous behaviour, where standard-mapping indices
+    /// Guards against the previous behavior, where standard-mapping indices
     /// were written out verbatim: on mfi, index 8 is B and index 0 is A, so
     /// `enable_hotkey = 8` plus `exit = 0` meant B+A quit the game.
     #[test]

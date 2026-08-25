@@ -60,7 +60,7 @@ const ROWS = Array.from({ length: 6 }, (_, i) => ({
   platform: "arcade",
   size_bytes: 1,
   downloaded: true,
-  favourite: i === 0,
+  favorite: i === 0,
   rating: null, year: null, last_played: null, players: null,
 }));
 

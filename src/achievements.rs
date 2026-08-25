@@ -6,7 +6,7 @@
 //!
 //! Self-contained on purpose. The credentials are not read from the user's own
 //! `retroarch.cfg` and nothing here depends on how RetroArch is set up: the
-//! same `config.toml` produces the same achievement behaviour against any
+//! same `config.toml` produces the same achievement behavior against any
 //! RetroArch install, including a fresh one that has never been logged in. That
 //! is the same principle as the rest of the launch layer — this app's settings
 //! live in this app's config, and the user's emulator settings are left alone.

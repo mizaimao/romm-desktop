@@ -10,5 +10,7 @@ pub mod covers;
 pub mod gfx;
 pub mod glass;
 pub mod input;
+pub mod keyboard;
 pub mod library;
+pub mod status;
 pub mod text;

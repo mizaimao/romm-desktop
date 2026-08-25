@@ -257,7 +257,7 @@ ignores all of it and builds a parallel ES-DE tree. That is the documented
 decision and the code follows it, but it means re-downloading artwork that is
 already on the card.
 
-**Size:** 2–4 days. The largest mechanical step, and **no new behaviour** — if
+**Size:** 2–4 days. The largest mechanical step, and **no new behavior** — if
 anything changes on the Mac, it is a bug.
 
 **Risk:** moving 51 `cfg` sites is where a silent regression hides. Do it as
@@ -419,7 +419,7 @@ why it is scoped separately rather than discovered mid-build.
 **Toolchain:** Android SDK, **NDK r28+** (28+ gets Google's 16 KB page
 alignment free), **JDK 17**, `cargo-ndk`. Then `cargo tauri android init`,
 which generates `src-tauri/gen/android/`. There is no `gen/android` in this
-repo — mobile has never been initialised.
+repo — mobile has never been initialized.
 
 **Verify the permission first, before anything is built on it:** can the app
 read the on-device ES-DE folder by path with `MANAGE_EXTERNAL_STORAGE`, or does

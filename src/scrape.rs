@@ -323,7 +323,7 @@ fn extension_for(kind: &str, bytes: &[u8]) -> &'static str {
 /// III`. Names that share no opening word are rejected outright, which is what
 /// catches the pairs that are not sequels at all.
 fn plausible_match(rom_name: &str, candidate: &str) -> bool {
-    let (a, b) = (normalise(rom_name), normalise(candidate));
+    let (a, b) = (normalize(rom_name), normalize(candidate));
     if a.is_empty() || b.is_empty() {
         return false;
     }
@@ -338,7 +338,7 @@ fn plausible_match(rom_name: &str, candidate: &str) -> bool {
 /// Lowercase, without the bracketed region and revision tags, and without
 /// punctuation — so `Boogerman: A Pick and Flick Adventure` and
 /// `Boogerman - A Pick and Flick Adventure` are the same string.
-fn normalise(name: &str) -> String {
+fn normalize(name: &str) -> String {
     let mut out = String::new();
     let mut depth = 0i32;
     for c in name.chars() {
@@ -355,8 +355,8 @@ fn normalise(name: &str) -> String {
 
 /// The thing that tells one entry in a series from another: a trailing number,
 /// a roman numeral, or a year. `None` for a title that has none.
-fn edition(normalised: &str) -> Option<String> {
-    let last = normalised.split(' ').next_back()?;
+fn edition(normalized: &str) -> Option<String> {
+    let last = normalized.split(' ').next_back()?;
     let is_roman = !last.is_empty() && last.chars().all(|c| "ivx".contains(c));
     let is_number = last.chars().all(|c| c.is_ascii_digit()) && !last.is_empty();
     let is_year = last.starts_with('\'') && last.len() == 3;
@@ -567,18 +567,18 @@ mod tests {
 
     #[test]
     fn the_numeral_is_what_separates_one_entry_from_the_next() {
-        assert_eq!(edition(&normalise("Road Rash II")), Some("ii".to_owned()));
-        assert_eq!(edition(&normalise("King of the Monsters 2")), Some("2".to_owned()));
-        assert_eq!(edition(&normalise("HardBall '94")), Some("'94".to_owned()));
-        assert_eq!(edition(&normalise("Road Rash")), None);
+        assert_eq!(edition(&normalize("Road Rash II")), Some("ii".to_owned()));
+        assert_eq!(edition(&normalize("King of the Monsters 2")), Some("2".to_owned()));
+        assert_eq!(edition(&normalize("HardBall '94")), Some("'94".to_owned()));
+        assert_eq!(edition(&normalize("Road Rash")), None);
         // A title merely ending in a word is not an edition.
-        assert_eq!(edition(&normalise("Streets of Rage")), None);
+        assert_eq!(edition(&normalize("Streets of Rage")), None);
     }
 
     #[test]
     fn region_tags_and_punctuation_fall_away() {
-        assert_eq!(normalise("Boogerman: A Pick and Flick Adventure (USA) [!]"),
+        assert_eq!(normalize("Boogerman: A Pick and Flick Adventure (USA) [!]"),
                    "boogerman a pick and flick adventure");
-        assert_eq!(normalise("Road Rash (USA, Europe)"), "road rash");
+        assert_eq!(normalize("Road Rash (USA, Europe)"), "road rash");
     }
 }

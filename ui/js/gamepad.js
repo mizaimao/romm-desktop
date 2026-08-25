@@ -33,7 +33,7 @@ const REPEAT_MS = 110;
 const STICK_DEADZONE = 0.55;
 
 /// Below this a trigger is resting, or being brushed. Lower than the stick's
-/// because a trigger is pulled deliberately and has no centre to drift around.
+/// because a trigger is pulled deliberately and has no center to drift around.
 const TRIGGER_DEADZONE = 0.06;
 
 /// Pixels a frame at a full pull. About a screen every third of a second on a

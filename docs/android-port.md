@@ -74,7 +74,7 @@ Mechanical, half a day, nothing to design.
 * Android SDK, **NDK r28 or later** (28+ gets Google's 16 KB page alignment for
   free), **JDK 17**, `cargo-ndk`.
 * `cargo tauri android init` — generates `src-tauri/gen/android/`. There is no
-  `gen/android` in this repo today; mobile has never been initialised.
+  `gen/android` in this repo today; mobile has never been initialized.
 * `cargo tauri android dev` to run on the Thor over ADB, `android build` for an
   APK. The APK is unsigned by default.
 

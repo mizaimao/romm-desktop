@@ -69,7 +69,7 @@ pydantic_core._pydantic_core.ValidationError: 1 validation error for RomFileSche
    input_type=RomFile]
 ```
 
-### Expected behaviour
+### Expected behavior
 
 The endpoint returns the `RomFileSchema` for that file.
 

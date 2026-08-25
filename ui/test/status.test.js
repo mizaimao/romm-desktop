@@ -65,7 +65,7 @@ describe("the server tag", () => {
 
   /// "offline" and a server name are the same shape of word, and the
   /// difference between them is the entire point of the tag.
-  test("the state has a colour of its own, not just a word", () => {
+  test("the state has a color of its own, not just a word", () => {
     const css = readFileSync(join(uiDir, "style.css"), "utf8");
     for (const state of ["on", "off", "unset"]) {
       assert.ok(

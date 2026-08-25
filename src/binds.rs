@@ -189,7 +189,7 @@ impl Bindings {
 
         // Rebinding clears whichever button previously held that action. If
         // that leaves an essential action with no button at all, the pad is
-        // broken rather than customised — a direction that does nothing looks
+        // broken rather than customized — a direction that does nothing looks
         // exactly like an app ignoring the button, and there is nothing on
         // screen to say otherwise. Put the default back.
         for action in ESSENTIAL {
@@ -570,7 +570,7 @@ mod tests {
             std::fs::write(path, &want).expect("writing the fixture");
             return;
         }
-        // Line endings normalised on both sides. Git checks this file out with
+        // Line endings normalized on both sides. Git checks this file out with
         // CRLF on Windows unless told otherwise, so a byte-for-byte comparison
         // fails there and only there — which is a red CI run about nothing,
         // and the fix it suggests would produce a file that then fails

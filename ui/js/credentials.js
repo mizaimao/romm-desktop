@@ -152,12 +152,14 @@ export async function editAchievements(current) {
 export async function editScraper(current) {
   return credentialDialog({
     title: "ScreenScraper",
-    note: "Not used by the app yet. Four fields are needed, not two: ssid/sspassword are your login, devid/devpassword are issued separately to a registered application.",
+    // Your login only. The developer credentials ScreenScraper issues to a
+    // registered application belong to the application, not to the person
+    // using it — asking every user for a pair they would have to register for
+    // is asking them to do our paperwork.
+    note: "Your ScreenScraper login. Not used by the app yet.",
     fields: [
       { field: "scraper_ssid", label: "Login", value: current.scraper_ssid || "" },
       { field: "scraper_sspassword", label: "Password", secret: true, isSet: current.scraper_sspassword_set },
-      { field: "scraper_devid", label: "Dev id", value: current.scraper_devid || "" },
-      { field: "scraper_devpassword", label: "Dev password", secret: true, isSet: current.scraper_devpassword_set },
     ],
   });
 }

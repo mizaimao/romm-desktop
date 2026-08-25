@@ -64,7 +64,7 @@ pub fn of(slug: &str) -> Option<Facts> {
             "Sega",
             1990,
             "Handheld",
-            "A backlit colour handheld against the Game Boy's grey screen — and six AA \
+            "A backlit color handheld against the Game Boy's gray screen — and six AA \
              batteries for three hours of it.",
         ),
         "gb" => f(
@@ -85,7 +85,7 @@ pub fn of(slug: &str) -> Option<Facts> {
             "Nintendo",
             1998,
             "Handheld",
-            "Colour, eight years into the Game Boy's life, and it still played every \
+            "Color, eight years into the Game Boy's life, and it still played every \
              original cartridge.",
         ),
         "mastersystem" => f(
@@ -184,7 +184,7 @@ pub fn of(slug: &str) -> Option<Facts> {
             1990,
             "Console",
             "Mode 7, a sound chip by the man who later built the PlayStation's, and the \
-             back catalogue most people mean by \"retro\".",
+             back catalog most people mean by \"retro\".",
         ),
         "wii" => f(
             "Nintendo",
@@ -204,7 +204,7 @@ pub fn of(slug: &str) -> Option<Facts> {
             "Bandai",
             2000,
             "Handheld",
-            "Colour, and the Final Fantasy remakes that were the reason to own one. Japan \
+            "Color, and the Final Fantasy remakes that were the reason to own one. Japan \
              only.",
         ),
         "g-and-w" => f(
@@ -219,7 +219,7 @@ pub fn of(slug: &str) -> Option<Facts> {
             2015,
             "Console",
             "A console that never existed, with limits invented on purpose: 128×128, \
-             sixteen colours, and a cartridge you can fit in a PNG.",
+             sixteen colors, and a cartridge you can fit in a PNG.",
         ),
         "easyrpg" => f(
             "ASCII / Enterbrain",

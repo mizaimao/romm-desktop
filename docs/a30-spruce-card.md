@@ -143,7 +143,7 @@ already matched and needed nothing.
 Worth knowing: spruce migrates saves itself when you change core, via
 `handle_changed_core` in `spruce/scripts/emu/lib/ra_functions.sh`. It matches
 `<rom name>.*` — any extension — backs up whatever is already there as
-`.bak-<timestamp>`, and deliberately does not copy save states. The behaviour is
+`.bak-<timestamp>`, and deliberately does not copy save states. The behavior is
 controlled by a `keepSavesBetweenCores` setting (Always / Never / Prompt).
 
 ## BIOS — three locations, not one
@@ -192,7 +192,7 @@ Roms/PS/Imgs/Final Fantasy VII (USA).png     <- art keyed to the m3u name
 The `.m3u` lines are `.<Game>/<Game> (Disc N).chd`. PS ends up with 102 entries:
 94 single-disc games and 8 playlists.
 
-## Collections and favourites
+## Collections and favorites
 
 Neither format is documented; both were read from the shipped PyUI source.
 
@@ -205,7 +205,7 @@ Neither format is documented; both were read from the shipped PyUI source.
                  "game_system_name": "FBNEO"}]}]
 ```
 
-Favourites are a flat list of the same entry shape plus `display_name`.
+Favorites are a flat list of the same entry shape plus `display_name`.
 
 `game_system_name` is the **`Emu/` folder name**, not the label —
 `games/utils/game_system.py` says so in a comment on `system_name`. `FC`, not
@@ -215,7 +215,7 @@ Paths are absolute as the device sees them: `/mnt/SDCARD/Roms/...`.
 
 **PyUI validates every path with `os.path.exists` on load and silently drops
 failures**, so build these against what is actually on the card and verify
-before ejecting. 26 collections / 2,641 entries and 380 favourites were written
+before ejecting. 26 collections / 2,641 entries and 380 favorites were written
 with zero broken paths. "Best of n64" was dropped — no N64 on this device.
 
 ## Verifying before eject

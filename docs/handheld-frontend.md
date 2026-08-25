@@ -74,12 +74,12 @@ every other app on the machine. Neither is the answer.
   `u_low/u_mid/u_high`, `u_strength`, `u_speed`. SDL2 gives an OpenGL ES context
   directly; on Mali-G52 (GLES 3.2) the shading language maps 1:1.
 * **`ui/js/tint.js` ports and gets simpler.** It averages a cover down to one
-  colour for the selection glow by drawing into an 8x8 canvas. In Rust the
+  color for the selection glow by drawing into an 8x8 canvas. In Rust the
   images are already decoded; the canvas round-trip disappears.
 * **CSS effects become draw calls.** `ui/style.css` and `ui/settings.css` are
   3,339 lines with 131 uses of `backdrop-filter`, `blur()`, `border-radius`,
   gradients and transitions. `box-shadow` glow becomes a blurred quad or a
-  pre-blurred nine-slice tinted by `tint.js`'s colour. `backdrop-filter` is the
+  pre-blurred nine-slice tinted by `tint.js`'s color. `backdrop-filter` is the
   expensive one — it samples what is behind the element, so it needs
   render-to-texture plus a blur pass.
 * **Video and PDF do not port.** `ui/js/lightbox.js` plays the gameplay video and
@@ -135,7 +135,7 @@ Three returns: the TUI stops being second-class today, duplication goes, and an
 SDL front end inherits all of it for nothing.
 
 **How to know it is right:** `ui/test/` holds ~300 jsdom tests asserting
-behaviour rather than markup, several written after a bug with a comment saying
+behavior rather than markup, several written after a bug with a comment saying
 what they caught. Port the assertions alongside the logic. Both suites must stay
 green: `npm test` and `cargo test --workspace`, plus
 `cargo clippy --workspace --all-targets -- -D warnings`.
@@ -401,7 +401,7 @@ and getting it up early proves the GL context works on the device.
 * **The app's own words, in other languages.** Untouched, and a different job
   entirely: every string in the interface is currently an English literal in
   the source. Nothing about the front end forbids it — the text engine draws
-  any script already — but there is no catalogue, no lookup and no plural
+  any script already — but there is no catalog, no lookup and no plural
   handling. Parked rather than started; it wants doing once, properly, and not
   while the front end is still moving.
 

@@ -30,7 +30,7 @@ pub struct Row {
     pub downloaded: bool,
     /// In a starred collection.
     #[serde(default)]
-    pub favourite: bool,
+    pub favorite: bool,
     /// RomM's 0-10 scale.
     #[serde(default)]
     pub rating: Option<f64>,

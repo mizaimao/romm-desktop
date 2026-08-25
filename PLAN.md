@@ -504,7 +504,7 @@ requirement.
 
 ### Always pass `--config` as well
 
-Independent of portable mode, pass an explicit config so behaviour never depends on what
+Independent of portable mode, pass an explicit config so behavior never depends on what
 RetroArch happens to find:
 
 ```
@@ -784,7 +784,7 @@ than picking one alphabetically.
 
 - Whether save **states** negotiate through `/api/sync/negotiate` — the payload only
   declares a `saves` array. Unverified.
-- `overwrite` / `autocleanup` / `autocleanup_limit` behaviour on `POST /api/saves`.
+- `overwrite` / `autocleanup` / `autocleanup_limit` behavior on `POST /api/saves`.
 - Token refresh/expiry — `expires_at` is returned, no refresh endpoint spotted. The
   existing `personal_token` expires 2026-08-29.
 - `/api/saves/{id}/track`, `/untrack`, `/downloaded`, `/visibility` — purpose unknown.

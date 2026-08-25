@@ -118,7 +118,7 @@ struct PlatformView {
     logo: Option<String>,
     /// True only for the `logo` style, whose art is a white-on-transparent
     /// wordmark and therefore needs inverting on a light page. Hardware and
-    /// console art is full colour and must not be touched.
+    /// console art is full color and must not be touched.
     logo_wordmark: bool,
     /// A fixed picture of the machine for the info pane; see `portrait` above.
     portrait: Option<String>,
@@ -144,7 +144,7 @@ struct RomView {
     size_bytes: i64,
     downloaded: bool,
     /// In a starred collection. Shown with a star and sorted to the top.
-    favourite: bool,
+    favorite: bool,
     /// The three things a list can be ordered by that are not the name. Pulled
     /// out of the metadata blob here rather than in the page, because the page
     /// would have to parse the same JSON once per game on every redraw.
@@ -399,8 +399,6 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "server_username" => ("server", "username"),
         "scraper_ssid" => ("scraper", "ssid"),
         "scraper_sspassword" => ("scraper", "sspassword"),
-        "scraper_devid" => ("scraper", "devid"),
-        "scraper_devpassword" => ("scraper", "devpassword"),
         "achievements_enabled" => ("achievements", "enabled"),
         "achievements_username" => ("achievements", "username"),
         "achievements_token" => ("achievements", "token"),
@@ -1129,11 +1127,11 @@ fn to_views(
     stash: Option<&str>,
 ) -> Vec<RomView> {
     // One query for the whole list rather than one per row.
-    let favourites = state
+    let favorites = state
         .cache
         .lock()
         .ok()
-        .and_then(|c| c.favourite_ids().ok())
+        .and_then(|c| c.favorite_ids().ok())
         .unwrap_or_default();
     let views: Vec<RomView> = rows
         .into_iter()
@@ -1141,7 +1139,7 @@ fn to_views(
             let meta: Option<serde_json::Value> =
                 r.meta_json.as_deref().and_then(|m| serde_json::from_str(m).ok());
             RomView {
-                favourite: favourites.contains(&r.id),
+                favorite: favorites.contains(&r.id),
                 downloaded: row_path(state, &r).is_some(),
                 rating: meta
                     .as_ref()
@@ -1704,7 +1702,7 @@ async fn game_video(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
 /// sizes them in points, so the same physical screen wants the logical figure —
 /// pass it the device pixels there and the window is asked to be twice the size
 /// of the display, which the compositor answers by clamping it to a shape
-/// neither centred nor the size that was asked for.
+/// neither centered nor the size that was asked for.
 ///
 /// Asked of the monitor rather than of the webview: `window.screen` reports CSS
 /// pixels, which is the logical figure on both, so it is wrong on exactly one
@@ -3351,7 +3349,7 @@ impl RomView {
             name: self.name.clone(),
             platform: self.platform.clone(),
             downloaded: self.downloaded,
-            favourite: self.favourite,
+            favorite: self.favorite,
             rating: self.rating,
             year: self.year,
             last_played: self.last_played.clone(),

@@ -32,7 +32,7 @@ export function installTilt(root, { selector = ".gcard", max = MAX } = {}) {
     if (!card || !root.contains(card)) return;
     const r = card.getBoundingClientRect();
     if (!r.width || !r.height) return;
-    // -1..1 from the centre, so the sign falls out and the edges are the
+    // -1..1 from the center, so the sign falls out and the edges are the
     // extremes without a second scaling step.
     const px = (ev.clientX - r.left) / r.width * 2 - 1;
     const py = (ev.clientY - r.top) / r.height * 2 - 1;

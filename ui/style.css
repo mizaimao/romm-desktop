@@ -51,7 +51,7 @@ header {
      color instead of a second hardcoded value that drifts from it. */
   /* Aero glass.
      Vista's look was never just blur. Four things did the work, and leaving any
-     one out gives you a grey bar:
+     one out gives you a gray bar:
 
        a tint the user picks, sitting over the blur rather than replacing it
        a vertical gradient, lighter at the top, as if lit from above
@@ -155,7 +155,7 @@ header h1 {
    it keeps a faint recess — a text box with no boundary at all reads as a
    label and nobody clicks it. Just enough to say "type here". */
 #search {
-  /* The switch's auto margins take the slack now, which is what centres it
+  /* The switch's auto margins take the slack now, which is what centers it
      between the title and this box. Taking it here as well would split the gap
      three ways and put the switch a third of the way along. */
   margin-left: 0;
@@ -340,9 +340,9 @@ main {
   /* The second sheet: less tint and a weaker highlight, so it reads as glass
      behind glass rather than one thick slab. */
   background: transparent;
-  /* The line under the tabs takes the theme color rather than a neutral grey,
+  /* The line under the tabs takes the theme color rather than a neutral gray,
      so changing the tint in Appearance moves the whole bar together instead of
-     leaving a grey rule across the top of a colored window. */
+     leaving a gray rule across the top of a colored window. */
   border-bottom: 1px solid color-mix(in srgb, var(--glass) 28%, transparent);
 }
 #tabbar .stab {
@@ -439,7 +439,7 @@ body.has-pad #tabbar .bumper { display: inline; }
 }
 /* Wordmark art is white-on-transparent and vanishes on a light page, so it is
    inverted there. Hardware and console art is full color — inverting that
-   turns a grey SNES pad into a photographic negative. */
+   turns a gray SNES pad into a photographic negative. */
 @media (prefers-color-scheme: light) {
   .card .logo img.wordmark { filter: invert(1) brightness(.55); }
 }
@@ -1163,7 +1163,7 @@ footer#toast {
    rather than stretching the panel. */
 .set-savesync-status { white-space: pre-wrap; }
 
-/* Console-picture picker. One button per style, greyed out when nothing has
+/* Console-picture picker. One button per style, grayed out when nothing has
    been fetched for it — the count is the point, since a style with two icons
    is worse than the one with thirty. */
 .icon-styles { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -1730,13 +1730,13 @@ body.resizing-detail { user-select: none; cursor: col-resize; }
   text-shadow: 0 0 20px color-mix(in srgb, var(--glass) 70%, transparent);
 }
 
-/* ---- Favourites ----------------------------------------------------------
-   RomM has no per-game favourite: a favourite there is a collection, either
+/* ---- Favorites ----------------------------------------------------------
+   RomM has no per-game favorite: a favorite there is a collection, either
    one the server flags or one named with a star — which is what the
    "★ Best of …" collections on this library are. A game in one of those sorts
    to the top of its console page and is marked here.
 
-   Gold, and only on the star: coloring the whole title would make a favourite
+   Gold, and only on the star: coloring the whole title would make a favorite
    harder to read than an ordinary game, which is backwards. */
 .star {
   color: #f5c451;
@@ -2720,7 +2720,7 @@ code {
 }
 
 /* The platform pane's Take offline, styled as the one in the top bar rather
-   than as a form button. It was a bare `<button>` — a grey slab spanning the
+   than as a form button. It was a bare `<button>` — a gray slab spanning the
    pane — while the identical action in the header is a label with an icon and
    no surface at all. Same control, same look, and left-aligned: a button that
    fills its container reads as "confirm", which this is not. */
@@ -2784,7 +2784,7 @@ code {
 
 
 /* The "do not show again" line in the light gun notice. Left-aligned with the
-   text above it rather than centred with the button, so it reads as a choice
+   text above it rather than centered with the button, so it reads as a choice
    about the message and not a second action. */
 #conflict-overlay .gun-again {
   display: flex;
@@ -2809,7 +2809,7 @@ code {
 }
 #conflict-overlay .cfg-list li { margin-bottom: 8px; opacity: 0.8; }
 #conflict-overlay .cfg-list i { margin-left: 6px; font-style: normal; opacity: 0.6; }
-/* Severity, as a marker rather than a colour wash: the point is which line to
+/* Severity, as a marker rather than a color wash: the point is which line to
    read first, not to make the dialog alarming. */
 #conflict-overlay .cfg-wrong b { color: color-mix(in srgb, var(--accent) 70%, white 30%); }
 
@@ -2830,7 +2830,7 @@ code {
  * nothing" is established for the small ones and was never asked of the big
  * one. It is in the list now, and the question is open again.
  *
- * This turns the glass off and leaves a flat panel of the same colour. Set by
+ * This turns the glass off and leaves a flat panel of the same color. Set by
  * the measuring switch today; a "reduce transparency" setting tomorrow, which
  * is a thing worth having on a handheld anyway.
  */

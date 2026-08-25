@@ -3,7 +3,7 @@
 // Worth testing in jsdom for the same reason the gamepad loop is: this path
 // only runs when a save has genuinely diverged, which is rare and awkward to
 // stage by hand, and a throw inside it would leave the launch blocked with
-// nothing on screen. The behaviour that matters is that cancelling does NOT
+// nothing on screen. The behavior that matters is that cancelling does NOT
 // launch and that an answered conflict is actually sent to the backend.
 
 import { test, describe, before, beforeEach } from "node:test";

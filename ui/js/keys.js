@@ -165,7 +165,7 @@ function focusNode(node) {
 
 /// Left/right stop at the ends of their row rather than spilling into the
 /// neighbouring one, which is what made this feel random. Up/down keep the
-/// column you were in, matched on horizontal centre rather than index — so a
+/// column you were in, matched on horizontal center rather than index — so a
 /// short last row, a row of differently-shaped cards, or the next console's
 /// section all land somewhere that looks directly above or below where you
 /// were. All of that is decided in `src/gridnav.rs`; this picks a column of

@@ -3,7 +3,7 @@
 // The settings window is its own document — settings.html, `#pane`, styled by
 // settings.css. The library window is index.html, styled by style.css. Writing
 // a pane's rules into the wrong one fails *silently*: the markup renders, the
-// behaviour works, every test passes, and the elements simply come out with
+// behavior works, every test passes, and the elements simply come out with
 // the browser's default look. That is how the Icon sets tab shipped with its
 // screenshots at their natural 1280px width — the rules were in style.css
 // under `#settings`, an id that exists in neither document.

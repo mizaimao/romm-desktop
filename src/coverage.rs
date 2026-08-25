@@ -9,7 +9,7 @@
 //!   amount of scraping will produce one. Reporting these as missing is
 //!   reporting a permanent fact as an outstanding task.
 //! * **Never going to be.** Romhacks, translations, unlicensed carts and
-//!   prototypes. ScreenScraper catalogues released games; a patched ROM is not
+//!   prototypes. ScreenScraper catalogs released games; a patched ROM is not
 //!   one, and counting them against coverage means the number can never reach
 //!   100% and so stops meaning anything.
 //!

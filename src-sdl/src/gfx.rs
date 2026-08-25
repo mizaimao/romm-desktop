@@ -46,17 +46,17 @@ void main() {
 }
 "#;
 
-/// The fragment shader: a colour, optionally multiplied by a texture.
+/// The fragment shader: a color, optionally multiplied by a texture.
 ///
 /// One program rather than two. Text is a coverage mask tinted at draw time
-/// and artwork is a picture drawn as it is, and both are "a colour times a
+/// and artwork is a picture drawn as it is, and both are "a color times a
 /// sample" — with a 1x1 white texture standing in when there is no picture, so
 /// a plain rectangle takes the same path as everything else.
-/// The fragment shader: a colour, optionally multiplied by a texture, inside
+/// The fragment shader: a color, optionally multiplied by a texture, inside
 /// rounded corners.
 ///
 /// One program rather than two. Text is a coverage mask tinted at draw time
-/// and artwork is a picture drawn as it is, and both are "a colour times a
+/// and artwork is a picture drawn as it is, and both are "a color times a
 /// sample" — with a 1x1 white texture standing in when there is no picture, so
 /// a plain rectangle takes the same path as everything else.
 ///
@@ -139,7 +139,7 @@ impl Drop for Offscreen {
     }
 }
 
-/// A colour, 0 to 1.
+/// A color, 0 to 1.
 #[derive(Debug, Clone, Copy)]
 pub struct Rgba(pub f32, pub f32, pub f32, pub f32);
 
@@ -289,7 +289,7 @@ impl Gfx {
     /// An image, stretched to fit.
     ///
     /// `tint` multiplies it, which is what makes one text raster serve every
-    /// colour it is drawn in — white with the coverage as alpha, tinted here.
+    /// color it is drawn in — white with the coverage as alpha, tinted here.
     pub fn image(&self, texture: &Texture, x: f32, y: f32, w: f32, h: f32, tint: Rgba) {
         self.quad(texture, x, y, w, h, tint);
     }
@@ -327,7 +327,7 @@ impl Gfx {
             // this context — the backdrop turns blending off for its own quad,
             // which is opaque and covers the frame — leaves the state it
             // wanted behind, and a coverage mask drawn without blending is a
-            // solid rectangle the colour of its tint. Which is what every
+            // solid rectangle the color of its tint. Which is what every
             // label in the library became.
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
@@ -361,7 +361,7 @@ impl Gfx {
 
     /// Upload a coverage mask as white with that coverage for alpha.
     ///
-    /// What text is. Kept white here so the colour is decided at draw time and
+    /// What text is. Kept white here so the color is decided at draw time and
     /// one raster serves a name however it is drawn — dim in a metadata line,
     /// bright under the cursor.
     pub fn upload_coverage(&self, width: u32, height: u32, coverage: &[u8]) -> Texture {
@@ -447,7 +447,7 @@ unsafe fn upload_raw(width: u32, height: u32, pixels: *const std::ffi::c_void) -
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
         // Clamped, or the edge of a card samples the opposite edge of its own
-        // artwork and every cover gets a thin wrong-coloured line round it.
+        // artwork and every cover gets a thin wrong-colored line round it.
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
         gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
         // Rows are not padded. The default is four-byte alignment, which

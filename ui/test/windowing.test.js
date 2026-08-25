@@ -31,7 +31,7 @@ const ROWS = Array.from({ length: TOTAL }, (_, i) => ({
   platform: "arcade",
   size_bytes: 1,
   downloaded: true,
-  favourite: false,
+  favorite: false,
   rating: null, year: null, last_played: null, players: null,
 }));
 
@@ -162,7 +162,7 @@ describe("a two-thousand-row console", () => {
   });
 
   /// A short list is drawn whole — a window over it is machinery with nothing
-  /// to do, and every existing behaviour has to survive that path unchanged.
+  /// to do, and every existing behavior has to survive that path unchanged.
   test("a short list is left alone entirely", () => {
     const few = ROWS.slice(0, 50);
     backend.rows(few);

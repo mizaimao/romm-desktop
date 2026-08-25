@@ -46,14 +46,14 @@ pub fn cycle(from: &str, delta: i32) -> &'static Order {
 
 /// Compare two rows under one order.
 ///
-/// Favourites stay on top whatever the order, which is what they are for. A
+/// Favorites stay on top whatever the order, which is what they are for. A
 /// game with nothing to compare sorts last rather than first: an unrated game
 /// is not a bad one, and a screen that opens on the unknowns is a screen that
 /// answers nothing. Name breaks the tie, so two games with the same rating do
 /// not swap places between one redraw and the next.
 pub fn compare(a: &Row, b: &Row, order_id: &str) -> Ordering {
-    if a.favourite != b.favourite {
-        return if a.favourite { Ordering::Less } else { Ordering::Greater };
+    if a.favorite != b.favorite {
+        return if a.favorite { Ordering::Less } else { Ordering::Greater };
     }
     let order = by_id(order_id).unwrap_or(&ORDERS[0]);
     let keyed = match order.id {
@@ -126,11 +126,11 @@ mod tests {
         assert_eq!(names(&rows, "year"), ["New", "Old", "Undated"]);
     }
 
-    /// What favourites are for.
+    /// What favorites are for.
     #[test]
-    fn favourites_stay_on_top_of_any_order() {
+    fn favorites_stay_on_top_of_any_order() {
         let mut starred = row("Zebra", Some(1.0), None);
-        starred.favourite = true;
+        starred.favorite = true;
         let rows = vec![row("Alpha", Some(9.0), None), starred];
         for order in ORDERS {
             assert_eq!(names(&rows, order.id)[0], "Zebra", "not first under {}", order.id);

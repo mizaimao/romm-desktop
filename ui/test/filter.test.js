@@ -25,10 +25,10 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 // Delta has none on purpose: two thirds of the real library has no player
 // count, and that case decides whether the filter is useful or noise.
 const ROWS = [
-  { id: 1, name: "Alpha", downloaded: true, favourite: false, last_played: null, rating: 9, players: 1 },
-  { id: 2, name: "Beta", downloaded: false, favourite: true, last_played: "2026-01-01", rating: 4, players: 2 },
-  { id: 3, name: "Gamma", downloaded: true, favourite: true, last_played: "2026-02-02", rating: 8, players: 4 },
-  { id: 4, name: "Delta", downloaded: false, favourite: false, last_played: null, rating: null, players: null },
+  { id: 1, name: "Alpha", downloaded: true, favorite: false, last_played: null, rating: 9, players: 1 },
+  { id: 2, name: "Beta", downloaded: false, favorite: true, last_played: "2026-01-01", rating: 4, players: 2 },
+  { id: 3, name: "Gamma", downloaded: true, favorite: true, last_played: "2026-02-02", rating: 8, players: 4 },
+  { id: 4, name: "Delta", downloaded: false, favorite: false, last_played: null, rating: null, players: null },
 ];
 
 before(async () => {
@@ -207,8 +207,8 @@ describe("random comes from this list and no other", () => {
   /// whole library — which is not what a button on a console's page can mean.
   test("only rows from the list on screen", async () => {
     const arcade = [
-      { id: 90, name: "Metal Slug", downloaded: true, favourite: false, last_played: null },
-      { id: 91, name: "Pang", downloaded: true, favourite: false, last_played: null },
+      { id: 90, name: "Metal Slug", downloaded: true, favorite: false, last_played: null },
+      { id: 91, name: "Pang", downloaded: true, favorite: false, last_played: null },
     ];
     state.rows = arcade;
     backend.rows(arcade);

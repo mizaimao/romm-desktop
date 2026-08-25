@@ -36,7 +36,7 @@ pub struct Entry {
     pub path: String,
     #[serde(default)]
     pub desc: String,
-    /// False for BIOS that only unlock optional behaviour.
+    /// False for BIOS that only unlock optional behavior.
     #[serde(default)]
     pub required: bool,
     #[serde(default)]
@@ -55,7 +55,7 @@ fn manifest() -> Vec<Entry> {
 /// enough: `neogeo.zip` is listed against the arcade *systems* while
 /// `geolith`'s own BIOS is listed against the *core*.
 ///
-/// Only the required ones. Optional BIOS unlock extra behaviour rather than
+/// Only the required ones. Optional BIOS unlock extra behavior rather than
 /// making a game run, and pulling the whole set on the way into a game is the
 /// opposite of what an automatic fetch should feel like.
 pub fn required_for(core: &str, platform: &str) -> Vec<String> {
@@ -319,7 +319,7 @@ mod tests {
     /// A file already here with the right size and hash is not fetched again —
     /// this runs against 67 files and most of them will not have changed.
     #[test]
-    fn an_intact_file_is_recognised() {
+    fn an_intact_file_is_recognized() {
         let dir = scratch("intact");
         let path = dir.join("bios.bin");
         std::fs::write(&path, b"hello").unwrap();
@@ -407,7 +407,7 @@ mod tests {
         assert!(required_for("fceumm", "nes").is_empty());
     }
 
-    /// Only the required ones. Optional BIOS unlock extra behaviour rather than
+    /// Only the required ones. Optional BIOS unlock extra behavior rather than
     /// making a game run, and fetching the lot on the way into a game is the
     /// opposite of what an automatic fetch should feel like.
     #[test]

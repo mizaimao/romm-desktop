@@ -57,7 +57,7 @@ const cols = [
 ];
 
 // Which orders each kind of list offers, what each one does to it, that
-// favourites stay on top of any of them, and that the chosen one survives a
+// favorites stay on top of any of them, and that the chosen one survives a
 // restart are all asserted in `pickorder::tests` — against the implementation
 // rather than through a page. What is left here is the bar above the column.
 

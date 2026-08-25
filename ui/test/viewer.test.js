@@ -49,7 +49,7 @@ describe("the arrows stay where they are", () => {
   test("they are placed against the window, not against the picture", () => {
     for (const sel of ["#lightbox .lb-prev", "#lightbox .lb-next"]) {
       assert.equal(style(sel).position, "absolute", `${sel} still sits beside the artwork`);
-      assert.equal(style(sel).top, "50%", `${sel} is not centred down the window`);
+      assert.equal(style(sel).top, "50%", `${sel} is not centered down the window`);
     }
     assert.equal(style("#lightbox .lb-prev").left, "14px");
     assert.equal(style("#lightbox .lb-next").right, "14px");
@@ -128,7 +128,7 @@ describe("the layout switch keeps its place", () => {
   /// the middle of the gap. Taking `margin-left: auto` on the search box as
   /// well would split it three ways and leave the switch a third of the way
   /// along.
-  test("it is centred in the gap, and the search box does not take the slack", () => {
+  test("it is centered in the gap, and the search box does not take the slack", () => {
     const sw = dom.window.getComputedStyle(dom.window.document.getElementById("view-switch"));
     assert.equal(sw.marginLeft, "auto");
     assert.equal(sw.marginRight, "auto");

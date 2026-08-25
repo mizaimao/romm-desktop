@@ -155,7 +155,7 @@ describe("the settings tabs", () => {
     assert.ok(pane.querySelector(".bd-strength"), "brightness was lost");
 
     // The first scheme is the fallback when nothing is stored, which is every
-    // new install — so it has to carry a glass colour rather than being a
+    // new install — so it has to carry a glass color rather than being a
     // placeholder. A missing one used to be a crash before the first paint.
     assert.match(SCHEMES[0].glass ?? "", /^#[0-9a-f]{6}$/i, "the default scheme has no glass");
 

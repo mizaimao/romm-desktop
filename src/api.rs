@@ -76,7 +76,7 @@ pub struct RomMedia {
 pub struct Match {
     #[serde(default)]
     pub name: Option<String>,
-    /// ScreenScraper's game id, when it recognised the file.
+    /// ScreenScraper's game id, when it recognized the file.
     #[serde(default)]
     pub ss_id: Option<i64>,
     /// A complete, ready-to-fetch ScreenScraper media URL, built by the server.

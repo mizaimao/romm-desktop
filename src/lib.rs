@@ -63,7 +63,7 @@ pub mod tui;
 pub mod update;
 pub mod util;
 
-/// RomM release this client's server-specific behaviour was verified against.
+/// RomM release this client's server-specific behavior was verified against.
 ///
 /// Archive hashing, param names and the `/api/config` shape were all read out
 /// of this version. A different server may still work, but the mismatch is

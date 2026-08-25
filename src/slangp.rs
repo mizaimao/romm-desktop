@@ -121,7 +121,7 @@ impl Preset {
 
     /// Names listed in `textures = "A;B;C"`. Each has its own global key
     /// holding a path, which is relative to this preset's directory just as
-    /// `shaderN` is — crt-guest-advanced ships four colour LUTs this way.
+    /// `shaderN` is — crt-guest-advanced ships four color LUTs this way.
     fn texture_names(&self) -> Vec<&str> {
         self.globals()
             .filter(|(k, _)| *k == "textures")
@@ -281,7 +281,7 @@ parameters = "_ADPT_STROBE_STR"
     /// uses the platform separator, which on Windows produced a path mixing
     /// both -- and made this suite fail there while passing on macOS.
     #[test]
-    fn separators_are_normalised_whatever_the_host() {
+    fn separators_are_normalized_whatever_the_host() {
         let base = Preset::parse(
             "shaders = 1\nshader0 = shaders/guest/crt.slang\n",
             // A Windows-shaped directory, so this is a real check there and a
@@ -321,7 +321,7 @@ parameters = "_ADPT_STROBE_STR"
     }
 
     /// Textures listed in `textures = ...` carry relative paths of their own.
-    /// crt-guest-advanced ships four colour LUTs that way, and leaving them
+    /// crt-guest-advanced ships four color LUTs that way, and leaving them
     /// relative means RetroArch cannot load them once the generated preset
     /// lives in a different directory — a silently wrong picture, not an error.
     #[test]

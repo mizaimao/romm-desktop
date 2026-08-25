@@ -157,13 +157,13 @@ impl CoreMap {
     ///
     /// RetroArch names its save subdirectories after the core's display name,
     /// which differs from ES-DE's labels (`"MAME"` vs `"MAME - Current"`), so
-    /// match on a normalised form of both the label and the stem itself.
+    /// match on a normalized form of both the label and the stem itself.
     pub fn core_by_display_name(
         &self,
         display: &str,
-        normalise: fn(&str) -> String,
+        normalize: fn(&str) -> String,
     ) -> Option<String> {
-        let want = normalise(display);
+        let want = normalize(display);
         if want.is_empty() {
             return None;
         }
@@ -173,10 +173,10 @@ impl CoreMap {
                 let Some(core) = emu.core.as_deref() else {
                     continue;
                 };
-                if normalise(core) == want {
+                if normalize(core) == want {
                     return Some(core.to_owned());
                 }
-                if normalise(&emu.label) == want {
+                if normalize(&emu.label) == want {
                     fallback.get_or_insert_with(|| core.to_owned());
                 }
             }

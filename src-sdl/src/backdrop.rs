@@ -18,7 +18,7 @@ use std::ffi::CString;
 /// Shared by every style: the uniforms, the noise, and the vignette.
 ///
 /// One program per style would mean a compilation each at startup and a copy
-/// each of the colour handling, so a style is a body spliced into this frame
+/// each of the color handling, so a style is a body spliced into this frame
 /// and they cannot drift apart on how they read `u_strength` or how they
 /// darken at the edges.
 const HEAD: &str = r#"
@@ -53,7 +53,7 @@ float fbm(vec2 p) {
   return noise(p) * 0.65 + noise(p * 2.1 + 4.7) * 0.35;
 }
 
-// Low -> mid -> high, so a scheme can be three colours rather than two.
+// Low -> mid -> high, so a scheme can be three colors rather than two.
 vec3 ramp(float k) {
   k = clamp(k, 0.0, 1.0);
   return k < 0.5 ? mix(u_low, u_mid, k * 2.0) : mix(u_mid, u_high, (k - 0.5) * 2.0);
@@ -137,7 +137,7 @@ pub fn style(id: &str) -> &'static Style {
     STYLES.iter().find(|s| s.id == id).unwrap_or(&STYLES[0])
 }
 
-/// A colour scheme, as the three stops the ramp blends between.
+/// A color scheme, as the three stops the ramp blends between.
 #[derive(Debug, Clone, Copy)]
 pub struct Scheme {
     pub low: [f32; 3],
@@ -334,11 +334,11 @@ mod tests {
     }
 
 
-    /// Where the fragment colour goes is the preamble's business and nobody
+    /// Where the fragment color goes is the preamble's business and nobody
     /// else's. It was declared in both — the shared frame *and* the modern
     /// preamble — which is a duplicate on one dialect and a compile error on
     /// the other, and the error names a line the body does not contain.
-    /// Where the fragment colour goes is `build`'s business and nobody
+    /// Where the fragment color goes is `build`'s business and nobody
     /// else's. It was declared in both once — the shared frame and the
     /// preamble — which is a duplicate on one dialect and a compile error on
     /// the other, naming a line the body does not contain.

@@ -122,12 +122,22 @@ impl Server {
 pub struct Library {
     #[serde(default = "default_local_root")]
     pub local_root: String,
+    /// Show RomM's own generated collections — by company, genre, franchise,
+    /// series and mode — alongside the ones you made.
+    ///
+    /// On by default, and worth turning off on a handheld: this library has 27
+    /// collections of its own and 1,931 generated ones, and the generated set
+    /// is mostly a way to find a game you could have found faster in the
+    /// Library tab.
+    #[serde(default = "yes")]
+    pub romm_collections: bool,
 }
 
 impl Default for Library {
     fn default() -> Self {
         Self {
             local_root: default_local_root(),
+            romm_collections: true,
         }
     }
 }
@@ -365,7 +375,7 @@ impl Default for ShadersCfg {
 #[derive(Debug, Deserialize)]
 pub struct MediaCfg {
     /// The image on each game in the list or grid. Cartridge art by default:
-    /// it is the thing you recognise a game by when you owned it, and within a
+    /// it is the thing you recognize a game by when you owned it, and within a
     /// console every cartridge is the same shape, so the grid stays even.
     #[serde(default = "cart_art")]
     pub list_art: String,

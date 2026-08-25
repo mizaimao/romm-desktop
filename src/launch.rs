@@ -223,7 +223,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     }
 
     // Point RetroArch at the generated chain when there is one. Passing the
-    // absolute path rather than a catalogue name keeps config_lines honest:
+    // absolute path rather than a catalog name keeps config_lines honest:
     // it only ever emits a shader it has verified exists.
     let extra = format!(
         "{}{}{}{}{}{}{}",

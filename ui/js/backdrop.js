@@ -260,6 +260,104 @@ export const BACKDROPS = [
       }`,
   },
   {
+    id: "towers",
+    label: "Towers",
+    hint: "Columns of light standing on a dark plane that reflects them. The "
+      + "PlayStation 2 boot screen, which drew one for every save you had.",
+    // Six rows of billboards, not a ray march. A distance field of boxes is
+    // sixty-odd steps per pixel, and this is drawn behind cover art on a
+    // machine that may also be running an emulator — the perspective divide is
+    // the only 3D in it, and at a glance nothing here is missing.
+    pace: 0.3,
+    defaults: { strength: 0.7 },
+    body: `
+      // The rows cycle in depth: one reaching the front wraps to the back,
+      // with the phases spread so they arrive evenly rather than in a pulse.
+      // Additive, because the columns are light rather than surfaces — which
+      // also means they never need sorting, and that is what lets a row wrap
+      // past its neighbours without a seam.
+      float horizon = 0.58;
+      vec2 q = vec2((uv.x - 0.5) * aspect.x, uv.y);
+      float ypx = max(fwidth(q.y), 1e-5);
+      float glow = 0.0;
+
+      for (int L = 0; L < 6; L++) {
+        float turn = t * 0.06 + float(L) / 6.0;
+        float phase = fract(turn);
+        float z = mix(6.0, 0.55, phase);
+        float s = 0.42 / z;
+
+        // Where this row's floor meets the screen, and how much world reaches
+        // across one screen unit at that depth.
+        float yb = horizon - s * 0.9;
+        float wx = q.x / s;
+
+        // The row is slid sideways by its own hash, and re-seeded each time it
+        // wraps: rows sharing an offset line up into corridors, and the same
+        // rank of columns coming round again is a carousel.
+        float row = float(L) * 13.0 + floor(turn);
+        float slide = hash(vec2(row, 3.0)) * 7.0;
+        float cx = floor(wx + slide);
+        float fx = fract(wx + slide) - 0.5;
+
+        // Most cells empty. A solid rank is a fence; the boot screen was a
+        // scatter, because it was drawing what was on the memory card.
+        float seed = hash(vec2(cx, row));
+        float there = step(0.7, seed);
+        float height = (0.35 + hash(vec2(cx, row + 1.7)) * 1.5) * s;
+        float tall = max(height, 1e-4);
+
+        // The bar, and a wider soft falloff around it. The halo is most of
+        // what reads as translucent light rather than as a white rectangle.
+        float wpx = max(fwidth(wx), 1e-4);
+        float core = 1.0 - smoothstep(0.10 - wpx, 0.10 + wpx, abs(fx));
+        float halo = exp(-abs(fx) * 9.0) * 0.35;
+
+        // Up the column, in blocks. The seams flatten out once a block is
+        // thinner than a pixel, which at the far end of the range they are —
+        // drawn anyway they stop being blocks and become a shimmer.
+        float up = q.y - yb;
+        float k = clamp(up / tall, 0.0, 1.0);
+        float bs = max(s * 0.22, 1e-4);
+        float band = 0.3 * smoothstep(0.004, 0.022, bs);
+        float box = (1.0 - band) + band * cos(up / bs * 6.28318);
+        // Soft at the foot and at the cap rather than cut off. The canvas is
+        // drawn at half the window's resolution and scaled up, and a hard step
+        // along a vertical edge is the one place that shows.
+        float column = smoothstep(-ypx, ypx, up)
+                     * smoothstep(height + ypx, height - ypx, up);
+        float lit = column * (mix(1.0, 0.4, k) * box + smoothstep(0.8, 1.0, k) * 0.9);
+
+        // A little of the light escaping past the top of the stack.
+        lit += step(height, up) * exp(-max(up - height, 0.0) * 26.0) * 0.35;
+
+        // The reflection, mirrored in the plane and dimmer the further it
+        // falls from the foot of the column.
+        float below = yb - q.y;
+        lit += step(0.0, below) * step(below, height) * exp(-below * 5.0) * 0.5;
+
+        // Haze towards the back, and a fade at both ends of the depth range so
+        // a row never pops in at either edge of it. Depth is a straight
+        // function of the phase here, so the haze can be read off that rather
+        // than off z.
+        glow += lit * (core + halo) * there * (0.45 + 0.55 * phase)
+              * smoothstep(0.0, 0.18, phase) * smoothstep(1.0, 0.82, phase);
+      }
+
+      // The plane itself: not black, and brightest where it meets the horizon,
+      // which is what stops the lower half of the screen reading as a hole
+      // rather than as a floor.
+      float plane = step(q.y, horizon) * smoothstep(0.0, 0.9, q.y / horizon) * 0.13;
+      plane += exp(-abs(q.y - horizon) * 90.0) * 0.1;
+      base = ramp(min(glow * 0.8 + plane, 1.0));
+      // The hottest cores go past the top of the ramp, towards white. Most of
+      // these schemes have a dark navy for their high, and a light source that
+      // never gets brighter than the wall behind it does not read as a light
+      // source — it reads as a painted stripe. Only where several columns'
+      // haloes overlap, so the field stays the color the scheme asked for.
+      base += smoothstep(0.75, 1.6, glow) * 0.35;`,
+  },
+  {
     id: "tunnel",
     label: "Tunnel",
     hint: "Rings running away from the middle. The oldest perspective trick "
@@ -270,7 +368,7 @@ export const BACKDROPS = [
       vec2 q = (uv - 0.5) * aspect;
       float r = max(length(q), 0.02);
       float a = atan(q.y, q.x);
-      // 1/r is the depth: rings bunch towards the centre because that is
+      // 1/r is the depth: rings bunch towards the center because that is
       // where the tunnel is furthest away.
       float rings = sin(1.0 / r * 3.0 - t * 0.8) * 0.5 + 0.5;
       float spokes = sin(a * 8.0 + t * 0.15) * 0.5 + 0.5;
@@ -440,7 +538,7 @@ export function styleSettings(style) {
 /// What a style starts at, before anyone touches it.
 ///
 /// Some shapes are wrong at the shared numbers and always will be: Scanlines
-/// at 32% brightness is a lit grey screen, Static at 32% is a snowstorm over
+/// at 32% brightness is a lit gray screen, Static at 32% is a snowstorm over
 /// the artwork. The style carries its own answer and the shared settings are
 /// the fallback for everything that has no opinion.
 export function styleDefaults(style) {

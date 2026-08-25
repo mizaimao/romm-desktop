@@ -5,7 +5,7 @@
 // adding a tab is a file and a line here.
 //
 // This was one 1,225-line module holding five unrelated panes, their markup,
-// their behaviour, and the key-capture state, which meant every change to any
+// their behavior, and the key-capture state, which meant every change to any
 // setting was a change to the same file. The panes had nothing to do with each
 // other; the file was the only thing they shared.
 
@@ -53,7 +53,7 @@ export function paneHtml(id) {
   return (typeof markup === "function" ? markup() : markup) ?? "";
 }
 
-/// Attach behaviour to a rendered pane.
+/// Attach behavior to a rendered pane.
 ///
 /// Every lookup inside a pane is scoped to `box`, so a pane only ever wires its
 /// own controls and switching tabs cannot leave a listener pointing at an

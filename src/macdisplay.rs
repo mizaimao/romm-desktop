@@ -263,7 +263,7 @@ mod tests {
     }
 
     /// The setting round-trips through config.toml as text, and anything
-    /// unrecognised means the default rather than a panic or a blank screen.
+    /// unrecognized means the default rather than a panic or a blank screen.
     #[test]
     fn the_setting_survives_being_written_and_read_back() {
         for c in [Choice::PreferExternal, Choice::Main, Choice::Index(2)] {

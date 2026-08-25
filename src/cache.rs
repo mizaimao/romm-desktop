@@ -140,10 +140,10 @@ pub struct RomRow {
 /// Every game in a starred collection.
 ///
 /// Two ways in, because there are two ways to star something. RomM flags a
-/// collection it considers a favourite, and a person marks one by putting a
+/// collection it considers a favorite, and a person marks one by putting a
 /// star in the name — which is what happened on this library. Reading both
 /// means the app agrees with whichever the user did.
-const FAVOURITE_ROMS: &str = "SELECT cr.rom_id FROM collection_roms cr \
+const FAVORITE_ROMS: &str = "SELECT cr.rom_id FROM collection_roms cr \
                               JOIN collections c ON c.id = cr.collection_id \
                               WHERE c.is_favorite = 1 OR c.name LIKE '★%'";
 
@@ -546,13 +546,13 @@ impl Cache {
 
     /// Games you have starred, as a set of ids.
     ///
-    /// RomM has no per-game favourite of its own — a favourite there is a
+    /// RomM has no per-game favorite of its own — a favorite there is a
     /// *collection*, either one the server has flagged or one you named with a
     /// star, which is what the "★ Best of …" collections on this library are.
-    /// So a game counts as a favourite when it is in one of those, and this
+    /// So a game counts as a favorite when it is in one of those, and this
     /// stays true whether the starring happened here or on the web.
-    pub fn favourite_ids(&self) -> Result<std::collections::HashSet<i64>> {
-        let mut stmt = self.conn.prepare(FAVOURITE_ROMS)?;
+    pub fn favorite_ids(&self) -> Result<std::collections::HashSet<i64>> {
+        let mut stmt = self.conn.prepare(FAVORITE_ROMS)?;
         let ids = stmt
             .query_map([], |r| r.get::<_, i64>(0))?
             .collect::<Result<std::collections::HashSet<_>, _>>()?;
@@ -669,12 +669,12 @@ impl Cache {
     }
 
     pub fn roms_for(&self, platform_slug: &str) -> Result<Vec<RomRow>> {
-        // Favourites first, then alphabetical within each group. A console
+        // Favorites first, then alphabetical within each group. A console
         // page is a wall of a few hundred names; the handful you actually play
         // being at the top is the difference between browsing and searching.
         let sql = format!(
             "SELECT {ROM_COLUMNS} FROM roms WHERE platform_slug = ?1 \
-             ORDER BY (id IN ({FAVOURITE_ROMS})) DESC, 3 COLLATE NOCASE"
+             ORDER BY (id IN ({FAVORITE_ROMS})) DESC, 3 COLLATE NOCASE"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
@@ -1363,7 +1363,7 @@ mod tests {
     #[test]
     fn collections_accept_both_numeric_and_string_ids() {
         let numeric: crate::api::Collection =
-            serde_json::from_str(r#"{"id": 5, "name": "Favourites", "rom_ids": [1]}"#).unwrap();
+            serde_json::from_str(r#"{"id": 5, "name": "Favorites", "rom_ids": [1]}"#).unwrap();
         assert_eq!(numeric.id, "5");
         assert_eq!(numeric.group(), "user");
 

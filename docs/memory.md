@@ -328,7 +328,7 @@ holding its own blurred copy of what is behind it. One is cheap; eighty-five,
 replaced wholesale every time a windowed list jumps, is the obvious candidate
 for 451 MB of page process.
 
-`body.plain-cards` turns it off and leaves a flat panel of the same colour. It
+`body.plain-cards` turns it off and leaves a flat panel of the same color. It
 is in the stylesheet and inert — nothing sets it but the measuring switch — and
 it is worth having as a real "reduce transparency" setting whatever the
 measurement says, because a handheld wants it anyway.
@@ -732,7 +732,7 @@ screenfuls of hoarding on a handheld is wrong whatever it costs.
 
 The hypothesis it suggested — that releasing the `<img>` does not release the
 decode, because WebKit's image cache is keyed by URL and outlives the element —
-is a real and documented behaviour, but it has not been demonstrated *here*.
+is a real and documented behavior, but it has not been demonstrated *here*.
 It is the first thing the fixed rig should settle.
 
 If it turns out to be true, two things work:

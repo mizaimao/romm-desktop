@@ -28,7 +28,7 @@ two things" rather than a full grid.
 
 ## 2. ROM auditing — L
 
-Verify what is on disk against the No-Intro and Redump catalogues: bad dumps,
+Verify what is on disk against the No-Intro and Redump catalogs: bad dumps,
 wrong regions, overdumps, duplicates, files claiming to be something they are
 not. A library assembled from a 12 TB drive of unknown provenance has all of
 these.
