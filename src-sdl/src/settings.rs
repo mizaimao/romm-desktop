@@ -474,6 +474,15 @@ pub fn panes(
                     },
                 },
                 Entry {
+                    field: "appearance.scheme",
+                    label: "Color scheme",
+                    help: "The colors the backdrop and the glass are drawn in. The same nine the desktop offers.",
+                    kind: Kind::Choice {
+                        at: scheme_at(&cfg.appearance.scheme),
+                        options: scheme_options(),
+                    },
+                },
+                Entry {
                     field: "appearance.backdrop_speed",
                     label: "Speed",
                     help: "How fast the backdrop moves, against the style's own pace.",
@@ -687,6 +696,20 @@ fn backdrop_options() -> Vec<(String, String)> {
         .iter()
         .map(|(id, label)| ((*id).to_owned(), (*label).to_owned()))
         .collect()
+}
+
+fn scheme_options() -> Vec<(String, String)> {
+    crate::backdrop::SCHEMES
+        .iter()
+        .map(|s| (s.id.to_owned(), s.label.to_owned()))
+        .collect()
+}
+
+fn scheme_at(current: &str) -> usize {
+    crate::backdrop::SCHEMES
+        .iter()
+        .position(|s| s.id == current)
+        .unwrap_or(0)
 }
 
 fn backdrop_at(current: &str) -> usize {
@@ -1142,6 +1165,62 @@ mod tests {
         assert!(pane.entries.len() >= 6, "still a stub: {labels:?}");
     }
 
+    /// Both front ends offer the same backdrops and the same color schemes.
+    ///
+    /// The SDL renderer shipped with three styles and no schemes against the
+    /// webview's eleven and nine, which is most of what "the gap is still huge"
+    /// meant. The shader bodies are identical text in both, so there is no
+    /// reason for the lists to differ.
+    #[test]
+    fn the_backdrops_and_schemes_match_the_webviews() {
+        assert_eq!(
+            crate::backdrop::STYLE_LIST.len(),
+            11,
+            "the webview has eleven backdrop styles"
+        );
+        assert_eq!(
+            crate::backdrop::SCHEMES.len(),
+            9,
+            "the webview has nine named schemes, plus a custom one the pad drops"
+        );
+        for id in [
+            "towers",
+            "starfield",
+            "tunnel",
+            "waves",
+            "sweep",
+            "static",
+            "grid",
+            "stars",
+        ] {
+            assert!(
+                crate::backdrop::STYLE_LIST.iter().any(|(s, _)| *s == id),
+                "{id} is in the webview and not here"
+            );
+        }
+        for id in [
+            "midnight", "frost", "abyss", "moss", "ember", "rust", "wine", "plum", "slate",
+        ] {
+            assert!(
+                crate::backdrop::SCHEMES.iter().any(|s| s.id == id),
+                "{id} is in the webview and not here"
+            );
+        }
+    }
+
+    /// Every ported style still compiles as a shader body, in the sense that it
+    /// is not empty and mentions the one variable the frame is built from.
+    #[test]
+    fn every_ported_style_has_a_body_that_sets_the_colour() {
+        for style in crate::backdrop::STYLES {
+            assert!(
+                style.body.contains("base"),
+                "{} never assigns base, so it would draw nothing",
+                style.id
+            );
+        }
+    }
+
     /// The backdrop list is the renderer's own, so a style added to the shader
     /// table cannot go missing from the setting that picks it.
     #[test]
@@ -1149,6 +1228,11 @@ mod tests {
         let opts = backdrop_options();
         assert_eq!(opts.len(), crate::backdrop::STYLE_LIST.len());
         assert_eq!(backdrop_at("aurora"), 1);
+        assert_eq!(
+            scheme_at("nonsense"),
+            0,
+            "an unknown scheme is the first, not a panic"
+        );
         assert_eq!(
             backdrop_at("nonsense"),
             0,

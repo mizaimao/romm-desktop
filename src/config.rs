@@ -162,7 +162,9 @@ pub struct ControllersCfg {
 
 impl Default for ControllersCfg {
     fn default() -> Self {
-        Self { mirror_player_one: true }
+        Self {
+            mirror_player_one: true,
+        }
     }
 }
 
@@ -199,7 +201,11 @@ pub struct SavesCfg {
 
 impl Default for SavesCfg {
     fn default() -> Self {
-        Self { root: default_saves_root(), auto_sync: true, confirm_delete_state: false }
+        Self {
+            root: default_saves_root(),
+            auto_sync: true,
+            confirm_delete_state: false,
+        }
     }
 }
 
@@ -239,8 +245,10 @@ pub struct CoresCfg {
 /// chosen — every row was produced by probing the romset headless against the
 /// core — and it made two thirds of the user's config file a table no user
 /// should have to read.
-pub const ARCADE_CORE_MAP: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/arcade-core-map.toml"));
+pub const ARCADE_CORE_MAP: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/data/arcade-core-map.toml"
+));
 
 /// The compiled-in table. Infallible by construction: a malformed file fails
 /// the test below, which runs at build time, rather than failing a user.
@@ -314,6 +322,10 @@ pub struct AppearanceCfg {
     /// this is the SDL front end's and the two do not have to agree.
     #[serde(default = "default_backdrop")]
     pub backdrop: String,
+    /// Which color scheme the backdrop and the glass take — an id from
+    /// `ui/js/backdrop.js`'s list, shared with the webview.
+    #[serde(default = "default_scheme")]
+    pub scheme: String,
     /// How fast it moves, as a percentage of the style's own pace.
     #[serde(default = "hundred")]
     pub backdrop_speed: i64,
@@ -338,6 +350,7 @@ impl Default for AppearanceCfg {
             app_icon: None,
             viewing_distance_cm: None,
             backdrop: default_backdrop(),
+            scheme: default_scheme(),
             backdrop_speed: hundred(),
             backdrop_strength: hundred(),
             glass: default_glass(),
@@ -347,6 +360,10 @@ impl Default for AppearanceCfg {
 
 fn default_backdrop() -> String {
     "blobs".to_owned()
+}
+
+fn default_scheme() -> String {
+    "midnight".to_owned()
 }
 
 fn hundred() -> i64 {
@@ -390,7 +407,10 @@ fn default_icon_style() -> String {
 
 impl Default for IconsCfg {
     fn default() -> Self {
-        Self { style: default_icon_style(), set: String::new() }
+        Self {
+            style: default_icon_style(),
+            set: String::new(),
+        }
     }
 }
 
@@ -414,7 +434,11 @@ pub struct ShadersCfg {
 
 impl Default for ShadersCfg {
     fn default() -> Self {
-        Self { enabled: true, by_platform: BTreeMap::new(), motion: None }
+        Self {
+            enabled: true,
+            by_platform: BTreeMap::new(),
+            motion: None,
+        }
     }
 }
 
@@ -442,7 +466,10 @@ fn mix_art() -> String {
 
 impl Default for MediaCfg {
     fn default() -> Self {
-        Self { list_art: cart_art(), detail_art: mix_art() }
+        Self {
+            list_art: cart_art(),
+            detail_art: mix_art(),
+        }
     }
 }
 
@@ -641,8 +668,8 @@ impl Config {
             // Absent config is fine for commands that don't touch the server.
             return Ok(Self::default().with_shipped_cores());
         }
-        let raw = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let raw =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let cfg: Self =
             toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
         Ok(cfg.with_shipped_cores())
@@ -688,7 +715,6 @@ impl Config {
         PathBuf::from(&self.library.local_root).join("themes")
     }
 }
-
 
 /// Set `key = "value"` inside `[table]` in a TOML file, creating the table if
 /// needed.
@@ -755,7 +781,12 @@ fn write_entry(path: &str, table: &str, key: &str, value: Option<&str>) -> Resul
 /// As [`write_entry`], with the right-hand side written verbatim — for values
 /// that are not TOML strings.
 fn write_raw(path: &str, table: &str, key: &str, value: Option<&str>) -> Result<()> {
-    write_line(path, table, key, value.map(|v| format!("{} = {v}", toml_key(key))))
+    write_line(
+        path,
+        table,
+        key,
+        value.map(|v| format!("{} = {v}", toml_key(key))),
+    )
 }
 
 fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Result<()> {
@@ -772,7 +803,11 @@ fn write_line(path: &str, table: &str, key: &str, entry: Option<String>) -> Resu
 /// one at a time is forty-five read-modify-writes of config.toml for a single
 /// press of a rebind button, and a file rewritten that often is one that
 /// eventually gets caught half-written.
-pub fn set_table_entries(path: &str, table: &str, entries: &[(String, Option<String>)]) -> Result<()> {
+pub fn set_table_entries(
+    path: &str,
+    table: &str,
+    entries: &[(String, Option<String>)],
+) -> Result<()> {
     let lines: Vec<(String, Option<String>)> = entries
         .iter()
         .map(|(key, value)| {
@@ -809,7 +844,6 @@ fn write_lines(path: &str, table: &str, entries: &[(String, Option<String>)]) ->
 
 /// Put one key where it belongs in `lines`. Returns whether anything changed.
 fn edit(lines: &mut Vec<String>, header: &str, key: &str, entry: Option<String>) -> bool {
-
     // Locate the table, and the key within it.
     let table_at = lines.iter().position(|l| l.trim() == header);
     let Some(start) = table_at else {
@@ -865,12 +899,14 @@ mod tests {
     #[test]
     fn appearance_defaults_survive_a_config_with_no_appearance_table() {
         let cfg: Config = toml::from_str("[server]\nurl = \"http://x\"\n").unwrap();
-        assert_eq!(cfg.appearance.backdrop_strength, 100, "backdrop drawn at nothing");
+        assert_eq!(
+            cfg.appearance.backdrop_strength, 100,
+            "backdrop drawn at nothing"
+        );
         assert_eq!(cfg.appearance.backdrop_speed, 100, "backdrop frozen");
         assert_eq!(cfg.appearance.backdrop, "blobs");
         assert!(cfg.appearance.glass > 0, "panels drawn with no glass");
     }
-
 
     /// A whole table at once, which is what the bindings need: 29 actions and
     /// 16 buttons, written one at a time, is forty-five read-modify-writes of
@@ -902,8 +938,15 @@ mod tests {
         let keys = doc.get("bindings").and_then(|b| b.get("keys")).unwrap();
         assert_eq!(keys.get("sortMenu").unwrap().as_str(), Some("s"));
         assert_eq!(keys.get("filterMenu").unwrap().as_str(), Some("f"));
-        assert_eq!(keys.get("left").unwrap().as_str(), Some(""), "unbound was not written");
-        assert!(keys.get("random").is_none(), "a key nobody set was written anyway");
+        assert_eq!(
+            keys.get("left").unwrap().as_str(),
+            Some(""),
+            "unbound was not written"
+        );
+        assert!(
+            keys.get("random").is_none(),
+            "a key nobody set was written anyway"
+        );
         // And the rest of the file is untouched.
         assert_eq!(
             doc.get("server").unwrap().get("url").unwrap().as_str(),
@@ -928,13 +971,26 @@ mod tests {
         )
         .unwrap();
 
-        super::set_table_entries(file, "cores", &[("nes".to_owned(), Some("mesen".to_owned()))])
-            .unwrap();
+        super::set_table_entries(
+            file,
+            "cores",
+            &[("nes".to_owned(), Some("mesen".to_owned()))],
+        )
+        .unwrap();
 
         let after = std::fs::read_to_string(&path).unwrap();
-        assert!(after.contains("# why this console needs this core"), "a comment was lost");
-        assert!(after.contains("# and why not the other one"), "a comment was lost");
-        assert!(after.contains("nes = \"mesen\""), "the value was not changed");
+        assert!(
+            after.contains("# why this console needs this core"),
+            "a comment was lost"
+        );
+        assert!(
+            after.contains("# and why not the other one"),
+            "a comment was lost"
+        );
+        assert!(
+            after.contains("nes = \"mesen\""),
+            "the value was not changed"
+        );
     }
 
     /// Nothing to change means nothing to write. Rebinding one button walks
@@ -950,8 +1006,12 @@ mod tests {
         std::fs::write(&path, "[cores]\nnes = \"mesen\"\n").unwrap();
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
 
-        super::set_table_entries(file, "cores", &[("nes".to_owned(), Some("mesen".to_owned()))])
-            .unwrap();
+        super::set_table_entries(
+            file,
+            "cores",
+            &[("nes".to_owned(), Some("mesen".to_owned()))],
+        )
+        .unwrap();
 
         assert_eq!(
             std::fs::metadata(&path).unwrap().modified().unwrap(),
@@ -979,7 +1039,10 @@ mod tests {
         .unwrap();
 
         let cfg = Config::load_from(&path).expect("an old config still has to load");
-        assert_eq!(cfg.server.url, "http://dev.lan", "the rest of the file was lost");
+        assert_eq!(
+            cfg.server.url, "http://dev.lan",
+            "the rest of the file was lost"
+        );
         assert_eq!(cfg.retroarch.autofire, "off");
 
         // `true` meant rapid fire was wanted, so it stays wanted — on the
@@ -999,7 +1062,9 @@ mod tests {
         for old in ["a", "bottom"] {
             std::fs::write(&path, format!("[retroarch]\nautofire = \"{old}\"\n")).unwrap();
             assert_eq!(
-                crate::tweaks::AutoFire::parse(&Config::load_from(&path).unwrap().retroarch.autofire),
+                crate::tweaks::AutoFire::parse(
+                    &Config::load_from(&path).unwrap().retroarch.autofire
+                ),
                 crate::tweaks::AutoFire::LeftBumper,
                 "{old} lost its rapid fire"
             );
@@ -1007,7 +1072,9 @@ mod tests {
         for old in ["y", "top"] {
             std::fs::write(&path, format!("[retroarch]\nautofire = \"{old}\"\n")).unwrap();
             assert_eq!(
-                crate::tweaks::AutoFire::parse(&Config::load_from(&path).unwrap().retroarch.autofire),
+                crate::tweaks::AutoFire::parse(
+                    &Config::load_from(&path).unwrap().retroarch.autofire
+                ),
                 crate::tweaks::AutoFire::Top,
                 "{old} did not keep the button it named"
             );
@@ -1044,8 +1111,7 @@ mod tests {
     /// silently disable every install in an existing config.
     #[test]
     fn an_install_is_enabled_unless_it_says_otherwise() {
-        let cfg: Config =
-            toml::from_str("[[retroarch.installs]]\npath = \"/ra\"\n").unwrap();
+        let cfg: Config = toml::from_str("[[retroarch.installs]]\npath = \"/ra\"\n").unwrap();
         assert_eq!(cfg.retroarch.ordered_paths(), ["/ra"]);
     }
 
@@ -1053,8 +1119,7 @@ mod tests {
     /// only sets `root` has to keep working untouched.
     #[test]
     fn the_legacy_single_root_still_works_and_is_superseded() {
-        let legacy: Config =
-            toml::from_str("[retroarch]\nroot = \"/old\"\n").unwrap();
+        let legacy: Config = toml::from_str("[retroarch]\nroot = \"/old\"\n").unwrap();
         assert_eq!(legacy.retroarch.ordered_paths(), ["/old"]);
 
         let both: Config = toml::from_str(
@@ -1096,7 +1161,9 @@ mod tests {
         let path = dir.join("config.toml");
         std::fs::write(&path, "[server\nurl = ").unwrap();
 
-        let err = Config::load_from(&path).expect_err("not valid TOML").to_string();
+        let err = Config::load_from(&path)
+            .expect_err("not valid TOML")
+            .to_string();
         assert!(err.contains("config.toml"), "got: {err}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1105,9 +1172,13 @@ mod tests {
     /// the whole footprint — which is what makes "delete that folder" true.
     #[test]
     fn every_download_location_derives_from_one_setting() {
-        let cfg: Config =
-            toml::from_str("[library]\nlocal_root = \"/data/romm\"\n").unwrap();
-        for dir in [cfg.local_roms_dir(), cfg.media_dir(), cfg.system_dir(), cfg.themes_dir()] {
+        let cfg: Config = toml::from_str("[library]\nlocal_root = \"/data/romm\"\n").unwrap();
+        for dir in [
+            cfg.local_roms_dir(),
+            cfg.media_dir(),
+            cfg.system_dir(),
+            cfg.themes_dir(),
+        ] {
             assert!(
                 dir.starts_with("/data/romm"),
                 "{} escaped the library root",
@@ -1121,14 +1192,12 @@ mod tests {
     /// off, which is indistinguishable from never having set them up.
     #[test]
     fn the_old_cheevos_section_name_is_still_accepted() {
-        let renamed: Config = toml::from_str(
-            "[achievements]\nenabled = true\nusername = \"frank\"\ntoken = \"t\"\n",
-        )
-        .unwrap();
-        let legacy: Config = toml::from_str(
-            "[cheevos]\nenabled = true\nusername = \"frank\"\ntoken = \"t\"\n",
-        )
-        .unwrap();
+        let renamed: Config =
+            toml::from_str("[achievements]\nenabled = true\nusername = \"frank\"\ntoken = \"t\"\n")
+                .unwrap();
+        let legacy: Config =
+            toml::from_str("[cheevos]\nenabled = true\nusername = \"frank\"\ntoken = \"t\"\n")
+                .unwrap();
 
         for (label, cfg) in [("achievements", renamed), ("cheevos", legacy)] {
             let s = cfg.achievements.settings();
@@ -1174,7 +1243,10 @@ mod tests {
         )
         .expect("an older config must still load");
         assert_eq!(old.achievements.settings().credential(), None);
-        assert!(!old.achievements.settings().usable(), "a password still logs in");
+        assert!(
+            !old.achievements.settings().usable(),
+            "a password still logs in"
+        );
         assert!(s.hardcore);
         assert!(s.test_unofficial);
         let out = crate::achievements::config_lines(&s);
@@ -1221,7 +1293,11 @@ mod tests {
     #[test]
     fn the_shipped_arcade_table_parses_and_is_all_arcade() {
         let map = arcade_core_map();
-        assert!(map.len() > 100, "only {} rows — did the table lose its contents?", map.len());
+        assert!(
+            map.len() > 100,
+            "only {} rows — did the table lose its contents?",
+            map.len()
+        );
         for (game, core) in &map {
             assert!(game.starts_with("arcade/"), "{game} is not an arcade path");
             assert!(game.ends_with(".zip"), "{game} is not a romset");
@@ -1239,8 +1315,13 @@ mod tests {
         let path = dir.join("config.toml");
         std::fs::write(&path, "[server]\nurl = \"http://x\"\n").unwrap();
         let cfg = Config::load_from(&path).unwrap();
-        assert_eq!(cfg.cores.per_game.get("arcade/mrdo.zip").map(String::as_str),
-                   Some("mame2003_plus"));
+        assert_eq!(
+            cfg.cores
+                .per_game
+                .get("arcade/mrdo.zip")
+                .map(String::as_str),
+            Some("mame2003_plus")
+        );
     }
 
     /// And a core chosen in the detail pane still wins: the shipped rows go
@@ -1250,13 +1331,15 @@ mod tests {
         let dir = std::env::temp_dir().join("romm-cfg-shipped-beaten");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
-        std::fs::write(
-            &path,
-            "[cores.per_game]\n\"arcade/mrdo.zip\" = \"fbneo\"\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[cores.per_game]\n\"arcade/mrdo.zip\" = \"fbneo\"\n").unwrap();
         let cfg = Config::load_from(&path).unwrap();
-        assert_eq!(cfg.cores.per_game.get("arcade/mrdo.zip").map(String::as_str), Some("fbneo"));
+        assert_eq!(
+            cfg.cores
+                .per_game
+                .get("arcade/mrdo.zip")
+                .map(String::as_str),
+            Some("fbneo")
+        );
         // and the rest of the table is still there beside it
         assert!(cfg.cores.per_game.len() > 100);
     }
@@ -1300,10 +1383,16 @@ mod tests {
         // Clearing removes it.
         clear_table_entry(p, "cores.per_game", keys[0]).unwrap();
         let parsed: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(parsed["cores"]["per_game"].as_table().unwrap().len(), keys.len() - 1);
+        assert_eq!(
+            parsed["cores"]["per_game"].as_table().unwrap().len(),
+            keys.len() - 1
+        );
 
         // The hand-written table above must survive untouched.
-        assert_eq!(parsed["cores"]["overrides"]["arcade"].as_str(), Some("mame2003_plus"));
+        assert_eq!(
+            parsed["cores"]["overrides"]["arcade"].as_str(),
+            Some("mame2003_plus")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -24,9 +24,11 @@ use std::ffi::CString;
 /// Positions arrive in the same points everything else is written in and are
 /// turned into clip space here, so nothing above this file ever computes a
 /// coordinate between -1 and 1.
+// Locations are stated rather than left to the linker — see `glass.rs` for what
+// happens when they are not.
 const VERTEX: &str = r#"
-in vec2 a_pos;
-in vec2 a_uv;
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec2 a_uv;
 out vec2 v_uv;
 /// Where this pixel is inside its own quad, 0 to 1 in each direction.
 ///
@@ -250,7 +252,6 @@ impl Gfx {
     pub fn resize(&mut self, width: f32, height: f32) {
         self.resize_at(0.0, 0.0, width, height)
     }
-
 
     /// Draw into part of the window rather than all of it.
     ///

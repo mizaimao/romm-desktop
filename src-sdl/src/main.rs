@@ -153,6 +153,7 @@ fn main() -> Result<()> {
     // coincidence.
     let backdrop = match unsafe { backdrop::Backdrop::build(&video, &config.appearance.backdrop) } {
         Ok(mut b) => {
+            b.scheme = *backdrop::scheme(&config.appearance.scheme);
             b.speed = config.appearance.backdrop_speed as f32 / 100.0;
             b.strength = config.appearance.backdrop_strength as f32 / 100.0;
             println!("backdrop: {}", b.style_label());

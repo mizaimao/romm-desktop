@@ -32,9 +32,18 @@ const SHRINK: u32 = 4;
 // below. At a quarter scale that reaches sixteen screen pixels, which is where
 // `blur(10px)` on a retina display lands.
 
+// Locations are stated rather than left to the linker.
+//
+// `draw_full_quad` binds position to attribute 0 and texture coordinates to 1.
+// Without a layout qualifier the linker assigns those numbers however it likes,
+// and if it swaps them `gl_Position` receives the texture coordinates — which
+// span 0..1 rather than -1..1, so the quad covers a single quadrant of the
+// target and the other three keep whatever was in them. That is the backdrop
+// "divided into four quarters", and it depends on the driver, which is why it
+// showed on one machine and not in every measurement.
 const VERTEX: &str = r#"
-in vec2 a_pos;
-in vec2 a_uv;
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec2 a_uv;
 out vec2 v_uv;
 void main() {
   v_uv = a_uv;
@@ -96,8 +105,11 @@ impl Glass {
     pub unsafe fn new(width: u32, height: u32) -> Result<Self> {
         unsafe {
             let version = crate::gfx::version_line()?;
-            let precision =
-                if version.contains(" es") { "precision highp float;\n" } else { "" };
+            let precision = if version.contains(" es") {
+                "precision highp float;\n"
+            } else {
+                ""
+            };
             let program = crate::gfx::link(
                 &format!("{version}\n{precision}{VERTEX}"),
                 &format!("{version}\n{precision}{FRAGMENT}"),
@@ -158,8 +170,18 @@ impl Glass {
             // second pass reads what the first wrote, which is why there are
             // two textures and not one.
             let (w, h) = self.small.size();
-            self.pass(gfx, &self.small.texture, &self.scratch, (1.0 / w as f32, 0.0));
-            self.pass(gfx, &self.scratch.texture, &self.small, (0.0, 1.0 / h as f32));
+            self.pass(
+                gfx,
+                &self.small.texture,
+                &self.scratch,
+                (1.0 / w as f32, 0.0),
+            );
+            self.pass(
+                gfx,
+                &self.scratch.texture,
+                &self.small,
+                (0.0, 1.0 / h as f32),
+            );
         }
     }
 
@@ -183,16 +205,7 @@ impl Glass {
     /// color of its own, and the stylesheet's `--glass` is that color. Its
     /// alpha is how much of the blur shows through.
     #[allow(clippy::too_many_arguments)]
-    pub fn panel(
-        &self,
-        gfx: &Gfx,
-        screen: (f32, f32),
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        tint: Rgba,
-    ) {
+    pub fn panel(&self, gfx: &Gfx, screen: (f32, f32), x: f32, y: f32, w: f32, h: f32, tint: Rgba) {
         // Which part of the blurred copy sits behind this rectangle. The
         // texture is the whole screen shrunk, so the mapping is the panel's
         // own place on screen as a fraction of it — and it must be *this*
@@ -239,10 +252,21 @@ mod tests {
     fn the_blur_weights_sum_to_one() {
         let weights: Vec<f32> = FRAGMENT
             .lines()
-            .filter_map(|line| line.rsplit_once("* 0.")?.1.trim_end_matches(';').parse().ok())
+            .filter_map(|line| {
+                line.rsplit_once("* 0.")?
+                    .1
+                    .trim_end_matches(';')
+                    .parse()
+                    .ok()
+            })
             .map(|n: f32| n / 10f32.powi(10))
             .collect();
-        assert_eq!(weights.len(), 9, "expected nine taps, found {}", weights.len());
+        assert_eq!(
+            weights.len(),
+            9,
+            "expected nine taps, found {}",
+            weights.len()
+        );
         let total: f32 = weights.iter().sum();
         assert!((total - 1.0).abs() < 0.001, "the taps sum to {total}");
     }
@@ -250,7 +274,11 @@ mod tests {
     #[test]
     fn the_small_copy_is_never_nothing() {
         assert_eq!(shrunk(1920, 1080), (480, 270));
-        assert_eq!(shrunk(2, 2), (1, 1), "a window dragged to nothing still draws");
+        assert_eq!(
+            shrunk(2, 2),
+            (1, 1),
+            "a window dragged to nothing still draws"
+        );
         assert_eq!(shrunk(0, 0), (1, 1));
     }
 }

@@ -90,7 +90,7 @@ pub struct Style {
     pub id: &'static str,
     pub label: &'static str,
     pub pace: f32,
-    body: &'static str,
+    pub body: &'static str,
 }
 
 pub const STYLES: &[Style] = &[
@@ -125,6 +125,225 @@ pub const STYLES: &[Style] = &[
               + sin(length(p) * 1.6 - t * 0.4);
       base = ramp(smoothstep(-1.2, 2.4, v));"#,
     },
+    Style {
+        id: "grid",
+        label: "Grid",
+        pace: 0.7,
+        body: r#"
+      vec2 q = (uv - vec2(0.5, 0.55)) * aspect;
+      float depth = max(-q.y, 1e-3);
+      vec2 g = vec2(q.x / depth, 1.0 / depth + t * 0.25);
+      vec2 w = max(fwidth(g * 2.0), 1e-4);
+      vec2 line = abs(fract(g * 2.0) - 0.5) / w;
+      float mesh = 1.0 - min(min(line.x, line.y), 1.0);
+      // Nothing above the horizon but a glow, and the mesh fades in below it:
+      // the lines converge faster than the pixels can hold them right at the
+      // vanishing line, and drawn hard that reads as noise rather than as
+      // distance.
+      float floorMask = step(0.0, -q.y) * smoothstep(0.0, 0.06, depth);
+      float sky = 1.0 - smoothstep(0.0, 0.30, max(q.y, 0.0));
+      base = ramp(mesh * 0.8 * floorMask + sky * 0.12);"#,
+    },
+    Style {
+        id: "stars",
+        label: "Drift",
+        pace: 1.0,
+        body: r#"
+      vec2 p = uv * aspect * 18.0 + vec2(0.0, t * 0.08);
+      vec2 cell = floor(p), f = fract(p);
+      float glow = 0.0;
+      for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+          vec2 o = vec2(float(i), float(j));
+          vec2 c = cell + o;
+          float star = hash(c);
+          vec2 pos = f - o - vec2(hash(c + 3.1), hash(c + 7.7));
+          float twinkle = 0.6 + 0.4 * sin(t * 1.6 + star * 40.0);
+          glow += smoothstep(0.42, 0.0, length(pos)) * step(0.955, star) * twinkle;
+        }
+      }
+      base = ramp(min(glow, 1.0));"#,
+    },
+    Style {
+        id: "starfield",
+        label: "Starfield",
+        pace: 1.1,
+        body: r#"
+      base = u_low;
+      for (int L = 0; L < 3; L++) {
+        float f = float(L);
+        float scale = 10.0 + f * 12.0;
+        float speed = (f + 1.0) * 0.06;
+        vec2 p = uv * aspect * scale + vec2(t * speed, 0.0);
+        vec2 cell = floor(p), fr = fract(p);
+        // The neighbours too. A star is scattered anywhere in its cell and its
+        // glow has a radius, so one near an edge had the rest of it drawn by a
+        // cell that was never asked — the same bug Drift had, and it looks the
+        // same: points sliced flat along invisible straight lines.
+        float glow = 0.0;
+        for (int j = -1; j <= 1; j++) {
+          for (int i = -1; i <= 1; i++) {
+            vec2 o = vec2(float(i), float(j));
+            vec2 c = cell + o;
+            float star = hash(c + f * 17.0);
+            vec2 off = fr - o - vec2(hash(c + 3.1), hash(c + 7.7));
+            glow += smoothstep(0.30, 0.0, length(off)) * step(0.972, star);
+          }
+        }
+        base = mix(base, u_high, min(glow, 1.0) * (0.35 + f * 0.32));
+      }"#,
+    },
+    Style {
+        id: "towers",
+        label: "Towers",
+        pace: 0.3,
+        body: r#"
+      // The rows cycle in depth: one reaching the front wraps to the back,
+      // with the phases spread so they arrive evenly rather than in a pulse.
+      // Additive, because the columns are light rather than surfaces — which
+      // also means they never need sorting, and that is what lets a row wrap
+      // past its neighbours without a seam.
+      float horizon = 0.58;
+      vec2 q = vec2((uv.x - 0.5) * aspect.x, uv.y);
+      float ypx = max(fwidth(q.y), 1e-5);
+      float glow = 0.0;
+
+      for (int L = 0; L < 6; L++) {
+        float turn = t * 0.06 + float(L) / 6.0;
+        float phase = fract(turn);
+        float z = mix(6.0, 0.55, phase);
+        float s = 0.42 / z;
+
+        // Where this row's floor meets the screen, and how much world reaches
+        // across one screen unit at that depth.
+        float yb = horizon - s * 0.9;
+        float wx = q.x / s;
+
+        // The row is slid sideways by its own hash, and re-seeded each time it
+        // wraps: rows sharing an offset line up into corridors, and the same
+        // rank of columns coming round again is a carousel.
+        float row = float(L) * 13.0 + floor(turn);
+        float slide = hash(vec2(row, 3.0)) * 7.0;
+        float cx = floor(wx + slide);
+        float fx = fract(wx + slide) - 0.5;
+
+        // Most cells empty. A solid rank is a fence; the boot screen was a
+        // scatter, because it was drawing what was on the memory card.
+        float seed = hash(vec2(cx, row));
+        float there = step(0.7, seed);
+        float height = (0.35 + hash(vec2(cx, row + 1.7)) * 1.5) * s;
+        float tall = max(height, 1e-4);
+
+        // The bar, and a wider soft falloff around it. The halo is most of
+        // what reads as translucent light rather than as a white rectangle.
+        float wpx = max(fwidth(wx), 1e-4);
+        float core = 1.0 - smoothstep(0.10 - wpx, 0.10 + wpx, abs(fx));
+        float halo = exp(-abs(fx) * 9.0) * 0.35;
+
+        // Up the column, in blocks. The seams flatten out once a block is
+        // thinner than a pixel, which at the far end of the range they are —
+        // drawn anyway they stop being blocks and become a shimmer.
+        float up = q.y - yb;
+        float k = clamp(up / tall, 0.0, 1.0);
+        float bs = max(s * 0.22, 1e-4);
+        float band = 0.3 * smoothstep(0.004, 0.022, bs);
+        float box = (1.0 - band) + band * cos(up / bs * 6.28318);
+        // Soft at the foot and at the cap rather than cut off. The canvas is
+        // drawn at half the window's resolution and scaled up, and a hard step
+        // along a vertical edge is the one place that shows.
+        float column = smoothstep(-ypx, ypx, up)
+                     * smoothstep(height + ypx, height - ypx, up);
+        float lit = column * (mix(1.0, 0.4, k) * box + smoothstep(0.8, 1.0, k) * 0.9);
+
+        // A little of the light escaping past the top of the stack.
+        lit += step(height, up) * exp(-max(up - height, 0.0) * 26.0) * 0.35;
+
+        // The reflection, mirrored in the plane and dimmer the further it
+        // falls from the foot of the column.
+        float below = yb - q.y;
+        lit += step(0.0, below) * step(below, height) * exp(-below * 5.0) * 0.5;
+
+        // Haze towards the back, and a fade at both ends of the depth range so
+        // a row never pops in at either edge of it. Depth is a straight
+        // function of the phase here, so the haze can be read off that rather
+        // than off z.
+        glow += lit * (core + halo) * there * (0.45 + 0.55 * phase)
+              * smoothstep(0.0, 0.18, phase) * smoothstep(1.0, 0.82, phase);
+      }
+
+      // The plane itself: not black, and brightest where it meets the horizon,
+      // which is what stops the lower half of the screen reading as a hole
+      // rather than as a floor.
+      float plane = step(q.y, horizon) * smoothstep(0.0, 0.9, q.y / horizon) * 0.13;
+      plane += exp(-abs(q.y - horizon) * 90.0) * 0.1;
+      base = ramp(min(glow * 0.8 + plane, 1.0));
+      // The hottest cores go past the top of the ramp, towards white. Most of
+      // these schemes have a dark navy for their high, and a light source that
+      // never gets brighter than the wall behind it does not read as a light
+      // source — it reads as a painted stripe. Only where several columns'
+      // haloes overlap, so the field stays the color the scheme asked for.
+      base += smoothstep(0.75, 1.6, glow) * 0.35;"#,
+    },
+    Style {
+        id: "tunnel",
+        label: "Tunnel",
+        pace: 0.35,
+        body: r#"
+      vec2 q = (uv - 0.5) * aspect;
+      float r = max(length(q), 0.02);
+      float a = atan(q.y, q.x);
+      // 1/r is the depth: rings bunch towards the center because that is
+      // where the tunnel is furthest away.
+      float rings = sin(1.0 / r * 3.0 - t * 0.8) * 0.5 + 0.5;
+      float spokes = sin(a * 8.0 + t * 0.15) * 0.5 + 0.5;
+      base = ramp(rings * 0.7 * (0.55 + spokes * 0.45) * smoothstep(0.0, 0.35, r));"#,
+    },
+    Style {
+        id: "waves",
+        label: "Waves",
+        pace: 0.5,
+        body: r#"
+      vec2 q = (uv - vec2(0.5, 0.35)) * aspect;
+      float depth = max(0.75 - uv.y, 0.05);
+      float w = sin(q.x * 4.0 + t * 0.4) * 0.5
+              + sin(q.x * 7.3 - t * 0.27) * 0.3
+              + sin(q.x * 2.1 + t * 0.13) * 0.2;
+      float ridge = smoothstep(0.05, 0.0, abs(fract((uv.y + w * 0.06) * 9.0) - 0.5) * depth);
+      base = ramp(ridge * 0.8 * smoothstep(0.95, 0.25, uv.y));"#,
+    },
+    Style {
+        id: "sweep",
+        label: "Sweep",
+        pace: 0.9,
+        body: r#"
+      // Named band, not d: SHADER_TAIL declares its own float d for the
+      // vignette, and a body declaring one too is a redeclaration — the shader
+      // fails to compile, programFor returns null, and the style simply never
+      // switches, with nothing on screen to say why.
+      // (No backticks anywhere in here: this is inside a JS template literal.)
+      float band = (uv.x * aspect.x + uv.y) * 0.7;
+      base = ramp(0.5 + 0.5 * sin(band * 2.2 - t * 0.5));"#,
+    },
+    Style {
+        id: "static",
+        label: "Static",
+        pace: 2.0,
+        body: r#"
+      // Three fields at incommensurable scales, each drifting on its own
+      // irrational-ish vector, plus a slow wander of the sampling grid itself.
+      //
+      // Two fields on whole-number scales still shared a period: 3 and 7 line
+      // up every 21 pixels and the eye finds that. These are 3.0, 5.7 and
+      // 11.3, and the drift vectors are picked so no two are rational
+      // multiples of each other — the combined pattern has no repeat short
+      // enough to see. The last term moves the whole lattice, so even a static
+      // pixel is sampling somewhere new each frame.
+      vec2 wander = vec2(sin(t * 0.13), cos(t * 0.17)) * 40.0;
+      float g1 = hash(floor((uv * u_size + wander) / 3.0)  + vec2(t * 37.7, t * 11.3));
+      float g2 = hash(floor((uv * u_size + wander) / 5.7)  - vec2(t * 19.1, t * 43.9));
+      float g3 = hash(floor((uv * u_size - wander) / 11.3) + vec2(t * 29.3, t * 7.1));
+      base = ramp(g1 * 0.34 + g2 * 0.20 + g3 * 0.16 + 0.08);"#,
+    },
 ];
 
 /// What the motion slider sits at before anyone touches it.
@@ -139,7 +358,121 @@ pub const STYLE_LIST: &[(&str, &str)] = &[
     ("blobs", "Blobs"),
     ("aurora", "Aurora"),
     ("plasma", "Plasma"),
+    ("grid", "Grid"),
+    ("stars", "Drift"),
+    ("starfield", "Starfield"),
+    ("towers", "Towers"),
+    ("tunnel", "Tunnel"),
+    ("waves", "Waves"),
+    ("sweep", "Sweep"),
+    ("static", "Static"),
 ];
+
+/// A named color scheme, as the webview has them.
+pub struct Named {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub scheme: Scheme,
+}
+
+/// The schemes, ported from `ui/js/backdrop.js` so the two front ends offer
+/// the same names and the same colors. `custom` is deliberately absent: a
+/// color picker is miserable on a d-pad, and the handheld drops it.
+///
+/// The webview stores only two stops and mixes the middle, so the same
+/// midpoint is computed here — the ramp then behaves identically.
+pub const SCHEMES: &[Named] = &[
+    Named {
+        id: "midnight",
+        label: "Midnight",
+        scheme: Scheme {
+            low: [0.0431, 0.051, 0.0863],
+            mid: [0.1039, 0.1294, 0.2432],
+            high: [0.1647, 0.2078, 0.4],
+        },
+    },
+    Named {
+        id: "frost",
+        label: "Frost",
+        scheme: Scheme {
+            low: [0.0431, 0.0588, 0.0784],
+            mid: [0.1216, 0.1862, 0.249],
+            high: [0.2, 0.3137, 0.4196],
+        },
+    },
+    Named {
+        id: "abyss",
+        label: "Abyss",
+        scheme: Scheme {
+            low: [0.0235, 0.0353, 0.0471],
+            mid: [0.047, 0.1451, 0.1745],
+            high: [0.0706, 0.2549, 0.302],
+        },
+    },
+    Named {
+        id: "moss",
+        label: "Moss",
+        scheme: Scheme {
+            low: [0.0392, 0.0706, 0.0627],
+            mid: [0.0804, 0.1804, 0.1392],
+            high: [0.1216, 0.2902, 0.2157],
+        },
+    },
+    Named {
+        id: "ember",
+        label: "Ember",
+        scheme: Scheme {
+            low: [0.0784, 0.0431, 0.0353],
+            mid: [0.2196, 0.0921, 0.0647],
+            high: [0.3608, 0.1412, 0.0941],
+        },
+    },
+    Named {
+        id: "rust",
+        label: "Rust",
+        scheme: Scheme {
+            low: [0.0824, 0.0588, 0.0353],
+            mid: [0.2255, 0.1431, 0.0628],
+            high: [0.3686, 0.2275, 0.0902],
+        },
+    },
+    Named {
+        id: "wine",
+        label: "Wine",
+        scheme: Scheme {
+            low: [0.0745, 0.0392, 0.0549],
+            mid: [0.202, 0.0824, 0.1412],
+            high: [0.3294, 0.1255, 0.2275],
+        },
+    },
+    Named {
+        id: "plum",
+        label: "Plum",
+        scheme: Scheme {
+            low: [0.0706, 0.0392, 0.0863],
+            mid: [0.1706, 0.1039, 0.2274],
+            high: [0.2706, 0.1686, 0.3686],
+        },
+    },
+    Named {
+        id: "slate",
+        label: "Slate",
+        scheme: Scheme {
+            low: [0.0588, 0.0667, 0.0745],
+            mid: [0.1294, 0.1471, 0.1666],
+            high: [0.2, 0.2275, 0.2588],
+        },
+    },
+];
+
+/// The scheme with that id, or the first.
+pub fn scheme(id: &str) -> &'static Scheme {
+    SCHEMES
+        .iter()
+        .find(|s| s.id == id)
+        .map(|s| &s.scheme)
+        .unwrap_or(&SCHEMES[0].scheme)
+}
 
 pub fn style(id: &str) -> &'static Style {
     STYLES.iter().find(|s| s.id == id).unwrap_or(&STYLES[0])
