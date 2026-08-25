@@ -917,8 +917,14 @@ fn main() -> Result<()> {
                     }
                     continue;
                 }
+                // B at the top level does nothing now.
+                //
+                // It used to quit, and the help bar called it "back" — so the
+                // one irreversible action on the device was on an unlabelled
+                // button, next to a label saying it did something else. Leaving
+                // is a row in Settings, where it says what it does.
                 if matches!(action.as_str(), "back" | "back2") && lib.at_top() {
-                    break 'running;
+                    continue;
                 }
                 act(&mut lib, action);
                 if lib.quitting {
@@ -1058,6 +1064,11 @@ fn main() -> Result<()> {
         // A slide is motion, so it draws every frame it lasts. So is the
         // cursor on its way to a new row.
         if slide.is_some() || glide.moving(now) {
+            dirty = true;
+        }
+        // The selection pulses on the console grid, which is motion like any
+        // other — see the outline in `draw_consoles`.
+        if showing.animations && lib.section().id == "library" && lib.view == library::View::Platforms {
             dirty = true;
         }
 
@@ -3268,7 +3279,31 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
         f.fill(tile, paint::TILE, size::ROUND);
         f.hovering(offset, tile, size::ROUND);
         if on {
-            f.outline(tile, 2.0, paint::CURSOR, size::ROUND);
+            // A breathing outline, the way `canvas-es` marks its selection.
+            //
+            // A still 2-point border says "this one" and stops saying it after
+            // a second; a slow pulse keeps saying it, and on a shelf of six
+            // cards it is what the eye comes back to. Two seconds a breath —
+            // any faster and it is a warning light.
+            let phase = if f.animate {
+                (f.now / 1000.0 * std::f64::consts::TAU / 2.0).sin() as f32
+            } else {
+                0.0
+            };
+            let lit = 0.72 + 0.28 * phase;
+            let glow = Rgba(paint::CURSOR.0, paint::CURSOR.1, paint::CURSOR.2, lit);
+            // The halo first, wider and much fainter, then the line itself.
+            for step in (1..=3).rev() {
+                let spread = step as f32 * 1.6;
+                let fade = 0.16 * lit / (step as f32 * step as f32);
+                f.outline(
+                    tile.inset(Edges::all(-spread)),
+                    2.0,
+                    Rgba(paint::CURSOR.0, paint::CURSOR.1, paint::CURSOR.2, fade),
+                    size::ROUND + spread,
+                );
+            }
+            f.outline(tile, 2.0, glow, size::ROUND);
         }
 
         let inner = tile.inset(Edges::all(8.0));
@@ -3296,6 +3331,11 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
 
 /// One console's games.
 fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    // The bar is drawn once, under all the rows, at wherever it has slid to.
+    //
+    // It used to be drawn inside the loop, on the chosen row — so the bar
+    // slid and the text did not, and half the highlight arrived before the
+    // other half. A row is text; the cursor is one thing moving behind it.
     let step = size::ROW;
     lib.relayout(1);
 
@@ -3313,6 +3353,17 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         .map(|(i, (r, _))| (i, r.name.clone(), r.favorite, r.downloaded))
         .collect();
 
+    // Where the chosen row will land, before anything is drawn over it.
+    for (i, ..) in rows.iter() {
+        if *i == lib.at {
+            let line = Rect::new(area.x, area.y + *i as f32 * step - top, area.w, step);
+            if line.bottom() >= area.y && line.bottom() <= area.bottom() {
+                let at = f.glide.at(line, f.now, f.animate);
+                f.pane(at, paint::CURSOR, size::ROUND_SMALL);
+            }
+        }
+    }
+
     for (i, name, favorite, downloaded) in rows {
         let line = Rect::new(area.x, area.y + i as f32 * step - top, area.w, step);
         if line.bottom() < area.y || line.bottom() > area.bottom() {
@@ -3321,11 +3372,7 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         f.hits.row(f.px(line), i);
         let on = i == lib.at;
         f.hovering(i, line, size::ROUND_SMALL);
-        if on {
-            // Drawn where the cursor is *getting to*. See `Gliding`.
-            let at = f.glide.at(line, f.now, f.animate);
-            f.pane(at, paint::CURSOR, size::ROUND_SMALL);
-        }
+
 
         // No console column. Every row in this list is the console named in
         // the header, so it said the same word ninety-four times down the page

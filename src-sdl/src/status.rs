@@ -52,7 +52,19 @@ impl Status {
         let p = platform::current();
         self.bars = p.wifi().and_then(|w| bars_from_proc(&w));
         if let Some(b) = p.battery() {
-            self.battery = read_number(&b.capacity).map(|n| n.min(100) as u8);
+            // The device's own helper first, and the file only if there is
+            // none.
+            //
+            // Both usually read the same node, but "usually" is why the number
+            // here and the number in KNULLI's own menu could disagree — the
+            // helper knows about a percentage file this board may publish
+            // instead, and about fuel-gauge nodes that need charge-now over
+            // charge-full. Asking it is how the two agree by construction
+            // rather than by our copying its arithmetic and hoping.
+            self.battery = b
+                .helper
+                .and_then(ask_helper)
+                .or_else(|| read_number(&b.capacity).map(|n| n.min(100) as u8));
             self.charging = b.charging.iter().any(|p| read_number(p) == Some(1));
         }
     }
@@ -145,6 +157,22 @@ fn smooth(v: f32, from: f32, to: f32) -> f32 {
     }
     let t = ((v - from) / (to - from)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// Ask the device's own battery helper, if it has one.
+///
+/// A process, so it is only run on the same two-second timer as everything else
+/// here — sixty of these a second would be sixty shells a second.
+fn ask_helper(helper: &str) -> Option<u8> {
+    let out = std::process::Command::new(helper).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .map(|n| n.clamp(0, 100) as u8)
 }
 
 /// Read a whole number out of a one-line sysfs file.
