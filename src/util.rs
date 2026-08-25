@@ -60,7 +60,22 @@ pub fn http_client(timeout: Option<std::time::Duration>) -> anyhow::Result<reqwe
         let _ = rustls::crypto::ring::default_provider().install_default();
     });
     let mut b = reqwest::Client::builder()
-        .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")));
+        .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
+        // Bound *connecting* even when the request itself is unbounded.
+        //
+        // A server that is off the network blackholes the SYN rather than
+        // refusing it, so without this the wait is the OS TCP timeout — over a
+        // minute, and longer once reqwest retries. That is what left a launch
+        // sitting on "checking saves with the server…" forever: `auto_sync`
+        // was written to give up and offer "play anyway", and it never got the
+        // chance to. A refused connection was always instant, which is why
+        // this only ever showed up with the server switched off rather than
+        // merely not listening.
+        .connect_timeout(std::time::Duration::from_secs(5))
+        // Between bytes, not for the whole transfer — a multi-gigabyte ROM
+        // download resets this on every chunk, while a server that accepts the
+        // connection and then says nothing still gives up.
+        .read_timeout(std::time::Duration::from_secs(30));
     if let Some(d) = timeout {
         b = b.timeout(d);
     }

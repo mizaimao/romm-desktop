@@ -295,8 +295,10 @@ motion_shader: cfg.shaders.motion.as_deref(),
         .map(|l| format!(" ({l})"))
         .unwrap_or_default();
     println!("core    {}{core_label}", plan.core);
-    println!("rom     {}", rom.display());
-    println!("command {}", retroarch::render(&plan.command(&ra, rom, fullscreen)?));
+    // plan.rom, not the argument: a folder ROM launches the playlist inside it,
+    // and printing the folder would name a path RetroArch never sees.
+    println!("rom     {}", plan.rom.display());
+    println!("command {}", retroarch::render(&plan.command(&ra, fullscreen)?));
 
     if !go {
         println!("\n(dry run — pass --go to actually launch)");
@@ -304,7 +306,7 @@ motion_shader: cfg.shaders.motion.as_deref(),
     }
 
     println!("\nlaunching…");
-    let status = plan.run(&ra, rom, fullscreen)?;
+    let status = plan.run(&ra, fullscreen)?;
     match status.code() {
         Some(0) => println!("RetroArch exited cleanly (0)"),
         Some(c) => println!("RetroArch exited with status {c}"),

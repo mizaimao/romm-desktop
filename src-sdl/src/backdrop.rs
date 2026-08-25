@@ -133,6 +133,14 @@ pub const STYLES: &[Style] = &[
 /// `pace` scales it. The range there is 0 to 7.
 pub const DEFAULT_SPEED: f32 = 4.0;
 
+/// Just the ids and labels, for a settings list that must not depend on the
+/// shader source being compiled.
+pub const STYLE_LIST: &[(&str, &str)] = &[
+    ("blobs", "Blobs"),
+    ("aurora", "Aurora"),
+    ("plasma", "Plasma"),
+];
+
 pub fn style(id: &str) -> &'static Style {
     STYLES.iter().find(|s| s.id == id).unwrap_or(&STYLES[0])
 }
@@ -196,8 +204,15 @@ impl Backdrop {
             // for. This used to have to speak whatever SDL's renderer had
             // made, which on macOS was GLSL 1.20.
             let version = crate::gfx::version_line()?;
-            let precision = if version.contains(" es") { "precision highp float;\n" } else { "" };
-            let fragment = format!("{version}\n{precision}out vec4 color;\n{HEAD}{}{TAIL}", chosen.body);
+            let precision = if version.contains(" es") {
+                "precision highp float;\n"
+            } else {
+                ""
+            };
+            let fragment = format!(
+                "{version}\n{precision}out vec4 color;\n{HEAD}{}{TAIL}",
+                chosen.body
+            );
             let vertex = format!("{version}\n{VERTEX}");
 
             let program = crate::gfx::link(&vertex, &fragment)?;
@@ -205,8 +220,9 @@ impl Backdrop {
             // One quad, as two triangles covering the clip volume. The vertex
             // shader passes it through: everything interesting happens per
             // fragment.
-            let corners: [f32; 12] =
-                [-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0];
+            let corners: [f32; 12] = [
+                -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0,
+            ];
             // Vertex array objects are 3.0 and later. A legacy context binds
             // the buffer and describes it on every draw instead.
             let (mut vao, mut vbo) = (0, 0);
@@ -252,7 +268,6 @@ impl Backdrop {
                 speed: DEFAULT_SPEED,
                 pace: chosen.pace,
                 label: chosen.label,
-
             })
         }
     }
@@ -299,8 +314,6 @@ impl Drop for Backdrop {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,10 +328,15 @@ mod tests {
             for name in ["uv", "aspect", "t", "base"] {
                 assert!(
                     HEAD.contains(name) || style.body.contains(name),
-                    "{}: {name} is used by nobody", style.id
+                    "{}: {name} is used by nobody",
+                    style.id
                 );
             }
-            assert!(style.body.contains("base ="), "{} never fills base", style.id);
+            assert!(
+                style.body.contains("base ="),
+                "{} never fills base",
+                style.id
+            );
             assert!(style.pace > 0.0, "{} has no pace", style.id);
         }
     }
@@ -330,9 +348,11 @@ mod tests {
     fn the_paces_span_the_range_they_are_meant_to() {
         let fastest = STYLES.iter().map(|s| s.pace).fold(f32::MIN, f32::max);
         let slowest = STYLES.iter().map(|s| s.pace).fold(f32::MAX, f32::min);
-        assert!(fastest / slowest > 10.0, "the paces are all the same, so the slider is a lie");
+        assert!(
+            fastest / slowest > 10.0,
+            "the paces are all the same, so the slider is a lie"
+        );
     }
-
 
     /// Where the fragment color goes is the preamble's business and nobody
     /// else's. It was declared in both — the shared frame *and* the modern
@@ -344,10 +364,11 @@ mod tests {
     /// the other, naming a line the body does not contain.
     #[test]
     fn the_shared_frame_does_not_declare_the_output() {
-        assert!(!HEAD.contains("out vec4"), "the frame declares the output as well");
+        assert!(
+            !HEAD.contains("out vec4"),
+            "the frame declares the output as well"
+        );
     }
-
-
 
     #[test]
     fn an_unknown_style_falls_back_rather_than_failing() {

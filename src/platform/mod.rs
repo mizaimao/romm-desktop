@@ -128,6 +128,16 @@ pub trait Platform: Sync {
         &[]
     }
 
+    /// The device front end's own system table, when it has one.
+    ///
+    /// KNULLI's `es_systems.cfg` is where Ports and Tools are actually
+    /// defined — each is a `<group>` of systems, every member with its own
+    /// folder and its own extensions. Reading it is the difference between
+    /// showing what the device shows and showing a guess.
+    fn es_systems(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// System directories to pass over in silence on this device.
     ///
     /// Distinct from "unknown": an unknown directory is reported as skipped so

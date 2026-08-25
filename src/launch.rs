@@ -80,16 +80,22 @@ pub struct Plan {
     pub shader: Option<PathBuf>,
     pub shader_label: Option<String>,
     pub overrides: Option<PathBuf>,
+    /// The file actually handed to the emulator.
+    ///
+    /// Not always what the caller asked for: a folder ROM is a directory, and
+    /// the thing that launches is the playlist inside it. Callers print this
+    /// rather than their own path so the two never disagree.
+    pub rom: PathBuf,
     /// Things worth telling the user, in the order they happened.
     pub notes: Vec<String>,
 }
 
 impl Plan {
     /// Spawn and block until the emulator exits.
-    pub fn run(&self, ra: &RetroArch, rom: &Path, fullscreen: bool) -> Result<std::process::ExitStatus> {
+    pub fn run(&self, ra: &RetroArch, fullscreen: bool) -> Result<std::process::ExitStatus> {
         ra.launch_full(
             &self.core,
-            rom,
+            &self.rom,
             fullscreen,
             self.overrides.as_deref(),
             self.shader.as_deref(),
@@ -98,10 +104,10 @@ impl Plan {
     }
 
     /// The same invocation, without running it.
-    pub fn command(&self, ra: &RetroArch, rom: &Path, fullscreen: bool) -> Result<std::process::Command> {
+    pub fn command(&self, ra: &RetroArch, fullscreen: bool) -> Result<std::process::Command> {
         ra.launch_command_full(
             &self.core,
-            rom,
+            &self.rom,
             fullscreen,
             self.overrides.as_deref(),
             self.shader.as_deref(),
@@ -138,6 +144,53 @@ fn check_playlist(rom: &Path) -> Result<()> {
     )
 }
 
+/// A folder ROM is a directory; the emulator needs a file inside it.
+///
+/// RomM serves a multi-disc game as one folder and synthesises an `.m3u`
+/// beside the discs, so `roms/dc/Shenmue (USA)/` is what the library holds and
+/// `Shenmue (USA).m3u` is the only thing in it that launches. Handing the
+/// directory to RetroArch gets `[BOOT] Unknown disk format` and nothing else.
+///
+/// Anything that is not a directory is returned unchanged.
+fn resolve_folder_rom(rom: &Path) -> Result<PathBuf> {
+    if !rom.is_dir() {
+        return Ok(rom.to_owned());
+    }
+    let mut playlist = None;
+    let mut discs = Vec::new();
+    for entry in std::fs::read_dir(rom).with_context(|| format!("reading {}", rom.display()))? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+        match path.extension().and_then(|e| e.to_str()) {
+            Some(e) if e.eq_ignore_ascii_case("m3u") => playlist = Some(path),
+            Some(_) => discs.push(path),
+            None => {}
+        }
+    }
+    if let Some(m3u) = playlist {
+        return Ok(m3u);
+    }
+    discs.sort();
+    match discs.len() {
+        0 => bail!("{} is an empty folder — nothing to launch", rom.display()),
+        1 => Ok(discs.remove(0)),
+        // Guessing which disc to start on is how someone ends up on disc 3.
+        _ => bail!(
+            "{} holds {} discs and no .m3u to order them:\n{}\nRe-download it, or add a \
+             playlist naming the discs in order.",
+            rom.display(),
+            discs.len(),
+            discs
+                .iter()
+                .map(|d| format!("  {}", d.file_name().unwrap_or_default().to_string_lossy()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    }
+}
+
 /// Resolve the core, write the launch config, and report what was done.
 pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
     let mut notes = Vec::new();
@@ -161,11 +214,15 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         })?,
     };
 
-    check_playlist(req.rom)?;
+    // A folder ROM resolves to the playlist inside it before anything else
+    // looks at the path — the checks below, and the emulator, both need the
+    // file rather than the directory.
+    let rom = resolve_folder_rom(req.rom)?;
+    check_playlist(&rom)?;
 
     // Arcade sets need their BIOS in RetroArch's own system directory; copying
     // it is cheap and silent when there is nothing to do.
-    if let Some(dir) = req.rom.parent()
+    if let Some(dir) = rom.parent()
         && let Ok(n) = ra.install_bios(dir)
         && n > 0
     {
@@ -339,6 +396,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
         shader,
         shader_label,
         overrides,
+        rom,
         notes,
     })
 }
@@ -410,6 +468,65 @@ mod tests {
         // A console with no gun ignores the switch whatever it says.
         map.insert("gb".to_owned(), "on".to_owned());
         assert!(!gun_enabled(&map, "gb"));
+    }
+
+    /// The bug: a folder ROM downloaded correctly still would not launch.
+    /// `roms/dc/Shenmue (USA)/` is a directory, and the emulator answered
+    /// `[BOOT] Unknown disk format` when handed one.
+    #[test]
+    fn a_folder_rom_launches_the_playlist_inside_it() {
+        let dir = scratch("folder-rom");
+        let game = dir.join("Shenmue (USA)");
+        std::fs::create_dir_all(&game).unwrap();
+        for d in ["Disc 1.chd", "Disc 2.chd", "Disc 3.chd"] {
+            std::fs::write(game.join(d), b"disc").unwrap();
+        }
+        let m3u = game.join("Shenmue (USA).m3u");
+        std::fs::write(&m3u, "Disc 1.chd\nDisc 2.chd\nDisc 3.chd\n").unwrap();
+
+        assert_eq!(resolve_folder_rom(&game).unwrap(), m3u);
+        // And the playlist it picked is one check_playlist then accepts, which
+        // is the pair that has to hold: resolving to a stub would trade one
+        // unhelpful failure for another.
+        assert!(check_playlist(&resolve_folder_rom(&game).unwrap()).is_ok());
+    }
+
+    /// A single-disc folder needs no playlist to be unambiguous.
+    #[test]
+    fn a_one_disc_folder_launches_that_disc() {
+        let dir = scratch("folder-one");
+        let game = dir.join("Game");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("Game.chd"), b"disc").unwrap();
+        assert_eq!(resolve_folder_rom(&game).unwrap(), game.join("Game.chd"));
+    }
+
+    /// Several discs and no order to play them in. Starting on whichever the
+    /// filesystem listed first is worse than saying so.
+    #[test]
+    fn several_discs_without_a_playlist_is_refused_by_name() {
+        let dir = scratch("folder-ambiguous");
+        let game = dir.join("Game");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("Game (Disc 1).chd"), b"a").unwrap();
+        std::fs::write(game.join("Game (Disc 2).chd"), b"b").unwrap();
+        let err = resolve_folder_rom(&game).expect_err("no .m3u to order them").to_string();
+        assert!(err.contains("Game (Disc 1).chd"), "{err}");
+        assert!(err.contains("Game (Disc 2).chd"), "{err}");
+    }
+
+    /// A plain file is handed back untouched — every single-file ROM in the
+    /// library goes through here.
+    #[test]
+    fn a_plain_rom_passes_straight_through() {
+        let dir = scratch("folder-plain");
+        let rom = dir.join("Sonic.md");
+        std::fs::write(&rom, b"whatever").unwrap();
+        assert_eq!(resolve_folder_rom(&rom).unwrap(), rom);
+        // Including one that does not exist: the emulator's own "no such file"
+        // beats a folder error about a path that is not a folder.
+        let missing = dir.join("Missing.md");
+        assert_eq!(resolve_folder_rom(&missing).unwrap(), missing);
     }
 
     fn scratch(name: &str) -> PathBuf {

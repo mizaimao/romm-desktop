@@ -179,9 +179,12 @@ impl App {
     }
 
     /// Local path for a ROM, if it was staged into `library/`.
+    /// A folder ROM is a directory, so this cannot be a file-only test: a
+    /// multi-disc game that had downloaded fine still reported itself missing.
+    /// `launch::plan` resolves the directory to the playlist inside it.
     fn local_path(&self, rom: &RomRow) -> Option<PathBuf> {
         let p = self.local_roms.join(&rom.platform_slug).join(&rom.fs_name);
-        p.is_file().then_some(p)
+        (p.is_file() || p.is_dir()).then_some(p)
     }
 
     fn apply_filter(&mut self) {
@@ -356,7 +359,7 @@ impl App {
         }
 
         restore_terminal(term)?;
-        let result = plan.run(ra, &path, false);
+        let result = plan.run(ra, false);
         setup_terminal(term)?;
 
         let played = match result {

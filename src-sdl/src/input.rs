@@ -108,11 +108,20 @@ impl Pads {
         };
         let mut buttons = vec![false; 16];
         for button in [
-            Button::A, Button::B, Button::X, Button::Y,
-            Button::LeftShoulder, Button::RightShoulder,
-            Button::Back, Button::Start,
-            Button::LeftStick, Button::RightStick,
-            Button::DPadUp, Button::DPadDown, Button::DPadLeft, Button::DPadRight,
+            Button::A,
+            Button::B,
+            Button::X,
+            Button::Y,
+            Button::LeftShoulder,
+            Button::RightShoulder,
+            Button::Back,
+            Button::Start,
+            Button::LeftStick,
+            Button::RightStick,
+            Button::DPadUp,
+            Button::DPadDown,
+            Button::DPadLeft,
+            Button::DPadRight,
         ] {
             if let Some(i) = index_of(button) {
                 buttons[i as usize] = pad.button(button);
@@ -127,6 +136,32 @@ impl Pads {
 
         let axes = [axis(pad, Axis::LeftX), axis(pad, Axis::LeftY)];
         padpoll::pressed_actions(&buttons, &axes, map)
+    }
+
+    /// Whichever button is down, as the index the bindings are written
+    /// against — for capturing a binding, where a button has to be caught
+    /// before it means anything.
+    pub fn any_button(&self) -> Option<u8> {
+        let pad = self.held.as_ref()?;
+        [
+            Button::A,
+            Button::B,
+            Button::X,
+            Button::Y,
+            Button::LeftShoulder,
+            Button::RightShoulder,
+            Button::Back,
+            Button::Start,
+            Button::LeftStick,
+            Button::RightStick,
+            Button::DPadUp,
+            Button::DPadDown,
+            Button::DPadLeft,
+            Button::DPadRight,
+        ]
+        .into_iter()
+        .filter(|b| pad.button(*b))
+        .find_map(index_of)
     }
 
     /// The right stick, for scrolling the preview. Signed, and shaped by
@@ -153,12 +188,23 @@ mod tests {
     /// has to mean the same button here, and SDL numbers its own differently.
     #[test]
     fn sdl_buttons_land_on_the_indices_the_bindings_name() {
-        assert_eq!(index_of(Button::A), Some(0), "the bottom face button is not Confirm");
+        assert_eq!(
+            index_of(Button::A),
+            Some(0),
+            "the bottom face button is not Confirm"
+        );
         assert_eq!(index_of(Button::B), Some(1));
         assert_eq!(index_of(Button::DPadUp), Some(12));
         assert_eq!(index_of(Button::DPadRight), Some(15));
         // Every index we claim is one the tables actually describe.
-        for button in [Button::A, Button::B, Button::X, Button::Y, Button::Back, Button::Start] {
+        for button in [
+            Button::A,
+            Button::B,
+            Button::X,
+            Button::Y,
+            Button::Back,
+            Button::Start,
+        ] {
             let index = index_of(button).expect("mapped");
             assert!(
                 binds::PAD_BUTTONS.iter().any(|b| b.index == index),
@@ -196,7 +242,11 @@ mod tests {
         let mut b = binds::Bindings::default();
         b.set_key("random", Some("z"));
         assert_eq!(action_for_key(&b, Keycode::Z), Some("random"));
-        assert_eq!(action_for_key(&b, Keycode::R), None, "the old key still works");
+        assert_eq!(
+            action_for_key(&b, Keycode::R),
+            None,
+            "the old key still works"
+        );
     }
 
     /// A key nothing is bound to resolves to nothing, rather than to whatever

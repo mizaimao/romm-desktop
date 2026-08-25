@@ -122,7 +122,9 @@ impl Offscreen {
             let ok = gl::CheckFramebufferStatus(gl::FRAMEBUFFER) == gl::FRAMEBUFFER_COMPLETE;
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
             if !ok {
-                return Err(anyhow!("this driver will not draw into a texture that size"));
+                return Err(anyhow!(
+                    "this driver will not draw into a texture that size"
+                ));
             }
             Ok(Offscreen { frame, texture })
         }
@@ -206,7 +208,12 @@ impl Gfx {
             // Four floats a vertex — two of position, two of texture — and six
             // vertices a quad. Filled per draw; there is no static geometry
             // in an interface where everything moves.
-            gl::BufferData(gl::ARRAY_BUFFER, (24 * 4) as isize, std::ptr::null(), gl::STREAM_DRAW);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                (24 * 4) as isize,
+                std::ptr::null(),
+                gl::STREAM_DRAW,
+            );
             bind_attribute(program, "a_pos", 0)?;
             bind_attribute(program, "a_uv", 2)?;
             gl::BindVertexArray(0);
@@ -233,9 +240,20 @@ impl Gfx {
 
     /// Tell it how big the drawable is, in pixels.
     pub fn resize(&mut self, width: f32, height: f32) {
+        self.resize_at(0.0, 0.0, width, height)
+    }
+
+    /// Draw into part of the window rather than all of it.
+    ///
+    /// The panel preview needs this: the layout is exactly 640x480 points and
+    /// the window is whatever somebody dragged it to, so the panel is drawn at
+    /// a whole-number scale in the middle and the rest of the window is left
+    /// alone. Stretching to fill instead is how a 2784-pixel window came out
+    /// 696 points wide and stopped being a preview of the device at all.
+    pub fn resize_at(&mut self, x: f32, y: f32, width: f32, height: f32) {
         self.width = width.max(1.0);
         self.height = height.max(1.0);
-        unsafe { gl::Viewport(0, 0, self.width as i32, self.height as i32) };
+        unsafe { gl::Viewport(x as i32, y as i32, self.width as i32, self.height as i32) };
     }
 
     pub fn clear(&self, color: Rgba) {
@@ -500,7 +518,11 @@ unsafe fn uniform(program: u32, name: &str) -> i32 {
 /// GLSL ES needs to be told a precision; desktop GLSL does not have the
 /// statement at all before 1.30 and ignores it after.
 fn precision(version: &str) -> &'static str {
-    if version.contains(" es") { "precision highp float;\n" } else { "" }
+    if version.contains(" es") {
+        "precision highp float;\n"
+    } else {
+        ""
+    }
 }
 
 /// Which GLSL this context speaks.
@@ -511,8 +533,10 @@ fn precision(version: &str) -> &'static str {
 pub fn version_line() -> Result<&'static str> {
     let reported = unsafe { reported(gl::SHADING_LANGUAGE_VERSION) };
     let es = reported.contains("ES");
-    let number: f32 =
-        reported.split_whitespace().find_map(|word| word.parse().ok()).unwrap_or(0.0);
+    let number: f32 = reported
+        .split_whitespace()
+        .find_map(|word| word.parse().ok())
+        .unwrap_or(0.0);
     match (es, number) {
         (true, n) if n >= 3.0 => Ok("#version 300 es"),
         (false, n) if n >= 3.3 => Ok("#version 330 core"),
@@ -543,8 +567,8 @@ pub unsafe fn draw_full_quad() {
         static mut QUAD: (u32, u32) = (0, 0);
         if QUAD.0 == 0 {
             let corners: [f32; 24] = [
-                -1.0, -1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, 1.0,
-                -1.0, 1.0, 0.0, 1.0, 1.0, -1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+                -1.0, -1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, 1.0, -1.0, 1.0, 0.0,
+                1.0, 1.0, -1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
             ];
             let (mut vao, mut vbo) = (0, 0);
             gl::GenVertexArrays(1, &mut vao);
@@ -588,7 +612,9 @@ pub unsafe fn reported(name: u32) -> String {
         if raw.is_null() {
             return String::new();
         }
-        std::ffi::CStr::from_ptr(raw as *const _).to_string_lossy().into_owned()
+        std::ffi::CStr::from_ptr(raw as *const _)
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
@@ -643,10 +669,23 @@ unsafe fn info_log(object: u32, program: bool) -> String {
         }
         let mut buf = vec![0u8; len.max(1) as usize];
         if program {
-            gl::GetProgramInfoLog(object, len, std::ptr::null_mut(), buf.as_mut_ptr() as *mut _);
+            gl::GetProgramInfoLog(
+                object,
+                len,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut _,
+            );
         } else {
-            gl::GetShaderInfoLog(object, len, std::ptr::null_mut(), buf.as_mut_ptr() as *mut _);
+            gl::GetShaderInfoLog(
+                object,
+                len,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut _,
+            );
         }
-        String::from_utf8_lossy(&buf).trim_end_matches('\0').trim().to_owned()
+        String::from_utf8_lossy(&buf)
+            .trim_end_matches('\0')
+            .trim()
+            .to_owned()
     }
 }

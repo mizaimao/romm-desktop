@@ -1,64 +1,112 @@
-// Ports and Tools, exactly as KNULLI has them.
+// Ports and Tools, as KNULLI actually defines them.
 //
-// These are not consoles and they are not a RomM platform. A port is a shell
-// script — PortMaster's, mostly — sitting in `/userdata/roms/ports` beside a
-// folder of its own data, and KNULLI shows the scripts and hides the folders.
-// `esde::scan` deliberately skips both directories, because scanning them as a
-// system invents games and hands them to a core that cannot run them; this is
-// the other half of that decision rather than a change to it.
+// The first version of this file was wrong twice over, and both mistakes came
+// from guessing at a structure instead of reading it:
 //
-// Read off the device on 2026-08-25:
+//   * **Ports and Tools are `<group>`s, not folders.** `/userdata/roms/tools`
+//     holds nothing but a readme; the Tools *group* is `odcommander` and
+//     `vaixterm`, each its own system with its own directory. Scanning the
+//     folder found an empty folder and reported, wrongly, that there was
+//     nothing there — while the device plainly showed two.
+//   * **Every member has its own extensions.** `.sh` is only what the `ports`
+//     system itself uses. Its siblings use `.wad`, `.game`, `.rtcw`, `.odc`,
+//     `.vxt`, `.zip` and more, so a scan looking for shell scripts finds one
+//     system out of ten.
 //
-//   * the launchable things are `.sh` and `.squashfs`
-//   * `gamelist.xml` holds `<path>`, `<name>` and a relative `<image>`
-//   * everything else in the folder is one of those scripts' data
-//   * KNULLI launches with
-//     `emulatorlauncher -system <system> -rom <path>` — its argument parser
-//     marks exactly those two as required and the rest optional
-//
-// `tools` is empty on this device, `ports` has six and `emulators` has two, which
-// is why an empty folder shows nothing at all rather than an empty screen.
+// So this reads `es_systems.cfg` — the same table KNULLI's own front end reads —
+// and takes the group membership, the paths and the extensions from it.
 
 use std::path::{Path, PathBuf};
 
-/// One launchable script.
+/// One entry a group offers.
 pub struct Port {
     pub name: String,
     pub path: PathBuf,
+    /// Which system it belongs to. `emulatorlauncher` is told this, and the
+    /// members of a group are different systems.
+    pub system: String,
     /// Box art or a screenshot, when the gamelist named one that exists.
     pub image: Option<PathBuf>,
 }
 
-/// The folders KNULLI keeps these in, and what it calls them.
+/// One system out of `es_systems.cfg`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct System {
+    pub name: String,
+    pub path: PathBuf,
+    /// Lower-case, without the dot.
+    pub extensions: Vec<String>,
+    pub group: Option<String>,
+}
+
+/// The groups worth showing beside the consoles, and what to call them.
 ///
-/// Three, not two. `emulators` holds PPSSPP and ScummVM on this device — the
-/// standalone emulators that are launched as scripts rather than as a libretro
-/// core, so they belong here rather than in the Emulators *settings* pane,
-/// which is about which core runs a console. `tools` is empty on this device
-/// and shows nothing.
-pub const FOLDERS: [(&str, &str); 3] = [
+/// Not every group: `megadrive` and `nes` are groups too, and those are
+/// consoles the library already knows about. These three hold the things that
+/// are not RomM platforms at all.
+pub const GROUPS: [(&str, &str); 3] = [
     ("ports", "Ports"),
     ("tools", "Tools"),
     ("emulators", "Emulators"),
 ];
 
-/// Everything launchable in one folder, by name.
+/// Parse `es_systems.cfg`.
 ///
-/// Empty when the folder is missing or holds nothing — the caller shows no row
-/// at all in that case, which is what makes an empty `tools` invisible rather
-/// than a screen saying nothing is here.
-pub fn scan(roms: &Path, system: &str) -> Vec<Port> {
-    let dir = roms.join(system);
-    let names = gamelist_names(&dir.join("gamelist.xml"));
+/// Hand-rolled for the same reason `esde.rs` hand-rolls its gamelist reader: the
+/// format is flat, and one dependency for six fields is not a trade worth making
+/// on a device with a gigabyte of memory.
+pub fn systems(cfg: &Path) -> Vec<System> {
+    let Ok(text) = std::fs::read_to_string(cfg) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for block in text.split("<system>").skip(1) {
+        let block = block.split("</system>").next().unwrap_or(block);
+        let (Some(name), Some(path)) = (tag(block, "name"), tag(block, "path")) else {
+            continue;
+        };
+        let extensions = tag(block, "extension")
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(|e| e.trim_start_matches('.').to_ascii_lowercase())
+            .filter(|e| !e.is_empty())
+            .collect();
+        out.push(System {
+            name,
+            path: PathBuf::from(path),
+            extensions,
+            group: tag(block, "group"),
+        });
+    }
+    out
+}
 
-    let mut out: Vec<Port> = std::fs::read_dir(&dir)
+/// Everything in one group, across every system that belongs to it.
+///
+/// Sorted by name, because a group is a flat list to whoever is looking at it —
+/// that Doom and Abuse come from different systems is a launching detail, not
+/// something to organize the screen around.
+pub fn scan_group(all: &[System], group: &str) -> Vec<Port> {
+    let mut out: Vec<Port> = all
+        .iter()
+        .filter(|s| s.group.as_deref() == Some(group) || s.name == group)
+        .flat_map(scan_system)
+        .collect();
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+/// One system's entries.
+fn scan_system(system: &System) -> Vec<Port> {
+    let names = gamelist_names(&system.path.join("gamelist.xml"));
+    std::fs::read_dir(&system.path)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let path = e.path();
             let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-            if ext != "sh" && ext != "squashfs" {
+            if !system.extensions.contains(&ext) {
                 return None;
             }
             let file = path.file_name()?.to_str()?.to_owned();
@@ -70,22 +118,17 @@ pub fn scan(roms: &Path, system: &str) -> Vec<Port> {
                 .unwrap_or((stem, None));
             Some(Port {
                 name,
+                system: system.name.clone(),
                 image: image
-                    .map(|i| dir.join(i.trim_start_matches("./")))
+                    .map(|i| system.path.join(i.trim_start_matches("./")))
                     .filter(|p| p.is_file()),
                 path,
             })
         })
-        .collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    out
+        .collect()
 }
 
 /// `(file name, display name, image)` out of a gamelist.
-///
-/// Hand-rolled for the same reason `esde.rs` hand-rolls its own: the format is
-/// flat, and the only awkward part is that `<path>` is relative and usually
-/// prefixed `./`, so it is reduced to a file name for matching.
 fn gamelist_names(path: &Path) -> Vec<(String, String, Option<String>)> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
@@ -114,14 +157,14 @@ fn tag(block: &str, name: &str) -> Option<String> {
 
 /// Launch one, the way KNULLI does.
 ///
-/// Through `emulatorlauncher` rather than by running the script directly: that
-/// is what KNULLI's own `es_systems.cfg` invokes, and it sets up the controller
-/// configuration a PortMaster script expects to find already in place. Running
-/// the `.sh` ourselves would work for some and quietly not for others.
-pub fn launch(system: &str, port: &Port) -> std::io::Result<std::process::ExitStatus> {
+/// Through `emulatorlauncher` rather than by running the file — most of these
+/// are not executable at all. A `.wad` is data for prboom and a `.game` is data
+/// for abuse; only the `ports` system's own entries are shell scripts, which is
+/// the other half of the mistake this file used to make.
+pub fn launch(port: &Port) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("emulatorlauncher")
         .arg("-system")
-        .arg(system)
+        .arg(&port.system)
         .arg("-rom")
         .arg(&port.path)
         .status()
@@ -131,106 +174,136 @@ pub fn launch(system: &str, port: &Port) -> std::io::Result<std::process::ExitSt
 mod tests {
     use super::*;
 
-    /// A real gamelist from `/userdata/roms/ports`, 2026-08-25.
-    const REAL: &str = r#"<?xml version="1.0"?>
-<gameList>
-	<game>
-		<path>./Install.PortMaster.sh</path>
-		<name>Install.PortMaster</name>
-		<playcount>1</playcount>
-	</game>
-	<game>
-		<path>./yatka.sh</path>
-		<name>yatka</name>
-		<image>./yatka/screenshot.jpg</image>
-	</game>
-</gameList>"#;
+    /// Three real systems out of the Flip's own `es_systems.cfg`, with the ROM
+    /// paths rewritten so the test can point them at a scratch directory.
+    const FRAGMENT: &str = include_str!("../tests/data/es_systems_fragment.cfg");
+
+    fn fixture(root: &Path) -> Vec<System> {
+        let text = FRAGMENT.replace("ROMS", &root.to_string_lossy());
+        let path = root.join("es_systems.cfg");
+        std::fs::write(&path, text).unwrap();
+        systems(&path)
+    }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("romm-ports-{name}"));
+        let dir = std::env::temp_dir().join(format!("romm-groups-{name}"));
         std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(dir.join("ports")).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
+    /// The real file parses into systems with their group and extensions.
     #[test]
-    fn the_real_gamelist_gives_names_and_pictures() {
-        let got = {
-            let dir = scratch("gamelist");
-            let path = dir.join("ports/gamelist.xml");
-            std::fs::write(&path, REAL).unwrap();
-            gamelist_names(&path)
-        };
-        assert_eq!(got.len(), 2);
-        assert_eq!(got[0].0, "Install.PortMaster.sh", "the ./ prefix was kept");
-        assert_eq!(got[1].1, "yatka");
-        assert_eq!(got[1].2.as_deref(), Some("./yatka/screenshot.jpg"));
-        assert_eq!(got[0].2, None, "an absent image is not an empty one");
-    }
+    fn the_devices_own_table_parses() {
+        let dir = scratch("parse");
+        let all = fixture(&dir);
+        let by = |n: &str| all.iter().find(|s| s.name == n).cloned();
 
-    /// Scripts are the games; the folders beside them are those scripts' data.
-    ///
-    /// KNULLI's own `ports` folder holds five scripts and six directories, and
-    /// listing the directories would offer six things that cannot be launched.
-    #[test]
-    fn only_scripts_are_listed_and_folders_are_not() {
-        let dir = scratch("scan");
-        let ports = dir.join("ports");
-        for f in ["yatka.sh", "Echo Chamber.sh", "thing.squashfs", "_info.txt"] {
-            std::fs::write(ports.join(f), "#!/bin/sh\n").unwrap();
-        }
-        std::fs::create_dir_all(ports.join("yatka")).unwrap();
-        std::fs::write(ports.join("gamelist.xml"), REAL).unwrap();
+        let od = by("odcommander").expect("odcommander is in the fragment");
+        assert_eq!(od.group.as_deref(), Some("tools"), "OD-Commander is a Tool");
+        assert_eq!(od.extensions, ["odc"], "the leading dot was not stripped");
 
-        let found = scan(&dir, "ports");
-        let names: Vec<&str> = found.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["Echo Chamber", "thing", "yatka"],
-            "a folder or a text file was offered as a port"
+        let vx = by("vaixterm").expect("vaixterm is in the fragment");
+        assert_eq!(vx.group.as_deref(), Some("tools"));
+
+        let pr = by("prboom").expect("prboom is in the fragment");
+        assert_eq!(pr.group.as_deref(), Some("ports"));
+        assert!(
+            pr.extensions.contains(&"wad".to_owned()),
+            "{:?}",
+            pr.extensions
         );
     }
 
-    /// A name with a space in it survives — KNULLI's own list has
-    /// "Friday Night Funkin.sh" and "Dueling Dragons.sh" in it.
-    #[test]
-    fn a_name_with_spaces_is_one_port() {
-        let dir = scratch("spaces");
-        std::fs::write(dir.join("ports/Friday Night Funkin.sh"), "x").unwrap();
-        let found = scan(&dir, "ports");
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].name, "Friday Night Funkin");
-    }
-
-    /// An image the gamelist names but which is not on disk is no image, not a
-    /// broken one.
-    #[test]
-    fn a_missing_picture_is_no_picture() {
-        let dir = scratch("noimage");
-        std::fs::write(dir.join("ports/yatka.sh"), "x").unwrap();
-        std::fs::write(dir.join("ports/gamelist.xml"), REAL).unwrap();
-        let found = scan(&dir, "ports");
-        assert_eq!(found[0].name, "yatka");
-        assert_eq!(found[0].image, None, "a path that does not exist was kept");
-    }
-
-    /// All three of KNULLI's script folders, not just the two obvious ones.
+    /// Tools is OD-Commander and VaixTerm — two systems, not the empty `tools`
+    /// folder.
     ///
-    /// `emulators` holds PPSSPP and ScummVM — standalone emulators launched as
-    /// scripts. Leaving it out is why two things on the device had nowhere to
-    /// appear.
+    /// This is the bug the file was rewritten for: scanning
+    /// `/userdata/roms/tools` finds a readme and reports Tools empty, while the
+    /// device plainly shows two.
     #[test]
-    fn all_three_script_folders_are_offered() {
-        let ids: Vec<&str> = FOLDERS.iter().map(|(id, _)| *id).collect();
-        assert_eq!(ids, ["ports", "tools", "emulators"]);
+    fn tools_is_two_systems_and_not_the_empty_tools_folder() {
+        let dir = scratch("tools");
+        let all = fixture(&dir);
+        for (system, file) in [
+            ("odcommander", "odcommander.odc"),
+            ("vaixterm", "vaixterm.vxt"),
+        ] {
+            let d = dir.join(system);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(file), "x").unwrap();
+        }
+        // An empty `tools` folder, exactly as the device has it.
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::write(dir.join("tools/_info.txt"), "readme").unwrap();
+
+        let found = scan_group(&all, "tools");
+        let names: Vec<&str> = found.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["odcommander", "vaixterm"],
+            "Tools came back empty again"
+        );
+        assert_eq!(
+            found[0].system, "odcommander",
+            "the launcher needs the member system"
+        );
     }
 
-    /// An empty folder is nothing to show. `tools` is empty on this device, and
-    /// a Tools row leading to an empty screen is worse than no row.
+    /// Each system's own extensions are honored. `.sh` is only the `ports`
+    /// system's; a scan looking for shell scripts finds one system in ten.
     #[test]
-    fn an_empty_or_missing_folder_offers_nothing() {
-        let dir = scratch("empty");
-        assert!(scan(&dir, "ports").is_empty());
-        assert!(scan(&dir, "tools").is_empty(), "a folder that is not there");
+    fn each_system_matches_its_own_extensions() {
+        let dir = scratch("exts");
+        let all = fixture(&dir);
+        let d = dir.join("prboom");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("doom.wad"), "x").unwrap();
+        std::fs::write(d.join("notes.txt"), "x").unwrap();
+        std::fs::write(d.join("run.sh"), "x").unwrap();
+
+        let found = scan_group(&all, "ports");
+        let names: Vec<&str> = found.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["doom"], "a .sh in prboom is not a prboom game");
+    }
+
+    /// A gamelist name and picture win over the file name, and a picture that is
+    /// not on disk is no picture.
+    #[test]
+    fn the_gamelist_names_what_it_can() {
+        let dir = scratch("gamelist");
+        let all = fixture(&dir);
+        let d = dir.join("odcommander");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("odcommander.odc"), "x").unwrap();
+        std::fs::write(
+            d.join("gamelist.xml"),
+            "<gameList><game><path>./odcommander.odc</path>\
+             <name>OD-Commander</name><image>./art.png</image></game></gameList>",
+        )
+        .unwrap();
+
+        let found = scan_group(&all, "tools");
+        assert_eq!(
+            found[0].name, "OD-Commander",
+            "the gamelist name was ignored"
+        );
+        assert_eq!(found[0].image, None, "a picture that is not there was kept");
+
+        std::fs::write(d.join("art.png"), "x").unwrap();
+        assert!(
+            scan_group(&all, "tools")[0].image.is_some(),
+            "a real picture was dropped"
+        );
+    }
+
+    /// A group nothing belongs to is empty rather than an error, and an
+    /// unreadable table is no systems rather than a panic.
+    #[test]
+    fn a_missing_table_or_group_is_simply_empty() {
+        assert!(systems(Path::new("/nonexistent/es_systems.cfg")).is_empty());
+        let dir = scratch("none");
+        let all = fixture(&dir);
+        assert!(scan_group(&all, "nothing-is-in-this").is_empty());
     }
 }

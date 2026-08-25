@@ -304,22 +304,47 @@ The password is connman's to keep. It is passed to `enable` and never stored by
 us — a copy in our own config would be a plaintext password on an exfat card
 with no permissions.
 
-## Ports and Tools (read off the device 2026-08-25)
+## Ports and Tools — they are groups, not folders (2026-08-25)
 
-Neither is a console and neither is a RomM platform, which is why `esde::scan`
-skips both — a folder of shell scripts read as a system invents games.
+The first reading of this was wrong twice, and both mistakes came from assuming
+a structure rather than reading `es_systems.cfg`.
+
+**They are `<group>`s.** `/userdata/roms/tools` holds nothing but `_info.txt`;
+the **Tools group** is `odcommander` and `vaixterm`, each its own system with
+its own directory. The **Ports group** is nine populated systems: `abuse`,
+`cannonball`, `iortcw`, `mrboom`, `ports`, `prboom`, `sdlpop`, `superbroswar`,
+`xrick`. `emulators` is its own group holding PPSSPP and ScummVM.
+
+**Every member has its own extensions.** `.sh .squashfs` is only the `ports`
+system's. The others use `.odc`, `.vxt`, `.wad .iwad .pwad`, `.game`, `.rtcw`,
+`.libretro`, `.sdlpop`, `.cannonball`, `.zip`. A scan looking for shell scripts
+finds one system in ten.
 
 | | |
 |---|---|
-| Where | `/userdata/roms/ports` and `/userdata/roms/tools` |
-| What launches | **`.sh` and `.squashfs`**, per `es_systems.cfg`. Everything else in the folder is one of those scripts' own data. |
-| Metadata | `gamelist.xml` with `<path>` (relative, `./` prefixed), `<name>`, `<image>` |
-| Launch | `emulatorlauncher -system <system> -rom <path>` — its argparse marks exactly those two `required=True`, the rest optional. |
+| Metadata | `gamelist.xml` per system — `<path>` (relative, `./`), `<name>`, `<image>` |
+| Launch | `emulatorlauncher -system <member system> -rom <path>`. Its argparse marks exactly those two `required=True`. |
 
-`/usr/bin/knulli-wifi`'s sibling trap applies here too: `ports` currently holds
-five scripts *and* six data directories, so listing directories would offer six
-things that cannot be launched. `tools` is empty, which is why an empty folder
-shows no row at all.
+Note the system is the **member**, not the group: launching Doom passes
+`-system prboom`, not `-system ports`.
+
+## The Wi-Fi helper's actual interface (read off the device 2026-08-25)
+
+`/usr/bin/knulli-wifi` is a 124-line shell script over `connmanctl`. Its usage
+text lists two subcommands; the case statement has seven.
+
+| | |
+|---|---|
+| `knulli-wifi list` | networks, **one plain SSID per line**. Names contain spaces — `DIRECT-AB-HP OfficeJet Pro 6970` — so take the whole line. |
+| `knulli-wifi scanlist` | `connmanctl scan wifi`, `sleep 1`, then `list`. |
+| `knulli-wifi enable <ssid> <key>` | the join. **Waits up to 20 s** for an address. Not a call to make on a draw loop. |
+| `knulli-wifi disable` | radio off. |
+| `knulli-wifi get_route` | default gateway — a cheap "am I on" check. |
+| `knulli-settings-get wifi.ssid` | the saved network. |
+
+The password is connman's to keep. It is passed to `enable` and never stored by
+us — a copy in our own config would be a plaintext password on an exfat card
+with no permissions.
 
 ## Front-end platform module — what to wire
 - Input: `/dev/input/event5` (pad), `event1` (lid), `event0` (volume keys).

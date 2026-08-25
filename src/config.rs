@@ -287,7 +287,7 @@ impl EsdeCfg {
 /// Most of the Appearance pane lives in the browser's own storage, because it
 /// is per-screen and changes as you drag a slider. The app icon does not: it
 /// has to be known before a window exists, so it belongs in the file.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct AppearanceCfg {
     /// Which icon the app wears — an id from [`crate::appicon::ICONS`].
     /// Absent means the default; an id this build no longer ships also means
@@ -308,6 +308,53 @@ pub struct AppearanceCfg {
     /// The handheld image ships with this set; nothing else needs it.
     #[serde(default)]
     pub viewing_distance_cm: Option<f32>,
+
+    /// Which shader draws behind everything, by id — `blobs`, `aurora` or
+    /// `plasma`. The webview keeps its own in the browser's local storage, so
+    /// this is the SDL front end's and the two do not have to agree.
+    #[serde(default = "default_backdrop")]
+    pub backdrop: String,
+    /// How fast it moves, as a percentage of the style's own pace.
+    #[serde(default = "hundred")]
+    pub backdrop_speed: i64,
+    /// How strongly it is drawn, as a percentage.
+    #[serde(default = "hundred")]
+    pub backdrop_strength: i64,
+    /// How frosted the panels are, 0 to 60.
+    #[serde(default = "default_glass")]
+    pub glass: i64,
+}
+
+/// Written out rather than derived.
+///
+/// `#[serde(default = "...")]` fills a field that is *missing from a table that
+/// is present*. When the whole `[appearance]` table is absent, serde uses
+/// `AppearanceCfg::default()` instead — and the derived one is zeros, which
+/// gave a backdrop drawn at zero strength and a settings screen reading "0%"
+/// beside a black screen.
+impl Default for AppearanceCfg {
+    fn default() -> Self {
+        Self {
+            app_icon: None,
+            viewing_distance_cm: None,
+            backdrop: default_backdrop(),
+            backdrop_speed: hundred(),
+            backdrop_strength: hundred(),
+            glass: default_glass(),
+        }
+    }
+}
+
+fn default_backdrop() -> String {
+    "blobs".to_owned()
+}
+
+fn hundred() -> i64 {
+    100
+}
+
+fn default_glass() -> i64 {
+    30
 }
 
 /// Which per-system artwork the platform grid shows.
@@ -807,6 +854,23 @@ fn edit(lines: &mut Vec<String>, header: &str, key: &str, entry: Option<String>)
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// A config with no `[appearance]` table at all still gets real values.
+    ///
+    /// `#[serde(default = "...")]` only fills a field missing from a table that
+    /// is present. With the table absent serde reaches for `Default`, and the
+    /// derived one is zeros — which drew the backdrop at zero strength and put
+    /// "0%" beside a black screen on the settings page.
+    #[test]
+    fn appearance_defaults_survive_a_config_with_no_appearance_table() {
+        let cfg: Config = toml::from_str("[server]\nurl = \"http://x\"\n").unwrap();
+        assert_eq!(cfg.appearance.backdrop_strength, 100, "backdrop drawn at nothing");
+        assert_eq!(cfg.appearance.backdrop_speed, 100, "backdrop frozen");
+        assert_eq!(cfg.appearance.backdrop, "blobs");
+        assert!(cfg.appearance.glass > 0, "panels drawn with no glass");
+    }
+
 
     /// A whole table at once, which is what the bindings need: 29 actions and
     /// 16 buttons, written one at a time, is forty-five read-modify-writes of
@@ -955,7 +1019,6 @@ mod tests {
         std::fs::write(&path, "[retroarch]\n").unwrap();
         assert_eq!(Config::load_from(&path).unwrap().retroarch.autofire, "lb");
     }
-    use super::*;
 
     /// The boot order is the point: a portable build can shadow a system one
     /// without uninstalling either, and disabling an entry must skip it rather

@@ -148,8 +148,13 @@ fn main() -> Result<()> {
         }
     };
 
-    let backdrop = match unsafe { backdrop::Backdrop::build(&video, "blobs") } {
-        Ok(b) => {
+    // The style and its tuning come from the config, so the Appearance settings
+    // are the ones that draw this rather than a second set that agrees by
+    // coincidence.
+    let backdrop = match unsafe { backdrop::Backdrop::build(&video, &config.appearance.backdrop) } {
+        Ok(mut b) => {
+            b.speed = config.appearance.backdrop_speed as f32 / 100.0;
+            b.strength = config.appearance.backdrop_strength as f32 / 100.0;
             println!("backdrop: {}", b.style_label());
             Some(b)
         }
@@ -343,6 +348,21 @@ fn main() -> Result<()> {
         // The pad, read whole rather than as events: how far a stick is pushed
         // and how long a button has been down are states, not edges, and
         // `padpoll` is written against them.
+        // While a control is being captured, a button is a button and not
+        // whatever it is bound to — that is the whole point of capturing.
+        if lib.capturing.is_some()
+            && let Some(button) = pads.any_button()
+        {
+            match button {
+                // B clears, Start leaves it alone. Everything else binds.
+                1 => lib.capture_button(None),
+                9 => lib.cancel_capture(),
+                other => lib.capture_button(Some(other)),
+            }
+            repeat.release(&BTreeSet::new());
+            continue;
+        }
+
         let pressed = pads.pressed(&pad_map);
         for action in &pressed {
             if repeat.fire(action, now) {
@@ -385,7 +405,11 @@ fn main() -> Result<()> {
             lib.refresh_rows();
         }
         status.poll(now as u64);
-        gfx.resize(screen.width_px, screen.height_px);
+        // Only the panel, centered. The rest of the window stays as it was
+        // cleared, which is what letterboxing looks like.
+        let (dw, dh) = window.drawable_size();
+        let (ox, oy, _) = panel_box(dw as f32, dh as f32);
+        gfx.resize_at(ox, oy, screen.width_px, screen.height_px);
 
         // The backdrop is drawn twice, deliberately. Once small, into a
         // texture that is then blurred — which is what the panels sample —
@@ -606,14 +630,33 @@ fn ticks(timer: &sdl2::TimerSubsystem) -> f64 {
 /// The *drawable* size, not the window size: on a retina display those differ
 /// by the backing scale, and the drawable is the one with pixels in it.
 fn viewport(window: &sdl2::video::Window) -> Viewport {
-    // One read of the drawable, used for both halves. Asking twice is how the
-    // scale and the size came from different numbers and the preview reported
-    // 1280x960 points on a window pinned to 640.
     let (w, h) = window.drawable_size();
+    let (_, _, scale) = panel_box(w as f32, h as f32);
     Viewport::new(
-        w as f32,
-        h as f32,
-        Scale::new((w as f32 / PANEL.0 as f32).max(0.1)),
+        PANEL.0 as f32 * scale.factor(),
+        PANEL.1 as f32 * scale.factor(),
+        scale,
+    )
+}
+
+/// Where the panel sits in the window, and how big a pixel is.
+///
+/// A whole-number scale, and letterboxed. `Scale::new` snaps to quarter steps
+/// and clamps at four, so dividing the drawable by 640 gave 696 points on a
+/// 2784-pixel window — a preview of a screen the device does not have, with a
+/// different number of panes. Fitting the panel and leaving the rest of the
+/// window blank is the only arrangement where what is on screen here is what
+/// will be on screen there.
+fn panel_box(w: f32, h: f32) -> (f32, f32, Scale) {
+    let fit = (w / PANEL.0 as f32)
+        .min(h / PANEL.1 as f32)
+        .floor()
+        .max(1.0);
+    let (pw, ph) = (PANEL.0 as f32 * fit, PANEL.1 as f32 * fit);
+    (
+        ((w - pw) / 2.0).max(0.0),
+        ((h - ph) / 2.0).max(0.0),
+        Scale::new(fit),
     )
 }
 
@@ -749,6 +792,8 @@ mod size {
     pub const TABS: f32 = 26.0;
     /// The line under the tabs saying where you are.
     pub const HEADER: f32 = 20.0;
+    /// The strip along the bottom saying what the buttons do.
+    pub const HELP: f32 = 18.0;
     /// The info pane beside the games. Wide enough for a wrapped title and a
     /// column of facts, and no wider — what is left is the list, and the list
     /// is the thing being read.
@@ -979,14 +1024,17 @@ fn draw(
     };
     let page = Rect::new(0.0, 0.0, screen.width(), screen.height());
 
-    let [tabs, header, body] = split3(page.column(
+    let boxes = page.column(
         0.0,
         &[
             Size::Fixed(size::TABS),
             Size::Fixed(size::HEADER),
             Size::Grow(1.0),
+            Size::Fixed(size::HELP),
         ],
-    ));
+    );
+    let [tabs, header, body, help] =
+        <[Rect; 4]>::try_from(boxes).unwrap_or([Rect::new(0.0, 0.0, 0.0, 0.0); 4]);
 
     // One page at a time, chosen by the tab. There is no Sofa-or-Desk here and
     // no column count to work out: the panel is 640 points wide and that is
@@ -1004,7 +1052,16 @@ fn draw(
         other => draw_unbuilt(&mut f, other, body),
     }
 
+    // What the buttons do here. Said rather than left to be found by pressing
+    // everything, which is what a settings screen with no help bar teaches.
+    draw_help(&mut f, hints_for(lib, typing.is_some()), help);
+
     // The keyboard sits over whatever asked for it.
+    if let Some(picker) = lib.picking.as_ref() {
+        draw_picker_sheet(&mut f, picker, page);
+    } else if let Some(cap) = lib.capturing.as_ref() {
+        draw_capture(&mut f, cap, page);
+    }
     if let Some(kb) = typing {
         draw_keyboard(&mut f, kb, page);
     }
@@ -1387,6 +1444,105 @@ fn demo_keyboard() -> Option<keyboard::Keyboard> {
     Some(kb)
 }
 
+/// What to say the buttons do, for whatever is on screen.
+fn hints_for(lib: &library::Library, typing: bool) -> &'static [(&'static str, &'static str)] {
+    if typing {
+        return &[("A", "type"), ("B", "delete"), ("L R", "page")];
+    }
+    if lib.capturing.is_some() {
+        return &[("any", "bind"), ("B", "clear"), ("Start", "cancel")];
+    }
+    if lib.picking.is_some() {
+        return &[("A", "choose"), ("B", "cancel")];
+    }
+    match lib.view {
+        library::View::Options => &[
+            ("A", "change"),
+            ("< >", "slider"),
+            ("B", "back"),
+            ("L R", "tabs"),
+        ],
+        library::View::Roms => &[
+            ("A", "play"),
+            ("B", "back"),
+            ("/", "search"),
+            ("L R", "tabs"),
+        ],
+        _ => &[("A", "open"), ("B", "back"), ("L R", "tabs")],
+    }
+}
+
+/// A sheet of options, over the settings screen.
+///
+/// The shape a mature settings menu uses: the choices are on screen at once and
+/// the current one is marked, so choosing is reading and pressing rather than
+/// holding a direction until the right value goes past.
+fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, page: Rect) {
+    f.fill(page, paint::SCRIM, 0.0);
+
+    let step = size::ROW;
+    let rows = picker.options.len().min(9);
+    let sheet_h = rows as f32 * step + 46.0 + size::GAP * 2.0;
+    let sheet = Rect::new(page.x, page.bottom() - sheet_h, page.w, sheet_h);
+    f.fill(sheet, paint::SHEET, 0.0);
+
+    let inner = sheet.inset(size::PAD);
+    let (head, list) = inner.split_top(24.0);
+    let spec = f.spec(picker.title, size::TITLE);
+    f.label(&spec, head, paint::TEXT);
+
+    // Keep the highlighted option on screen when the list is longer than the
+    // sheet — the core map offers nine cores for some consoles.
+    let first = picker.at.saturating_sub(rows.saturating_sub(1));
+    for (i, (_, label)) in picker.options.iter().enumerate().skip(first).take(rows) {
+        let line = Rect::new(list.x, list.y + (i - first) as f32 * step, list.w, step);
+        let on = i == picker.at;
+        if on {
+            f.pane(line, paint::CURSOR, size::ROUND_SMALL);
+        }
+        let inside = line.inset(Edges::xy(8.0, 5.0));
+        let spec = f.wrapped(label, size::LABEL, inside.w, 1);
+        f.label(&spec, inside, if on { paint::TEXT } else { paint::DIM });
+    }
+}
+
+/// Waiting for a button, so a control can be put on it.
+fn draw_capture(f: &mut Frame, cap: &library::Capture, page: Rect) {
+    f.fill(page, paint::SCRIM, 0.0);
+    let (top, rest) = page.inset(size::PAD).split_top(page.h * 0.42);
+    let spec = f.spec(cap.label, 20.0);
+    f.label_centered(&spec, top, paint::TEXT);
+    let spec = f.wrapped(
+        "Press the button you want. B clears it, Start leaves it alone.",
+        size::TITLE,
+        rest.w.min(380.0),
+        3,
+    );
+    f.label_centered(&spec, Rect { h: 60.0, ..rest }, paint::DIM);
+}
+
+/// What the buttons do, along the bottom.
+///
+/// Permanent, the way a settings menu that expects a pad has it — a screen
+/// whose controls you have to guess is one where left and right get pressed on
+/// everything to find out what moves.
+fn draw_help(f: &mut Frame, hints: &[(&str, &str)], area: Rect) {
+    let mut x = area.x + size::GAP;
+    for (button, what) in hints {
+        let spec = f.spec(*button, 10.0);
+        let (w, _) = f.painter.measure(f.gfx, &spec);
+        let w = f.screen.scale.pt(w as f32);
+        f.label(&spec, Rect { x, w, ..area }, paint::TEXT);
+        x += w + 4.0;
+
+        let spec = f.spec(*what, 10.0);
+        let (w, _) = f.painter.measure(f.gfx, &spec);
+        let w = f.screen.scale.pt(w as f32);
+        f.label(&spec, Rect { x, w, ..area }, paint::FAINT);
+        x += w + size::GAP * 1.6;
+    }
+}
+
 /// The on-screen keyboard, over whatever asked for it.
 ///
 /// Drawn as a sheet across the bottom two thirds rather than a dialog in the
@@ -1559,8 +1715,11 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         let spec = f.wrapped(entry.label, size::LABEL, name.w, 1);
         f.label(&spec, name, if on { paint::TEXT } else { paint::DIM });
 
-        // A value you can change says so, with the arrows the pad presses.
-        let shown = if on && entry.steps() {
+        // Only a slider shows arrows, because only a slider is changed with
+        // them. A toggle flips on A and a choice opens a list, and drawing
+        // arrows on those is how the screen taught the wrong control.
+        let sliding = entry.steps();
+        let shown = if on && sliding {
             format!("\u{2039} {} \u{203a}", entry.value())
         } else {
             entry.value()
@@ -1623,11 +1782,6 @@ fn draw_unbuilt(f: &mut Frame, id: &str, area: Rect) {
     f.label_centered(&spec, top, paint::DIM);
     let spec = f.wrapped(why, size::LABEL, rest.w.min(330.0), 4);
     f.label_centered(&spec, Rect { h: 54.0, ..rest }, paint::FAINT);
-}
-
-fn split3(mut boxes: Vec<Rect>) -> [Rect; 3] {
-    boxes.resize(3, Rect::new(0.0, 0.0, 0.0, 0.0));
-    [boxes[0], boxes[1], boxes[2]]
 }
 
 /// The tab row and the header, across the top.

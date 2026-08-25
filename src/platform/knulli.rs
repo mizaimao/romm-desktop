@@ -94,6 +94,11 @@ impl Platform for Knulli {
         &[("psx", "pcsx_rearmed"), ("neogeoaes", "geolith")]
     }
 
+    /// Batocera's own system table, which is where Ports and Tools live.
+    fn es_systems(&self) -> Option<PathBuf> {
+        Some(PathBuf::from("/usr/share/emulationstation/es_systems.cfg"))
+    }
+
     /// Known, and deliberately not wanted here.
     ///
     /// Distinct from an unknown directory, which is reported so a missing

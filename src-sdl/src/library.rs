@@ -182,6 +182,27 @@ impl Shelf {
     }
 }
 
+/// A list of options, open over the settings screen.
+///
+/// This is what a setting does instead of stepping. Stepping means holding a
+/// direction and watching values go past to find the one you want, and on a list
+/// of nine cores it means doing that while reading — which is the control this
+/// replaced.
+pub struct Picker {
+    pub title: &'static str,
+    /// `(value, label)`, the same shape the setting holds.
+    pub options: Vec<(String, String)>,
+    pub at: usize,
+    /// Where the choice is written. Empty for a choice that is not a setting.
+    pub field: &'static str,
+}
+
+/// Waiting for a button, to put a control on it.
+pub struct Capture {
+    pub action: String,
+    pub label: &'static str,
+}
+
 /// Something waiting for the keyboard, and what to do with what is typed.
 pub struct TextField {
     /// Where the text goes when it is finished. Distinguishing these is not
@@ -289,7 +310,13 @@ pub struct Library {
     pub option_at: usize,
     /// What the search box holds. Empty means everything.
     pub query: String,
-    /// The open Ports or Tools folder.
+    /// The open list of options, if a setting was activated.
+    pub picking: Option<Picker>,
+    /// Waiting for a button press, if a control was activated.
+    pub capturing: Option<Capture>,
+    /// The device's own system table, read once.
+    pub es_systems: Vec<crate::ports::System>,
+    /// The open Ports or Tools group.
     pub ports: Vec<crate::ports::Port>,
     pub port_at: usize,
     /// Which folder those came from, for launching and for the heading.
@@ -367,6 +394,9 @@ impl Library {
             pane_at: 0,
             option_at: 0,
             query: String::new(),
+            picking: None,
+            capturing: None,
+            es_systems: Vec::new(),
             ports: Vec::new(),
             port_at: 0,
             port_system: String::new(),
@@ -446,13 +476,20 @@ impl Library {
         // because a folder of shell scripts read as a platform invents games —
         // so they are added here as their own kind, and only when they hold
         // something. `tools` is empty on this device and shows nothing.
-        for (folder, label) in crate::ports::FOLDERS {
-            let found = crate::ports::scan(&lib.roms_dir, folder);
+        // From the device's own system table, not from a folder — Ports and
+        // Tools are groups of systems there, and `/userdata/roms/tools` is an
+        // empty directory while the Tools group has two members.
+        lib.es_systems = romm_desktop::platform::current()
+            .es_systems()
+            .map(|p| crate::ports::systems(&p))
+            .unwrap_or_default();
+        for (group, label) in crate::ports::GROUPS {
+            let found = crate::ports::scan_group(&lib.es_systems, group);
             if found.is_empty() {
                 continue;
             }
             lib.consoles.push(Console {
-                slug: folder.to_owned(),
+                slug: group.to_owned(),
                 name: label.to_owned(),
                 games: found.len() as i64,
                 scripts: true,
@@ -626,7 +663,7 @@ impl Library {
     /// Open a Ports or Tools folder.
     pub fn open_scripts(&mut self) {
         let Some(slug) = self.console().map(|c| c.slug.clone()) else { return };
-        self.ports = crate::ports::scan(&self.roms_dir, &slug);
+        self.ports = crate::ports::scan_group(&self.es_systems, &slug);
         self.port_system = slug;
         self.view = View::Scripts;
         self.port_at = 0;
@@ -792,6 +829,23 @@ impl Library {
 
     /// Put the cursor on a particular row, if it is one.
     ///
+    /// Change the highlighted setting's value and save it.
+    ///
+    /// Shared by the slider and by a toggle, which flips on activate rather
+    /// than opening a list of two.
+    pub fn step_option(&mut self, dir: i64) {
+        let at = self.option_at;
+        let Some(pane) = self.panes.get_mut(self.pane_at) else { return };
+        let Some(entry) = pane.entries.get_mut(at) else { return };
+        let field = entry.field;
+        if let Some(written) = entry.step(dir)
+            && !field.is_empty()
+            && let Err(e) = crate::settings::write(field, &written)
+        {
+            eprintln!("could not save {field}: {e:#}");
+        }
+    }
+
     /// The setting under the cursor.
     fn option_here(&self) -> Option<&crate::settings::Entry> {
         self.panes.get(self.pane_at)?.entries.get(self.option_at)
@@ -898,8 +952,88 @@ impl Library {
         true
     }
 
+    /// Drive the open list of options, if there is one.
+    ///
+    /// Takes the input before anything else does, the way the keyboard does:
+    /// a list you are choosing from owns the buttons until you have chosen.
+    fn act_picking(&mut self, action: &str) -> bool {
+        let Some(picker) = self.picking.as_mut() else { return false };
+        let n = picker.options.len();
+        match action {
+            "up" => picker.at = (picker.at + n.saturating_sub(1)) % n.max(1),
+            "down" => picker.at = (picker.at + 1) % n.max(1),
+            "first" => picker.at = 0,
+            "last" => picker.at = n.saturating_sub(1),
+            "activate" => {
+                let Some(picker) = self.picking.take() else { return true };
+                let Some((value, _)) = picker.options.get(picker.at).cloned() else {
+                    return true;
+                };
+                if let Some(pane) = self.panes.get_mut(self.pane_at)
+                    && let Some(entry) = pane.entries.get_mut(self.option_at)
+                    && let crate::settings::Kind::Choice { at, .. } = &mut entry.kind
+                {
+                    *at = picker.at;
+                }
+                if !picker.field.is_empty()
+                    && let Err(e) = crate::settings::write(
+                        picker.field,
+                        &crate::settings::Written::Text(value),
+                    )
+                {
+                    eprintln!("could not save {}: {e:#}", picker.field);
+                }
+            }
+            "back" | "back2" => self.picking = None,
+            _ => {}
+        }
+        true
+    }
+
+    /// Put the control being captured onto `button`, or clear it.
+    ///
+    /// Called by the loop with a raw button index rather than an action,
+    /// because the whole point is to catch the button before it means anything.
+    pub fn capture_button(&mut self, button: Option<u8>) {
+        let Some(cap) = self.capturing.take() else { return };
+        if let Err(e) = crate::settings::set_pad_binding(&cap.action, button) {
+            eprintln!("could not bind {}: {e:#}", cap.label);
+            return;
+        }
+        if let Some(pane) = self.panes.get_mut(self.pane_at)
+            && let Some(entry) = pane.entries.get_mut(self.option_at)
+            && let crate::settings::Kind::Binding(on) = &mut entry.kind
+        {
+            *on = button;
+        }
+    }
+
+    /// Stop waiting for a button, changing nothing.
+    pub fn cancel_capture(&mut self) {
+        self.capturing = None;
+    }
+
     /// Do what a key or a button asked for. Returns whether anything changed.
     pub fn act(&mut self, action: &str) -> Result<bool> {
+        if self.act_picking(action) {
+            return Ok(true);
+        }
+        // Left and right adjust a slider, and nothing else. A choice opens a
+        // list and a control waits for a button, because stepping through values
+        // to find the one you want is the control this screen used to have.
+        //
+        // Checked before the cursor is borrowed: the cursor borrows all of
+        // `self`, and changing a value needs it too.
+        if self.view == View::Options && matches!(action, "left" | "right") {
+            let sliding = self
+                .option_here()
+                .is_some_and(|e| matches!(e.kind, crate::settings::Kind::Number { .. }));
+            if sliding {
+                self.step_option(if action == "right" { 1 } else { -1 });
+                return Ok(true);
+            }
+        }
+
         let cursor = match self.view {
             View::Platforms => &mut self.console_at,
             View::Groups => &mut self.shelf_at,
@@ -912,24 +1046,6 @@ impl Library {
             View::Roms => &mut self.at,
         };
         let moved = |table: &[Option<usize>], at: usize| table.get(at).copied().flatten();
-
-        // On a settings row, left and right change the value rather than
-        // moving — there is nothing to move sideways to, and stepping a value
-        // is what those presses are for on every device that has this screen.
-        if self.view == View::Options && matches!(action, "left" | "right") {
-            let dir = if action == "right" { 1 } else { -1 };
-            let at = self.option_at;
-            let Some(pane) = self.panes.get_mut(self.pane_at) else { return Ok(false) };
-            let Some(entry) = pane.entries.get_mut(at) else { return Ok(false) };
-            let field = entry.field;
-            if let Some(written) = entry.step(dir)
-                && !field.is_empty()
-                && let Err(e) = crate::settings::write(field, &written)
-            {
-                eprintln!("could not save {field}: {e:#}");
-            }
-            return Ok(true);
-        }
 
         let next = match action {
             "left" => moved(&self.moves.left, *cursor),
@@ -961,7 +1077,7 @@ impl Library {
                     let Some(port) = self.ports.get(self.port_at) else {
                         return Ok(false);
                     };
-                    match crate::ports::launch(&self.port_system, port) {
+                    match crate::ports::launch(port) {
                         Ok(status) if status.success() => {}
                         Ok(status) => eprintln!("{} exited {status}", port.name),
                         Err(e) => eprintln!("could not launch {}: {e:#}", port.name),
@@ -988,6 +1104,36 @@ impl Library {
                 // it asks for the keyboard. The loop picks this up and opens
                 // one — `Library` has no window to open it in.
                 View::Options => {
+                    // A choice opens a list, a control waits for a button, and
+                    // a toggle just flips — none of them step.
+                    if let Some(e) = self.option_here() {
+                        match &e.kind {
+                            crate::settings::Kind::Choice { at, options } => {
+                                self.picking = Some(Picker {
+                                    title: e.label,
+                                    options: options.clone(),
+                                    at: *at,
+                                    field: e.field,
+                                });
+                                return Ok(true);
+                            }
+                            crate::settings::Kind::Binding(_) => {
+                                self.capturing = Some(Capture {
+                                    action: e
+                                        .field
+                                        .trim_start_matches("bindings_pad.")
+                                        .to_owned(),
+                                    label: e.label,
+                                });
+                                return Ok(true);
+                            }
+                            crate::settings::Kind::Toggle(_) => {
+                                self.step_option(1);
+                                return Ok(true);
+                            }
+                            _ => {}
+                        }
+                    }
                     // The Wi-Fi row is an action rather than a value, and the
                     // only one so far that opens a screen of its own.
                     if self.option_here().is_some_and(|e| e.label == "Wi-Fi") {
@@ -1113,6 +1259,9 @@ mod tests {
             pane_at: 0,
             option_at: 0,
             query: String::new(),
+            picking: None,
+            capturing: None,
+            es_systems: Vec::new(),
             ports: Vec::new(),
             port_at: 0,
             port_system: String::new(),
@@ -1387,13 +1536,13 @@ mod tests {
         );
     }
 
-    /// Left and right change a setting rather than moving the cursor.
+    /// A toggle flips on activate, and left and right do nothing to it.
     ///
-    /// Deliberately on an entry with no `field`, because stepping one that has
-    /// a field writes `config.toml` — and a test that edits the developer's own
-    /// config while it runs is a test that eventually edits something worse.
+    /// Stepping is for sliders only. On a choice it meant holding a direction
+    /// and watching values go past to find one, which is the control this
+    /// screen used to have and the reason it was rebuilt.
     #[test]
-    fn left_and_right_change_a_setting_in_place() {
+    fn a_toggle_flips_on_activate_and_ignores_left_and_right() {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "t",
@@ -1406,17 +1555,69 @@ mod tests {
             }],
         }];
         lib.go_to_section(3);
-        assert_eq!(lib.view, View::Panes);
         lib.act("activate").unwrap();
         assert_eq!(lib.view, View::Options, "a group did not open");
 
         let value = |l: &Library| l.panes[0].entries[0].value();
         assert_eq!(value(&lib), "Off");
+        lib.act("activate").unwrap();
+        assert_eq!(value(&lib), "On", "activate did not flip the toggle");
         lib.act("right").unwrap();
-        assert_eq!(value(&lib), "On", "right did not change the value");
-        assert_eq!(lib.option_at, 0, "right moved the cursor instead of editing");
-        lib.act("left").unwrap();
-        assert_eq!(value(&lib), "Off", "left is a dead press on a toggle");
+        assert_eq!(value(&lib), "On", "right stepped a toggle");
+    }
+
+    /// A choice opens a list rather than stepping through its options.
+    #[test]
+    fn a_choice_opens_a_list() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.panes = vec![crate::settings::Pane {
+            id: "t",
+            label: "Test",
+            entries: vec![crate::settings::Entry {
+                field: "",
+                label: "Which one",
+                help: "",
+                kind: crate::settings::Kind::Choice {
+                    at: 1,
+                    options: vec![
+                        ("a".into(), "Alpha".into()),
+                        ("b".into(), "Beta".into()),
+                        ("c".into(), "Gamma".into()),
+                    ],
+                },
+            }],
+        }];
+        lib.go_to_section(3);
+        lib.act("activate").unwrap();
+        lib.act("activate").unwrap();
+
+        let picker = lib.picking.as_ref().expect("a list should have opened");
+        assert_eq!(picker.title, "Which one");
+        assert_eq!(picker.options.len(), 3);
+        assert_eq!(picker.at, 1, "the list did not open on the current value");
+    }
+
+    /// A control waits for a button rather than stepping through their names.
+    #[test]
+    fn a_control_waits_for_a_button() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.panes = vec![crate::settings::Pane {
+            id: "t",
+            label: "Test",
+            entries: vec![crate::settings::Entry {
+                field: "bindings_pad.activate",
+                label: "Open platform / play",
+                help: "",
+                kind: crate::settings::Kind::Binding(None),
+            }],
+        }];
+        lib.go_to_section(3);
+        lib.act("activate").unwrap();
+        lib.act("activate").unwrap();
+
+        let cap = lib.capturing.as_ref().expect("it should be waiting for a button");
+        assert_eq!(cap.action, "activate", "the table prefix was not stripped");
+        assert!(lib.picking.is_none(), "a control opened a list instead");
     }
 
     /// Up and down still move, and Back leaves the group rather than the tab.

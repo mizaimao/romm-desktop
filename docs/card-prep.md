@@ -257,7 +257,7 @@ needs that ROM.
 | System | State |
 |---|---|
 | psx | **OK** — `psxonpsp660.bin` + `scph5500/5501/5502` present. The `scph101/1001/7001` the checker lists are alternates |
-| dreamcast | **`dc_flash.bin` missing** — in `library/system/`, md5 matches, never copied (Trap 1). `dc_boot.bin` present and correct |
+| dreamcast | ~~`dc_flash.bin` missing~~ **fixed 2026-08-25** — rsynced onto the live card, md5 `0a93f794…`, checker now clean. The manifest still does not know about it (Trap 1), so a re-staged card will lose it again. `dc_boot.bin` present and correct |
 | neogeo | `neogeo.zip` present, **wrong revision** (Trap 3) |
 | pcengine | `syscard3.pce` missing — irrelevant, both games are HuCard homebrew, not CD |
 | nes, snes, megadrive, gb, gbc, gba, n64, fbneo | **nothing needed** — no BIOS entries, or already satisfied |
@@ -266,10 +266,19 @@ needs that ROM.
 
 `scp` and `ssh 'cat > file' < src` both **hang** against KNULLI (measured
 2026-08-24) — the login flow stalls without a PTY, and `-tt` mangles binary.
-`sftp-server`, `scp` and `rsync` all exist on the device, so a working route
-almost certainly exists; `rsync` is the one `handheld-os.md` records as
-confirmed, but it has not been re-tested since. Until it is, copy BIOS onto the
-card while it is in the reader.
+
+**`rsync` works. Use it** (re-tested 2026-08-25, `dc_flash.bin` onto the live
+card). Drive the password with the same `expect` wrapper `handheld-os.md`
+records, wrapping `rsync` instead of `ssh`:
+
+    rsync -av -e {ssh -o StrictHostKeyChecking=accept-new \
+      -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password \
+      -o PubkeyAuthentication=no} <src> root@10.10.10.187:<dest>
+
+It ends with `chown ... Operation not permitted` and exit 23. **That is not a
+failure** — `/userdata` will not take an ownership change, and the file itself
+lands byte-exact. Check the md5 rather than the exit code. Pulling the card is
+no longer necessary for a file or two.
 
 ## Tools
 

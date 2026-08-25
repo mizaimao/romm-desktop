@@ -82,6 +82,8 @@ pub enum Kind {
     ReadOnly(String),
     /// Does something rather than holding a value.
     Action,
+    /// A pad binding, changed by pressing the button you want.
+    Binding(Option<u8>),
 }
 
 /// One row on a settings screen.
@@ -118,15 +120,17 @@ impl Entry {
             }
             Kind::ReadOnly(v) => v.clone(),
             Kind::Action => "\u{203a}".to_owned(),
+            Kind::Binding(b) => romm_desktop::binds::pad_label(*b),
         }
     }
 
     /// Whether left and right change this in place.
+    ///
+    /// Sliders only. A toggle flips on A and a choice opens a list — including
+    /// them here is what put arrows beside rows those presses did not move, and
+    /// taught the wrong control on every screen.
     pub fn steps(&self) -> bool {
-        matches!(
-            self.kind,
-            Kind::Toggle(_) | Kind::Choice { .. } | Kind::Number { .. }
-        )
+        matches!(self.kind, Kind::Number { .. })
     }
 
     /// Step the value. `dir` is -1 or 1. Returns what to write, if anything.
@@ -327,41 +331,11 @@ fn binding_entries(binds: &romm_desktop::binds::Bindings) -> Vec<Entry> {
         .map(|a| Entry {
             field: Box::leak(format!("bindings_pad.{}", a.id).into_boxed_str()),
             label: a.label,
-            help: "Press left or right to move this to another button.",
-            kind: Kind::Choice {
-                at: pad_index(binds.pad_for(a.id)),
-                options: pad_options(),
-            },
+            help: "Press A, then press the button you want. B clears it, and the \
+                   Start button leaves without changing anything.",
+            kind: Kind::Binding(binds.pad_for(a.id)),
         })
         .collect()
-}
-
-/// The buttons a binding can be on, plus "not bound".
-///
-/// A fixed list rather than a capture mode: capture means "press the button you
-/// want", which on a device where every button already does something means
-/// pressing the one that leaves the screen. Stepping through the names is
-/// slower and cannot trap you.
-fn pad_options() -> Vec<(String, String)> {
-    let mut out = vec![(String::new(), "not bound".to_owned())];
-    for b in romm_desktop::binds::PAD_BUTTONS {
-        out.push((
-            b.index.to_string(),
-            romm_desktop::binds::pad_label(Some(b.index)),
-        ));
-    }
-    out
-}
-
-fn pad_index(button: Option<u8>) -> usize {
-    match button {
-        None => 0,
-        Some(b) => romm_desktop::binds::PAD_BUTTONS
-            .iter()
-            .position(|p| p.index == b)
-            .map(|i| i + 1)
-            .unwrap_or(0),
-    }
 }
 
 /// Build every pane from the config as it stands.
@@ -460,6 +434,51 @@ pub fn panes(
                     kind: Kind::Choice {
                         at: art_at(&cfg.media.detail_art),
                         options: art_options(),
+                    },
+                },
+                Entry {
+                    field: "appearance.backdrop",
+                    label: "Backdrop",
+                    help: "Which shader draws behind everything. The webview keeps its own in the browser, so this one is the handheld's.",
+                    kind: Kind::Choice {
+                        at: backdrop_at(&cfg.appearance.backdrop),
+                        options: backdrop_options(),
+                    },
+                },
+                Entry {
+                    field: "appearance.backdrop_speed",
+                    label: "Speed",
+                    help: "How fast the backdrop moves, against the style's own pace.",
+                    kind: Kind::Number {
+                        value: cfg.appearance.backdrop_speed,
+                        min: 0,
+                        max: 300,
+                        step: 10,
+                        unit: "%",
+                    },
+                },
+                Entry {
+                    field: "appearance.backdrop_strength",
+                    label: "Strength",
+                    help: "How strongly the backdrop is drawn. Zero is a plain dark screen.",
+                    kind: Kind::Number {
+                        value: cfg.appearance.backdrop_strength,
+                        min: 0,
+                        max: 200,
+                        step: 10,
+                        unit: "%",
+                    },
+                },
+                Entry {
+                    field: "appearance.glass",
+                    label: "Glass",
+                    help: "How frosted the panels are. The blur is a shader, so this costs nothing to raise.",
+                    kind: Kind::Number {
+                        value: cfg.appearance.glass,
+                        min: 0,
+                        max: 60,
+                        step: 5,
+                        unit: "",
                     },
                 },
                 Entry {
@@ -573,6 +592,27 @@ fn launch_entries(cfg: &Config) -> Vec<Entry> {
     ]
 }
 
+/// The backdrops this front end can draw, from the shader table itself — so a
+/// style added there appears here without a second list to keep in step.
+fn backdrop_options() -> Vec<(String, String)> {
+    romm_sdl_styles()
+        .iter()
+        .map(|(id, label)| ((*id).to_owned(), (*label).to_owned()))
+        .collect()
+}
+
+fn backdrop_at(current: &str) -> usize {
+    romm_sdl_styles()
+        .iter()
+        .position(|(id, _)| *id == current)
+        .unwrap_or(0)
+}
+
+/// Indirection so `settings` does not depend on the renderer's module layout.
+fn romm_sdl_styles() -> &'static [(&'static str, &'static str)] {
+    crate::backdrop::STYLE_LIST
+}
+
 fn art_options() -> Vec<(String, String)> {
     ["box", "title", "screenshot", "logo", "none"]
         .iter()
@@ -620,7 +660,15 @@ pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
         return apply_device(key, value);
     }
     if table == "bindings_pad" {
-        return set_pad_binding(key, value);
+        let Written::Text(v) = value else {
+            anyhow::bail!("a binding is a button number or nothing");
+        };
+        let button = if v.is_empty() {
+            None
+        } else {
+            Some(v.parse::<u8>()?)
+        };
+        return set_pad_binding(key, button);
     }
     let table = toml_table(table);
     match value {
@@ -635,15 +683,7 @@ pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
 /// Through `Bindings::set_pad` rather than by writing the key directly: that
 /// method also clears whatever else was on the button, and two actions on one
 /// button is a pad where one of them silently stops working.
-fn set_pad_binding(action: &str, value: &Written) -> anyhow::Result<()> {
-    let Written::Text(v) = value else {
-        anyhow::bail!("a binding is a button number or nothing");
-    };
-    let button = if v.is_empty() {
-        None
-    } else {
-        Some(v.parse::<u8>()?)
-    };
+pub fn set_pad_binding(action: &str, button: Option<u8>) -> anyhow::Result<()> {
     let mut cfg = Config::load_from(std::path::Path::new(FILE)).unwrap_or_default();
     cfg.bindings.set_pad(action, button);
     let entries: Vec<(String, Option<String>)> = cfg
@@ -920,47 +960,83 @@ mod tests {
         assert_eq!(toml_table("server"), "server");
     }
 
-    /// Controls offers pad buttons only, and every row can be cleared.
+    /// Controls are captured, not stepped.
     ///
-    /// No keyboard column: a handheld has no keyboard, and 29 rows of the same
-    /// dash is a column that only takes room.
+    /// Stepping through button names to bind a control is a worse control than
+    /// the problem it avoids. `Binding` is its own kind precisely so the screen
+    /// cannot fall back to left and right on it.
     #[test]
-    fn controls_are_pad_only_and_can_be_unbound() {
+    fn controls_are_captured_rather_than_stepped() {
         let pane = built()
             .into_iter()
             .find(|p| p.id == "control")
             .expect("a Control pane");
-        assert!(!pane.entries.is_empty());
-        // The pane opens with "Match player 1", which is a toggle; the bindings
-        // are the rest.
-        for e in pane
+        let bindings: Vec<&Entry> = pane
             .entries
             .iter()
             .filter(|e| e.field.starts_with("bindings_pad."))
-        {
-            let Kind::Choice { options, .. } = &e.kind else {
-                panic!("{} is not a choice", e.label);
-            };
-            assert_eq!(options[0].0, "", "{} cannot be unbound", e.label);
-            assert_eq!(options[0].1, "not bound");
+            .collect();
+        assert!(!bindings.is_empty(), "no bindings in the Control pane");
+        for e in bindings {
+            assert!(
+                matches!(e.kind, Kind::Binding(_)),
+                "{} is not a binding, so it would be stepped",
+                e.label
+            );
+            assert!(
+                !e.steps(),
+                "{} can still be changed with left and right",
+                e.label
+            );
         }
     }
 
-    /// The button a binding is on comes back as the option that is selected.
-    /// Off by one here and every row opens showing the wrong button.
+    /// An unbound control says so; a bound one names its button.
     #[test]
-    fn a_bound_button_selects_its_own_option() {
-        let opts = pad_options();
-        assert_eq!(pad_index(None), 0, "unbound is the first option");
-        for b in romm_desktop::binds::PAD_BUTTONS {
-            let at = pad_index(Some(b.index));
-            assert_eq!(
-                opts[at].0,
-                b.index.to_string(),
-                "button {} selected the wrong option",
-                b.index
+    fn a_binding_reads_as_the_button_it_is_on() {
+        assert_eq!(
+            entry(Kind::Binding(None)).value(),
+            romm_desktop::binds::pad_label(None)
+        );
+        let bound = entry(Kind::Binding(Some(0)));
+        assert_eq!(bound.value(), romm_desktop::binds::pad_label(Some(0)));
+        assert_ne!(bound.value(), "", "a bound button drew nothing");
+    }
+
+    /// Appearance is not three rows any more.
+    ///
+    /// The backdrop, its speed and strength, and the glass were missing because
+    /// the desktop keeps them in the browser's local storage rather than in
+    /// config.toml — so there was nothing to copy across, and shipping three
+    /// rows without saying that was the wrong answer twice.
+    #[test]
+    fn appearance_can_actually_change_how_it_looks() {
+        let pane = built()
+            .into_iter()
+            .find(|p| p.id == "appearance")
+            .expect("an Appearance pane");
+        let labels: Vec<&str> = pane.entries.iter().map(|e| e.label).collect();
+        for wanted in ["Backdrop", "Speed", "Strength", "Glass"] {
+            assert!(
+                labels.contains(&wanted),
+                "Appearance has no {wanted:?}: {labels:?}"
             );
         }
+        assert!(pane.entries.len() >= 6, "still a stub: {labels:?}");
+    }
+
+    /// The backdrop list is the renderer's own, so a style added to the shader
+    /// table cannot go missing from the setting that picks it.
+    #[test]
+    fn the_backdrop_list_comes_from_the_renderer() {
+        let opts = backdrop_options();
+        assert_eq!(opts.len(), crate::backdrop::STYLE_LIST.len());
+        assert_eq!(backdrop_at("aurora"), 1);
+        assert_eq!(
+            backdrop_at("nonsense"),
+            0,
+            "an unknown style is the first, not a panic"
+        );
     }
 
     /// The panes are the desktop's, in the desktop's order.

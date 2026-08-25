@@ -392,8 +392,15 @@ fn unpack_folder_rom(zip_path: &Path, dest: &Path) -> Result<()> {
     let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file))
         .with_context(|| format!("reading {}", zip_path.display()))?;
 
-    if dest.exists() {
+    // A folder ROM downloaded before this function existed is sitting there as
+    // the raw zip, under the folder's own name and with no extension. That is a
+    // *file* where a directory has to go, so removing only directories left it
+    // in place and `create_dir_all` then failed with "File exists" — the one
+    // copy that most needed replacing was the one that could not be.
+    if dest.is_dir() {
         std::fs::remove_dir_all(dest).ok();
+    } else if dest.exists() {
+        std::fs::remove_file(dest).ok();
     }
     std::fs::create_dir_all(dest)?;
 

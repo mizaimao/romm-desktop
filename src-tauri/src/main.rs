@@ -1398,7 +1398,7 @@ async fn rom_detail(state: State<'_, AppState>, id: i64) -> CmdResult<RomDetail>
             .map(|p| romm_desktop::util::webview_path(&p))
             .collect(),
         art,
-        downloaded: local_path(&state, &row.platform_slug, &row.fs_name).is_some(),
+        downloaded: row_path(&state, &row).is_some(),
         autofire: autofire_possible(&row)
             .then(|| romm_desktop::tweaks::AutoFire::parse(&stored_autofire()).key().to_owned()),
         autofire_hz: autofire_hz(&state),
@@ -1888,8 +1888,10 @@ async fn launch_rom(
     .ok_or_else(|| format!("no rom with id {id}"))?;
 
     let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
-    let path = local_path(&state, &row.platform_slug, &row.fs_name)
-        .ok_or("not downloaded yet")?;
+    // row_path, not local_path: the grid marks a row downloaded with this, and
+    // a launch that disagreed said "not downloaded yet" about a folder ROM
+    // sitting right there. launch::plan resolves the folder to its playlist.
+    let path = row_path(&state, &row).ok_or("not downloaded yet")?;
     // One shared planner for GUI, CLI and TUI — see launch.rs for why.
     let overrides = state.core_overrides.lock().map_err(err)?.clone();
     let per_game = state.core_per_game.lock().map_err(err)?.clone();
@@ -2045,7 +2047,7 @@ async fn launch_rom(
     say("starting RetroArch…");
     let began = std::time::Instant::now();
     let started_at = romm_desktop::util::now_iso();
-    let status = plan.run(ra, &path, false).map_err(err)?;
+    let status = plan.run(ra, false).map_err(err)?;
 
     // How long that took is the only record of it. RetroArch tells nobody, and
     // the server's `last_played` only moves when something tells the server —
@@ -3198,9 +3200,11 @@ fn abs(p: &Path) -> String {
 
 // --- helpers -------------------------------------------------------------
 
+/// Not a file-only test: a multi-disc game is a directory of discs plus the
+/// `.m3u` that orders them, and RomM's own layout is what puts it there.
 fn local_path(state: &State<'_, AppState>, platform: &str, fs_name: &str) -> Option<PathBuf> {
     let p = state.roms_dir.join(platform).join(fs_name);
-    p.is_file().then_some(p)
+    (p.is_file() || p.is_dir()).then_some(p)
 }
 
 /// Where a row's file actually is.
