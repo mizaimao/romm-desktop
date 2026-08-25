@@ -353,6 +353,19 @@ that had been named twice in this file is cleared. `body.plain-cards` stays as
 a "reduce transparency" setting, which is worth having on its own terms, but it
 is not a memory fix and this file should not have implied it would be.
 
+> **Narrower than it reads, found 2026-08-24.** `body.plain-cards` turned the
+> glass off on `.gcard .art`, `.card` and `.row.sel` — and not on `#detail`.
+> The preview column is 460px of full-height glass at `blur(18px)`: the
+> strongest blur in the app, on much the largest surface carrying one, on
+> screen the entire time in three columns. So what this table clears is the
+> *cards*, which are small and numerous. The single big pane was never in the
+> comparison and its cost is still unknown.
+>
+> That matters more since the area result above: 97 MB per CSS megapixel is
+> about six full-window backing stores, and a blur that size needs a snapshot
+> of what is behind it plus intermediates to blur it in. `#detail` is in the
+> switch now, so the next `no-glass` run asks the question this one did not.
+
 The rig itself took three goes to get right, and each wrong version produced a
 confident number: `pid+8` guessing missed the helpers entirely and read 54 MB;
 counting every WebKit process on the machine picked up Safari's and read

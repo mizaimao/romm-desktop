@@ -2814,7 +2814,7 @@ code {
 #conflict-overlay .cfg-wrong b { color: color-mix(in srgb, var(--accent) 70%, white 30%); }
 
 
-/* Cards without glass.
+/* Everything without glass.
  *
  * `backdrop-filter` is on `.gcard .art`, so every card on screen is its own
  * compositing layer holding its own blurred copy of what is behind it. One is
@@ -2822,12 +2822,21 @@ code {
  * scrolls, is not: measured 2026-08-23, scrolling the arcade console with *no
  * artwork at all* still peaked at 573.7 MB, 451 of it in the page process.
  *
+ * That was measured and cleared — the cards cost nothing anyone could see. But
+ * the switch that cleared them **did not turn off `#detail`**, and it should
+ * have: the preview column is 460px of full-height glass at `blur(18px)`, the
+ * strongest blur in the app on much the largest surface carrying one, and it
+ * is on screen the whole time in three columns. So "backdrop-filter costs
+ * nothing" is established for the small ones and was never asked of the big
+ * one. It is in the list now, and the question is open again.
+ *
  * This turns the glass off and leaves a flat panel of the same colour. Set by
  * the measuring switch today; a "reduce transparency" setting tomorrow, which
  * is a thing worth having on a handheld anyway.
  */
 body.plain-cards .gcard .art,
 body.plain-cards .card,
+body.plain-cards #detail,
 body.plain-cards .row.sel {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
