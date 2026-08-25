@@ -686,6 +686,12 @@ pub fn panes(
                     help: "How a console is drawn within that set.",
                     kind: choice(icon_style_options(&cfg.media_dir(), &cfg.icons.set), &cfg.icons.style),
                 },
+                Entry {
+                    field: "",
+                    label: "Get pictures",
+                    help: "Download a set of console pictures over Wi-Fi. Pick which one; it fetches only the consoles your library actually has, and replaces whatever that set had before.",
+                    kind: Kind::Action,
+                },
             ],
         },
         Pane {
@@ -797,6 +803,20 @@ fn backdrop_options() -> Vec<(String, String)> {
 /// the stored value opens the list on the wrong row and, worse, shows the wrong
 /// answer on the settings screen itself.
 fn choice(options: Vec<(String, String)>, current: &str) -> Kind {
+    // A list of one is not a choice.
+    //
+    // It looks like one — the row has the chevron, pressing A opens a sheet —
+    // and then the sheet holds a single line and closes on the value that was
+    // already there. Shown rather than offered, so the screen stops promising
+    // something it cannot do. What makes the choice real is elsewhere: for
+    // icon sets it is downloading a second one.
+    if options.len() < 2 {
+        let label = options
+            .first()
+            .map(|(_, label)| label.clone())
+            .unwrap_or_else(|| "Nothing to choose from".to_owned());
+        return Kind::ReadOnly(label);
+    }
     let at = options.iter().position(|(v, _)| v == current).unwrap_or(0);
     Kind::Choice { at, options }
 }
@@ -1690,6 +1710,31 @@ mod tests {
 #[cfg(test)]
 mod wiring {
     use super::*;
+
+    /// A list of one is shown, not offered.
+    ///
+    /// It used to be a Choice: the row had a chevron, pressing A opened a sheet
+    /// holding a single line, and picking it changed nothing. Three settings
+    /// were in that state on a machine with no icon sets downloaded.
+    #[test]
+    fn a_choice_of_one_is_not_a_choice() {
+        let one = choice(vec![("a".into(), "Only one".into())], "a");
+        assert!(
+            matches!(&one, Kind::ReadOnly(v) if v == "Only one"),
+            "{one:?}"
+        );
+        let none = choice(Vec::new(), "");
+        assert!(matches!(none, Kind::ReadOnly(_)), "{none:?}");
+
+        let two = choice(
+            vec![("a".into(), "A".into()), ("b".into(), "B".into())],
+            "b",
+        );
+        assert!(
+            matches!(two, Kind::Choice { at: 1, .. }),
+            "two options stopped being a choice"
+        );
+    }
 
     /// Every setting that claims a config field is actually read back.
     ///

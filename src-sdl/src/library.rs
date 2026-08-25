@@ -31,6 +31,15 @@ pub struct Detail {
     pub downloaded: bool,
     pub hardware: Option<&'static str>,
     pub maker: Option<&'static str>,
+    /// RomM's 0-10 score.
+    pub rating: Option<f64>,
+    pub year: Option<i32>,
+    pub players: Option<u8>,
+    /// The blurb RomM holds, and the genres out of its metadata. Both come
+    /// from the cache row rather than the list row, so they are fetched for
+    /// the highlighted game only — see [`Library::deep`].
+    pub summary: Option<String>,
+    pub genres: Vec<String>,
 }
 
 impl Detail {
@@ -38,7 +47,23 @@ impl Detail {
     /// than printing a blank: a field with nothing in it is a question the
     /// pane cannot answer, and a dash is not an answer.
     pub fn facts(&self) -> Vec<(&'static str, String)> {
-        let mut out = vec![("Console", self.platform.clone()), ("Size", self.size.clone())];
+        let mut out = vec![("Console", self.platform.clone())];
+        // Rating first: on the desktop it is the line the eye goes to, and a
+        // score is the one fact here that is an opinion rather than a
+        // measurement.
+        if let Some(rating) = self.rating {
+            out.push(("Rating", format!("{rating:.1} / 10")));
+        }
+        if let Some(year) = self.year {
+            out.push(("Released", year.to_string()));
+        }
+        if !self.genres.is_empty() {
+            out.push(("Genre", self.genres.join(", ")));
+        }
+        if let Some(players) = self.players.filter(|n| *n > 1) {
+            out.push(("Players", format!("up to {players}")));
+        }
+        out.push(("Size", self.size.clone()));
         if self.favorite {
             out.push(("Starred", "yes".to_owned()));
         }
@@ -54,7 +79,7 @@ impl Detail {
             Some(when) => out.push(("Last played", when.chars().take(10).collect())),
             None => out.push(("Last played", "never".to_owned())),
         }
-        out.push(("On this machine", if self.downloaded { "yes" } else { "no" }.to_owned()));
+        out.push(("Downloaded", if self.downloaded { "yes" } else { "no" }.to_owned()));
         out
     }
 }
@@ -197,6 +222,10 @@ impl Shelf {
 /// direction and watching values go past to find the one you want, and on a list
 /// of nine cores it means doing that while reading — which is the control this
 /// replaced.
+/// The picker field that means "download this set" rather than "save this
+/// value". Not a config key: nothing is written, a thread starts instead.
+pub const FETCH_ICONS: &str = "\u{0}fetch-icons";
+
 pub struct Picker {
     pub title: &'static str,
     /// `(value, label)`, the same shape the setting holds.
@@ -312,6 +341,11 @@ pub struct Library {
     pub mine_count: usize,
     /// The last collection peeked into, and the names that came back.
     peeked: (String, Vec<String>),
+    /// The last game looked up in full, and what came back — its blurb and its
+    /// genres, which the list rows do not carry.
+    looked_up: (i64, Option<String>, Vec<String>),
+    /// A set of console pictures being downloaded, if one is.
+    pub fetching: Option<crate::iconfetch::Fetch>,
     pub cols: Vec<CollectionRow>,
     pub col_at: usize,
     /// The open collection's name, for the header once its games are showing.
@@ -386,6 +420,8 @@ impl Library {
             .collect();
         let mut lib = Library {
             peeked: (String::new(), Vec::new()),
+            looked_up: (0, None, Vec::new()),
+            fetching: None,
             cache,
             media_root,
             roms_dir,
@@ -555,6 +591,76 @@ impl Library {
     /// facts to lay out rather than a place where things are worked out. What
     /// is *in* the list comes from the row and from `platformfacts`, both
     /// already in the core.
+    /// The highlighted game's detail, with the blurb and genres filled in.
+    ///
+    /// Two steps because they come from two places: everything else is already
+    /// in the list row, and these two need the cache. Read once per game
+    /// rather than once per frame — the pane redraws sixty times a second and
+    /// the cursor sits still for most of them.
+    /// Begin downloading one set of console pictures.
+    ///
+    /// Only the consoles the library holds: the table covers about ninety
+    /// systems and a real library is two dozen, so fetching the rest is most of
+    /// the transfer and none of the value.
+    /// Read the settings from the config file again and rebuild every pane.
+    ///
+    /// After something changes what a pane can offer rather than what it holds
+    /// — a set of pictures arriving, which turns one icon-set choice into two.
+    pub fn rebuild_panes(&mut self) {
+        let (cfg, _) = crate::settings::load();
+        let consoles: Vec<(String, String)> = self
+            .consoles
+            .iter()
+            .map(|c| (c.slug.clone(), c.name.clone()))
+            .collect();
+        let map = romm_desktop::coremap::CoreMap::load_or_embedded(std::path::Path::new(
+            "data/esde-core-map.json",
+        ));
+        self.panes = crate::settings::panes(&cfg, &consoles, &map);
+        self.option_at = self
+            .option_at
+            .min(self.panes.get(self.pane_at).map_or(0, |p| p.entries.len().saturating_sub(1)));
+    }
+
+    pub fn start_icon_fetch(&mut self, set: &str) {
+        let slugs: Vec<String> = self.consoles.iter().map(|c| c.slug.clone()).collect();
+        let map = romm_desktop::coremap::CoreMap::load_or_embedded(std::path::Path::new(
+            "data/esde-core-map.json",
+        ));
+        self.fetching = Some(crate::iconfetch::Fetch::start(
+            self.media_root.clone(),
+            set,
+            slugs,
+            map,
+        ));
+    }
+
+    pub fn detail_full(&mut self) -> Option<Detail> {
+        let mut detail = self.detail()?;
+        if self.looked_up.0 != detail.id {
+            let (mut summary, mut genres) = (None, Vec::new());
+            if let Ok(Some(row)) = self.cache.rom_by_id(detail.id) {
+                summary = row.summary.filter(|s| !s.trim().is_empty());
+                genres = row
+                    .meta_json
+                    .as_deref()
+                    .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+                    .and_then(|m| m.get("genres").cloned())
+                    .and_then(|g| g.as_array().cloned())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
+            self.looked_up = (detail.id, summary, genres);
+        }
+        detail.summary = self.looked_up.1.clone();
+        detail.genres = self.looked_up.2.clone();
+        Some(detail)
+    }
+
     pub fn detail(&self) -> Option<Detail> {
         let row = self.selected()?;
         let stem = self.arranged.get(self.at).and_then(|i| self.stems.get(*i))?;
@@ -569,6 +675,11 @@ impl Library {
             downloaded: row.downloaded,
             hardware: romm_desktop::platformfacts::of(&row.platform).map(|f| f.hardware),
             maker: romm_desktop::platformfacts::of(&row.platform).map(|f| f.manufacturer),
+            rating: row.rating,
+            year: row.year,
+            players: row.players,
+            summary: None,
+            genres: Vec::new(),
         })
     }
 
@@ -582,10 +693,14 @@ impl Library {
         gamelist::scope("roms", self.console().map(|c| c.slug.as_str()), None)
     }
 
+    /// Used by the header line, which is commented out — see `draw_chrome`.
+    #[allow(dead_code)]
     pub fn order_label(&self) -> &'static str {
         self.chosen.order(&self.scope()).label
     }
 
+    /// Used by the header line, which is commented out — see `draw_chrome`.
+    #[allow(dead_code)]
     pub fn filters(&self) -> Vec<String> {
         self.chosen.filters(&self.scope()).into_iter().collect()
     }
@@ -983,6 +1098,10 @@ impl Library {
                 {
                     *at = picker.at;
                 }
+                if picker.field == FETCH_ICONS {
+                    self.start_icon_fetch(&value);
+                    return true;
+                }
                 if !picker.field.is_empty()
                     && let Err(e) = crate::settings::write(
                         picker.field,
@@ -1142,6 +1261,28 @@ impl Library {
                             _ => {}
                         }
                     }
+                    // Getting console pictures: pick which set, and the pick
+                    // starts the download rather than writing a setting.
+                    if self.option_here().is_some_and(|e| e.label == "Get pictures") {
+                        self.picking = Some(Picker {
+                            title: "Get pictures",
+                            // The whole catalog here, not the installed ones —
+                            // the point of this row is to install one that is
+                            // not there yet.
+                            options: romm_desktop::iconart::ordered()
+                                .into_iter()
+                                .map(|(id, _)| {
+                                    let label =
+                                        id.trim_end_matches("-es-de").replace('-', " ");
+                                    (id, label)
+                                })
+                                .collect(),
+                            at: 0,
+                            field: FETCH_ICONS,
+                        });
+                        return Ok(true);
+                    }
+
                     // The Wi-Fi row is an action rather than a value, and the
                     // only one so far that opens a screen of its own.
                     if self.option_here().is_some_and(|e| e.label == "Wi-Fi") {
@@ -1246,6 +1387,8 @@ mod tests {
     fn seeded(rows: Vec<Row>) -> Library {
         let mut lib = Library {
             peeked: (String::new(), Vec::new()),
+            looked_up: (0, None, Vec::new()),
+            fetching: None,
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),
             media_root: PathBuf::new(),
             roms_dir: PathBuf::new(),

@@ -217,11 +217,19 @@ impl Glass {
         // own place on screen as a fraction of it — and it must be *this*
         // rectangle rather than the whole texture, or every panel shows the
         // same picture and the effect reads as wallpaper.
+        //
+        // Upside down in y, because the blurred copy was *rendered into* and a
+        // texture rendered into holds its first row at the bottom — GL's
+        // origin, not the layout's. Sampling it the right way up gives each
+        // panel the mirror image of what is behind it, which a soft backdrop
+        // hides completely and a backdrop with an edge in it does not: the
+        // bars inside the pane sat a third of the screen from the bars behind
+        // it.
         let source = (
             x / screen.0,
-            y / screen.1,
+            1.0 - y / screen.1,
             (x + w) / screen.0,
-            (y + h) / screen.1,
+            1.0 - (y + h) / screen.1,
         );
         gfx.image_part(self.blurred(), x, y, w, h, source, Rgba::WHITE);
         gfx.rect(x, y, w, h, tint);

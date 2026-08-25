@@ -487,6 +487,23 @@ unsafe fn upload_empty(width: u32, height: u32) -> Texture {
     unsafe { upload_raw(width, height, std::ptr::null()) }
 }
 
+impl Texture {
+    /// Magnify this texture by repeating pixels rather than blending them.
+    ///
+    /// For the panel preview, and only for it. The device draws 640x480 real
+    /// pixels; showing that four times bigger with linear filtering invents
+    /// smooth edges the handheld will never have, which is exactly the thing
+    /// the preview is supposed to be honest about.
+    pub fn nearest(&self) {
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, self.id);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+            gl::BindTexture(gl::TEXTURE_2D, 0);
+        }
+    }
+}
+
 unsafe fn upload(width: u32, height: u32, pixels: &[u8]) -> Texture {
     unsafe { upload_raw(width, height, pixels.as_ptr() as *const _) }
 }

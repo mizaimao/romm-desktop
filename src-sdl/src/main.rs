@@ -36,6 +36,7 @@ mod library;
 mod ports;
 mod settings;
 mod status;
+mod iconfetch;
 mod sysinfo;
 mod text;
 mod wifi;
@@ -141,7 +142,7 @@ fn main() -> Result<()> {
     // library, and the message says why rather than the window being black.
     // The frosted panels. Not fatal either: a driver that will not draw into a
     // texture still gets a library, with flat panels instead of glass.
-    let mut frosted = match unsafe { glass::Glass::new(PANEL.0 * PREVIEW, PANEL.1 * PREVIEW) } {
+    let mut frosted = match unsafe { glass::Glass::new(PANEL.0, PANEL.1) } {
         Ok(mut g) => {
             g.strength = config.appearance.glass as f32 / 20.0;
             Some(g)
@@ -206,6 +207,12 @@ fn main() -> Result<()> {
     ));
     lib.panes = settings::panes(&config, &consoles, &core_map);
     start_at(&mut lib);
+
+    // The device's screen, as a texture. Everything is drawn here and this is
+    // what the window shows, magnified.
+    let panel = unsafe { gfx::Offscreen::new(PANEL.0, PANEL.1) }
+        .context("this driver will not draw into a 640x480 texture")?;
+    panel.texture.nearest();
 
     let mut screen = viewport(&window);
     say_where_we_are(&screen);
@@ -454,11 +461,8 @@ fn main() -> Result<()> {
         }
 
         status.poll(now as u64);
-        // Only the panel, centered. The rest of the window stays as it was
-        // cleared, which is what letterboxing looks like.
         let (dw, dh) = window.drawable_size();
-        let (ox, oy, _) = panel_box(dw as f32, dh as f32);
-        gfx.resize_at(ox, oy, screen.width_px, screen.height_px);
+        let (ox, oy, zoom) = panel_box(dw as f32, dh as f32);
 
         // The backdrop is drawn twice, deliberately. Once small, into a
         // texture that is then blurred — which is what the panels sample —
@@ -475,21 +479,49 @@ fn main() -> Result<()> {
             }
         }
 
-        gfx.clear(paint::BACKGROUND);
-        if let Some(backdrop) = &backdrop {
-            unsafe { backdrop.draw(screen.width_px, screen.height_px, seconds) };
+        // The whole page, into 640x480 pixels — the device's own count.
+        //
+        // Drawing straight at the window and scaling the *layout* instead is
+        // what made this a preview of a screen nobody has: the boxes landed in
+        // the right places and every glyph was rasterized four times larger
+        // than the handheld will ever draw it. Whatever comes out of here is
+        // what comes out on the Flip.
+        unsafe {
+            gfx.draw_onto(&panel, |gfx| {
+                gfx.clear(paint::BACKGROUND);
+                if let Some(backdrop) = &backdrop {
+                    backdrop.draw(screen.width_px, screen.height_px, seconds);
+                }
+                hits = draw(
+                    gfx,
+                    frosted.as_ref(),
+                    &mut painter,
+                    &mut art,
+                    &mut lib,
+                    &screen,
+                    hover,
+                    typing.as_ref(),
+                    &status,
+                    glass_tint,
+                );
+            });
         }
-        hits = draw(
-            &gfx,
-            frosted.as_ref(),
-            &mut painter,
-            &mut art,
-            &mut lib,
-            &screen,
-            hover,
-            typing.as_ref(),
-            &status,
-            glass_tint,
+
+        // And out to the window, magnified with no smoothing, letterboxed.
+        gfx.resize_at(0.0, 0.0, dw as f32, dh as f32);
+        gfx.clear(paint::BACKGROUND);
+        let (pw, ph) = (PANEL.0 as f32 * zoom, PANEL.1 as f32 * zoom);
+        // Bottom row first: a texture drawn into through a framebuffer comes
+        // out with GL's origin, and everything else here is measured from the
+        // top left. Sampling it upside down puts the two back in agreement.
+        gfx.image_part(
+            &panel.texture,
+            ox,
+            oy,
+            pw,
+            ph,
+            (0.0, 1.0, 1.0, 0.0),
+            gfx::Rgba::WHITE,
         );
         window.gl_swap_window();
 
@@ -527,7 +559,15 @@ fn pointer(window: &sdl2::video::Window, x: i32, y: i32) -> (f32, f32) {
     let (ww, wh) = window.size();
     let across = if ww > 0 { dw as f32 / ww as f32 } else { 1.0 };
     let down = if wh > 0 { dh as f32 / wh as f32 } else { 1.0 };
-    (x as f32 * across, y as f32 * down)
+    // Into the panel's own pixels. Everything is drawn 640x480 and then
+    // magnified into the middle of the window, so a click has to come back the
+    // other way through both — the letterbox offset and the zoom — or the
+    // pointer lands a quarter of the screen from where it looks.
+    let (ox, oy, zoom) = panel_box(dw as f32, dh as f32);
+    (
+        (x as f32 * across - ox) / zoom,
+        (y as f32 * down - oy) / zoom,
+    )
 }
 
 /// A portrait of one frame, written to a file, and then nothing.
@@ -680,14 +720,17 @@ fn ticks(timer: &sdl2::TimerSubsystem) -> f64 {
 ///
 /// The *drawable* size, not the window size: on a retina display those differ
 /// by the backing scale, and the drawable is the one with pixels in it.
-fn viewport(window: &sdl2::video::Window) -> Viewport {
-    let (w, h) = window.drawable_size();
-    let (_, _, scale) = panel_box(w as f32, h as f32);
-    Viewport::new(
-        PANEL.0 as f32 * scale.factor(),
-        PANEL.1 as f32 * scale.factor(),
-        scale,
-    )
+fn viewport(_window: &sdl2::video::Window) -> Viewport {
+    // 640x480 at one to one, whatever the window is.
+    //
+    // It used to be the panel multiplied by the preview scale, which made the
+    // *layout* right and the *drawing* a lie: a 12-point label rasterized at
+    // 4x is a 48-pixel glyph, sharp and fully legible, and on the device it is
+    // a 12-pixel glyph and may not be legible at all. Everything is drawn into
+    // a 640x480 texture now, exactly as many pixels as the Flip has, and that
+    // texture is what gets magnified — so what is on this screen is the device
+    // screen enlarged rather than a different screen entirely.
+    Viewport::new(PANEL.0 as f32, PANEL.1 as f32, Scale::new(1.0))
 }
 
 /// Where the panel sits in the window, and how big a pixel is.
@@ -698,17 +741,13 @@ fn viewport(window: &sdl2::video::Window) -> Viewport {
 /// different number of panes. Fitting the panel and leaving the rest of the
 /// window blank is the only arrangement where what is on screen here is what
 /// will be on screen there.
-fn panel_box(w: f32, h: f32) -> (f32, f32, Scale) {
+fn panel_box(w: f32, h: f32) -> (f32, f32, f32) {
     let fit = (w / PANEL.0 as f32)
         .min(h / PANEL.1 as f32)
         .floor()
         .max(1.0);
     let (pw, ph) = (PANEL.0 as f32 * fit, PANEL.1 as f32 * fit);
-    (
-        ((w - pw) / 2.0).max(0.0),
-        ((h - ph) / 2.0).max(0.0),
-        Scale::new(fit),
-    )
+    (((w - pw) / 2.0).max(0.0), ((h - ph) / 2.0).max(0.0), fit)
 }
 
 /// Say what the machine can and cannot draw, once, at startup.
@@ -840,8 +879,11 @@ mod size {
     pub const GAP: f32 = 6.0;
     /// The tab row. Six tabs across 640 points, so ~104 each.
     pub const TABS: f32 = 26.0;
-    /// The line under the tabs saying where you are.
+    /// The line under the tabs saying where you are. Off — see `draw_chrome`.
+    #[allow(dead_code)]
     pub const HEADER: f32 = 20.0;
+    /// What sits there instead: air.
+    pub const HEADER_GAP: f32 = 6.0;
     /// The strip along the bottom saying what the buttons do.
     pub const HELP: f32 = 18.0;
     pub const CARD: f32 = 96.0;
@@ -1084,7 +1126,10 @@ fn draw(
         0.0,
         &[
             Size::Fixed(size::TABS),
-            Size::Fixed(size::HEADER),
+            // A gap where the "where you are" line used to be. `size::HEADER`
+            // is what to put back if it is ever wanted again — see
+            // `draw_chrome`, where the line itself is commented out.
+            Size::Fixed(size::HEADER_GAP),
             Size::Grow(1.0),
             Size::Fixed(size::HELP),
         ],
@@ -1723,7 +1768,7 @@ fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, page: Rect) {
     // backdrops — and a list you can only see the top of reads as a list that
     // is missing things.
     let head = 46.0 + size::GAP * 2.0;
-    let fits = ((page.h - size::TABS - size::HEADER - size::HELP - head) / step)
+    let fits = ((page.h - size::TABS - size::HEADER_GAP - size::HELP - head) / step)
         .floor()
         .max(3.0) as usize;
     let rows = picker.options.len().min(fits);
@@ -1939,12 +1984,50 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         return;
     }
 
+    // A download in flight reports on its own row, and when it lands the panes
+    // are rebuilt — the set that was just fetched is a real choice now, and the
+    // list of installed sets is read when the panes are built.
+    if let Some(fetch) = lib.fetching.as_mut() {
+        let note = {
+            fetch.poll();
+            // Named, because the row says "Get pictures" and what is arriving
+            // is one particular set out of nine.
+            format!("{} · {}", fetch.set.trim_end_matches("-es-de"), fetch.note())
+        };
+        let landed = fetch.finished();
+        if let Some(pane) = lib.panes.get_mut(lib.pane_at)
+            && let Some(entry) = pane.entries.iter_mut().find(|e| e.label == "Get pictures")
+        {
+            entry.kind = settings::Kind::ReadOnly(note);
+        }
+        if landed {
+            lib.fetching = None;
+            lib.rebuild_panes();
+        }
+    }
+
     let Some(pane) = lib.panes.get(lib.pane_at) else {
         return;
     };
-    let [list, aside] =
-        <[Rect; 2]>::try_from(area.cols(size::GAP, &[8, 4]))
-            .unwrap();
+    // About has nothing to explain. Every row on it is a fact with no help to
+    // give and no value to change, so a column repeating the row's own label
+    // is furniture — the page takes the whole width instead.
+    let plain = pane.id == "about";
+    let (list, aside) = if plain {
+        (area, Rect::new(0.0, 0.0, 0.0, 0.0))
+    } else {
+        let [list, aside] = <[Rect; 2]>::try_from(area.cols(size::GAP, &[8, 4])).unwrap();
+        (list, aside)
+    };
+
+    // The column is a panel, like the root menus.
+    //
+    // Not decoration: at the resolution the device actually has, a moving
+    // backdrop passes straight through unhighlighted rows and the value at the
+    // end of a line stops being readable. A settings screen is the one place
+    // where every row has to be legible at once.
+    f.pane(list, paint::BAR, size::ROUND);
+    let list = list.inset(Edges::all(5.0));
 
     let step = size::ROW;
     let fits = (list.h / step).floor().max(1.0) as usize;
@@ -1993,7 +2076,10 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         );
     }
 
-    // What the highlighted setting does.
+    // What the highlighted setting does. Not on About, which has no column.
+    if plain {
+        return;
+    }
     f.pane(aside, f.glass_tint, size::ROUND);
     if let Some(entry) = pane.entries.get(lib.option_at) {
         let inner = aside.inset(size::PAD);
@@ -2101,76 +2187,84 @@ fn draw_chrome(
         right = slot.x - size::GAP;
     }
 
-    // Where you are on the left, how the list is arranged on the right.
-    let inner = header.inset(Edges::xy(size::GAP, 0.0));
-    // What the line under the tabs says. One useful fact per screen, not a
-    // count of the furniture — "8 groups" told you how the settings happened to
-    // be filed, which is not something anybody wants to know.
-    let here = match (lib.section().id, lib.view) {
-        // Left as it was: Frank said this one already reads right.
-        ("library", library::View::Platforms) => format!("{} consoles", lib.consoles.len()),
-        ("library", library::View::Roms) => match lib.console() {
-            Some(c) if !lib.query.is_empty() => {
-                format!(
-                    "{} — {} matching \u{201c}{}\u{201d}",
-                    c.name,
-                    lib.shown(),
-                    lib.query
-                )
-            }
-            Some(c) => format!("{} — {} games", c.name, lib.shown()),
-            None => String::new(),
-        },
-        ("library", library::View::Scripts) => match lib.console() {
-            Some(c) => format!("{} — {}", c.name, lib.ports.len()),
-            None => String::new(),
-        },
-        ("mine", library::View::Groups) => match (lib.mine_count, lib.shelves.len()) {
-            (0, n) => format!("{n} from RomM"),
-            (n, all) if n == all => format!("{n} you made"),
-            (n, all) => format!("{n} you made · {} from RomM", all - n),
-        },
-        ("mine", library::View::Collections) => format!("{} collections", lib.cols.len()),
-        ("mine", _) => format!("{} — {} games", lib.col_name, lib.shown()),
-        ("history", _) => {
-            let (games, secs) = (lib.sync.games_played, lib.sync.seconds_played);
-            format!("{games} games · {}", played_for(secs))
-        }
-        ("settings", library::View::Panes) => "How this device behaves".to_owned(),
-        ("settings", library::View::Wifi) => "Wi-Fi".to_owned(),
-        ("settings", _) => lib
-            .panes
-            .get(lib.pane_at)
-            .map(|p| p.label.to_owned())
-            .unwrap_or_default(),
-        (_, _) => lib.section().label.to_owned(),
-    };
-    let title = f.spec(here, size::TITLE);
-    let (_, th) = f.painter.measure(f.gfx, &title);
-    let centered =
-        Rect::new(inner.x, inner.y, inner.w, inner.h).center(inner.w, f.screen.scale.pt(th as f32));
-    f.label(
-        &title,
-        Rect {
-            x: inner.x,
-            ..centered
-        },
-        paint::TEXT,
-    );
-
-    // How the games are ordered, when there are games. No grid/list control:
-    // on this panel it is a list, and a button offering the arrangement that
-    // does not fit is a button that makes the screen worse.
-    if lib.view == library::View::Roms {
-        let filters = lib.filters();
-        let arranged = if filters.is_empty() {
-            lib.order_label().to_owned()
-        } else {
-            format!("{}  ·  {}", lib.order_label(), filters.join(" + "))
-        };
-        let spec = f.spec(arranged, 11.0);
-        f.label_right(&spec, centered, paint::DIM);
-    }
+    // The line that used to sit between the tabs and the page — where you are
+    // on the left, how the list is arranged on the right — is off. It said
+    // things the screen already showed, and on a 640-point panel it cost
+    // twenty points of height to do it. What is there instead is a gap.
+    //
+    // Kept rather than deleted: turning it back on is uncommenting this and
+    // restoring `size::HEADER` in the page split.
+    let _ = header;
+    // // Where you are on the left, how the list is arranged on the right.
+    // let inner = header.inset(Edges::xy(size::GAP, 0.0));
+    // // What the line under the tabs says. One useful fact per screen, not a
+    // // count of the furniture — "8 groups" told you how the settings happened to
+    // // be filed, which is not something anybody wants to know.
+    // let here = match (lib.section().id, lib.view) {
+    //     // Left as it was: Frank said this one already reads right.
+    //     ("library", library::View::Platforms) => format!("{} consoles", lib.consoles.len()),
+    //     ("library", library::View::Roms) => match lib.console() {
+    //         Some(c) if !lib.query.is_empty() => {
+    //             format!(
+    //                 "{} — {} matching \u{201c}{}\u{201d}",
+    //                 c.name,
+    //                 lib.shown(),
+    //                 lib.query
+    //             )
+    //         }
+    //         Some(c) => format!("{} — {} games", c.name, lib.shown()),
+    //         None => String::new(),
+    //     },
+    //     ("library", library::View::Scripts) => match lib.console() {
+    //         Some(c) => format!("{} — {}", c.name, lib.ports.len()),
+    //         None => String::new(),
+    //     },
+    //     ("mine", library::View::Groups) => match (lib.mine_count, lib.shelves.len()) {
+    //         (0, n) => format!("{n} from RomM"),
+    //         (n, all) if n == all => format!("{n} you made"),
+    //         (n, all) => format!("{n} you made · {} from RomM", all - n),
+    //     },
+    //     ("mine", library::View::Collections) => format!("{} collections", lib.cols.len()),
+    //     ("mine", _) => format!("{} — {} games", lib.col_name, lib.shown()),
+    //     ("history", _) => {
+    //         let (games, secs) = (lib.sync.games_played, lib.sync.seconds_played);
+    //         format!("{games} games · {}", played_for(secs))
+    //     }
+    //     ("settings", library::View::Panes) => "How this device behaves".to_owned(),
+    //     ("settings", library::View::Wifi) => "Wi-Fi".to_owned(),
+    //     ("settings", _) => lib
+    //         .panes
+    //         .get(lib.pane_at)
+    //         .map(|p| p.label.to_owned())
+    //         .unwrap_or_default(),
+    //     (_, _) => lib.section().label.to_owned(),
+    // };
+    // let title = f.spec(here, size::TITLE);
+    // let (_, th) = f.painter.measure(f.gfx, &title);
+    // let centered =
+    //     Rect::new(inner.x, inner.y, inner.w, inner.h).center(inner.w, f.screen.scale.pt(th as f32));
+    // f.label(
+    //     &title,
+    //     Rect {
+    //         x: inner.x,
+    //         ..centered
+    //     },
+    //     paint::TEXT,
+    // );
+    //
+    // // How the games are ordered, when there are games. No grid/list control:
+    // // on this panel it is a list, and a button offering the arrangement that
+    // // does not fit is a button that makes the screen worse.
+    // if lib.view == library::View::Roms {
+    //     let filters = lib.filters();
+    //     let arranged = if filters.is_empty() {
+    //         lib.order_label().to_owned()
+    //     } else {
+    //         format!("{}  ·  {}", lib.order_label(), filters.join(" + "))
+    //     };
+    //     let spec = f.spec(arranged, 11.0);
+    //     f.label_right(&spec, centered, paint::DIM);
+    // }
 }
 
 /// The consoles: a grid of tiles where there is room, a list where there is
@@ -2324,8 +2418,10 @@ fn draw_game_list(f: &mut Frame, lib: &mut library::Library, area: Rect) {
 }
 
 /// The preview column: the cover, the name, and what is known about it.
-fn draw_detail(f: &mut Frame, lib: &library::Library, area: Rect) {
-    let Some(detail) = lib.detail() else { return };
+fn draw_detail(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    let Some(detail) = lib.detail_full() else {
+        return;
+    };
     let (art, rest) = area.split_top(area.w / lib.aspect.clamp(0.3, 3.0));
     // The game's own cover if there is one, and the console's picture if not —
     // an empty pane at the top of the column reads as a broken panel.
@@ -2354,12 +2450,32 @@ fn draw_detail(f: &mut Frame, lib: &library::Library, area: Rect) {
         if line.bottom() > area.bottom() {
             break;
         }
-        let [left, right] =
-            <[Rect; 2]>::try_from(line.row(6.0, &[Size::Grow(4.0), Size::Grow(6.0)])).unwrap();
+        let [left, right] = <[Rect; 2]>::try_from(line.cols(6.0, &[5, 7])).unwrap();
         let spec = f.spec(label, 11.0);
         f.label(&spec, left, paint::FAINT);
-        let spec = f.wrapped(value, 11.0, right.w, 1);
+        let spec = f.wrapped(&value, 11.0, right.w, 1);
         f.label(&spec, right, paint::DIM);
         y += 17.0;
     }
+
+    // The blurb, under a rule, in whatever room is left.
+    //
+    // Last because it is the one thing here of no fixed length: the facts are
+    // a line each and this is a paragraph, so it takes the remainder rather
+    // than pushing anything off the bottom.
+    let Some(summary) = detail.summary.as_deref() else {
+        return;
+    };
+    y += size::GAP;
+    if y + 24.0 > area.bottom() {
+        return;
+    }
+    f.fill(Rect::new(below.x, y, below.w, 1.0), paint::RULE, 0.0);
+    y += size::GAP + 2.0;
+    let room = area.bottom() - y;
+    // As many lines as fit, and no more: a paragraph cut off mid-word at the
+    // panel edge is worse than one that stops at a line.
+    let lines = ((room / 14.0).floor() as u16).clamp(1, 12);
+    let spec = f.wrapped(summary, 10.0, below.w, lines);
+    f.label(&spec, Rect::new(below.x, y, below.w, room), paint::DIM);
 }

@@ -33,6 +33,18 @@ linux = ["romm-desktop/linux"]
 romm-desktop = { path = ".." }
 anyhow = "1.0.104"
 
+# One use: the genres inside a cached row's metadata blob, for the info pane.
+# The blob is RomM's own JSON and the core already depends on this to write it.
+serde_json = "1.0"
+
+# Fetching console pictures. The blocking client, on a thread of its own —
+# there is no async runtime here and adding one to download a few hundred small
+# files would be the tail wagging the dog. Same TLS stack the core uses, so the
+# handheld build carries one copy of it.
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "blocking", "gzip", "http2", "rustls-no-provider",
+] }
+
 # Text: shaping, font fallback, line breaking and rasterisation.
 #
 # SDL_ttf was the obvious pairing and is the wrong one. It wraps FreeType and
