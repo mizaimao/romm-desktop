@@ -147,6 +147,11 @@ impl Offscreen {
     pub fn size(&self) -> (u32, u32) {
         (self.texture.width, self.texture.height)
     }
+
+    /// The framebuffer name, for reading the pixels back out of it.
+    pub fn frame_id(&self) -> u32 {
+        self.frame
+    }
 }
 
 impl Drop for Offscreen {

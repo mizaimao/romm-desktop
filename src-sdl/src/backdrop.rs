@@ -368,6 +368,56 @@ pub const STYLE_LIST: &[(&str, &str)] = &[
     ("static", "Static"),
 ];
 
+/// The most any one pixel of each style moves in a second, at its own pace.
+///
+/// Measured, not estimated — `ROMM_SDL_BENCH=motion` prints this table. It is
+/// what decides how often each style has to be redrawn, and it has to be the
+/// *worst* pixel rather than the average: a handful of stars crossing a dark
+/// screen shift almost no average level and are the most obvious thing on it.
+/// Starfield's average says it is the stillest style here and its worst says it
+/// is nearly the jumpiest, and the second one is the one an eye agrees with.
+pub const STYLE_JITTER: &[(&str, f32)] = &[
+    ("aurora", 3.0),
+    ("plasma", 6.0),
+    ("blobs", 11.0),
+    ("tunnel", 14.0),
+    ("static", 24.0),
+    ("sweep", 24.0),
+    ("grid", 32.0),
+    ("waves", 31.0),
+    ("stars", 34.0),
+    ("starfield", 39.0),
+    ("towers", 62.0),
+];
+
+/// The biggest step a pixel may take between two frames without the motion
+/// reading as a series of jumps.
+///
+/// Six levels out of 255, against the dark grounds these are drawn on. Below
+/// this an eye reports movement; above it, a slideshow.
+const TOLERABLE_STEP: f32 = 6.0;
+
+/// How often this style needs redrawing, in frames a second.
+///
+/// The whole point of the exercise: at one frame a second the app costs half a
+/// percent of a core, and whether that *looks* like one frame a second depends
+/// entirely on which backdrop is behind it. Aurora is the same picture either
+/// way; Towers is a slideshow. So each gets the rate it actually needs instead
+/// of every one of them paying for the fastest.
+///
+/// `speed` is the user's own multiplier: half speed is half the movement and
+/// so half the frames.
+pub fn needed_fps(style: &str, speed: f32) -> f64 {
+    let jitter = STYLE_JITTER
+        .iter()
+        .find(|(id, _)| *id == style)
+        .map(|(_, j)| *j)
+        // A style nobody measured gets the fastest rate rather than the
+        // slowest: being wrong here should cost battery, not look broken.
+        .unwrap_or(62.0);
+    ((jitter * speed.max(0.0) / TOLERABLE_STEP) as f64).clamp(1.0, 30.0)
+}
+
 /// A named color scheme, as the webview has them.
 pub struct Named {
     pub id: &'static str,
@@ -725,5 +775,37 @@ mod tests {
     fn an_unknown_style_falls_back_rather_than_failing() {
         assert_eq!(style("nonsense").id, STYLES[0].id);
         assert_eq!(style("aurora").id, "aurora");
+    }
+}
+
+#[cfg(test)]
+mod pacing {
+    use super::*;
+
+    /// Every style in the list has a measured jitter, or the fallback silently
+    /// gives it the fastest rate and nobody notices the table went stale.
+    #[test]
+    fn every_style_has_been_measured() {
+        for (id, label) in STYLE_LIST {
+            assert!(
+                STYLE_JITTER.iter().any(|(m, _)| m == id),
+                "{label} ({id}) is not in STYLE_JITTER; run ROMM_SDL_BENCH=motion"
+            );
+        }
+    }
+
+    /// The still ones cost one frame a second and the jumpy ones cost more.
+    #[test]
+    fn a_still_backdrop_is_not_redrawn_thirty_times_a_second() {
+        assert_eq!(needed_fps("aurora", 1.0), 1.0);
+        assert_eq!(needed_fps("plasma", 1.0), 1.0);
+        assert!(needed_fps("towers", 1.0) > needed_fps("blobs", 1.0));
+        // Half the movement is half the frames.
+        assert!(needed_fps("towers", 0.5) < needed_fps("towers", 1.0));
+        // Stopped is still one, not zero: the clock and the rest still need a
+        // frame now and then, and the caller decides whether to animate at all.
+        assert_eq!(needed_fps("towers", 0.0), 1.0);
+        // Nothing exceeds the cap, whatever the speed is set to.
+        assert_eq!(needed_fps("towers", 10.0), 30.0);
     }
 }

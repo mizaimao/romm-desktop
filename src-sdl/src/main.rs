@@ -82,13 +82,20 @@ const HELD_WAIT_MS: u32 = 8;
 /// How long a frame may stand before it is redrawn regardless.
 const STALE_MS: f64 = 500.0;
 
-/// How often a moving backdrop is redrawn, in frames a second.
+/// What the backdrop is actually redrawn at.
 ///
-/// Not the display's rate. A frame here is a few hundred separate draw calls —
-/// every rounded corner and every word is one — and the backdrop drifts slowly
-/// enough that half of them are the same picture twice. Thirty is where the
-/// motion still reads as motion, and it is half the work of sixty.
-const MOTION_FPS: f64 = 30.0;
+/// Per style rather than one number for all of them: at one frame a second the
+/// app costs half a percent of a core, and whether that looks like one frame a
+/// second is entirely a question about which backdrop is behind it.
+///
+/// `ROMM_SDL_MOTION_FPS=4` overrides it, which is how the table was arrived at.
+fn motion_fps(style: &str, speed: f32) -> f64 {
+    std::env::var("ROMM_SDL_MOTION_FPS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .filter(|n: &f64| *n > 0.0)
+        .unwrap_or_else(|| backdrop::needed_fps(style, speed))
+}
 
 /// How long a page takes to slide in when the tab changes.
 ///
@@ -149,6 +156,84 @@ fn bench_image(window: &sdl2::video::Window, gfx: &mut Gfx, events: &mut sdl2::E
             let secs = start.elapsed().as_secs_f64();
             println!("bench: {frames} frames in {secs:.1}s, {:.0} fps", frames as f64 / secs);
         }
+    }
+}
+
+/// How much each backdrop style changes in a second.
+///
+/// `ROMM_SDL_BENCH=motion`. Drawing at one frame a second costs almost nothing,
+/// and whether it *looks* like one frame a second depends entirely on the style:
+/// a slow drift is the same picture either way, and something with a fast edge
+/// in it steps visibly. This measures which is which instead of leaving it to
+/// be argued about — the average level a pixel moves between two frames a
+/// second apart, at the style's own pace.
+fn bench_motion(video: &sdl2::VideoSubsystem, window: &sdl2::video::Window, gfx: &mut Gfx) {
+    let (w, h) = (PANEL.0, PANEL.1);
+    let target = match unsafe { gfx::Offscreen::new(w, h) } {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("no offscreen: {e:#}");
+            return;
+        }
+    };
+    let mut rows: Vec<(String, f64, f64)> = Vec::new();
+    for style in backdrop::STYLE_LIST {
+        let Ok(mut art) = (unsafe { backdrop::Backdrop::build(video, style.0) }) else {
+            continue;
+        };
+        art.scheme = *backdrop::scheme("midnight");
+        let shot = |gfx: &mut Gfx, at: f32| -> Vec<u8> {
+            unsafe {
+                gfx.draw_onto(&target, |gfx| {
+                    gfx.clear(paint::BACKGROUND);
+                    art.draw(w as f32, h as f32, at);
+                });
+            }
+            let mut raw = vec![0u8; (w * h * 4) as usize];
+            unsafe {
+                gl::BindFramebuffer(gl::FRAMEBUFFER, target.frame_id());
+                gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+                gl::ReadPixels(
+                    0,
+                    0,
+                    w as i32,
+                    h as i32,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    raw.as_mut_ptr() as *mut _,
+                );
+                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            }
+            raw
+        };
+        // A second apart: how far this style travels between two frames if it
+        // is drawn once a second.
+        let a = shot(gfx, 10.0);
+        let b = shot(gfx, 11.0);
+        // Mean *and* worst. A few stars crossing the screen move almost no
+        // average level and are the most obvious thing on it, so an average on
+        // its own would call the jumpiest style the smoothest.
+        let step = |x: &[u8], y: &[u8]| -> (f64, f64) {
+            let n = x.len() / 4 * 3;
+            let mut sum = 0u64;
+            let mut worst = 0u64;
+            for (p, q) in x.chunks(4).zip(y.chunks(4)) {
+                for i in 0..3 {
+                    let d = (p[i] as i32 - q[i] as i32).unsigned_abs() as u64;
+                    sum += d;
+                    worst = worst.max(d);
+                }
+            }
+            (sum as f64 / n as f64, worst as f64)
+        };
+        let (mean_s, worst_s) = step(&a, &b);
+        rows.push((style.1.to_owned(), mean_s, worst_s));
+    }
+    window.gl_swap_window();
+    rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    println!("{:<22} {:>10} {:>10}", "style", "mean/s", "worst/s");
+    for (label, mean, worst) in rows {
+        println!("{label:<22} {mean:>10.2} {worst:>10.0}");
     }
 }
 
@@ -353,9 +438,16 @@ fn main() -> Result<()> {
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
     // The floor, when asked for: a window and one texture, nothing else. The
     // number every other measurement here is relative to.
-    if std::env::var("ROMM_SDL_BENCH").as_deref() == Ok("image") {
-        bench_image(&window, &mut gfx, &mut events);
-        return Ok(());
+    match std::env::var("ROMM_SDL_BENCH").as_deref() {
+        Ok("image") => {
+            bench_image(&window, &mut gfx, &mut events);
+            return Ok(());
+        }
+        Ok("motion") => {
+            bench_motion(&video, &window, &mut gfx);
+            return Ok(());
+        }
+        _ => {}
     }
     // What the pad is holding, so the drawing can show that input arrived.
     let mut held: BTreeSet<String> = BTreeSet::new();
@@ -419,6 +511,9 @@ fn main() -> Result<()> {
         // first version of this returned to the top of the loop, found nothing
         // to do, and spun there — which cost *more* than drawing every frame.
         let animating = backdrop.is_some() && showing.speed > 0.0;
+        // How often this backdrop actually needs redrawing. Per style, from
+        // measurement — see `backdrop::needed_fps`.
+        let motion = motion_fps(&showing.backdrop, showing.speed);
         // How long there is to wait before something is due.
         //
         // A held button is the short one: nothing arrives while a direction is
@@ -431,7 +526,7 @@ fn main() -> Result<()> {
         } else if !held.is_empty() {
             HELD_WAIT_MS
         } else if animating {
-            ((1000.0 / MOTION_FPS - (now - drawn_at)).max(1.0) as u32).min(IDLE_WAIT_MS)
+            ((1000.0 / motion - (now - drawn_at)).max(1.0) as u32).min(IDLE_WAIT_MS)
         } else {
             IDLE_WAIT_MS
         };
@@ -703,7 +798,7 @@ fn main() -> Result<()> {
         }
 
         // A moving backdrop redraws on its own clock rather than the display's.
-        if !dirty && (!animating || now - drawn_at < 1000.0 / MOTION_FPS) {
+        if !dirty && (!animating || now - drawn_at < 1000.0 / motion) {
             continue;
         }
         dirty = false;
@@ -762,7 +857,14 @@ fn main() -> Result<()> {
         // out with GL's origin, and everything else here is measured from the
         // top left. Sampling it upside down puts the two back in agreement.
         let flip = (0.0, 1.0, 1.0, 0.0);
-        let shift = match slide.as_ref() {
+        // Where the tab row stops and the page begins, as a fraction of the
+        // panel. The two halves of the transition are different things: the
+        // tabs slide, because the movement is what says which way you went, and
+        // the page under them fades, because a whole screenful of list sliding
+        // past is motion nobody asked to read.
+        let split = size::TABS / PANEL.1 as f32;
+        let band = |from: f32, to: f32| (0.0, 1.0 - from, 1.0, 1.0 - to);
+        match slide.as_ref() {
             Some(s) => {
                 let t = ((now - s.started) / SLIDE_MS).clamp(0.0, 1.0) as f32;
                 // Eased out: fast at the start, settling at the end, which is
@@ -770,24 +872,59 @@ fn main() -> Result<()> {
                 let eased = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
                 if t >= 1.0 {
                     slide = None;
-                    0.0
+                    gfx.image_part(&panel.texture, ox, oy, pw, ph, flip, gfx::Rgba::WHITE);
                 } else {
-                    // The old page leaves the way the new one is coming from.
+                    let (top_h, body_h) = (ph * split, ph * (1.0 - split));
+                    let body_y = oy + top_h;
+
+                    // The tabs, sliding: the old row out, the new row in.
+                    let tabs_band = band(0.0, split);
                     gfx.image_part(
                         &leaving.texture,
                         ox - s.toward * eased * pw,
                         oy,
                         pw,
-                        ph,
-                        flip,
+                        top_h,
+                        tabs_band,
                         gfx::Rgba::WHITE,
                     );
-                    s.toward * (1.0 - eased) * pw
+                    gfx.image_part(
+                        &panel.texture,
+                        ox + s.toward * (1.0 - eased) * pw,
+                        oy,
+                        pw,
+                        top_h,
+                        tabs_band,
+                        gfx::Rgba::WHITE,
+                    );
+
+                    // The page, fading: the old one under, the new one over it
+                    // at rising opacity. Both in place — nothing here moves.
+                    let body_band = band(split, 1.0);
+                    gfx.image_part(
+                        &leaving.texture,
+                        ox,
+                        body_y,
+                        pw,
+                        body_h,
+                        body_band,
+                        gfx::Rgba::WHITE,
+                    );
+                    gfx.image_part(
+                        &panel.texture,
+                        ox,
+                        body_y,
+                        pw,
+                        body_h,
+                        body_band,
+                        gfx::Rgba(1.0, 1.0, 1.0, eased),
+                    );
                 }
             }
-            None => 0.0,
-        };
-        gfx.image_part(&panel.texture, ox + shift, oy, pw, ph, flip, gfx::Rgba::WHITE);
+            None => {
+                gfx.image_part(&panel.texture, ox, oy, pw, ph, flip, gfx::Rgba::WHITE);
+            }
+        }
         window.gl_swap_window();
 
         // A portrait, and then out. Taken after a handful of frames rather
@@ -1112,6 +1249,14 @@ mod paint {
     /// Furniture: darker than a panel, so it does not compete with artwork.
     pub const BAR: Rgba = Rgba(0.05, 0.05, 0.08, 0.72);
     pub const CARD: Rgba = Rgba(0.14, 0.15, 0.21, 0.62);
+    /// A console tile: a wash, not a plate, and no frost behind it.
+    ///
+    /// The picture on it is a machine rendered on nothing, so what should be
+    /// behind it is the backdrop — moving, and its own color. Glass here reads
+    /// as grey: a blur of a dark ground with the saturation pushed is grey
+    /// whatever the scheme is, and a shelf of hardware turns into a shelf of
+    /// grey rectangles with hardware printed on them.
+    pub const TILE: Rgba = Rgba(0.10, 0.11, 0.16, 0.30);
     pub const CURSOR: Rgba = Rgba::rgb(96, 140, 210);
     pub const TEXT: Rgba = Rgba::rgb(232, 234, 242);
     pub const DIM: Rgba = Rgba::rgb(150, 154, 168);
@@ -2657,7 +2802,13 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
         f.hits.row(f.px(tile), offset);
         let on = offset == lib.console_at;
 
-        f.pane(tile, paint::CARD, size::ROUND);
+        // Barely there, and only the glass behind it.
+        //
+        // A console tile is mostly its own picture — a machine rendered on
+        // nothing, with the backdrop showing through. A solid plate under it
+        // turns a shelf of hardware into a shelf of grey rectangles with
+        // hardware printed on them.
+        f.fill(tile, paint::TILE, size::ROUND);
         f.hovering(offset, tile, size::ROUND);
         if on {
             f.outline(tile, 2.0, paint::CURSOR, size::ROUND);
