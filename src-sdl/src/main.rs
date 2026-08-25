@@ -66,6 +66,43 @@ const PANEL: (u32, u32) = (640, 480);
 /// only the physical size of the preview changes.
 const PREVIEW: u32 = 3;
 
+/// How many pixels one layout point gets.
+///
+/// The panel is 640x480 pixels and that does not change. This is how much of it
+/// one element takes: at 1 the layout is 640x480 points and a 12-point label is
+/// twelve pixels tall; at 2 it is 320x240 points and the same label is
+/// twenty-four.
+///
+/// One and a half, for the handheld. A 3.5" screen held at arm's length is not
+/// a monitor at arm's length, and the layout this front end started from was a
+/// desktop one measured in the same numbers. Two was tried and is too much: six
+/// rows of a list, and titles cut to "Castle of…".
+///
+/// Nothing is upscaled at any value — the type is *rasterised* at the size the
+/// scale asks for, so it is bigger and exactly as sharp.
+///
+/// A fractional scale costs one thing and it is worth naming. Points land on
+/// half-pixels: a rectangle edge at 10.5 pixels is drawn across two, so a
+/// hairline rule comes out as two grey pixels rather than one bright one. Text
+/// is unaffected — glyphs are rasterised at their real size and their position
+/// is rounded — and the panels are drawn by a shader that antialiases its own
+/// edges anyway. So the penalty is confined to rules and outlines, and 1.5 is
+/// the friendliest fraction there is: everything even lands whole.
+const UI_SCALE: f32 = 1.5;
+
+/// The same, overridable without a rebuild: `ROMM_SDL_UI_SCALE=1.5`.
+///
+/// Because the right number is a judgement about a screen, made by looking at
+/// that screen, and a rebuild-and-reinstall between each look is how a
+/// judgement like that gets made once and badly.
+fn ui_scale() -> f32 {
+    std::env::var("ROMM_SDL_UI_SCALE")
+        .ok()
+        .and_then(|n| n.parse::<f32>().ok())
+        .filter(|n| (0.5..=4.0).contains(n))
+        .unwrap_or(UI_SCALE)
+}
+
 /// How long to wait for something to happen before looking around anyway.
 ///
 /// Fifty milliseconds: twenty wake-ups a second, each of which does nothing but
@@ -355,8 +392,6 @@ fn collect<E>(woke: Option<E>, queued: impl IntoIterator<Item = E>) -> Vec<E> {
 /// A page on its way out, and which way it is going.
 struct Slide {
     started: f64,
-    /// +1 when the new tab is to the right of the old one.
-    toward: f32,
 }
 
 fn main() -> Result<()> {
@@ -936,13 +971,7 @@ fn main() -> Result<()> {
                         );
                     });
                 }
-                slide = Some(Slide {
-                    started: now,
-                    // Left along the tab row means the new page comes in from
-                    // the left, which is the direction the eye is already
-                    // travelling.
-                    toward: if lib.section > was_section { 1.0 } else { -1.0 },
-                });
+                slide = Some(Slide { started: now });
             }
             was_section = lib.section;
             dirty = true;
@@ -1033,24 +1062,21 @@ fn main() -> Result<()> {
                     let (top_h, body_h) = (ph * split, ph * (1.0 - split));
                     let body_y = oy + top_h;
 
-                    // The tabs, sliding: the old row out, the new row in.
-                    let tabs_band = band(0.0, split);
-                    gfx.image_part(
-                        &leaving.texture,
-                        ox - s.toward * eased * pw,
-                        oy,
-                        pw,
-                        top_h,
-                        tabs_band,
-                        gfx::Rgba::WHITE,
-                    );
+                    // The tab row does not move.
+                    //
+                    // It used to slide, on the reasoning that the movement says
+                    // which way you went. On a handheld it does not: the row is
+                    // twenty-six points of a 480-point screen, the thing that
+                    // says which tab you are on is the mark under it, and a
+                    // strip of text sliding past above a page that is fading is
+                    // two animations disagreeing about what happened.
                     gfx.image_part(
                         &panel.texture,
-                        ox + s.toward * (1.0 - eased) * pw,
+                        ox,
                         oy,
                         pw,
                         top_h,
-                        tabs_band,
+                        band(0.0, split),
                         gfx::Rgba::WHITE,
                     );
 
@@ -1288,7 +1314,7 @@ fn viewport(_window: &sdl2::video::Window) -> Viewport {
     // a 640x480 texture now, exactly as many pixels as the Flip has, and that
     // texture is what gets magnified — so what is on this screen is the device
     // screen enlarged rather than a different screen entirely.
-    Viewport::new(PANEL.0 as f32, PANEL.1 as f32, Scale::new(1.0))
+    Viewport::new(PANEL.0 as f32, PANEL.1 as f32, Scale::new(ui_scale()))
 }
 
 /// Where the panel sits in the window, and how big a pixel is.
@@ -1449,6 +1475,10 @@ mod size {
     /// Names set solid read as one long word at this size.
     pub const TAB_PAD: f32 = 7.0;
     pub const TAB_GAP: f32 = 5.0;
+    /// How big a tab's name is. The same as a title, because a tab row is the
+    /// most important line on the screen and used to be set smaller than the
+    /// list under it.
+    pub const TAB_TEXT: f32 = 13.0;
     /// The line under the tabs saying where you are. Off — see `draw_chrome`.
     #[allow(dead_code)]
     pub const HEADER: f32 = 20.0;
@@ -1462,8 +1492,18 @@ mod size {
     /// A list row. Tall enough to touch, short enough that a 434-point body
     /// shows sixteen of them.
     pub const ROW: f32 = 26.0;
-    /// A console tile: the machine's picture above, name and count below.
-    pub const TILE: f32 = 148.0;
+    /// How many consoles across, when there is room for a grid at all.
+    ///
+    /// A count rather than a width. The tile takes whatever the panel divided
+    /// by this comes to, so the same grid is the same shape on any screen —
+    /// three across on a handheld is three across on a desk, drawn bigger.
+    pub const GRID_COLUMNS: usize = 3;
+    /// And how many down. Three by two on a handheld: six consoles at a glance,
+    /// each big enough to recognise by its picture rather than by reading it.
+    pub const GRID_ROWS: usize = 2;
+    /// Below this much room per tile the grid becomes a list. Not the tile
+    /// size — there is no fixed tile size any more.
+    pub const TILE_MIN: f32 = 84.0;
     pub const TILE_ART: f32 = 66.0;
     /// Two lines of console name — "Nintendo Entertainment System" needs
     /// both — then the game count under it, then the tile's own padding.
@@ -1873,7 +1913,14 @@ fn draw_collections(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             if let (Some(id), Some(row)) = (id, rows.get_mut(lib.shelf_at)) {
                 row.inside = lib.peek(&id).to_vec();
             }
-            draw_menu(f, area, &rows, lib.shelf_at, rule);
+            draw_menu(
+                f,
+                area,
+                &rows,
+                lib.shelf_at,
+                rule,
+                "No collections yet.\nThey come from the RomM server; a library scanned from the card has none.",
+            );
         }
         library::View::Collections => {
             let rows: Vec<MenuRow> = lib
@@ -1894,7 +1941,7 @@ fn draw_collections(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             if let (Some(id), Some(row)) = (id, rows.get_mut(lib.col_at)) {
                 row.inside = lib.peek(&id).to_vec();
             }
-            draw_menu(f, area, &rows, lib.col_at, None);
+            draw_menu(f, area, &rows, lib.col_at, None, "Nothing in this group.");
         }
         // A collection of games is a list of games: same list, same info pane.
         library::View::Roms => {
@@ -2128,9 +2175,16 @@ fn draw_menu(
     rows: &[MenuRow],
     at: usize,
     rule_before: Option<usize>,
+    empty_note: &str,
 ) {
     if rows.is_empty() {
-        let spec = f.spec("Nothing here.", size::TITLE);
+        // Say why, not just that.
+        //
+        // A library built by scanning the card has no collections in it and
+        // never will: a collection is something the RomM server keeps, and the
+        // card holds files. "Nothing here." on a device that has just found
+        // 7,891 games reads as a fault.
+        let spec = f.wrapped(empty_note, size::TITLE, area.w * 0.7, 3);
         f.label_centered(&spec, area, paint::DIM);
         return;
     }
@@ -2613,7 +2667,7 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
                 inside: p.entries.iter().take(6).map(|e| e.label.to_owned()).collect(),
             })
             .collect();
-        draw_menu(f, area, &rows, lib.pane_at, None);
+        draw_menu(f, area, &rows, lib.pane_at, None, "No settings.");
         return;
     }
 
@@ -2774,14 +2828,81 @@ fn draw_chrome(
         0.0,
     );
 
-    // Tabs, each as wide as its own name — "Library" should not get the same
-    // room as "My collections".
-    let mut x = tabs.x + size::GAP;
+    // How much of the row the corner will want, measured before the tabs are
+    // laid out. It is drawn last and has to be known first, or the tab row
+    // sizes itself against space the clock is about to take.
+    let status_width: f32 = status
+        .parts()
+        .iter()
+        .map(|part| {
+            let w = match part {
+                status::Part::Text(text) => {
+                    let spec = f.spec(text.as_str(), 10.0);
+                    let (w, _) = f.painter.measure(f.gfx, &spec);
+                    f.screen.scale.pt(w as f32)
+                }
+                status::Part::Wifi(_) => f.screen.scale.pt(status::WIFI_SIZE.0 as f32),
+            };
+            w + size::GAP
+        })
+        .sum::<f32>()
+        // Air between the last tab and the first thing in the corner. Without
+        // it they are merely adjacent, and "Syncing 6:01 PM" reads as one line
+        // of text rather than two different things.
+        + size::GAP * 2.0;
+
+    // Tabs: their own size, inside their own half of the row.
+    //
+    // Two rules, and the first one used to be missing. The row is *split*: the
+    // corner takes what it measured above and the tabs get the rest, so a long
+    // name cannot slide under the clock however many tabs there are. On this
+    // panel that is 640 pixels less about 120 for the corner — a measurement,
+    // not a number written down, because the corner grows a charging bolt and
+    // loses a Wi-Fi symbol depending on the moment.
+    //
+    // And the type does not shrink to fit. It did, and the answer was a tab row
+    // set two points smaller than everything around it — legible, and obviously
+    // the loser of an argument. When the names do not fit, the row scrolls to
+    // keep the current one in view, which is what a row of tabs on a small
+    // screen has always done.
+    let room = tabs.w - size::GAP * 2.0 - status_width;
+    let font = size::TAB_TEXT;
+    let widths: Vec<f32> = library::SECTIONS
+        .iter()
+        .map(|s| {
+            let spec = f.spec(s.label, font);
+            let (w, _) = f.painter.measure(f.gfx, &spec);
+            f.screen.scale.pt(w as f32) + size::TAB_PAD * 2.0
+        })
+        .collect();
+    let total: f32 = widths.iter().sum::<f32>() + size::TAB_GAP * (widths.len() - 1) as f32;
+
+    // Where the row starts, so the chosen tab is inside the room there is.
+    // Zero when everything fits, which is the usual case and must not shift.
+    let mut offset = 0.0f32;
+    if total > room {
+        let before: f32 = widths[..lib.section]
+            .iter()
+            .map(|w| w + size::TAB_GAP)
+            .sum();
+        let here = widths[lib.section];
+        // Far enough left that the chosen tab's right edge is inside, and never
+        // so far that the row pulls away from its own start.
+        offset = (before + here - room).max(0.0).min(total - room);
+    }
+
+    let left = tabs.x + size::GAP;
+    let mut x = left - offset;
     for (i, section) in library::SECTIONS.iter().enumerate() {
-        let spec = f.spec(section.label, 13.0);
-        let (w, _) = f.painter.measure(f.gfx, &spec);
-        let width = f.screen.scale.pt(w as f32) + size::TAB_PAD * 2.0;
+        let width = widths[i];
         let slot = Rect::new(x, tabs.y, width, tabs.h);
+        x += width + size::TAB_GAP;
+        // Outside its half of the row: not drawn at all rather than drawn over
+        // the clock.
+        if slot.right() < left || slot.x > left + room {
+            continue;
+        }
+        let spec = f.spec(section.label, font);
         let on = i == lib.section;
         if on {
             // The glow, then the bar.
@@ -2793,9 +2914,6 @@ fn draw_chrome(
             // looks like.
             for step in (1..=6).rev() {
                 let spread = step as f32 * 1.6;
-                // Falls off with the square of the distance, the way light
-                // does. Three even steps read as three boxes; this reads as a
-                // haze.
                 let fade = 1.0 / (step as f32 * step as f32);
                 let glow = Rgba(
                     paint::CURSOR.0,
@@ -2834,7 +2952,6 @@ fn draw_chrome(
             },
         );
         f.hits.tab(f.px(slot), i);
-        x += width + size::TAB_GAP;
     }
 
     // The corner every device has: clock, then signal, then charge. Laid out
@@ -2949,7 +3066,7 @@ fn draw_chrome(
 /// The consoles: a grid of tiles where there is room, a list where there is
 /// not — the same two shapes the webview switches between.
 fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused: bool) {
-    if area.w < size::TILE * 2.0 + size::GAP {
+    if area.w < size::TILE_MIN * 2.0 + size::GAP {
         let fits = (area.h / size::ROW).floor().max(1.0) as usize;
         let first = lib.console_at.saturating_sub(fits.saturating_sub(1));
         for (offset, console) in lib.consoles.iter().enumerate().skip(first).take(fits) {
@@ -2981,13 +3098,36 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
         return;
     }
 
-    let across = area.fits(size::GAP, size::TILE);
+    // The grid is a count of tiles, not a tile size.
+    //
+    // It used to be `area.fits(GAP, TILE)` — how many 148-point tiles go in the
+    // width — which is a desktop question. On a 320-point panel the answer is
+    // two, and two enormous consoles filling the screen is not a shelf. What is
+    // wanted is a *shape*: three across, and as many rows as fit that.
+    //
+    // So the tile takes its size from the room divided by the count, and the
+    // count comes down on a panel too narrow to hold it rather than the tile
+    // staying fixed and the grid emptying out.
+    let across = size::GRID_COLUMNS.min(lib.consoles.len().max(1)).max(1);
     lib.relayout(across);
     let grid = area.tracks(size::GAP, across);
-    let tile_h = size::TILE_ART + size::TILE_CAPTION;
-    // Whole rows only. A part-row looked like more to scroll to and was
-    // really a row with its captions cut in half.
-    let rows = (area.h / (tile_h + size::GAP)).floor().max(1.0) as usize;
+    // Rows come from the count too, not from the tile.
+    //
+    // Both halves have to be a count or neither is: deriving the height from
+    // the width gave a tile 149 points tall in 258 points of room, which is one
+    // row and a gap — three consoles on a screen that was asked for six. The
+    // room divided by the rows wanted is the height, and whatever is left after
+    // the caption is the picture.
+    let want = size::GRID_ROWS;
+    let tile_h = ((area.h - size::GAP * (want - 1) as f32) / want as f32).max(size::TILE_MIN);
+    // How many of those actually fit. Normally `want`; fewer only when the
+    // height floor kicked in on a very short panel.
+    //
+    // The gap is added to the room as well as to the tile, or the arithmetic
+    // eats its own tail: a height derived from two rows, divided by that height
+    // plus a gap, is always a little under two and floors to one. Which is what
+    // it did — two rows asked for, three consoles drawn.
+    let rows = (((area.h + size::GAP) / (tile_h + size::GAP)).floor() as usize).clamp(1, want);
     let first_row = (lib.console_at / across).saturating_sub(rows.saturating_sub(2));
 
     for (offset, console) in lib.consoles.iter().enumerate() {
@@ -3011,8 +3151,11 @@ fn draw_consoles(f: &mut Frame, lib: &mut library::Library, area: Rect, focused:
             f.outline(tile, 2.0, paint::CURSOR, size::ROUND);
         }
 
-        let inner = tile.inset(Edges::all(10.0));
-        let (art, caption) = inner.split_top(size::TILE_ART - 10.0);
+        let inner = tile.inset(Edges::all(8.0));
+        // The picture takes what the caption does not want. A fixed art height
+        // inside a tile whose height is now computed is the one number that
+        // would still not scale.
+        let (art, caption) = inner.split_top((inner.h - size::TILE_CAPTION).max(inner.h * 0.4));
         f.console_art(&console.slug, art, 0.0);
 
         let name = f.wrapped(&console.name, size::LABEL, caption.w, 2);

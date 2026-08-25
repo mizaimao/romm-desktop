@@ -200,6 +200,10 @@ cmd_install() {
   local out="$HERE/target/$TARGET/release/romm-sdl"
   [ -f "$out" ] || { echo "nothing built; run 'knulli.sh build'" >&2; exit 1; }
 
+  # Stop it first. A running executable cannot be overwritten.
+  say "stopping anything already running on $FLIP"
+  ssh_do "pkill -x romm-sdl; sleep 1" >/dev/null 2>&1 || true
+
   say "sending to $FLIP:$REMOTE"
   ssh_do "mkdir -p $REMOTE/data"
   scp_to "$out" "$REMOTE/romm-sdl"
@@ -272,6 +276,24 @@ scp_to() {
     expect \"assword:\" { send \"$FLIP_PASSWORD\r\" }
     expect eof
   " >/dev/null
+  # Checked, not announced.
+  #
+  # scp reports "text file busy" and gives up when the target is a running
+  # executable — which is exactly the case here, because testing means the app
+  # is often up when a new build is sent. The old version stayed on the device,
+  # the script cheerfully said "sent", and an hour went into wondering why a
+  # change that was plainly in the source was not in the running program.
+  # Ask the device for the hash and look for ours in the answer, rather than
+  # trying to extract exactly one field through two layers of quoting — ssh
+  # brings a login banner and carriage returns with it, and a comparison that
+  # has to survive all of that is a comparison that fails for its own reasons.
+  local want
+  want="$(shasum -a 256 "$1" | cut -d" " -f1)"
+  if ! ssh_do "sha256sum $2" 2>/dev/null | grep -q "$want"; then
+    echo "  FAILED to send $(basename "$1") — the copy on the device does not match" >&2
+    echo "  (is it running? scp will not overwrite a busy executable)" >&2
+    exit 1
+  fi
   echo "  sent $(basename "$1") ($(du -h "$1" | cut -f1))"
 }
 
