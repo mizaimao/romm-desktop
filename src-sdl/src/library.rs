@@ -115,6 +115,12 @@ pub enum View {
     Collections,
     /// History: everything played, most time first.
     History,
+    /// Settings: the panes.
+    Panes,
+    /// Settings: one pane's settings.
+    Options,
+    /// Settings: the Wi-Fi list.
+    Wifi,
 }
 
 /// Where a tab starts when you arrive at it.
@@ -126,6 +132,7 @@ pub fn root_view(section: &str) -> View {
     match section {
         "mine" => View::Groups,
         "history" => View::History,
+        "settings" => View::Panes,
         _ => View::Platforms,
     }
 }
@@ -171,6 +178,30 @@ impl Shelf {
             Shelf::Kind { count, .. } => *count,
         }
     }
+}
+
+/// Something waiting for the keyboard, and what to do with what is typed.
+pub struct TextField {
+    /// Where the text goes when it is finished. Distinguishing these is not
+    /// optional: both open the same keyboard, and without it a search typed on
+    /// the Library tab was written into whichever setting the Settings tab
+    /// happened to be sitting on.
+    pub target: Target,
+    pub prompt: &'static str,
+    pub value: String,
+    pub secret: bool,
+}
+
+/// What a keyboard is filling in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A setting, written to `romm-sdl.toml` under this `table.key`.
+    Setting(&'static str),
+    /// The search box over a game list. Written nowhere.
+    Search,
+    /// A Wi-Fi password for this network. Handed to the device's own helper
+    /// and never written to a file — the device saves it itself.
+    WifiKey(String),
 }
 
 /// One game in the History list.
@@ -244,6 +275,20 @@ pub struct Library {
     pub col_name: String,
     pub history: Vec<Played>,
     pub history_at: usize,
+    /// Settings, built from the config when the app started.
+    pub panes: Vec<crate::settings::Pane>,
+    pub pane_at: usize,
+    pub option_at: usize,
+    /// What the search box holds. Empty means everything.
+    pub query: String,
+    /// The Wi-Fi screen, when it is open.
+    pub wifi: crate::wifi::State,
+    pub wifi_at: usize,
+    /// A scan or a join in flight. Polled by the loop, not by the drawing.
+    pub wifi_job: Option<crate::wifi::Job>,
+    /// Set when a text setting was activated, for the loop to open a keyboard
+    /// on. Taken rather than read, so one press opens one keyboard.
+    pub wants_keyboard: Option<TextField>,
     pub sync: SyncState,
     recent: Vec<Recent>,
     /// Where the cursor is, as a place in `arranged`.
@@ -300,6 +345,14 @@ impl Library {
             col_name: String::new(),
             history: Vec::new(),
             history_at: 0,
+            panes: Vec::new(),
+            pane_at: 0,
+            option_at: 0,
+            query: String::new(),
+            wifi: crate::wifi::State::Idle,
+            wifi_at: 0,
+            wifi_job: None,
+            wants_keyboard: None,
             sync: SyncState {
                 server_version: None,
                 watermark: None,
@@ -625,6 +678,8 @@ impl Library {
     /// quits a level early.
     pub fn back(&mut self) {
         self.view = match (self.section().id, self.view) {
+            ("settings", View::Wifi) => View::Options,
+            ("settings", View::Options) => View::Panes,
             ("mine", View::Roms) => View::Collections,
             ("mine", View::Collections) => View::Groups,
             (_, View::Roms) => View::Platforms,
@@ -651,6 +706,15 @@ impl Library {
             by_id.insert(row.id, i);
         }
         self.arranged = ids.into_iter().filter_map(|id| by_id.get(&id).copied()).collect();
+        // The search box, applied after the core's own ordering and filters so
+        // that what you searched is still sorted the way you asked for.
+        if !self.query.is_empty() {
+            let needle = self.query.to_lowercase();
+            let rows = &self.rows;
+            self.arranged.retain(|i| {
+                rows.get(*i).is_some_and(|r| r.name.to_lowercase().contains(&needle))
+            });
+        }
         self.at = self.at.min(self.arranged.len().saturating_sub(1));
         self.moves = gridnav::uniform(self.arranged.len(), self.columns);
     }
@@ -663,13 +727,7 @@ impl Library {
     /// drawn.
     pub fn relayout(&mut self, columns: usize) {
         let columns = columns.max(1);
-        let count = match self.view {
-            View::Platforms => self.consoles.len(),
-            View::Groups => self.shelves.len(),
-            View::Collections => self.cols.len(),
-            View::History => self.history.len(),
-            View::Roms => self.arranged.len(),
-        };
+        let count = self.count_here();
         // Only when it would come out different. This is called from the
         // drawing, so it runs every frame, and the table is six vectors the
         // length of the list — 15,000 allocations a frame on the arcade
@@ -683,21 +741,102 @@ impl Library {
 
     /// Put the cursor on a particular row, if it is one.
     ///
+    /// The setting under the cursor.
+    fn option_here(&self) -> Option<&crate::settings::Entry> {
+        self.panes.get(self.pane_at)?.entries.get(self.option_at)
+    }
+
+    /// The text setting under the cursor, if that is what it is.
+    fn text_here(&self) -> Option<TextField> {
+        let entry = self.panes.get(self.pane_at)?.entries.get(self.option_at)?;
+        match &entry.kind {
+            crate::settings::Kind::Text { value, secret } => Some(TextField {
+                target: Target::Setting(entry.field),
+                prompt: entry.label,
+                value: value.clone(),
+                secret: *secret,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Store what was typed, wherever it was going.
+    pub fn take_typed(&mut self, target: &Target, text: &str) {
+        match target {
+            Target::Search => {
+                self.query = text.to_owned();
+                self.at = 0;
+                self.scrolled = 0.0;
+                self.rearrange();
+            }
+            Target::WifiKey(ssid) => {
+                self.wifi_job = Some(crate::wifi::join(ssid.clone(), text.to_owned()));
+                self.wifi = crate::wifi::State::Busy("Joining");
+            }
+            Target::Setting(field) => {
+                if let Some(pane) = self.panes.get_mut(self.pane_at)
+                    && let Some(entry) = pane.entries.get_mut(self.option_at)
+                    && let crate::settings::Kind::Text { value, .. } = &mut entry.kind
+                {
+                    *value = text.to_owned();
+                }
+                if field.is_empty() {
+                    return;
+                }
+                if let Err(e) = crate::settings::write(
+                    field,
+                    &crate::settings::Written::Text(text.to_owned()),
+                ) {
+                    eprintln!("could not save {field}: {e:#}");
+                }
+            }
+        }
+    }
+
+    /// Rebuild the movement table for the screen you are on, whatever it was
+    /// before.
+    ///
+    /// `relayout` skips the work when the count looks unchanged, which is right
+    /// on a redraw and wrong after a list has been replaced under it — a Wi-Fi
+    /// scan that finds the same number of networks it had before would keep the
+    /// old table.
+    pub fn refresh_rows(&mut self) {
+        self.columns = 0;
+        self.relayout(1);
+    }
+
+    /// How many rows the screen you are on has.
+    ///
+    /// One place rather than three copies of the same match: `relayout`,
+    /// `point_at` and the drawing all need it, and the three drifted apart the
+    /// first time a new screen was added.
+    pub fn count_here(&self) -> usize {
+        match self.view {
+            View::Platforms => self.consoles.len(),
+            View::Groups => self.shelves.len(),
+            View::Collections => self.cols.len(),
+            View::History => self.history.len(),
+            View::Panes => self.panes.len(),
+            View::Options => self.panes.get(self.pane_at).map_or(0, |p| p.entries.len()),
+            View::Wifi => self.wifi.names().len(),
+            View::Roms => self.arranged.len(),
+        }
+    }
+
     /// For the mouse, which does not step — it arrives.
     pub fn point_at(&mut self, index: usize) -> bool {
+        // Counted before the cursor is borrowed: the count for Options reads
+        // `pane_at`, which is itself one of the cursors.
+        let count = self.count_here();
         let cursor = match self.view {
             View::Platforms => &mut self.console_at,
             View::Groups => &mut self.shelf_at,
             View::Collections => &mut self.col_at,
             View::History => &mut self.history_at,
+            View::Panes => &mut self.pane_at,
+            View::Options => &mut self.option_at,
+            View::Wifi => &mut self.wifi_at,
             View::Roms => &mut self.at,
-        };
-        let count = match self.view {
-            View::Platforms => self.consoles.len(),
-            View::Groups => self.shelves.len(),
-            View::Collections => self.cols.len(),
-            View::History => self.history.len(),
-            View::Roms => self.arranged.len(),
         };
         if index >= count || *cursor == index {
             return false;
@@ -713,9 +852,30 @@ impl Library {
             View::Groups => &mut self.shelf_at,
             View::Collections => &mut self.col_at,
             View::History => &mut self.history_at,
+            View::Panes => &mut self.pane_at,
+            View::Options => &mut self.option_at,
+            View::Wifi => &mut self.wifi_at,
             View::Roms => &mut self.at,
         };
         let moved = |table: &[Option<usize>], at: usize| table.get(at).copied().flatten();
+
+        // On a settings row, left and right change the value rather than
+        // moving — there is nothing to move sideways to, and stepping a value
+        // is what those presses are for on every device that has this screen.
+        if self.view == View::Options && matches!(action, "left" | "right") {
+            let dir = if action == "right" { 1 } else { -1 };
+            let at = self.option_at;
+            let Some(pane) = self.panes.get_mut(self.pane_at) else { return Ok(false) };
+            let Some(entry) = pane.entries.get_mut(at) else { return Ok(false) };
+            let field = entry.field;
+            if let Some(written) = entry.step(dir)
+                && !field.is_empty()
+                && let Err(e) = crate::settings::write(field, &written)
+            {
+                eprintln!("could not save {field}: {e:#}");
+            }
+            return Ok(true);
+        }
 
         let next = match action {
             "left" => moved(&self.moves.left, *cursor),
@@ -747,8 +907,47 @@ impl Library {
                     self.open_collection()?;
                     Ok(true)
                 }
-                // Nothing to open: History is already the games, and a game
-                // list has no launcher behind it yet.
+                View::Panes => {
+                    self.view = View::Options;
+                    self.option_at = 0;
+                    self.scrolled = 0.0;
+                    self.columns = 0;
+                    self.relayout(1);
+                    Ok(true)
+                }
+                // A text setting is the one kind that cannot be stepped, so
+                // it asks for the keyboard. The loop picks this up and opens
+                // one — `Library` has no window to open it in.
+                View::Options => {
+                    // The Wi-Fi row is an action rather than a value, and the
+                    // only one so far that opens a screen of its own.
+                    if self.option_here().is_some_and(|e| e.label == "Wi-Fi") {
+                        self.view = View::Wifi;
+                        self.wifi_at = 0;
+                        self.scrolled = 0.0;
+                        self.wifi_job = Some(crate::wifi::scan());
+                        self.wifi = crate::wifi::State::Busy("Scanning");
+                        self.columns = 0;
+                        self.relayout(1);
+                        return Ok(true);
+                    }
+                    self.wants_keyboard = self.text_here();
+                    Ok(self.wants_keyboard.is_some())
+                }
+                View::Wifi => {
+                    let Some(ssid) = self.wifi.names().get(self.wifi_at).cloned() else {
+                        return Ok(false);
+                    };
+                    self.wants_keyboard = Some(TextField {
+                        target: Target::WifiKey(ssid.clone()),
+                        prompt: "Wi-Fi password",
+                        value: String::new(),
+                        secret: true,
+                    });
+                    Ok(true)
+                }
+                // History is already the games, and a game list has no launcher
+                // behind it yet.
                 View::Roms | View::History => Ok(false),
             },
             "back" | "back2" if !self.at_top() => {
@@ -760,6 +959,17 @@ impl Library {
             "prevSection" | "nextSection" => {
                 let delta = if action == "nextSection" { 1 } else { SECTIONS.len() - 1 };
                 self.go_to_section((self.section + delta) % SECTIONS.len());
+                Ok(true)
+            }
+            // The search box. Only over a list of games — there is nothing to
+            // search on a screen of four settings.
+            "search" if self.view == View::Roms => {
+                self.wants_keyboard = Some(TextField {
+                    target: Target::Search,
+                    prompt: "Search",
+                    value: self.query.clone(),
+                    secret: false,
+                });
                 Ok(true)
             }
             "sortCycle" if self.view == View::Roms => {
@@ -830,6 +1040,14 @@ mod tests {
             col_name: String::new(),
             history: Vec::new(),
             history_at: 0,
+            panes: Vec::new(),
+            pane_at: 0,
+            option_at: 0,
+            query: String::new(),
+            wifi: crate::wifi::State::Idle,
+            wifi_at: 0,
+            wifi_job: None,
+            wants_keyboard: None,
             sync: SyncState {
                 server_version: None,
                 watermark: None,
@@ -1032,7 +1250,7 @@ mod tests {
             (0, View::Platforms),
             (1, View::Platforms),
             (2, View::Groups),
-            (3, View::Platforms),
+            (3, View::Panes),
             (4, View::History),
             (5, View::Platforms),
         ] {
@@ -1095,6 +1313,163 @@ mod tests {
             lib.shelves.len(),
             "a kind survived with RomM collections turned off"
         );
+    }
+
+    /// Left and right change a setting rather than moving the cursor.
+    ///
+    /// Deliberately on an entry with no `field`, because stepping one that has
+    /// a field writes `config.toml` — and a test that edits the developer's own
+    /// config while it runs is a test that eventually edits something worse.
+    #[test]
+    fn left_and_right_change_a_setting_in_place() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.panes = vec![crate::settings::Pane {
+            id: "t",
+            label: "Test",
+            entries: vec![crate::settings::Entry {
+                field: "",
+                label: "Something",
+                help: "",
+                kind: crate::settings::Kind::Toggle(false),
+            }],
+        }];
+        lib.go_to_section(3);
+        assert_eq!(lib.view, View::Panes);
+        lib.act("activate").unwrap();
+        assert_eq!(lib.view, View::Options, "a group did not open");
+
+        let value = |l: &Library| l.panes[0].entries[0].value();
+        assert_eq!(value(&lib), "Off");
+        lib.act("right").unwrap();
+        assert_eq!(value(&lib), "On", "right did not change the value");
+        assert_eq!(lib.option_at, 0, "right moved the cursor instead of editing");
+        lib.act("left").unwrap();
+        assert_eq!(value(&lib), "Off", "left is a dead press on a toggle");
+    }
+
+    /// Up and down still move, and Back leaves the group rather than the tab.
+    #[test]
+    fn settings_still_navigate_normally() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.panes = vec![crate::settings::Pane {
+            id: "t",
+            label: "Test",
+            entries: vec![
+                crate::settings::Entry {
+                    field: "",
+                    label: "One",
+                    help: "",
+                    kind: crate::settings::Kind::ReadOnly("x".into()),
+                },
+                crate::settings::Entry {
+                    field: "",
+                    label: "Two",
+                    help: "",
+                    kind: crate::settings::Kind::ReadOnly("y".into()),
+                },
+            ],
+        }];
+        lib.go_to_section(3);
+        lib.act("activate").unwrap();
+        lib.act("down").unwrap();
+        assert_eq!(lib.option_at, 1, "down did not move between settings");
+        assert!(!lib.at_top());
+        lib.back();
+        assert_eq!(lib.view, View::Panes, "back should leave the group, not the tab");
+        assert!(lib.at_top());
+    }
+
+    /// Search filters the list without disturbing the order it was sorted in.
+    #[test]
+    fn search_narrows_the_list_and_keeps_the_order() {
+        let mut lib = seeded(rows(&[
+            ("Sonic the Hedgehog", false),
+            ("Alex Kidd", false),
+            ("Sonic 2", false),
+        ]));
+        assert_eq!(lib.shown(), 3);
+
+        lib.take_typed(&Target::Search, "sonic");
+        let names: Vec<_> = lib.showing().map(|(r, _)| r.name.as_str()).collect();
+        assert_eq!(names, ["Sonic 2", "Sonic the Hedgehog"], "still in name order");
+
+        lib.take_typed(&Target::Search, "");
+        assert_eq!(lib.shown(), 3, "clearing the box did not put everything back");
+    }
+
+    /// A search typed on the Library tab must not land in a setting.
+    ///
+    /// Both open the same keyboard, and before the target was carried through,
+    /// finishing a search wrote the query into whichever setting the Settings
+    /// tab happened to be sitting on.
+    #[test]
+    fn a_search_does_not_write_itself_into_a_setting() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.panes = vec![crate::settings::Pane {
+            id: "t",
+            label: "Test",
+            entries: vec![crate::settings::Entry {
+                field: "",
+                label: "Some text",
+                help: "",
+                kind: crate::settings::Kind::Text {
+                    value: "untouched".into(),
+                    secret: false,
+                },
+            }],
+        }];
+        lib.take_typed(&Target::Search, "sonic");
+        let crate::settings::Kind::Text { value, .. } = &lib.panes[0].entries[0].kind else {
+            panic!("not a text setting");
+        };
+        assert_eq!(value, "untouched", "the search was written into a setting");
+        assert_eq!(lib.query, "sonic");
+    }
+
+    /// A Wi-Fi password goes to the device, never to a file.
+    ///
+    /// It is the one secret this app handles that it must not store: connman
+    /// already saves it, and a copy in `romm-sdl.toml` on an exfat card with no
+    /// permissions is a password sitting in a text file.
+    #[test]
+    fn a_wifi_password_is_not_written_to_the_config() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.panes = vec![crate::settings::Pane {
+            id: "device",
+            label: "Device",
+            entries: vec![crate::settings::Entry {
+                field: "",
+                label: "Wi-Fi",
+                help: "",
+                kind: crate::settings::Kind::Action,
+            }],
+        }];
+        lib.take_typed(&Target::WifiKey("Chicken24".into()), "hunter2");
+        assert!(lib.wifi_job.is_some(), "the join never started");
+        // Nothing was written, and the setting it came from is untouched.
+        assert!(matches!(lib.panes[0].entries[0].kind, crate::settings::Kind::Action));
+        assert!(
+            !std::path::Path::new(crate::settings::FILE).exists()
+                || !std::fs::read_to_string(crate::settings::FILE)
+                    .unwrap_or_default()
+                    .contains("hunter2"),
+            "the password reached the config file"
+        );
+    }
+
+    /// Back from the network list returns to the Device settings, not out of
+    /// the tab.
+    #[test]
+    fn back_from_the_wifi_list_returns_to_the_settings() {
+        let mut lib = seeded(rows(&[("a", false)]));
+        lib.go_to_section(3);
+        lib.view = View::Wifi;
+        assert!(!lib.at_top());
+        lib.back();
+        assert_eq!(lib.view, View::Options);
+        lib.back();
+        assert_eq!(lib.view, View::Panes);
+        assert!(lib.at_top());
     }
 
     #[test]

@@ -20,6 +20,15 @@ path = "src/lib.rs"
 name = "romm-sdl"
 path = "src/main.rs"
 
+# The device schemes, passed straight through to the core. Building the front
+# end for the handheld is `cargo build -p romm-sdl --features knulli`, not a
+# different command with a different meaning.
+[features]
+default = []
+knulli = ["romm-desktop/knulli"]
+android = ["romm-desktop/android"]
+linux = ["romm-desktop/linux"]
+
 [dependencies]
 romm-desktop = { path = ".." }
 anyhow = "1.0.104"

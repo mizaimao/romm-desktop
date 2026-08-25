@@ -33,8 +33,10 @@ mod glass;
 mod input;
 mod keyboard;
 mod library;
+mod settings;
 mod status;
 mod text;
+mod wifi;
 
 /// The handheld's panel, in points — and the size every layout below is
 /// written against.
@@ -105,7 +107,10 @@ fn main() -> Result<()> {
 
     // The config, read once. Everything the front end needs from it is settled
     // before the first frame; nothing below re-reads a file.
-    let config = romm_desktop::config::Config::load().unwrap_or_default();
+    // This front end's own file — see `settings::FILE` for why it is not
+    // `config.toml`.
+    let (config, config_from) = settings::load();
+    println!("config: {config_from}");
 
     // The context, ours. Everything below draws through it.
     let _context = window
@@ -177,6 +182,17 @@ fn main() -> Result<()> {
         );
     }
     println!("{} consoles", lib.consoles.len());
+    // The consoles this library actually holds, so the Emulators pane offers
+    // rows for those and not for the whole core map.
+    let consoles: Vec<(String, String)> = lib
+        .consoles
+        .iter()
+        .map(|c| (c.slug.clone(), c.name.clone()))
+        .collect();
+    let core_map = romm_desktop::coremap::CoreMap::load_or_embedded(std::path::Path::new(
+        "data/esde-core-map.json",
+    ));
+    lib.panes = settings::panes(&config, &consoles, &core_map);
     start_at(&mut lib);
 
     let mut screen = viewport(&window);
@@ -299,7 +315,10 @@ fn main() -> Result<()> {
                         if let Some(kb) = typing.as_mut() {
                             match kb.act(action) {
                                 keyboard::Outcome::Done => {
-                                    println!("typed: {}", kb.text);
+                                    let text = kb.text.clone();
+                                    if let Some(target) = kb.target.clone() {
+                                        lib.take_typed(&target, &text);
+                                    }
                                     typing = None;
                                 }
                                 keyboard::Outcome::Cancelled => typing = None,
@@ -329,7 +348,10 @@ fn main() -> Result<()> {
                 if let Some(kb) = typing.as_mut() {
                     match kb.act(action) {
                         keyboard::Outcome::Done => {
-                            println!("typed: {}", kb.text);
+                            let text = kb.text.clone();
+                            if let Some(target) = kb.target.clone() {
+                                lib.take_typed(&target, &text);
+                            }
                             typing = None;
                         }
                         keyboard::Outcome::Cancelled => typing = None,
@@ -346,6 +368,21 @@ fn main() -> Result<()> {
         repeat.release(&pressed);
         held.clone_from(&pressed);
 
+        if typing.is_none()
+            && let Some(kb) = keyboard_wanted(&mut lib)
+        {
+            typing = Some(kb);
+        }
+        // A scan or a join, finishing on its thread. Polled here rather than
+        // in the drawing so a slow helper never holds up a frame.
+        if let Some(job) = lib.wifi_job.as_ref()
+            && let Some(state) = job.poll()
+        {
+            lib.wifi = state;
+            lib.wifi_job = None;
+            lib.wifi_at = 0;
+            lib.refresh_rows();
+        }
         status.poll(now as u64);
         gfx.resize(screen.width_px, screen.height_px);
 
@@ -526,7 +563,10 @@ fn start_at(lib: &mut library::Library) {
     };
     // What "open" names depends on the tab: a console in the Library, a kind
     // of collection in Collections.
-    let err = if lib.section().id == "mine" {
+    let err = if lib.section().id == "settings" {
+        lib.pane_at = lib.panes.iter().position(|p| p.id == open).unwrap_or(0);
+        lib.act("activate").map(|_| ())
+    } else if lib.section().id == "mine" {
         lib.shelf_at = lib
             .shelves
             .iter()
@@ -646,6 +686,15 @@ fn act(lib: &mut library::Library, action: &str) {
         Ok(false) => println!("nothing does {action} yet"),
         Err(e) => eprintln!("{action}: {e:#}"),
     }
+}
+
+/// A keyboard for whichever setting asked for one, if any.
+///
+/// Taken rather than read: one activation opens one keyboard, and leaving the
+/// request in place would reopen it the moment the last one closed.
+fn keyboard_wanted(lib: &mut library::Library) -> Option<keyboard::Keyboard> {
+    let want = lib.wants_keyboard.take()?;
+    Some(keyboard::Keyboard::new(want.prompt, &want.value, want.secret).filling(want.target))
 }
 
 /// A grid of cards, in points, and the columns the window has room for.
@@ -930,9 +979,9 @@ fn draw(
         "mine" => draw_collections(&mut f, lib, body.inset(size::PAD)),
         "history" => draw_history(&mut f, lib, body.inset(size::PAD)),
         "syncing" => draw_syncing(&mut f, lib, body.inset(size::PAD)),
+        "settings" => draw_settings(&mut f, lib, body.inset(size::PAD)),
         // Until Settings is built, its tab is where the keyboard can be looked
         // at — it is the only screen that will ask for one.
-
         other => draw_unbuilt(&mut f, other, body),
     }
 
@@ -1298,12 +1347,7 @@ fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
     let rows = keyboard::ROWS + 1;
     let keys_h = rows as f32 * key_h + size::GAP * (rows - 1) as f32;
     let sheet_h = keys_h + 52.0 + size::GAP * 2.0;
-    let sheet = Rect::new(
-        page.x,
-        page.bottom() - sheet_h,
-        page.w,
-        sheet_h,
-    );
+    let sheet = Rect::new(page.x, page.bottom() - sheet_h, page.w, sheet_h);
     f.fill(sheet, paint::SHEET, 0.0);
 
     let inner = sheet.inset(size::PAD);
@@ -1312,14 +1356,29 @@ fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
     // What is being asked for, and what has been typed so far.
     let prompt = f.spec(kb.prompt.as_str(), size::LABEL);
     f.label(&prompt, Rect { h: 15.0, ..top }, paint::FAINT);
-    let field = Rect { y: top.y + 17.0, h: 26.0, ..top };
+    let field = Rect {
+        y: top.y + 17.0,
+        h: 26.0,
+        ..top
+    };
     f.pane(field, paint::CARD, size::ROUND_SMALL);
     let shown = kb.shown();
-    let text = f.spec(if shown.is_empty() { "…" } else { shown.as_str() }, size::TITLE);
+    let text = f.spec(
+        if shown.is_empty() {
+            "…"
+        } else {
+            shown.as_str()
+        },
+        size::TITLE,
+    );
     f.label(
         &text,
         field.inset(Edges::xy(8.0, 5.0)),
-        if shown.is_empty() { paint::FAINT } else { paint::TEXT },
+        if shown.is_empty() {
+            paint::FAINT
+        } else {
+            paint::TEXT
+        },
     );
 
     let grid = kb.grid();
@@ -1335,7 +1394,11 @@ fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
                 key_h,
             );
             let on = !kb.on_actions() && kb.row == row && kb.col == col;
-            f.pane(cell, if on { paint::CURSOR } else { paint::CARD }, size::ROUND_SMALL);
+            f.pane(
+                cell,
+                if on { paint::CURSOR } else { paint::CARD },
+                size::ROUND_SMALL,
+            );
             let ch: String = grid[row].chars().nth(col).into_iter().collect();
             let spec = f.spec(ch.as_str(), size::TITLE);
             f.label_centered(&spec, cell, if on { paint::TEXT } else { paint::DIM });
@@ -1352,10 +1415,122 @@ fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
         let w = usable * weights[i] / total;
         let cell = Rect::new(x, row_y(keyboard::ROWS), w, key_h);
         let on = kb.action() == Some(*action);
-        f.pane(cell, if on { paint::CURSOR } else { paint::CARD }, size::ROUND_SMALL);
+        f.pane(
+            cell,
+            if on { paint::CURSOR } else { paint::CARD },
+            size::ROUND_SMALL,
+        );
         let spec = f.spec(action.label(), size::LABEL);
         f.label_centered(&spec, cell, if on { paint::TEXT } else { paint::DIM });
         x += w + size::GAP;
+    }
+}
+
+/// The Settings tab: the panes, then one pane's settings.
+///
+/// Two levels, like Collections. The settings themselves are a list with the
+/// value on the right and one sentence of explanation beside it — because a
+/// setting whose name you have to guess the meaning of is a setting nobody
+/// touches, and on a handheld there is no tooltip to hover for.
+fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
+    if lib.view == library::View::Wifi {
+        let (top, list) = area.split_top(22.0);
+        let spec = f.spec(lib.wifi.note().as_str(), size::LABEL);
+        f.label(&spec, top, paint::FAINT);
+        let names = lib.wifi.names();
+        let joined = match &lib.wifi {
+            wifi::State::Networks { joined, .. } => joined.clone(),
+            _ => None,
+        };
+        let rows: Vec<_> = names
+            .iter()
+            .map(|n| {
+                let mark = if joined.as_deref() == Some(n.as_str()) {
+                    "saved"
+                } else {
+                    ""
+                };
+                (n.clone(), mark.to_owned())
+            })
+            .collect();
+        draw_picker(f, list, &rows, lib.wifi_at, rows.len());
+        return;
+    }
+
+    if lib.view == library::View::Panes {
+        let rows: Vec<_> = lib
+            .panes
+            .iter()
+            .map(|p| (p.label.to_owned(), format!("{}", p.entries.len())))
+            .collect();
+        draw_picker(f, area, &rows, lib.pane_at, rows.len());
+        return;
+    }
+
+    let Some(pane) = lib.panes.get(lib.pane_at) else {
+        return;
+    };
+    let [list, aside] =
+        <[Rect; 2]>::try_from(area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]))
+            .unwrap();
+
+    let step = size::ROW;
+    let fits = (list.h / step).floor().max(1.0) as usize;
+    let first = lib.option_at.saturating_sub(fits.saturating_sub(1));
+
+    for (offset, entry) in pane.entries.iter().enumerate().skip(first).take(fits) {
+        let line = Rect::new(
+            list.x,
+            list.y + (offset - first) as f32 * step,
+            list.w,
+            step,
+        );
+        if line.bottom() > list.bottom() {
+            break;
+        }
+        f.hits.row(f.px(line), offset);
+        let on = offset == lib.option_at;
+        f.hovering(offset, line, size::ROUND_SMALL);
+        if on {
+            f.pane(line, paint::CURSOR, size::ROUND_SMALL);
+        }
+        let inside = line.inset(Edges::xy(8.0, 5.0));
+        let [name, value] =
+            <[Rect; 2]>::try_from(inside.row(8.0, &[Size::Grow(1.0), Size::Fixed(110.0)])).unwrap();
+        let spec = f.wrapped(entry.label, size::LABEL, name.w, 1);
+        f.label(&spec, name, if on { paint::TEXT } else { paint::DIM });
+
+        // A value you can change says so, with the arrows the pad presses.
+        let shown = if on && entry.steps() {
+            format!("\u{2039} {} \u{203a}", entry.value())
+        } else {
+            entry.value()
+        };
+        let spec = f.spec(shown.as_str(), 11.0);
+        f.label_right(
+            &spec,
+            value,
+            match &entry.kind {
+                settings::Kind::ReadOnly(_) => paint::FAINT,
+                _ if on => paint::TEXT,
+                _ => paint::DIM,
+            },
+        );
+    }
+
+    // What the highlighted setting does.
+    f.pane(aside, paint::COLUMN, size::ROUND);
+    if let Some(entry) = pane.entries.get(lib.option_at) {
+        let inner = aside.inset(size::PAD);
+        let title = f.wrapped(entry.label, size::TITLE, inner.w, 2);
+        let used = f.label(&title, inner, paint::TEXT);
+        let body = Rect {
+            y: inner.y + used + 8.0,
+            h: inner.h - used - 8.0,
+            ..inner
+        };
+        let help = f.wrapped(entry.help, size::LABEL, body.w, 8);
+        f.label(&help, body, paint::DIM);
     }
 }
 
@@ -1461,6 +1636,17 @@ fn draw_chrome(
     let here = match (lib.section().id, lib.view) {
         ("library", library::View::Platforms) => format!("{} consoles", lib.consoles.len()),
         ("library", library::View::Roms) => match lib.console() {
+            // The search box is said in the heading rather than drawn as a
+            // field: it is on or off, and a list that is quietly narrowed is a
+            // library that has lost games.
+            Some(c) if !lib.query.is_empty() => {
+                format!(
+                    "{} — {} matching \u{201c}{}\u{201d}",
+                    c.name,
+                    lib.shown(),
+                    lib.query
+                )
+            }
             Some(c) => format!("{} — {} games", c.name, lib.shown()),
             None => String::new(),
         },
@@ -1473,6 +1659,13 @@ fn draw_chrome(
         ("mine", library::View::Collections) => format!("{} collections", lib.cols.len()),
         ("mine", _) => format!("{} — {} games", lib.col_name, lib.shown()),
         ("history", _) => format!("{} games played", lib.history.len()),
+        ("settings", library::View::Panes) => format!("{} groups", lib.panes.len()),
+        ("settings", library::View::Wifi) => "Wi-Fi".to_owned(),
+        ("settings", _) => lib
+            .panes
+            .get(lib.pane_at)
+            .map(|p| p.label.to_owned())
+            .unwrap_or_default(),
         (_, _) => lib.section().label.to_owned(),
     };
     let title = f.spec(here, size::TITLE);

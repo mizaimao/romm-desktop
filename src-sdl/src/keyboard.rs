@@ -81,6 +81,9 @@ pub enum Outcome {
 
 /// One text field being filled in.
 pub struct Keyboard {
+    /// What this keyboard is filling in, so the caller does not have to
+    /// remember what it opened one for.
+    pub target: Option<crate::library::Target>,
     /// What is being asked for, drawn above the field.
     pub prompt: String,
     /// What has been typed.
@@ -97,6 +100,7 @@ pub struct Keyboard {
 impl Keyboard {
     pub fn new(prompt: impl Into<String>, initial: &str, secret: bool) -> Self {
         Self {
+            target: None,
             prompt: prompt.into(),
             text: initial.to_owned(),
             secret,
@@ -104,6 +108,12 @@ impl Keyboard {
             row: 1,
             col: 0,
         }
+    }
+
+    /// Say what this keyboard is filling in.
+    pub fn filling(mut self, target: crate::library::Target) -> Self {
+        self.target = Some(target);
+        self
     }
 
     /// The characters currently on the keys.

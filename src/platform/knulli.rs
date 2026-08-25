@@ -73,6 +73,27 @@ impl Platform for Knulli {
         ]
     }
 
+    /// What this hardware should actually run, where it differs from the
+    /// shipped default.
+    ///
+    /// Settled on the device rather than chosen from a list. The two here are
+    /// the ones that are certain:
+    ///
+    /// * **PSX** — the default is SwanStation, which assumes a modern x86 CPU.
+    ///   `pcsx_rearmed` is the ARM-targeted one and the reason PlayStation
+    ///   games are playable on this chip at all.
+    /// * **Neo Geo** — fixed by the ROMs, not by speed. The sets here are
+    ///   geolith's, so FBNeo cannot load them however fast it is.
+    ///
+    /// Deliberately short. The rest of KNULLI's per-device tuning lives in
+    /// `/usr/share/knulli/configgen/configgen-defaults-arch.yml`, and matching
+    /// it needs the actual core filenames out of `/usr/lib/libretro` — 99 of
+    /// them, not yet listed. Guessing a core name is not a cheap mistake:
+    /// a name that does not exist is a failed launch, not an error.
+    fn default_cores(&self) -> &'static [(&'static str, &'static str)] {
+        &[("psx", "pcsx_rearmed"), ("neogeoaes", "geolith")]
+    }
+
     /// Known, and deliberately not wanted here.
     ///
     /// Distinct from an unknown directory, which is reported so a missing
@@ -115,6 +136,7 @@ impl Platform for Knulli {
             interface: "wlan0",
             max_quality: 70,
             helper: Some("knulli-wifi"),
+            settings_get: Some("knulli-settings-get"),
         })
     }
 

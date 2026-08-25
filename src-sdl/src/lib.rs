@@ -12,5 +12,7 @@ pub mod glass;
 pub mod input;
 pub mod keyboard;
 pub mod library;
+pub mod settings;
 pub mod status;
+pub mod wifi;
 pub mod text;

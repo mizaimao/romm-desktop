@@ -52,7 +52,14 @@ pub struct Wifi {
     /// The largest value the quality column reports, for turning it into bars.
     pub max_quality: u32,
     /// Lists and joins networks. A process, so it is only for settings.
+    ///
+    /// Called as `<helper> scanlist` to look, and `<helper> enable <ssid>
+    /// <key>` to join — which saves the network and waits for an address, so it
+    /// can take several seconds and must not be run from the draw loop.
     pub helper: Option<&'static str>,
+    /// Reads one saved value, as `<settings> <key>`. `wifi.ssid` is the network
+    /// the device is set to join.
+    pub settings_get: Option<&'static str>,
 }
 
 /// A battery that can be read.
@@ -109,6 +116,15 @@ pub trait Platform: Sync {
     /// ES-DE system directory -> RomM slug, for names this device uses that
     /// the shipped core map does not know.
     fn system_aliases(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+
+    /// Cores this device should use in preference to the shipped default.
+    ///
+    /// RomM platform slug -> libretro core stem. The shipped core map is ES-DE's
+    /// and assumes a desktop; a quad A55 at 1.8 GHz does not run what a desktop
+    /// runs, and the difference is the game being playable or not.
+    fn default_cores(&self) -> &'static [(&'static str, &'static str)] {
         &[]
     }
 

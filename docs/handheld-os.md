@@ -286,6 +286,24 @@ For the status corner and the Device settings pane.
 
 Read at the time: `wlan0`, quality **40 of 70**, connected to `Chicken24` at **-52 dBm**.
 
+## The Wi-Fi helper's actual interface (read off the device 2026-08-25)
+
+`/usr/bin/knulli-wifi` is a 124-line shell script over `connmanctl`. Its usage
+text lists only two subcommands; the case statement has seven.
+
+| | |
+|---|---|
+| `knulli-wifi list` | networks, **one plain SSID per line**. No columns, no signal. Names contain spaces and hyphens — `DIRECT-AB-HP OfficeJet Pro 6970` — so take the whole line. |
+| `knulli-wifi scanlist` | `connmanctl scan wifi`, `sleep 1`, then `list`. |
+| `knulli-wifi enable <ssid> <key>` | the join. Writes `wifi.ssid` / `wifi.key` through `knulli-settings-set`, reloads connman, then **waits up to 20 s** for an address. Not a call to make on a draw loop. |
+| `knulli-wifi disable` | turns the radio off and waits for the address to go. |
+| `knulli-wifi get_route` | default gateway via a `wl*` interface — a cheap "am I actually on" check. |
+| `knulli-settings-get wifi.ssid` | the saved network. Read `Chicken24`. |
+
+The password is connman's to keep. It is passed to `enable` and never stored by
+us — a copy in our own config would be a plaintext password on an exfat card
+with no permissions.
+
 ## Front-end platform module — what to wire
 - Input: `/dev/input/event5` (pad), `event1` (lid), `event0` (volume keys).
 - Brightness: `knulli-brightness` (or `/sys/class/backlight/backlight/brightness`).

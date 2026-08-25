@@ -170,6 +170,7 @@ mod tests {
             interface: "wlan0",
             max_quality: 70,
             helper: None,
+            settings_get: None,
         };
         assert_eq!(bars_from_proc(&w), None, "a missing file is no signal");
         // The arithmetic, without the file.
