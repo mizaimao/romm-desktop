@@ -115,16 +115,50 @@ cmd_toolchain() {
 # these two by name and everything underneath them is resolved on the device at
 # run time, which is what --allow-shlib-undefined below says.
 cmd_sysroot() {
-  mkdir -p "$KIT/sysroot"
+  local lib="$KIT/sysroot/usr/lib"
+  mkdir -p "$lib/pkgconfig"
   say "copying SDL2 from $FLIP"
-  scp_from "/usr/lib/libSDL2-2.0.so.0.3200.8" "$KIT/sysroot/libSDL2.so"
-  scp_from "/usr/lib/libSDL2_image-2.0.so.0.800.5" "$KIT/sysroot/libSDL2_image.so"
-  ls -la "$KIT/sysroot"
+  scp_from "/usr/lib/libSDL2-2.0.so.0.3200.8" "$lib/libSDL2.so"
+  scp_from "/usr/lib/libSDL2_image-2.0.so.0.800.5" "$lib/libSDL2_image.so"
+
+  # Two files describing what was just copied.
+  #
+  # `sdl2-sys` is built with `use-pkgconfig`, and that is deliberate: on this
+  # Mac SDL lives in /opt/homebrew/lib, which the linker does not search, and
+  # the failure without it is `library 'SDL2' not found` with nothing saying the
+  # library is installed one directory away. So rather than special-case the
+  # dependency for one target, pkg-config is given a sysroot it can answer
+  # from — which is what a cross build is supposed to look like anyway.
+  say "writing pkg-config descriptions for them"
+  cat > "$lib/pkgconfig/sdl2.pc" <<PC
+prefix=/usr
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: sdl2
+Description: SDL2, as copied off the device
+Version: 2.32.8
+Libs: -L\${libdir} -lSDL2
+Cflags: -I\${includedir}/SDL2 -D_REENTRANT
+PC
+  cat > "$lib/pkgconfig/SDL2_image.pc" <<PC
+prefix=/usr
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: SDL2_image
+Description: SDL2_image, as copied off the device
+Version: 2.8.5
+Requires: sdl2
+Libs: -L\${libdir} -lSDL2_image
+Cflags: -I\${includedir}/SDL2
+PC
+  ls -la "$lib"
 }
 
 cmd_build() {
   [ -x "$ZIG_DIR/zig" ] || { echo "run 'knulli.sh toolchain' first" >&2; exit 1; }
-  [ -f "$KIT/sysroot/libSDL2.so" ] || { echo "run 'knulli.sh sysroot' first" >&2; exit 1; }
+  [ -f "$KIT/sysroot/usr/lib/libSDL2.so" ] || { echo "run 'knulli.sh sysroot' first" >&2; exit 1; }
 
   say "building romm-sdl for $TARGET (glibc $GLIBC)"
   # `--allow-shlib-undefined`: libSDL2.so names two dozen libraries of its own
@@ -138,8 +172,19 @@ cmd_build() {
     home_args=(env "RUSTUP_HOME=$KIT/rustup")
   fi
 
+  # `sdl2-sys` asks pkg-config where SDL2 is, and pkg-config refuses to answer
+  # for a target that is not this machine. There is nothing to ask: the library
+  # is the one copied off the device and sitting in .toolchain/sysroot, so the
+  # build script is told to skip the question and just link the name.
+  # pkg-config, pointed at the sysroot rather than at this machine. Without
+  # ALLOW_CROSS it refuses to answer at all for a target that is not the host,
+  # and LIBDIR rather than PATH so it cannot fall back to the Mac's own .pc
+  # files and hand the linker /opt/homebrew.
   PATH="$ZIG_DIR:$KIT/cargo/bin:$PATH" \
-  RUSTFLAGS="-C link-arg=-L$KIT/sysroot -C link-arg=-Wl,--allow-shlib-undefined" \
+  PKG_CONFIG_ALLOW_CROSS=1 \
+  PKG_CONFIG_SYSROOT_DIR="$KIT/sysroot" \
+  PKG_CONFIG_LIBDIR="$KIT/sysroot/usr/lib/pkgconfig" \
+  RUSTFLAGS="-C link-arg=-Wl,--allow-shlib-undefined" \
     "${home_args[@]}" cargo zigbuild \
       --release \
       -p romm-sdl \
@@ -213,26 +258,36 @@ ssh_do() {
   "
 }
 
+# Braces only quote at the start of a word in Tcl.
+#
+# `root@host:{$1}` is not a quoted path — it is `root@host:` followed by a
+# literal open brace — so scp went looking for a file with braces in its name
+# and failed, while the `echo` below said it had worked. Hence no braces here,
+# and a check afterwards rather than a cheerful message.
 scp_to() {
   expect -c "
     set timeout 600
     log_user 0
-    spawn scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {$1} root@$FLIP:{$2}
+    spawn scp -O -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $1 root@$FLIP:$2
     expect \"assword:\" { send \"$FLIP_PASSWORD\r\" }
     expect eof
   " >/dev/null
-  echo "  sent $(basename "$1")"
+  echo "  sent $(basename "$1") ($(du -h "$1" | cut -f1))"
 }
 
 scp_from() {
   expect -c "
     set timeout 600
     log_user 0
-    spawn scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$FLIP:{$1} {$2}
+    spawn scp -O -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$FLIP:$1 $2
     expect \"assword:\" { send \"$FLIP_PASSWORD\r\" }
     expect eof
   " >/dev/null
-  echo "  got $(basename "$2")"
+  if [ ! -s "$2" ]; then
+    echo "failed to copy $1 off the device" >&2
+    exit 1
+  fi
+  echo "  got $(basename "$2") ($(du -h "$2" | cut -f1))"
 }
 
 case "${1:-}" in
