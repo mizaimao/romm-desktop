@@ -747,6 +747,10 @@ pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
     if table == "device" {
         return apply_device(key, value);
     }
+    // Only now, once it is settled that something is actually going to be
+    // written. Seeding before the hardware branch created a config file for a
+    // brightness change that never touches one — including while the tests ran.
+    seed()?;
     if table == "bindings_pad" {
         let Written::Text(v) = value else {
             anyhow::bail!("a binding is a button number or nothing");
@@ -772,8 +776,15 @@ pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
 /// method also clears whatever else was on the button, and two actions on one
 /// button is a pad where one of them silently stops working.
 pub fn set_pad_binding(action: &str, button: Option<u8>) -> anyhow::Result<()> {
+    seed()?;
     let mut cfg = Config::load_from(std::path::Path::new(FILE)).unwrap_or_default();
     cfg.bindings.set_pad(action, button);
+    // Say so rather than let the healing quietly move things around. The map
+    // cannot be stranded any more, but a rebind that silently lands somewhere
+    // else is its own confusion — better to refuse the press and explain.
+    if let Some(stranded) = cfg.bindings.stranded() {
+        anyhow::bail!("that would leave {stranded} on no button");
+    }
     let entries: Vec<(String, Option<String>)> = cfg
         .bindings
         .pad
@@ -781,6 +792,24 @@ pub fn set_pad_binding(action: &str, button: Option<u8>) -> anyhow::Result<()> {
         .map(|(k, v)| (k.clone(), Some(v.clone())))
         .collect();
     config::set_table_entries(FILE, "bindings.pad", &entries).context("saving the pad bindings")
+}
+
+/// Make sure this front end's file exists before writing one setting into it.
+///
+/// Copied from `config.toml` when there is one. Without this the first setting
+/// changed on the handheld created a file holding *only* that setting — and
+/// since [`load`] prefers this file whole, every other value silently reverted
+/// to its default. One press on the settings screen and the server address was
+/// gone.
+fn seed() -> anyhow::Result<()> {
+    if Config::exists(FILE) {
+        return Ok(());
+    }
+    if Config::exists("config.toml") {
+        std::fs::copy("config.toml", FILE)
+            .with_context(|| format!("seeding {FILE} from config.toml"))?;
+    }
+    Ok(())
 }
 
 /// The TOML table a field's prefix means.
@@ -1239,6 +1268,31 @@ mod tests {
                 "{absent:?} means nothing on a device with no windows"
             );
         }
+    }
+
+    /// Refusing a rebind that would strand an essential action.
+    ///
+    /// The healing in `binds` means the pad can no longer be locked out, but a
+    /// press that quietly puts the action somewhere else is its own confusion.
+    /// The screen says no instead.
+    #[test]
+    fn a_rebind_that_would_strand_confirm_is_refused() {
+        let mut b = romm_desktop::binds::Bindings::default();
+        // Confirm's button taken by a direction, and that direction's own
+        // button cleared — Frank's config, as it happened.
+        b.pad.insert("0".into(), "up".into());
+        b.pad.insert("12".into(), String::new());
+        assert_eq!(
+            b.stranded(),
+            Some("activate"),
+            "the arrangement that locked the pad out was not reported"
+        );
+
+        assert_eq!(
+            romm_desktop::binds::Bindings::default().stranded(),
+            None,
+            "the defaults strand nothing"
+        );
     }
 
     /// This front end never writes the desktop's file.

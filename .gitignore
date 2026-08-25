@@ -17,6 +17,7 @@
 /Saves/
 
 # Metadata cache — regenerate with `cargo run -- sync`.
+/romm-sdl.toml
 /cache.sqlite3
 /cache.sqlite3-*
 

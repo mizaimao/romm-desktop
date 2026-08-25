@@ -29,7 +29,11 @@ pub struct Action {
 
 macro_rules! action {
     ($id:literal, $label:literal, $fallback:expr) => {
-        Action { id: $id, label: $label, fallback: $fallback }
+        Action {
+            id: $id,
+            label: $label,
+            fallback: $fallback,
+        }
     };
 }
 
@@ -81,22 +85,70 @@ pub struct PadButton {
 }
 
 pub const PAD_BUTTONS: &[PadButton] = &[
-    PadButton { index: 0, name: "A / Cross (bottom face)" },
-    PadButton { index: 1, name: "B / Circle (right face)" },
-    PadButton { index: 2, name: "X / Square (left face)" },
-    PadButton { index: 3, name: "Y / Triangle (top face)" },
-    PadButton { index: 4, name: "L1 / LB" },
-    PadButton { index: 5, name: "R1 / RB" },
-    PadButton { index: 6, name: "L2 / LT" },
-    PadButton { index: 7, name: "R2 / RT" },
-    PadButton { index: 8, name: "Select / Share" },
-    PadButton { index: 9, name: "Start / Options" },
-    PadButton { index: 10, name: "L3 (left stick)" },
-    PadButton { index: 11, name: "R3 (right stick)" },
-    PadButton { index: 12, name: "D-pad up" },
-    PadButton { index: 13, name: "D-pad down" },
-    PadButton { index: 14, name: "D-pad left" },
-    PadButton { index: 15, name: "D-pad right" },
+    PadButton {
+        index: 0,
+        name: "A / Cross (bottom face)",
+    },
+    PadButton {
+        index: 1,
+        name: "B / Circle (right face)",
+    },
+    PadButton {
+        index: 2,
+        name: "X / Square (left face)",
+    },
+    PadButton {
+        index: 3,
+        name: "Y / Triangle (top face)",
+    },
+    PadButton {
+        index: 4,
+        name: "L1 / LB",
+    },
+    PadButton {
+        index: 5,
+        name: "R1 / RB",
+    },
+    PadButton {
+        index: 6,
+        name: "L2 / LT",
+    },
+    PadButton {
+        index: 7,
+        name: "R2 / RT",
+    },
+    PadButton {
+        index: 8,
+        name: "Select / Share",
+    },
+    PadButton {
+        index: 9,
+        name: "Start / Options",
+    },
+    PadButton {
+        index: 10,
+        name: "L3 (left stick)",
+    },
+    PadButton {
+        index: 11,
+        name: "R3 (right stick)",
+    },
+    PadButton {
+        index: 12,
+        name: "D-pad up",
+    },
+    PadButton {
+        index: 13,
+        name: "D-pad down",
+    },
+    PadButton {
+        index: 14,
+        name: "D-pad left",
+    },
+    PadButton {
+        index: 15,
+        name: "D-pad right",
+    },
 ];
 
 /// Defaults, chosen by position rather than label so they read correctly on
@@ -142,7 +194,7 @@ pub const PAD_FALLBACK: &[(u8, &str)] = &[
 /// a themes button on their pad. These five are different: with a direction
 /// missing you cannot reach half the grid, and with Confirm missing you cannot
 /// open anything at all.
-const ESSENTIAL: &[&str] = &["up", "down", "left", "right", "activate"];
+const ESSENTIAL: &[&str] = &["up", "down", "left", "right", "activate", "back"];
 
 /// What a person has chosen, layered over the tables above.
 ///
@@ -180,10 +232,16 @@ impl Bindings {
             .map(|(i, a)| (*i, Some((*a).to_owned())))
             .collect();
         for (index, action) in &self.pad {
-            let Ok(index) = index.parse::<u8>() else { continue };
+            let Ok(index) = index.parse::<u8>() else {
+                continue;
+            };
             map.insert(
                 index,
-                if action.is_empty() { None } else { Some(action.clone()) },
+                if action.is_empty() {
+                    None
+                } else {
+                    Some(action.clone())
+                },
             );
         }
 
@@ -191,19 +249,47 @@ impl Bindings {
         // that leaves an essential action with no button at all, the pad is
         // broken rather than customized — a direction that does nothing looks
         // exactly like an app ignoring the button, and there is nothing on
-        // screen to say otherwise. Put the default back.
-        for action in ESSENTIAL {
-            if map.values().any(|a| a.as_deref() == Some(*action)) {
-                continue;
-            }
-            let home = PAD_FALLBACK.iter().find(|(_, a)| a == action).map(|(i, _)| *i);
-            // Only if its own default button is free, so healing one binding
-            // never steals a button the user deliberately assigned to
-            // something else.
-            if let Some(home) = home
-                && map.get(&home).map(Option::is_none).unwrap_or(true)
-            {
-                map.insert(home, Some((*action).to_owned()));
+        // screen to say otherwise.
+        //
+        // Two passes, and the second one is the important half. Healing only
+        // into a *free* button is polite and insufficient: bind Up onto
+        // Confirm's button and clear Up's own, and Confirm has nowhere to go
+        // home to. The pad then has no way to open anything, no way to reach
+        // the settings screen that could fix it, and no way out. Being locked
+        // out of the app is strictly worse than losing a binding somebody
+        // chose, so the second pass takes the button back.
+        // Three passes, in order of politeness. Healing only into a *free* home
+        // button is polite and insufficient: put Up onto Confirm's button and
+        // clear Up's own, and Confirm has nowhere to go home to. The pad then
+        // cannot open anything, cannot reach the settings screen that would fix
+        // it, and cannot get out.
+        //
+        //   1. its own default button, if nothing is on it
+        //   2. any button nothing is on
+        //   3. its own default button, evicting whatever is there
+        //
+        // Three exists so that two can promise never to steal a button somebody
+        // chose. Being locked out is worse than an odd placement, and worse
+        // again than losing one binding — but it is the last resort, not the
+        // first.
+        for pass in 0..3 {
+            for action in ESSENTIAL {
+                if map.values().any(|a| a.as_deref() == Some(*action)) {
+                    continue;
+                }
+                let home = PAD_FALLBACK
+                    .iter()
+                    .find(|(_, a)| a == action)
+                    .map(|(i, _)| *i);
+                let free = |at: &u8| map.get(at).map(Option::is_none).unwrap_or(true);
+                let onto = match pass {
+                    0 => home.filter(free),
+                    1 => PAD_BUTTONS.iter().map(|b| b.index).find(|i| free(i)),
+                    _ => home,
+                };
+                if let Some(onto) = onto {
+                    map.insert(onto, Some((*action).to_owned()));
+                }
             }
         }
         map
@@ -230,6 +316,33 @@ impl Bindings {
         }
     }
 
+    /// An essential action the chosen bindings leave with no button, if any.
+    ///
+    /// Reported *before* `pad_map` heals it, so a settings screen can refuse
+    /// the rebind and say why rather than accepting it and quietly putting the
+    /// action somewhere else.
+    pub fn stranded(&self) -> Option<&'static str> {
+        let mut chosen: BTreeMap<u8, Option<&str>> =
+            PAD_FALLBACK.iter().map(|(i, a)| (*i, Some(*a))).collect();
+        for (index, action) in &self.pad {
+            let Ok(index) = index.parse::<u8>() else {
+                continue;
+            };
+            chosen.insert(
+                index,
+                if action.is_empty() {
+                    None
+                } else {
+                    Some(action)
+                },
+            );
+        }
+        ESSENTIAL
+            .iter()
+            .find(|action| !chosen.values().any(|a| a == &Some(**action)))
+            .copied()
+    }
+
     pub fn reset_pad(&mut self) {
         self.pad.clear();
     }
@@ -237,7 +350,11 @@ impl Bindings {
     /// Current key for an action, or `None` when unbound.
     pub fn key_for(&self, id: &str) -> Option<String> {
         if let Some(chosen) = self.keys.get(id) {
-            return if chosen.is_empty() { None } else { Some(chosen.clone()) };
+            return if chosen.is_empty() {
+                None
+            } else {
+                Some(chosen.clone())
+            };
         }
         ACTIONS
             .iter()
@@ -295,12 +412,16 @@ impl Bindings {
     ) {
         for (action, key) in keys {
             if ACTIONS.iter().any(|a| a.id == action) {
-                self.keys.entry(action).or_insert_with(|| key.unwrap_or_default());
+                self.keys
+                    .entry(action)
+                    .or_insert_with(|| key.unwrap_or_default());
             }
         }
         for (index, action) in pad {
             if index.parse::<u8>().is_ok() {
-                self.pad.entry(index).or_insert_with(|| action.unwrap_or_default());
+                self.pad
+                    .entry(index)
+                    .or_insert_with(|| action.unwrap_or_default());
             }
         }
     }
@@ -356,11 +477,23 @@ mod tests {
     #[test]
     fn the_default_map_sends_the_face_buttons_to_open_and_back() {
         let map = Bindings::default().pad_map();
-        assert_eq!(map[&0].as_deref(), Some("activate"), "bottom face button opens");
-        assert_eq!(map[&1].as_deref(), Some("back"), "right face button goes back");
+        assert_eq!(
+            map[&0].as_deref(),
+            Some("activate"),
+            "bottom face button opens"
+        );
+        assert_eq!(
+            map[&1].as_deref(),
+            Some("back"),
+            "right face button goes back"
+        );
         // Select cycles the pictures. It used to open settings — a second
         // window of text fields and tables that a pad cannot navigate.
-        assert_eq!(map[&8].as_deref(), Some("pictures"), "Select should change the pictures");
+        assert_eq!(
+            map[&8].as_deref(),
+            Some("pictures"),
+            "Select should change the pictures"
+        );
     }
 
     /// The failure this guards against is invisible at runtime: a front end
@@ -381,9 +514,17 @@ mod tests {
         let mut b = Bindings::default();
         b.set_pad("activate", Some(3));
         assert_eq!(b.pad_map()[&3].as_deref(), Some("activate"));
-        assert_eq!(b.pad_map()[&0], None, "the old button is cleared, not left dangling");
+        assert_eq!(
+            b.pad_map()[&0],
+            None,
+            "the old button is cleared, not left dangling"
+        );
         b.reset_pad();
-        assert_eq!(b.pad_map()[&0].as_deref(), Some("activate"), "reset restores the defaults");
+        assert_eq!(
+            b.pad_map()[&0].as_deref(),
+            Some("activate"),
+            "reset restores the defaults"
+        );
     }
 
     #[test]
@@ -406,7 +547,65 @@ mod tests {
         let mut b = Bindings::default();
         b.set_pad("up", None);
         b.set_pad("random", Some(12));
-        assert_eq!(b.pad_map()[&12].as_deref(), Some("random"), "the deliberate bind was stolen");
+        assert_eq!(
+            b.pad_map()[&12].as_deref(),
+            Some("random"),
+            "the deliberate bind was stolen"
+        );
+    }
+
+    /// The lock-out, as a test.
+    ///
+    /// Frank's own config after a few presses on the settings screen: Up moved
+    /// onto Confirm's button, and Up's own button cleared by the rebind. Confirm
+    /// then had no button, its home was taken, and healing only into a free home
+    /// gave up — leaving a pad that could not open anything, could not reach the
+    /// screen that would fix it, and could not leave.
+    #[test]
+    fn a_rebind_onto_confirms_button_cannot_strand_confirm() {
+        let mut b = Bindings::default();
+        b.pad.insert("0".into(), "up".into());
+        b.pad.insert("12".into(), String::new());
+
+        let map = b.pad_map();
+        assert!(
+            map.values().any(|a| a.as_deref() == Some("activate")),
+            "nothing opens anything: {map:?}"
+        );
+        assert!(
+            b.pad_for("up").is_some(),
+            "up went missing while confirm was rescued"
+        );
+    }
+
+    /// Whatever is in the file, every essential action comes out on a button.
+    ///
+    /// The blunt version of the rule, because the interesting cases are the ones
+    /// nobody thought of — a hand-edited file, a half-finished rebind, a config
+    /// copied from another device.
+    #[test]
+    fn no_arrangement_of_the_file_can_strand_an_essential() {
+        for (button, action) in [
+            ("0", "up"),
+            ("1", "up"),
+            ("12", "activate"),
+            ("13", "back"),
+            ("0", ""),
+        ] {
+            let mut b = Bindings::default();
+            b.pad.insert(button.into(), action.into());
+            // And clear everything else, which is the worst a file can be.
+            for i in 0..16u8 {
+                b.pad.entry(i.to_string()).or_insert_with(String::new);
+            }
+            let map = b.pad_map();
+            for essential in ESSENTIAL {
+                assert!(
+                    map.values().any(|a| a.as_deref() == Some(*essential)),
+                    "{essential:?} has no button with {button}={action:?}: {map:?}"
+                );
+            }
+        }
     }
 
     /// Non-essential actions stay unbound, because plenty of people never want
@@ -423,7 +622,11 @@ mod tests {
         let mut b = Bindings::default();
         b.set_key("random", Some("s"));
         assert_eq!(b.action_for("s"), Some("random"));
-        assert_eq!(b.key_for("sortMenu"), None, "the old owner kept the key too");
+        assert_eq!(
+            b.key_for("sortMenu"),
+            None,
+            "the old owner kept the key too"
+        );
     }
 
     /// A binding works whether or not Shift is held; a named key keeps its case.
@@ -482,8 +685,16 @@ mod tests {
             [("sortMenu".to_owned(), Some("z".to_owned()))],
             [("2".to_owned(), Some("random".to_owned()))],
         );
-        assert_eq!(b.key_for("sortMenu").as_deref(), Some("q"), "an old key overruled a new one");
-        assert_eq!(b.pad_map()[&2].as_deref(), Some("video"), "an old button overruled a new one");
+        assert_eq!(
+            b.key_for("sortMenu").as_deref(),
+            Some("q"),
+            "an old key overruled a new one"
+        );
+        assert_eq!(
+            b.pad_map()[&2].as_deref(),
+            Some("video"),
+            "an old button overruled a new one"
+        );
     }
 
     /// "Deliberately unbound" is what the old storage wrote over a button a
@@ -524,8 +735,16 @@ mod tests {
             [("teleport".to_owned(), Some("t".to_owned()))],
             [("banana".to_owned(), Some("back".to_owned()))],
         );
-        assert!(b.keys.is_empty(), "an unknown action was carried over: {:?}", b.keys);
-        assert!(b.pad.is_empty(), "a nonsense button was carried over: {:?}", b.pad);
+        assert!(
+            b.keys.is_empty(),
+            "an unknown action was carried over: {:?}",
+            b.keys
+        );
+        assert!(
+            b.pad.is_empty(),
+            "a nonsense button was carried over: {:?}",
+            b.pad
+        );
     }
 
     #[test]
