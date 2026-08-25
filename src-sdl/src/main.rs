@@ -1609,8 +1609,11 @@ mod size {
     /// Reserving less is what made the count bleed out of the tile and sit
     /// under the row below.
     pub const TILE_CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0 + 14.0 + 10.0;
-    pub const ROUND: f32 = 6.0;
-    pub const ROUND_SMALL: f32 = 4.0;
+    /// How round a corner is. Generous on purpose: at this element scale a
+    /// six-point radius on a hundred-point card is very nearly a square, and
+    /// the cards on the device's own theme are visibly rounded.
+    pub const ROUND: f32 = 11.0;
+    pub const ROUND_SMALL: f32 = 7.0;
     pub const PAD: Edges = Edges::all(GAP);
 }
 
@@ -1800,6 +1803,27 @@ impl Frame<'_> {
         });
         if let Some(texture) = texture {
             gfx.picture(texture, at, paint::DIM);
+        }
+    }
+
+    /// The battery symbol, made once per state and held.
+    ///
+    /// Keyed by charge and by whether it is plugged in, so a hundred and one
+    /// possible pictures — which sounds like a lot and is 22x12 pixels each,
+    /// made only as they are reached, and the charge moves in whole percent.
+    fn charge(&mut self, percent: u8, charging: bool, at: Rect) {
+        let key = -(3_000_000 + percent as i64 * 2 + charging as i64);
+        let at = self.px(at);
+        let gfx = self.gfx;
+        let texture = self.art.made(gfx, key, || {
+            let (w, h) = status::BATTERY_SIZE;
+            (w, h, status::battery_pixels(percent, charging))
+        });
+        if let Some(texture) = texture {
+            // Green when plugged in, and the usual grey otherwise — the one
+            // fact worth reading across the room.
+            let tint = if charging { paint::HERE } else { paint::DIM };
+            gfx.picture(texture, at, tint);
         }
     }
 
@@ -2963,6 +2987,9 @@ fn draw_chrome(
                     f.screen.scale.pt(w as f32)
                 }
                 status::Part::Wifi(_) => f.screen.scale.pt(status::WIFI_SIZE.0 as f32),
+                status::Part::Battery { .. } => {
+                    f.screen.scale.pt(status::BATTERY_SIZE.0 as f32)
+                }
             };
             w + size::GAP
         })
@@ -3101,6 +3128,13 @@ fn draw_chrome(
                 let (w, h) = (f.screen.scale.pt(iw as f32), f.screen.scale.pt(ih as f32));
                 let at = Rect::new(right - w, tabs.y + (tabs.h - h) / 2.0, w, h);
                 f.signal(*bars, at);
+                w
+            }
+            status::Part::Battery { percent, charging } => {
+                let (iw, ih) = status::BATTERY_SIZE;
+                let (w, h) = (f.screen.scale.pt(iw as f32), f.screen.scale.pt(ih as f32));
+                let at = Rect::new(right - w, tabs.y + (tabs.h - h) / 2.0, w, h);
+                f.charge(*percent, *charging, at);
                 w
             }
         };

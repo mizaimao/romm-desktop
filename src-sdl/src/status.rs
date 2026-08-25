@@ -78,11 +78,15 @@ impl Status {
         if let Some(bars) = self.bars {
             out.push(Part::Wifi(bars));
         }
-        if let Some(pct) = self.battery {
-            out.push(Part::Text(format!(
-                "{}{pct}%",
-                if self.charging { "\u{26a1}" } else { "" }
-            )));
+        if let Some(percent) = self.battery {
+            out.push(Part::Battery {
+                percent,
+                charging: self.charging,
+            });
+            // The number as well as the picture. A cell that is a quarter full
+            // and one that is a third look the same at this size, and "is it
+            // worth starting something" is a question about the number.
+            out.push(Part::Text(format!("{percent}%")));
         }
         out
     }
@@ -97,8 +101,10 @@ impl Status {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Part {
     Text(String),
-    /// 0 to 3 arcs lit.
+    /// 0 to 4 arcs lit.
     Wifi(u8),
+    /// Charge as a percentage, and whether something is plugged in.
+    Battery { percent: u8, charging: bool },
 }
 
 /// How wide and tall the signal picture is drawn, in pixels.
@@ -106,7 +112,59 @@ pub enum Part {
 /// Odd width so the arcs have a centre column to be symmetrical about. Small,
 /// because the whole corner is: on a 640-point panel the clock beside it is ten
 /// points tall.
-pub const WIFI_SIZE: (u32, u32) = (13, 10);
+pub const WIFI_SIZE: (u32, u32) = (18, 14);
+
+/// How wide and tall the battery is drawn, in pixels. Wider than tall, like a
+/// battery, with a nub on the end.
+pub const BATTERY_SIZE: (u32, u32) = (22, 12);
+
+/// The battery symbol: a case, a nub, and as much of it filled as there is
+/// charge. A bolt across it when something is plugged in.
+///
+/// Drawn rather than typed for the same reason the signal is: no font has a
+/// battery at a hundred levels of fill, and the fill is the whole point.
+pub fn battery_pixels(percent: u8, charging: bool) -> Vec<u8> {
+    let (w, h) = BATTERY_SIZE;
+    let (w, h) = (w as i32, h as i32);
+    // The case, leaving room for the nub on the right.
+    let case_w = w - 3;
+    let wall = 1;
+    let inner_w = case_w - wall * 2 - 2;
+    let filled = (inner_w as f32 * percent as f32 / 100.0).round() as i32;
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let mut a: f32 = 0.0;
+            // The case outline.
+            let on_case = x < case_w
+                && (x < wall || x >= case_w - wall || y < wall || y >= h - wall);
+            if on_case {
+                a = 1.0;
+            }
+            // The nub, a third of the height, centred.
+            if x >= case_w && x < w - 1 && y >= h / 3 && y < h - h / 3 {
+                a = 1.0;
+            }
+            // The charge itself, inset by one from the wall so it never
+            // touches it — a fill that meets the outline reads as a solid
+            // block rather than as a level.
+            let fill_x0 = wall + 1;
+            if x >= fill_x0 && x < fill_x0 + filled && y >= wall + 1 && y < h - wall - 1 {
+                a = 1.0;
+            }
+            out.extend_from_slice(&[255, 255, 255, (a.clamp(0.0, 1.0) * 255.0) as u8]);
+        }
+    }
+    // No bolt drawn into the cell.
+    //
+    // The first version carved one out of the fill with two cleared columns,
+    // which at twenty-two pixels wide cut the charge into pieces and read as a
+    // broken icon rather than as a battery charging. The colour carries it
+    // instead: green when plugged in, grey when not, which is the one fact
+    // worth reading across a room and needs no detail at all.
+    let _ = charging;
+    out
+}
 
 /// The signal symbol, as pixels: arcs spreading up from a dot.
 ///
@@ -168,11 +226,39 @@ fn ask_helper(helper: &str) -> Option<u8> {
     if !out.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<i64>()
-        .ok()
-        .map(|n| n.clamp(0, 100) as u8)
+    // The helper prints a report, not a number:
+    //
+    // ```text
+    // Battery Status Report:
+    //   Capacity:     84%
+    //   Status:       Discharging
+    // ```
+    //
+    // Parsing it for `i64` therefore failed, quietly fell back to the sysfs
+    // node, and showed 27% next to KNULLI's 84% — which is the whole reason
+    // this exists. The node is wrong on this board: it reads 27 while
+    // `voltage_now` is 3.908 V, which on a lithium cell is about half. The
+    // device knows better and keeps the real figure in `/tmp/battery.percent`,
+    // which is the first thing the helper looks at.
+    let text = String::from_utf8_lossy(&out.stdout);
+    percent_in(&text)
+}
+
+/// The first percentage in a line of text, whatever else is on it.
+fn percent_in(text: &str) -> Option<u8> {
+    for line in text.lines() {
+        let Some(cut) = line.find('%') else { continue };
+        let digits: String = line[..cut]
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(n) = digits.chars().rev().collect::<String>().parse::<i64>() {
+            return Some(n.clamp(0, 100) as u8);
+        }
+    }
+    // A helper that does print a bare number is fine too.
+    text.trim().parse::<i64>().ok().map(|n| n.clamp(0, 100) as u8)
 }
 
 /// Read a whole number out of a one-line sysfs file.
@@ -316,5 +402,31 @@ mod tests {
         assert_eq!(s.clock.as_deref(), Some("wrong"), "it read again too early");
         s.poll(first);
         assert_ne!(s.clock.as_deref(), Some("wrong"), "it never read again");
+    }
+}
+
+#[cfg(test)]
+mod battery {
+    use super::percent_in;
+
+    /// KNULLI's helper prints a report, and the number is in the middle of it.
+    ///
+    /// Read as a bare integer it fails, falls back to the sysfs node, and shows
+    /// 27% beside the device's own 84%. That node is wrong on this board — it
+    /// reads 27 at 3.908 V, which is about half a lithium cell — so falling
+    /// back to it silently was the worst of the three possible outcomes.
+    #[test]
+    fn the_percentage_is_found_in_the_report() {
+        let report = "Battery Status Report:\n  Capacity:     84%\n  Status:     Discharging\n";
+        assert_eq!(percent_in(report), Some(84));
+        assert_eq!(percent_in("7%"), Some(7));
+        assert_eq!(percent_in("100%"), Some(100));
+        // A helper that prints a bare number still works.
+        assert_eq!(percent_in("55\n"), Some(55));
+        // Nonsense is nothing, not a zero — zero is a flat battery.
+        assert_eq!(percent_in("no battery here"), None);
+        assert_eq!(percent_in(""), None);
+        // Out of range is clamped rather than believed.
+        assert_eq!(percent_in("Capacity: 140%"), Some(100));
     }
 }
