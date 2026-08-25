@@ -234,7 +234,13 @@ cmd_install() {
   ssh_do "pidof emulationstation >/dev/null && echo ES-UP || echo ES-DOWN" > "$KIT/es.state" 2>&1 || true
   if grep -q ES-DOWN "$KIT/es.state" 2>/dev/null; then
     say "  nothing on screen — starting EmulationStation"
-    ssh_do "cat /dev/zero > /dev/fb0 2>/dev/null; /etc/init.d/S31emulationstation start >/dev/null 2>&1; sleep 10; pidof emulationstation >/dev/null && echo ES-UP || echo ES-DOWN" > "$KIT/es.state" 2>&1 || true
+    # The wrapper directly, not the init script.
+    #
+    # `/etc/init.d/S31emulationstation start` consults a setting and hands off,
+    # and there are states where it returns having started nothing. The wrapper
+    # is what actually runs EmulationStation — it recreates its own restart flag
+    # and loops — and started detached it survives this ssh session ending.
+    ssh_do "cat /dev/zero > /dev/fb0 2>/dev/null; setsid nohup /usr/bin/emulationstation-standalone >/tmp/es.log 2>&1 </dev/null & sleep 18; pidof emulationstation >/dev/null && echo ES-UP || echo ES-DOWN" > "$KIT/es.state" 2>&1 || true
     if grep -q ES-DOWN "$KIT/es.state" 2>/dev/null; then
       echo "  WARNING: the device has no front end on screen" >&2
     else
