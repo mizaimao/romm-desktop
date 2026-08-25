@@ -244,7 +244,7 @@ mod webview_path_tests {
     }
 }
 
-/// The wall clock, as `HH:MM` in local time.
+/// The wall clock, as `H:MM AM` in local time.
 ///
 /// Through libc rather than a date crate: the only thing wanted is two numbers
 /// in the corner of a handheld, and `chrono` is a dependency and a build for
@@ -268,6 +268,46 @@ pub fn local_hhmm() -> Option<String> {
         if libc::localtime_r(&now, &mut tm).is_null() {
             return None;
         }
-        Some(format!("{:02}:{:02}", tm.tm_hour, tm.tm_min))
+        // Twelve-hour, because that is what the corner of a device reads like
+        // where this one lives. Midnight is 12 AM and noon is 12 PM — the two
+        // a naive `hour % 12` gets wrong, and the two nobody notices until the
+        // clock says 0:20.
+        let suffix = if tm.tm_hour < 12 { "AM" } else { "PM" };
+        let hour = match tm.tm_hour % 12 {
+            0 => 12,
+            h => h,
+        };
+        Some(format!("{hour}:{:02} {suffix}", tm.tm_min))
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    /// The twelve-hour conversion, without waiting for the clock to come round.
+    ///
+    /// Midnight and noon are the two `hour % 12` gets wrong: both land on 0,
+    /// and a corner that reads `0:20 AM` is the sort of thing that only shows
+    /// up once a day.
+    fn twelve(hour: i32) -> String {
+        let suffix = if hour < 12 { "AM" } else { "PM" };
+        let h = match hour % 12 {
+            0 => 12,
+            h => h,
+        };
+        format!("{h}:00 {suffix}")
+    }
+
+    #[test]
+    fn midnight_and_noon_are_twelve_not_zero() {
+        assert_eq!(twelve(0), "12:00 AM", "midnight read as zero");
+        assert_eq!(twelve(12), "12:00 PM", "noon read as zero");
+    }
+
+    #[test]
+    fn the_rest_of_the_day_reads_normally() {
+        assert_eq!(twelve(1), "1:00 AM");
+        assert_eq!(twelve(11), "11:00 AM");
+        assert_eq!(twelve(13), "1:00 PM");
+        assert_eq!(twelve(23), "11:00 PM");
     }
 }

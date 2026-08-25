@@ -121,6 +121,8 @@ pub enum View {
     Options,
     /// Settings: the Wi-Fi list.
     Wifi,
+    /// Library: one folder of ports or tools.
+    Scripts,
 }
 
 /// Where a tab starts when you arrive at it.
@@ -238,6 +240,12 @@ pub struct Console {
     pub slug: String,
     pub name: String,
     pub games: i64,
+    /// A folder of scripts rather than a RomM platform.
+    ///
+    /// Ports and Tools sit in the console list because that is where KNULLI
+    /// puts them, but opening one lists shell scripts rather than games and
+    /// launching one runs `emulatorlauncher` rather than RetroArch.
+    pub scripts: bool,
 }
 
 pub struct Library {
@@ -281,6 +289,11 @@ pub struct Library {
     pub option_at: usize,
     /// What the search box holds. Empty means everything.
     pub query: String,
+    /// The open Ports or Tools folder.
+    pub ports: Vec<crate::ports::Port>,
+    pub port_at: usize,
+    /// Which folder those came from, for launching and for the heading.
+    pub port_system: String,
     /// The Wi-Fi screen, when it is open.
     pub wifi: crate::wifi::State,
     pub wifi_at: usize,
@@ -324,7 +337,12 @@ impl Library {
             .platforms()
             .context("reading the consoles")?
             .into_iter()
-            .map(|p| Console { slug: p.fs_slug, name: p.display_name, games: p.rom_count })
+            .map(|p| Console {
+                slug: p.fs_slug,
+                name: p.display_name,
+                games: p.rom_count,
+                scripts: false,
+            })
             .collect();
         let mut lib = Library {
             cache,
@@ -349,6 +367,9 @@ impl Library {
             pane_at: 0,
             option_at: 0,
             query: String::new(),
+            ports: Vec::new(),
+            port_at: 0,
+            port_system: String::new(),
             wifi: crate::wifi::State::Idle,
             wifi_at: 0,
             wifi_job: None,
@@ -419,6 +440,24 @@ impl Library {
             sessions: totals.1,
             games_played: totals.2,
         };
+
+        // Ports and Tools, where KNULLI puts them: in among the consoles. Not
+        // scanned as systems — `esde::scan` skips both folders on purpose,
+        // because a folder of shell scripts read as a platform invents games —
+        // so they are added here as their own kind, and only when they hold
+        // something. `tools` is empty on this device and shows nothing.
+        for (folder, label) in crate::ports::FOLDERS {
+            let found = crate::ports::scan(&lib.roms_dir, folder);
+            if found.is_empty() {
+                continue;
+            }
+            lib.consoles.push(Console {
+                slug: folder.to_owned(),
+                name: label.to_owned(),
+                games: found.len() as i64,
+                scripts: true,
+            });
+        }
 
         // The console list is a list before it is anything else, and the
         // cursor has to be able to move on it. Without this the move table
@@ -584,6 +623,17 @@ impl Library {
             .collect();
     }
 
+    /// Open a Ports or Tools folder.
+    pub fn open_scripts(&mut self) {
+        let Some(slug) = self.console().map(|c| c.slug.clone()) else { return };
+        self.ports = crate::ports::scan(&self.roms_dir, &slug);
+        self.port_system = slug;
+        self.view = View::Scripts;
+        self.port_at = 0;
+        self.scrolled = 0.0;
+        self.refresh_rows();
+    }
+
     /// The Collections tab's first screen.
     ///
     /// Yours first and flat — you made them, they are few, and putting them
@@ -683,6 +733,7 @@ impl Library {
             ("mine", View::Roms) => View::Collections,
             ("mine", View::Collections) => View::Groups,
             (_, View::Roms) => View::Platforms,
+            (_, View::Scripts) => View::Platforms,
             (id, _) => root_view(id),
         };
         self.scrolled = 0.0;
@@ -819,6 +870,7 @@ impl Library {
             View::Panes => self.panes.len(),
             View::Options => self.panes.get(self.pane_at).map_or(0, |p| p.entries.len()),
             View::Wifi => self.wifi.names().len(),
+            View::Scripts => self.ports.len(),
             View::Roms => self.arranged.len(),
         }
     }
@@ -836,6 +888,7 @@ impl Library {
             View::Panes => &mut self.pane_at,
             View::Options => &mut self.option_at,
             View::Wifi => &mut self.wifi_at,
+            View::Scripts => &mut self.port_at,
             View::Roms => &mut self.at,
         };
         if index >= count || *cursor == index {
@@ -855,6 +908,7 @@ impl Library {
             View::Panes => &mut self.pane_at,
             View::Options => &mut self.option_at,
             View::Wifi => &mut self.wifi_at,
+            View::Scripts => &mut self.port_at,
             View::Roms => &mut self.at,
         };
         let moved = |table: &[Option<usize>], at: usize| table.get(at).copied().flatten();
@@ -896,7 +950,22 @@ impl Library {
         match action {
             "activate" => match self.view {
                 View::Platforms => {
+                    if self.console().is_some_and(|c| c.scripts) {
+                        self.open_scripts();
+                        return Ok(true);
+                    }
                     self.open_console()?;
+                    Ok(true)
+                }
+                View::Scripts => {
+                    let Some(port) = self.ports.get(self.port_at) else {
+                        return Ok(false);
+                    };
+                    match crate::ports::launch(&self.port_system, port) {
+                        Ok(status) if status.success() => {}
+                        Ok(status) => eprintln!("{} exited {status}", port.name),
+                        Err(e) => eprintln!("could not launch {}: {e:#}", port.name),
+                    }
                     Ok(true)
                 }
                 View::Groups => {
@@ -1025,7 +1094,7 @@ mod tests {
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),
             media_root: PathBuf::new(),
             roms_dir: PathBuf::new(),
-            consoles: vec![Console { slug: "snes".into(), name: "SNES".into(), games: 3 }],
+            consoles: vec![Console { slug: "snes".into(), name: "SNES".into(), games: 3, scripts: false }],
             console_at: 0,
             view: View::Roms,
             stems: rows.iter().map(|r| r.name.clone()).collect(),
@@ -1044,6 +1113,9 @@ mod tests {
             pane_at: 0,
             option_at: 0,
             query: String::new(),
+            ports: Vec::new(),
+            port_at: 0,
+            port_system: String::new(),
             wifi: crate::wifi::State::Idle,
             wifi_at: 0,
             wifi_job: None,
@@ -1172,9 +1244,9 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.view = View::Platforms;
         lib.consoles = vec![
-            Console { slug: "a".into(), name: "A".into(), games: 1 },
-            Console { slug: "b".into(), name: "B".into(), games: 2 },
-            Console { slug: "c".into(), name: "C".into(), games: 3 },
+            Console { slug: "a".into(), name: "A".into(), games: 1, scripts: false },
+            Console { slug: "b".into(), name: "B".into(), games: 2, scripts: false },
+            Console { slug: "c".into(), name: "C".into(), games: 3, scripts: false },
         ];
         lib.relayout(1);
         assert!(lib.act("down").unwrap(), "down did nothing on the console list");

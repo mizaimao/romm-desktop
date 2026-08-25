@@ -79,7 +79,11 @@ impl Covers {
         let (look, set) = (self.console_look.clone(), self.console_set.clone());
         // A stable negative id per slug: the cache is keyed by rom id, and no
         // rom has one.
-        let key = -(slug.bytes().fold(1i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64)).abs() | 1);
+        let key = -(slug
+            .bytes()
+            .fold(1i64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as i64))
+            .abs()
+            | 1);
         if let Some(State::None) = self.known.get(&key) {
             return None;
         }
@@ -111,6 +115,32 @@ impl Covers {
     ///
     /// `stem` is the ROM's filename without its extension, which is what the
     /// artwork is named after — see `media::local_art`.
+    /// A picture named by path rather than found by convention.
+    ///
+    /// For ports, whose artwork the gamelist points straight at — there is no
+    /// platform and no ROM stem to derive it from. `key` is the cache slot;
+    /// callers use negative numbers so these cannot collide with a ROM id.
+    pub fn by_path(&mut self, gfx: &Gfx, key: i64, path: &std::path::Path) -> Option<&Texture> {
+        match self.known.get(&key) {
+            Some(State::None) => return None,
+            Some(State::Ready) => return self.held.get(&key),
+            None => {}
+        }
+        match self.load(gfx, path) {
+            Some(texture) => {
+                self.make_room();
+                self.held.insert(key, texture);
+                self.known.insert(key, State::Ready);
+                self.order.push(key);
+                self.held.get(&key)
+            }
+            None => {
+                self.known.insert(key, State::None);
+                None
+            }
+        }
+    }
+
     pub fn get(&mut self, gfx: &Gfx, id: i64, platform: &str, stem: &str) -> Option<&Texture> {
         match self.known.get(&id) {
             Some(State::None) => return None,
@@ -155,7 +185,9 @@ impl Covers {
     /// and the uploader wants one layout.
     fn load(&self, gfx: &Gfx, path: &Path) -> Option<Texture> {
         let surface = sdl2::surface::Surface::from_file(path).ok()?;
-        let rgba = surface.convert_format(sdl2::pixels::PixelFormatEnum::ABGR8888).ok()?;
+        let rgba = surface
+            .convert_format(sdl2::pixels::PixelFormatEnum::ABGR8888)
+            .ok()?;
         let (w, h) = (rgba.width(), rgba.height());
         let pitch = rgba.pitch() as usize;
         let bytes = rgba.without_lock()?;
@@ -172,7 +204,9 @@ impl Covers {
     /// Drop the oldest until there is room for one more.
     fn make_room(&mut self) {
         while self.held.len() >= LIMIT {
-            let Some(oldest) = self.order.first().copied() else { break };
+            let Some(oldest) = self.order.first().copied() else {
+                break;
+            };
             self.order.remove(0);
             self.held.remove(&oldest);
             // Forgotten rather than marked absent: it was there a moment ago

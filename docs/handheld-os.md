@@ -304,6 +304,23 @@ The password is connman's to keep. It is passed to `enable` and never stored by
 us — a copy in our own config would be a plaintext password on an exfat card
 with no permissions.
 
+## Ports and Tools (read off the device 2026-08-25)
+
+Neither is a console and neither is a RomM platform, which is why `esde::scan`
+skips both — a folder of shell scripts read as a system invents games.
+
+| | |
+|---|---|
+| Where | `/userdata/roms/ports` and `/userdata/roms/tools` |
+| What launches | **`.sh` and `.squashfs`**, per `es_systems.cfg`. Everything else in the folder is one of those scripts' own data. |
+| Metadata | `gamelist.xml` with `<path>` (relative, `./` prefixed), `<name>`, `<image>` |
+| Launch | `emulatorlauncher -system <system> -rom <path>` — its argparse marks exactly those two `required=True`, the rest optional. |
+
+`/usr/bin/knulli-wifi`'s sibling trap applies here too: `ports` currently holds
+five scripts *and* six data directories, so listing directories would offer six
+things that cannot be launched. `tools` is empty, which is why an empty folder
+shows no row at all.
+
 ## Front-end platform module — what to wire
 - Input: `/dev/input/event5` (pad), `event1` (lid), `event0` (volume keys).
 - Brightness: `knulli-brightness` (or `/sys/class/backlight/backlight/brightness`).

@@ -33,6 +33,7 @@ mod glass;
 mod input;
 mod keyboard;
 mod library;
+mod ports;
 mod settings;
 mod status;
 mod text;
@@ -580,7 +581,10 @@ fn start_at(lib: &mut library::Library) {
             .or_else(|| lib.consoles.iter().position(|c| c.slug == open))
             .unwrap_or(0);
         lib.console_at = at.min(lib.consoles.len().saturating_sub(1));
-        lib.open_console()
+        // Through `activate`, not `open_console`: Ports and Tools are consoles
+        // that open a list of scripts instead, and a preview that takes a
+        // different path from the app is a preview of something else.
+        lib.act("activate").map(|_| ())
     };
     if let Err(e) = err {
         eprintln!("ROMM_SDL_OPEN={open}: {e:#}");
@@ -920,6 +924,21 @@ impl Frame<'_> {
 
     /// A game's cover, in a box. Says whether there was one, so the caller can
     /// put a pane of glass there instead.
+    /// A picture named by path — a port's artwork, which the gamelist points
+    /// straight at rather than filing under a platform and a stem.
+    fn picture(&mut self, key: i64, path: &std::path::Path, at: Rect, round: f32) -> bool {
+        let at = self.px(at);
+        let round = round * self.screen.scale.factor();
+        let gfx = self.gfx;
+        match self.art.by_path(gfx, key, path) {
+            Some(art) => {
+                gfx.rounded(round, || gfx.picture(art, at, Rgba::WHITE));
+                true
+            }
+            None => false,
+        }
+    }
+
     fn cover(&mut self, id: i64, platform: &str, stem: &str, at: Rect, round: f32) -> bool {
         let at = self.px(at);
         let round = round * self.screen.scale.factor();
@@ -1012,6 +1031,46 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         return;
     }
 
+    if lib.view == library::View::Scripts {
+        // A port is a name and, if it was scraped, a picture. No size, no
+        // console, no star — none of those mean anything for a shell script.
+        let [list, aside] = <[Rect; 2]>::try_from(
+            area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]),
+        )
+        .unwrap();
+        let rows: Vec<_> = lib
+            .ports
+            .iter()
+            .map(|p| (p.name.clone(), String::new()))
+            .collect();
+        draw_picker(f, list, &rows, lib.port_at, rows.len());
+
+        f.pane(aside, paint::COLUMN, size::ROUND);
+        if let Some(port) = lib.ports.get(lib.port_at) {
+            let inner = aside.inset(size::PAD);
+            let (art, below) = inner.split_top(inner.w * 0.62);
+            // Negative keys: the cover cache is keyed by ROM id and a port has
+            // none, so these take slots no ROM can reach.
+            let key = -(lib.port_at as i64 + 1);
+            let drawn = port
+                .image
+                .as_deref()
+                .is_some_and(|p| f.picture(key, p, art, size::ROUND_SMALL));
+            if !drawn {
+                f.pane(art, paint::CARD, size::ROUND_SMALL);
+            }
+            let title = f.wrapped(&port.name, size::TITLE, below.w, 3);
+            f.label(
+                &title,
+                below.inset(Edges {
+                    top: 8.0,
+                    ..Edges::default()
+                }),
+                paint::TEXT,
+            );
+        }
+        return;
+    }
     if lib.view != library::View::Roms {
         draw_consoles(f, lib, area, true);
         return;
@@ -1635,6 +1694,10 @@ fn draw_chrome(
     let inner = header.inset(Edges::xy(size::GAP, 0.0));
     let here = match (lib.section().id, lib.view) {
         ("library", library::View::Platforms) => format!("{} consoles", lib.consoles.len()),
+        ("library", library::View::Scripts) => match lib.console() {
+            Some(c) => format!("{} — {}", c.name, lib.ports.len()),
+            None => String::new(),
+        },
         ("library", library::View::Roms) => match lib.console() {
             // The search box is said in the heading rather than drawn as a
             // field: it is on or off, and a list that is quietly narrowed is a
