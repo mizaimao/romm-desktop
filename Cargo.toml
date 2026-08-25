@@ -28,12 +28,35 @@ members = ["src-tauri", "src-sdl"]
 # Do not reintroduce a literal version in either member manifest or in
 # tauri.conf.json — that is the drift this replaced.
 [workspace.package]
-version = "0.2.850"
+version = "0.2.857"
 
 # `md-5` is imported as `md5`, which the unused-dependency check reads as a
 # name that appears nowhere. It is used, in download.rs and savehash.rs.
 [package.metadata.cargo-machete]
 ignored = ["md-5"]
+
+# The five device schemes — one per target, selected at build time.
+#
+# `target_os` cannot express these. KNULLI *is* `target_os = "linux"` and is not
+# desktop Linux; Android falls through the same `not(any(macos, windows))`
+# branch that desktop Linux uses. Both would compile today and behave wrong —
+# RetroArch looked for at the wrong paths, config written where desktop Linux
+# writes it — and build-and-be-wrong is worse than build-and-fail.
+#
+# No scheme is a default feature: with none set, `platform::current()` falls
+# back to the host's `target_os`, so an ordinary `cargo build` on this Mac is
+# byte-for-byte what it was before the module existed. The two schemes that
+# `target_os` cannot reach are opt-in:
+#
+#     cargo check --features knulli
+#     cargo check --features android
+[features]
+default = []
+macos = []
+windows = []
+linux = []
+knulli = []
+android = []
 
 [dependencies]
 anyhow = "1.0.104"

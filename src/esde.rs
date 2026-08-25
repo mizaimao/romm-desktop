@@ -190,6 +190,14 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> 
     for (system, slug) in SYSTEM_ALIASES {
         sys_to_slug.insert(system, slug);
     }
+    // The device's own spellings win over both. Batocera names its directories
+    // itself, and the shipped core map was built from an ES-DE *Android*
+    // export, so on KNULLI `fbneo` is the whole arcade library under a name
+    // nothing else here knows.
+    for (system, slug) in crate::platform::current().system_aliases() {
+        sys_to_slug.insert(system, slug);
+    }
+    let ignored = crate::platform::current().ignored_systems();
 
     let mut out = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -204,7 +212,11 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> 
         let Some(system) = dir.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if NOT_SYSTEMS.contains(&system) || system.starts_with('.') {
+        // `NOT_SYSTEMS` is what is never a system anywhere; `ignored` is what
+        // this device has and does not want. Both are silent — unlike an
+        // unknown directory, which is reported so a missing alias can be found.
+        if NOT_SYSTEMS.contains(&system) || ignored.contains(&system) || system.starts_with('.')
+        {
             continue;
         }
         let Some(slug) = sys_to_slug.get(system) else {
@@ -304,6 +316,42 @@ mod tests {
             }"#,
         )
         .unwrap()
+    }
+
+    /// The KNULLI scheme, end to end through a real scan.
+    ///
+    /// Measured on the Flip on 2026-08-24: `fbneo` holds 2,504 zips and is the
+    /// arcade library; `wswan`, `wswanc` and `gamecube` are empty and not
+    /// wanted. Without the scheme's alias the whole arcade set scans to
+    /// nothing, and `esde::scan` reports that as a skipped directory rather
+    /// than as an error — which is exactly why it went unnoticed.
+    #[cfg(feature = "knulli")]
+    #[test]
+    fn on_knulli_fbneo_is_the_arcade_library_and_the_unwanted_are_silent() {
+        let root = scratch("knulli-scan");
+        let roms = root.join("roms");
+        touch(&roms.join("fbneo/sf2.zip"), b"rom");
+        touch(&roms.join("wswan/gunpey.ws"), b"rom");
+        touch(&roms.join("gamecube/melee.iso"), b"rom");
+        touch(&roms.join("nowhere/mystery.bin"), b"rom");
+
+        let layout = Layout::new(&root, Some(&roms));
+        let (games, skipped) = scan(&layout, &map()).unwrap();
+
+        assert_eq!(
+            games.iter().map(|g| g.platform_slug.as_str()).collect::<Vec<_>>(),
+            ["arcade"],
+            "fbneo is the arcade library and nothing else should have scanned"
+        );
+        assert!(
+            !skipped.iter().any(|s| s == "wswan" || s == "gamecube"),
+            "hidden means silent, not reported: {skipped:?}"
+        );
+        assert!(
+            skipped.iter().any(|s| s == "nowhere"),
+            "a genuinely unknown directory must still be reported, or the next \
+             missing alias is invisible too: {skipped:?}"
+        );
     }
 
     /// ES-DE keeps its ROMs directory separate and configurable, so it is not

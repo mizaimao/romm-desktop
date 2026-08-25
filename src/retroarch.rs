@@ -80,39 +80,15 @@ pub struct RetroArch {
     pub portable: bool,
 }
 
-/// Roots checked when config.toml does not name one.
-/// Where RetroArch usually lives, per OS, in probe order.
-///
-/// The shape of an install differs enough between platforms that one list will
-/// not do: macOS ships an `.app` bundle, Windows a directory with
-/// `retroarch.exe`, and Linux normally installs to a system prefix with cores
-/// under `~/.config` or `/usr/lib`.
-const CANDIDATE_ROOTS: &[&str] = &[
-    #[cfg(target_os = "macos")]
-    "/Applications",
-    #[cfg(target_os = "macos")]
-    "~/Applications",
-    #[cfg(target_os = "macos")]
-    "~/Data/Games/Emulators/RetroArch",
-    #[cfg(target_os = "windows")]
-    "C:/RetroArch-Win64",
-    #[cfg(target_os = "windows")]
-    "C:/Program Files/RetroArch",
-    #[cfg(target_os = "windows")]
-    "C:/Program Files (x86)/RetroArch",
-    #[cfg(target_os = "windows")]
-    "~/RetroArch",
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    "/usr",
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    "/usr/local",
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    "/app",
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    "~/.local",
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    "~/RetroArch",
-];
+// Where RetroArch usually lives, in probe order, now lives in
+// `platform::current().retroarch_roots()`.
+//
+// The shape of an install differs enough between targets that one list will not
+// do: macOS ships an `.app` bundle, Windows a directory with `retroarch.exe`,
+// desktop Linux a system prefix. That much `target_os` could express. What it
+// could not is KNULLI, which *is* `target_os = "linux"` and has exactly one
+// root, or Android, where RetroArch is a separate app reached by Intent rather
+// than a binary on a path at all.
 
 /// Executable name for the host, and where it sits under the install root.
 ///
@@ -384,7 +360,7 @@ impl RetroArch {
         let mut tried: Vec<PathBuf> = Vec::new();
 
         let candidates: Vec<PathBuf> = if paths.is_empty() {
-            CANDIDATE_ROOTS.iter().map(|c| expand_tilde(c)).collect()
+            crate::platform::current().retroarch_roots().iter().map(|c| expand_tilde(c)).collect()
         } else {
             paths.iter().map(|p| expand_tilde(p)).collect()
         };
@@ -425,16 +401,12 @@ impl RetroArch {
     /// official download is; App Store builds keep cores inside the bundle.
     /// Verified against this machine's 1.20.0 install.
     pub fn cores_dir(&self) -> PathBuf {
-        first_existing(
-            &[self.data_dir().join("cores")],
-            // Distro packages drop cores in a system library directory instead
-            // of the user's data folder; Flatpak uses its own sandbox path.
-            &[
-                PathBuf::from("/usr/lib/x86_64-linux-gnu/libretro"),
-                PathBuf::from("/usr/lib/libretro"),
-                PathBuf::from("/usr/local/lib/libretro"),
-            ],
-        )
+        // Distro packages drop cores in a system library directory instead of
+        // the user's data folder, and which directories those are is a
+        // property of the device — KNULLI has exactly one, holding 99 cores.
+        let extra: Vec<PathBuf> =
+            crate::platform::current().core_dirs().iter().map(PathBuf::from).collect();
+        first_existing(&[self.data_dir().join("cores")], &extra)
     }
 
     /// RetroArch's user-data root: where `retroarch.cfg`, `cores/`, `system/`
@@ -449,23 +421,7 @@ impl RetroArch {
         if self.portable {
             return self.root.clone();
         }
-        #[cfg(target_os = "macos")]
-        {
-            crate::util::expand_tilde("~/Library/Application Support/RetroArch")
-        }
-        #[cfg(target_os = "windows")]
-        {
-            std::env::var_os("APPDATA")
-                .map(|a| PathBuf::from(a).join("RetroArch"))
-                .unwrap_or_else(|| self.root.clone())
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| crate::util::expand_tilde("~/.config"))
-                .join("retroarch")
-        }
+        crate::platform::current().retroarch_data_dir(&self.root)
     }
 
     /// Where per-core settings live: `<config>/<Core>/<Core>.opt`.
@@ -1151,11 +1107,19 @@ pub fn render(cmd: &Command) -> String {
 mod tests {
     use super::*;
 
+    /// A RetroArch whose files are all inside `root`.
+    ///
+    /// `portable` because otherwise `data_dir()` answers with the *host's*
+    /// real location — on this Mac that is `~/Library/Application Support/
+    /// RetroArch`, so tests that write a core override were writing into the
+    /// developer's own RetroArch install. Portable keeps every path under the
+    /// scratch directory, which also makes the fixture answer the same way
+    /// under every device scheme rather than only under the host's.
     fn fake(root: &Path) -> RetroArch {
         RetroArch {
             root: root.to_path_buf(),
             binary: root.join("retroarch"),
-            portable: false,
+            portable: true,
             system_override: None,
         }
     }

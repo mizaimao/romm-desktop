@@ -33,6 +33,7 @@ pub mod layout;
 pub mod lightgun;
 pub mod macdisplay;
 pub mod media;
+pub mod platform;
 pub mod platformfacts;
 pub mod padprofile;
 pub mod platformicon;

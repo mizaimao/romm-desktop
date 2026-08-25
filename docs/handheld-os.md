@@ -219,12 +219,11 @@ they exist; only drop to sysfs for what they don't cover.
 - SSH hygiene note: kill stray local ssh sessions between runs; a runaway remote
   command (e.g. `grep -r /sys`) will wedge new logins.
 
-## Still to probe (device auto-suspended off WiFi mid-session)
-For the frontend's platform module — grab when the device is awake again:
-- `/proc/bus/input/devices` — exact event nodes for buttons/joypad.
-- `/sys/class/backlight/*` path + `max_brightness`.
-- `/sys/class/power_supply/*` node names + capacity/status mapping.
-- Hall/lid switch device + event.
+## Still to probe — closed 2026-08-24
+The four hardware items below were answered on-device; see **Hardware layer**.
+The two remaining Step 0 items (`ls /userdata/roms`, RetroArch paths) were
+measured on the device the same day — see *Step 0, closed on the device* in
+`port-plan.md`. Nothing is outstanding.
 
 ## Decision update
 **Base = KNULLI (Batocera 42, BSP 5.10), verified working.** Trade vs the old
@@ -286,3 +285,111 @@ though the platform node `/sys/devices/platform/hall-mh248` also exists.
 `ssh host "cmd"` **must use `-tt`** (force a PTY) or KNULLI's login flow stalls;
 and don't fire rapid retries. Key auth needs `StrictModes no` (/userdata is
 world-writable) — optional; password is fine.
+
+**Do not set up keys — drive the password with `expect`.** This works first
+time and is the whole loop:
+
+    #!/usr/bin/expect -f
+    set timeout 45
+    log_user 0
+    spawn /usr/bin/ssh -tt -o StrictHostKeyChecking=accept-new \
+      -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password \
+      -o PubkeyAuthentication=no root@10.10.10.187 [lindex $argv 0]
+    expect -re {[Pp]assword:} { send "linux\r" }
+    log_user 1
+    expect eof
+
+The device is **`10.10.10.187`**, and it answers to **`knulli.local`** over
+mDNS, so `dscacheutil -q host -a name knulli.local` finds it again if the lease
+moves. Strip the trailing `Connection to … closed.` line from any output you
+parse.
+
+---
+
+# Emulator/core choice — the principle (2026-08-24)
+
+**Align with romm-desktop's emulators where the device can actually run them.
+Always check what the CPU and GPU can do before picking; if alignment costs
+emulation speed, speed wins.** Alignment is a preference, not a rule — it is
+only worth having when the game still runs full speed on the handheld.
+
+**Exception: Neo Geo stays on `geolith`.** The roms here are geolith-specific,
+so the core is fixed by the library, not by performance. Do not "fix" it to
+FBNeo.
+
+For this device that means checking picks against the Flip's real hardware:
+4× A55 @ 1.8 GHz, Mali-G52 2EE, 1 GB RAM, 640×480. A desktop-grade core that
+assumes a modern x86 CPU (SwanStation, full Flycast) will run, badly.
+
+## The trap: KNULLI's configgen does not validate core names
+
+`/userdata/system/knulli.conf` holds `<system>.core=` / `<system>.emulator=`.
+**configgen takes those strings verbatim — no validation, no fallback.** A name
+that doesn't exist is not an error at config time; it becomes a failed launch.
+And **romm-desktop's core names are not KNULLI's** — this is what broke the
+first hand-written block:
+
+- `genesis_plus_gx` (romm-desktop) vs **`genesisplusgx`** (KNULLI, the actual
+  `.so` name).
+- `mupen64plus_next` is a *libretro core*; the N64 default emulator here is
+  **standalone `mupen64plus`**, which takes a *video plugin* — `rice`,
+  `glide64mk2`, or `gliden64`. Mixing the two namespaces produces a config that
+  cannot launch.
+
+Check a name two ways before writing it:
+- `ls /usr/lib/libretro/<core>_libretro.so` — the core exists.
+- `<name>` appears in `/usr/share/emulationstation/es_systems.cfg` for that system.
+
+Then verify what the config actually resolves to, without launching a game:
+
+```sh
+python3 -c "import sys,glob;[sys.path.append(p) for p in glob.glob('/usr/lib/python3*/site-packages')];
+from configgen.Emulator import Emulator;
+print(Emulator(name='n64', rom='/tmp/x').config)"
+```
+
+## KNULLI already tuned this device — read its defaults first
+
+Two files, the second overriding the first **for this hardware**:
+- `/usr/share/knulli/configgen/configgen-defaults.yml` — generic defaults.
+- `/usr/share/knulli/configgen/configgen-defaults-arch.yml` — **per-device**.
+
+The arch file is where the low-power picks live: `dreamcast: flycastvl` (the
+low-spec Flycast, not full `flycast`) and `n64: mupen64plus` + `rice`. Overriding
+these with the generic names silently gives up the device tuning. **Start from
+the arch defaults and deviate only with a reason.**
+
+## The settled set (verified resolving on-device 2026-08-24)
+
+| System | Emulator / core | Note |
+|---|---|---|
+| psx | libretro / `pcsx_rearmed` | was `swanstation` — far too heavy for A55s |
+| megadrive | libretro / `genesisplusgx` | was `genesis_plus_gx` — **core file did not exist** |
+| n64 | **`mupen64plus`** / `rice` | was libretro `mupen64plus_next` — not a valid plugin; `glide64mk2` looks better if the speed is there |
+| dreamcast | libretro / `flycastvl` | was `flycast` — arch default is the low-spec build |
+| neogeo | libretro / `geolith` | **fixed by the roms**, not by speed |
+| nes | libretro / `fceumm` | KNULLI default |
+| snes | libretro / `snes9x` | KNULLI default; keeps SuperFX/SA-1 right |
+| gb, gbc | libretro / `gambatte` | KNULLI default |
+| gba | libretro / `mgba` | KNULLI default |
+| fbneo | libretro / `fbneo` | KNULLI default |
+
+Backups of the pre-change config: `/userdata/system/knulli.conf.bak-psx`,
+`knulli.conf.bak-cores`.
+
+## Applying a core change
+Edit `knulli.conf`, then **restart ES** (`killall emulationstation`; the
+`S31emulationstation` wrapper brings it back). ES holds the config in memory and
+writes the whole file back when settings change — without the restart, an edit
+can be silently reverted.
+
+## Saves are per system, not per core
+`/userdata/saves/<system>/` is keyed by **system**, so switching cores does not
+move or orphan saves. PSX memory cards are raw 128 KB cards (`MC` magic) and
+carry across PCSX-ReARMed/SwanStation untouched. **Save states do not** — they
+are core-specific and never transfer. `.ldci` files are SwanStation's disc-swap
+bookmarks; PCSX-ReARMed ignores them.
+
+## Global settings checked, all clean
+Rewind, shader sets, bezels/decorations, and smoothing are all at defaults
+(commented out) — none of them are taxing the device. Governor is `schedutil`.

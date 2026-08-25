@@ -757,6 +757,55 @@ impl Cache {
     /// Pull platforms and ROMs from the server into the cache.
     ///
     /// Returns `(platforms, roms_upserted, was_incremental)`.
+    /// The one statement that lands a RomM row in the cache.
+    ///
+    /// A `const` so the regression test below runs the real SQL rather
+    /// than a copy that can drift away from it.
+    const ROM_UPSERT: &str = "INSERT INTO roms(id, platform_slug, name, fs_name,
+                                          fs_size_bytes, md5_hash, sha1_hash,
+                                          crc_hash, updated_at, cover_path,
+                                          screenshot_path, screenshots_json,
+                                          cover_small_path, summary, meta_json,
+                                          alt_names_json, regions_json,
+                                          manual_path, youtube_id, multi_file,
+                                          last_played)
+                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
+                                ?14,?15,?16,?17,?18,?19,?20,?21)
+                         ON CONFLICT(id) DO UPDATE SET
+                            platform_slug = excluded.platform_slug,
+                            name          = excluded.name,
+                            fs_name       = excluded.fs_name,
+                            fs_size_bytes = excluded.fs_size_bytes,
+                            md5_hash      = excluded.md5_hash,
+                            sha1_hash     = excluded.sha1_hash,
+                            crc_hash      = excluded.crc_hash,
+                            updated_at    = excluded.updated_at,
+                            cover_path    = excluded.cover_path,
+                            screenshot_path = excluded.screenshot_path,
+                            screenshots_json = excluded.screenshots_json,
+                            cover_small_path = excluded.cover_small_path,
+                            summary        = excluded.summary,
+                            meta_json      = excluded.meta_json,
+                            alt_names_json = excluded.alt_names_json,
+                            regions_json   = excluded.regions_json,
+                            manual_path    = excluded.manual_path,
+                            youtube_id     = excluded.youtube_id,
+                            multi_file     = excluded.multi_file,
+                            -- Both describe a file found by a local ES-DE
+                            -- scan, and only `replace_from_esde` ever writes
+                            -- them. It numbers its rows positionally, so its
+                            -- ids collide with RomM's; without this, a sync
+                            -- landing on one of those ids overwrites
+                            -- `platform_slug` and leaves another game's
+                            -- system behind, which then picks the artwork.
+                            esde_system    = NULL,
+                            local_path     = NULL,
+                            -- Only when the server has one. An incremental
+                            -- pull can return a row with no per-user block,
+                            -- and letting that null out the timestamp would
+                            -- empty the recent list on every sync.
+                            last_played    = COALESCE(excluded.last_played, roms.last_played)";
+
     pub async fn sync(
         &mut self,
         client: &api::Client,
@@ -827,41 +876,7 @@ impl Cache {
                         continue;
                     }
                     tx.execute(
-                        "INSERT INTO roms(id, platform_slug, name, fs_name,
-                                          fs_size_bytes, md5_hash, sha1_hash,
-                                          crc_hash, updated_at, cover_path,
-                                          screenshot_path, screenshots_json,
-                                          cover_small_path, summary, meta_json,
-                                          alt_names_json, regions_json,
-                                          manual_path, youtube_id, multi_file,
-                                          last_played)
-                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,
-                                ?14,?15,?16,?17,?18,?19,?20,?21)
-                         ON CONFLICT(id) DO UPDATE SET
-                            platform_slug = excluded.platform_slug,
-                            name          = excluded.name,
-                            fs_name       = excluded.fs_name,
-                            fs_size_bytes = excluded.fs_size_bytes,
-                            md5_hash      = excluded.md5_hash,
-                            sha1_hash     = excluded.sha1_hash,
-                            crc_hash      = excluded.crc_hash,
-                            updated_at    = excluded.updated_at,
-                            cover_path    = excluded.cover_path,
-                            screenshot_path = excluded.screenshot_path,
-                            screenshots_json = excluded.screenshots_json,
-                            cover_small_path = excluded.cover_small_path,
-                            summary        = excluded.summary,
-                            meta_json      = excluded.meta_json,
-                            alt_names_json = excluded.alt_names_json,
-                            regions_json   = excluded.regions_json,
-                            manual_path    = excluded.manual_path,
-                            youtube_id     = excluded.youtube_id,
-                            multi_file     = excluded.multi_file,
-                            -- Only when the server has one. An incremental
-                            -- pull can return a row with no per-user block,
-                            -- and letting that null out the timestamp would
-                            -- empty the recent list on every sync.
-                            last_played    = COALESCE(excluded.last_played, roms.last_played)",
+                        Self::ROM_UPSERT,
                         params![
                             rom.id,
                             rom.platform_fs_slug.clone().unwrap_or_default(),
@@ -1052,6 +1067,54 @@ mod tests {
         // without adding it to the reader shifts every field after it —
         // quietly, into a field of the same type.
         assert_eq!(recent[0].last_played.as_deref(), Some("2026-01-01T10:00:00"));
+    }
+
+    /// A RomM sync must not inherit a local scan's system name.
+    ///
+    /// `replace_from_esde` numbers its rows positionally — id 1, 2, 3 — so its
+    /// ids collide with RomM's, which are the server's. Scan locally, then
+    /// sync, and the upsert lands on a row that already holds another game's
+    /// `esde_system`. It overwrites `platform_slug` and, before this was
+    /// fixed, left the stale system in place; that column picks the artwork,
+    /// so a Super Famicom game quietly rendered as a PS2 one. On a real
+    /// library 1,253 of 9,160 rows were wrong this way.
+    #[test]
+    fn a_synced_row_drops_the_system_a_local_scan_left_on_its_id() {
+        let c = cache("stale_esde_system");
+        add_platform(&c, 1, "sfc", "Super Famicom");
+
+        // What a local ES-DE scan leaves behind at id 7.
+        c.conn
+            .execute(
+                "INSERT INTO roms(id, platform_slug, name, fs_name, fs_size_bytes, \
+                 esde_system, local_path) \
+                 VALUES(7,'ps2','Some PS2 Game','g.iso',9,'ps2','/roms/ps2/g.iso')",
+                [],
+            )
+            .unwrap();
+
+        // The same id arriving from RomM as a completely different game.
+        c.conn
+            .execute(
+                Cache::ROM_UPSERT,
+                params![
+                    7i64, "sfc", "Accele Brid", "accele.7z", 512i64,
+                    None::<String>, None::<String>, None::<String>, None::<String>,
+                    None::<String>, None::<String>, None::<String>, None::<String>,
+                    None::<String>, None::<String>, None::<String>, None::<String>,
+                    None::<String>, None::<String>, 0i64, None::<String>,
+                ],
+            )
+            .unwrap();
+
+        let r = c.rom_by_id(7).unwrap().expect("the upserted row");
+        assert_eq!(r.platform_slug, "sfc");
+        assert_eq!(r.name, "Accele Brid");
+        assert_eq!(
+            r.esde_system, None,
+            "the previous occupant's system must not survive the sync"
+        );
+        assert_eq!(r.local_path, None, "nor its path to a file this is not");
     }
 
     /// Every column read by position, checked in one place.
