@@ -94,6 +94,11 @@ pub struct Glass {
     /// do both to the same texture.
     small: Offscreen,
     scratch: Offscreen,
+    /// How far the blur reaches, as a multiple of one texel per tap.
+    ///
+    /// 0 makes every tap read the same texel, which is no blur at all — the
+    /// "off" end of the setting rather than a special case.
+    pub strength: f32,
     /// How saturated the result is. 1.0 leaves it alone.
     pub saturate: f32,
 }
@@ -121,6 +126,7 @@ impl Glass {
                 program,
                 small: Offscreen::new(w, h)?,
                 scratch: Offscreen::new(w, h)?,
+                strength: 1.5,
                 saturate: 1.5,
             })
         }

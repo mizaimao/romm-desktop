@@ -141,7 +141,10 @@ fn main() -> Result<()> {
     // The frosted panels. Not fatal either: a driver that will not draw into a
     // texture still gets a library, with flat panels instead of glass.
     let mut frosted = match unsafe { glass::Glass::new(PANEL.0 * PREVIEW, PANEL.1 * PREVIEW) } {
-        Ok(g) => Some(g),
+        Ok(mut g) => {
+            g.strength = config.appearance.glass as f32 / 20.0;
+            Some(g)
+        }
         Err(e) => {
             eprintln!("no glass: {e:#}");
             None
@@ -151,19 +154,20 @@ fn main() -> Result<()> {
     // The style and its tuning come from the config, so the Appearance settings
     // are the ones that draw this rather than a second set that agrees by
     // coincidence.
-    let backdrop = match unsafe { backdrop::Backdrop::build(&video, &config.appearance.backdrop) } {
-        Ok(mut b) => {
-            b.scheme = *backdrop::scheme(&config.appearance.scheme);
-            b.speed = config.appearance.backdrop_speed as f32 / 100.0;
-            b.strength = config.appearance.backdrop_strength as f32 / 100.0;
-            println!("backdrop: {}", b.style_label());
-            Some(b)
-        }
-        Err(e) => {
-            eprintln!("no backdrop: {e:#}");
-            None
-        }
-    };
+    let mut backdrop =
+        match unsafe { backdrop::Backdrop::build(&video, &config.appearance.backdrop) } {
+            Ok(mut b) => {
+                b.scheme = *backdrop::scheme(&config.appearance.scheme);
+                b.speed = config.appearance.backdrop_speed as f32 / 100.0;
+                b.strength = config.appearance.backdrop_strength as f32 / 100.0;
+                println!("backdrop: {}", b.style_label());
+                Some(b)
+            }
+            Err(e) => {
+                eprintln!("no backdrop: {e:#}");
+                None
+            }
+        };
 
     // Box art, from the same folder the other front ends fill. Nothing is
     // fetched: what is on disk is drawn and what is not is a flat card.
@@ -236,6 +240,19 @@ fn main() -> Result<()> {
     let mut typing: Option<keyboard::Keyboard> = demo_keyboard();
     // The corner: clock, signal, charge. Read on a timer, not per frame.
     let mut status = status::Status::default();
+    // What the renderer is currently set to, so a change can be spotted without
+    // rebuilding a shader every frame.
+    // Seeded from what the renderer was actually built with, not from the
+    // settings entries. Reading the entries here makes the two agree by
+    // definition — including when they do not, which is how a change made
+    // before the loop starts was written to the file and never drawn.
+    let mut showing = settings::Look {
+        backdrop: config.appearance.backdrop.clone(),
+        scheme: config.appearance.scheme.clone(),
+        speed: config.appearance.backdrop_speed as f32 / 100.0,
+        strength: config.appearance.backdrop_strength as f32 / 100.0,
+        glass: config.appearance.glass,
+    };
 
     let mut frames = 0u32;
 
@@ -405,6 +422,30 @@ fn main() -> Result<()> {
             lib.wifi_at = 0;
             lib.refresh_rows();
         }
+        // A setting is not a setting until it does something. The Appearance
+        // pane writes the file; this is what makes the screen change while you
+        // are looking at it.
+        let want = settings::look(&lib.panes);
+        if want != showing {
+            if want.backdrop != showing.backdrop {
+                match unsafe { backdrop::Backdrop::build(&video, &want.backdrop) } {
+                    Ok(b) => backdrop = Some(b),
+                    Err(e) => eprintln!("no backdrop {}: {e:#}", want.backdrop),
+                }
+            }
+            if let Some(g) = frosted.as_mut() {
+                // 0 to 60 on the slider, the same range the webview uses, onto
+                // how far each tap reaches.
+                g.strength = want.glass as f32 / 20.0;
+            }
+            if let Some(b) = backdrop.as_mut() {
+                b.scheme = *backdrop::scheme(&want.scheme);
+                b.speed = want.speed;
+                b.strength = want.strength;
+            }
+            showing = want;
+        }
+
         status.poll(now as u64);
         // Only the panel, centered. The rest of the window stays as it was
         // cleared, which is what letterboxing looks like.
@@ -574,16 +615,6 @@ fn start_at(lib: &mut library::Library) {
     {
         lib.go_to_section(i);
     }
-    // Put the cursor somewhere, for judging a screen that only looks different
-    // partway down it — a divider twenty-seven rows in, say.
-    if let Ok(at) = std::env::var("ROMM_SDL_AT")
-        && let Ok(n) = at.parse::<usize>()
-    {
-        for _ in 0..n {
-            let _ = lib.act("down");
-        }
-    }
-
     let Ok(open) = std::env::var("ROMM_SDL_OPEN") else {
         return;
     };
@@ -613,6 +644,17 @@ fn start_at(lib: &mut library::Library) {
     };
     if let Err(e) = err {
         eprintln!("ROMM_SDL_OPEN={open}: {e:#}");
+    }
+    // Replay a few presses, for judging a screen that takes some getting to —
+    // a list of options is three presses in and cannot be screenshotted
+    // otherwise. `ROMM_SDL_ACT=down,down,activate`, in the app's own action
+    // names, through the app's own dispatcher.
+    if let Ok(script) = std::env::var("ROMM_SDL_ACT") {
+        for action in script.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+            if let Err(e) = lib.act(action) {
+                eprintln!("ROMM_SDL_ACT {action}: {e:#}");
+            }
+        }
     }
 }
 
@@ -1482,19 +1524,34 @@ fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, page: Rect) {
     f.fill(page, paint::SCRIM, 0.0);
 
     let step = size::ROW;
-    let rows = picker.options.len().min(9);
-    let sheet_h = rows as f32 * step + 46.0 + size::GAP * 2.0;
+    // As many as the screen has room for, rather than a number picked in
+    // advance. Nine was fine for the schemes and hid two of the eleven
+    // backdrops — and a list you can only see the top of reads as a list that
+    // is missing things.
+    let head = 46.0 + size::GAP * 2.0;
+    let fits = ((page.h - size::TABS - size::HEADER - size::HELP - head) / step)
+        .floor()
+        .max(3.0) as usize;
+    let rows = picker.options.len().min(fits);
+    let sheet_h = rows as f32 * step + head;
     let sheet = Rect::new(page.x, page.bottom() - sheet_h, page.w, sheet_h);
     f.fill(sheet, paint::SHEET, 0.0);
 
     let inner = sheet.inset(size::PAD);
-    let (head, list) = inner.split_top(24.0);
+    let (head_rect, list) = inner.split_top(24.0);
     let spec = f.spec(picker.title, size::TITLE);
-    f.label(&spec, head, paint::TEXT);
+    f.label(&spec, head_rect, paint::TEXT);
 
     // Keep the highlighted option on screen when the list is longer than the
     // sheet — the core map offers nine cores for some consoles.
     let first = picker.at.saturating_sub(rows.saturating_sub(1));
+    if picker.options.len() > rows {
+        let spec = f.spec(
+            format!("{} of {}", picker.at + 1, picker.options.len()),
+            10.0,
+        );
+        f.label_right(&spec, head_rect, paint::FAINT);
+    }
     for (i, (_, label)) in picker.options.iter().enumerate().skip(first).take(rows) {
         let line = Rect::new(list.x, list.y + (i - first) as f32 * step, list.w, step);
         let on = i == picker.at;

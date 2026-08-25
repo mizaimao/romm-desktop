@@ -175,6 +175,65 @@ pub enum Written {
     Text(String),
 }
 
+/// The appearance settings as they stand right now, for the renderer.
+///
+/// Read back off the entries rather than out of the file: the file has just been
+/// written and re-reading it to find out what we set is a round trip for an
+/// answer already in hand.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Look {
+    pub backdrop: String,
+    pub scheme: String,
+    pub speed: f32,
+    pub strength: f32,
+    pub glass: i64,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            backdrop: "blobs".into(),
+            scheme: "midnight".into(),
+            speed: 1.0,
+            strength: 1.0,
+            glass: 30,
+        }
+    }
+}
+
+/// What the Appearance pane currently says.
+pub fn look(panes: &[Pane]) -> Look {
+    let mut out = Look::default();
+    let Some(pane) = panes.iter().find(|p| p.id == "appearance") else {
+        return out;
+    };
+    for e in &pane.entries {
+        match (e.field, &e.kind) {
+            ("appearance.backdrop", Kind::Choice { at, options }) => {
+                out.backdrop = options
+                    .get(*at)
+                    .map(|(v, _)| v.clone())
+                    .unwrap_or(out.backdrop);
+            }
+            ("appearance.scheme", Kind::Choice { at, options }) => {
+                out.scheme = options
+                    .get(*at)
+                    .map(|(v, _)| v.clone())
+                    .unwrap_or(out.scheme);
+            }
+            ("appearance.backdrop_speed", Kind::Number { value, .. }) => {
+                out.speed = *value as f32 / 100.0;
+            }
+            ("appearance.backdrop_strength", Kind::Number { value, .. }) => {
+                out.strength = *value as f32 / 100.0;
+            }
+            ("appearance.glass", Kind::Number { value, .. }) => out.glass = *value,
+            _ => {}
+        }
+    }
+    out
+}
+
 /// A group of settings, which is one screen.
 pub struct Pane {
     pub id: &'static str,
@@ -1163,6 +1222,63 @@ mod tests {
             );
         }
         assert!(pane.entries.len() >= 6, "still a stub: {labels:?}");
+    }
+
+    /// The renderer is driven by what the pane says, not by the file.
+    ///
+    /// A setting that writes `romm-sdl.toml` and changes nothing on screen is
+    /// not wired up, it is a note to self. `look` is what closes that: the loop
+    /// compares it against what it last drew and rebuilds when they differ.
+    #[test]
+    fn look_reads_the_appearance_pane_back() {
+        let mut panes = built();
+        let now = look(&panes);
+        assert_eq!(now.backdrop, "blobs");
+        assert_eq!(now.scheme, "midnight");
+        assert_eq!(now.speed, 1.0, "100% is a multiplier of one");
+        assert_eq!(now.strength, 1.0);
+
+        // Choose a different backdrop, the way the list does.
+        let pane = panes.iter_mut().find(|p| p.id == "appearance").unwrap();
+        let entry = pane
+            .entries
+            .iter_mut()
+            .find(|e| e.field == "appearance.backdrop")
+            .unwrap();
+        let Kind::Choice { at, options } = &mut entry.kind else {
+            panic!("not a choice")
+        };
+        *at = options
+            .iter()
+            .position(|(v, _)| v == "towers")
+            .expect("towers is a backdrop");
+
+        assert_eq!(
+            look(&panes).backdrop,
+            "towers",
+            "the pane changed and look did not"
+        );
+    }
+
+    /// A slider moves the number the renderer is given, not just the label.
+    #[test]
+    fn the_sliders_reach_the_renderer() {
+        let mut panes = built();
+        let pane = panes.iter_mut().find(|p| p.id == "appearance").unwrap();
+        for (field, expect) in [
+            ("appearance.backdrop_strength", 0.0),
+            ("appearance.glass", 0.0),
+        ] {
+            let e = pane.entries.iter_mut().find(|e| e.field == field).unwrap();
+            let Kind::Number { value, .. } = &mut e.kind else {
+                panic!("{field} is not a number")
+            };
+            *value = 0;
+            let _ = expect;
+        }
+        let now = look(&panes);
+        assert_eq!(now.strength, 0.0, "strength zero must reach the shader");
+        assert_eq!(now.glass, 0, "glass zero must reach the blur");
     }
 
     /// Both front ends offer the same backdrops and the same color schemes.
