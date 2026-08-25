@@ -176,6 +176,13 @@ pub struct Gfx {
     u_half: i32,
     u_radius: i32,
     u_rect: i32,
+    /// Where the drawing area starts in the window.
+    ///
+    /// Non-zero when the panel is letterboxed. Kept because `draw_onto` has to
+    /// put it back: restoring with the size alone left the viewport at the
+    /// window's origin, and everything drawn after a glass capture — which is
+    /// everything — landed offset from the panel it belonged to.
+    origin: (f32, f32),
     /// How round the next quad's corners are, in pixels. Set around a draw
     /// rather than passed to it, so the twenty call sites that want square
     /// corners say nothing.
@@ -222,6 +229,7 @@ impl Gfx {
 
             let blank = upload(1, 1, &[255, 255, 255, 255]);
             Ok(Gfx {
+                origin: (0.0, 0.0),
                 u_screen: uniform(program, "u_screen"),
                 u_tint: uniform(program, "u_tint"),
                 u_half: uniform(program, "u_half"),
@@ -243,6 +251,7 @@ impl Gfx {
         self.resize_at(0.0, 0.0, width, height)
     }
 
+
     /// Draw into part of the window rather than all of it.
     ///
     /// The panel preview needs this: the layout is exactly 640x480 points and
@@ -251,6 +260,7 @@ impl Gfx {
     /// alone. Stretching to fill instead is how a 2784-pixel window came out
     /// 696 points wide and stopped being a preview of the device at all.
     pub fn resize_at(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        self.origin = (x, y);
         self.width = width.max(1.0);
         self.height = height.max(1.0);
         unsafe { gl::Viewport(x as i32, y as i32, self.width as i32, self.height as i32) };
@@ -404,6 +414,7 @@ impl Gfx {
     /// A context must be current.
     pub unsafe fn draw_onto(&mut self, target: &Offscreen, body: impl FnOnce(&mut Gfx)) {
         let (was_w, was_h) = (self.width, self.height);
+        let (ox, oy) = self.origin;
         let (w, h) = target.size();
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, target.frame);
@@ -413,7 +424,8 @@ impl Gfx {
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
         }
-        self.resize(was_w, was_h);
+        // Back to where the panel is, not to the window's corner.
+        self.resize_at(ox, oy, was_w, was_h);
     }
 
     /// Draw part of a texture, rather than all of it.

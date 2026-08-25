@@ -377,6 +377,24 @@ pub fn panes(
                     },
                 },
                 Entry {
+                    field: "server.username",
+                    label: "Server login",
+                    help: "Your RomM account. Leave empty if you use a token.",
+                    kind: Kind::Text {
+                        value: cfg.server.username.clone(),
+                        secret: false,
+                    },
+                },
+                Entry {
+                    field: "server.token",
+                    label: "Server token",
+                    help: "A RomM client token — better than a password on a device that keeps it on a card.",
+                    kind: Kind::Text {
+                        value: cfg.server.token.clone().unwrap_or_default(),
+                        secret: true,
+                    },
+                },
+                Entry {
                     field: "achievements.enabled",
                     label: "RetroAchievements",
                     help: "Track achievements while you play.",
@@ -411,6 +429,16 @@ pub fn panes(
                     label: "Ask before deleting",
                     help: "Confirm before a save state is thrown away.",
                     kind: Kind::Toggle(cfg.saves.confirm_delete_state),
+                },
+                // No ScreenScraper rows. The desktop writes `[scraper]` and
+                // nothing in the codebase reads it — its own dialog says "not
+                // used by the app yet". A row for a setting that cannot do
+                // anything is worse than a missing one, because you try it.
+                Entry {
+                    field: "",
+                    label: "Sync saves now",
+                    help: "Compare your saves and save states with the server. Not wired up on this front end yet.",
+                    kind: Kind::Action,
                 },
             ],
         },
@@ -482,6 +510,24 @@ pub fn panes(
                     },
                 },
                 Entry {
+                    field: "icons.style",
+                    label: "Console picture",
+                    help: "How a console is drawn on the Library screen.",
+                    kind: Kind::Text {
+                        value: cfg.icons.style.clone(),
+                        secret: false,
+                    },
+                },
+                Entry {
+                    field: "shaders.motion",
+                    label: "Motion layer",
+                    help: "A shader pass over the game itself — black-frame insertion and the like.",
+                    kind: Kind::Text {
+                        value: cfg.shaders.motion.clone().unwrap_or_default(),
+                        secret: false,
+                    },
+                },
+                Entry {
                     field: "shaders.enabled",
                     label: "Shaders",
                     help: "Apply the shader chain when a game launches.",
@@ -509,6 +555,24 @@ pub fn panes(
                     label: "RomM collections",
                     help: "Show the collections RomM generates by company, genre and franchise alongside your own.",
                     kind: Kind::Toggle(cfg.library.romm_collections),
+                },
+                Entry {
+                    field: "",
+                    label: "Fetch game list",
+                    help: "Pull the library from the server. Not wired up on this front end yet — see the Syncing tab.",
+                    kind: Kind::Action,
+                },
+                Entry {
+                    field: "",
+                    label: "BIOS files",
+                    help: "Check which consoles are missing the files they need. Not wired up yet.",
+                    kind: Kind::Action,
+                },
+                Entry {
+                    field: "",
+                    label: "Missing artwork",
+                    help: "Find games with no picture. Not wired up yet.",
+                    kind: Kind::Action,
                 },
             ],
         },
@@ -562,6 +626,18 @@ pub fn panes(
                     help: "Which platform scheme this build selected.",
                     kind: Kind::ReadOnly(romm_desktop::platform::current().scheme().to_owned()),
                 },
+                Entry {
+                    field: "",
+                    label: "By",
+                    help: "Who wrote it.",
+                    kind: Kind::ReadOnly("mizaimao".to_owned()),
+                },
+                Entry {
+                    field: "",
+                    label: "Source",
+                    help: "github.com/mizaimao/romm-desktop",
+                    kind: Kind::ReadOnly("romm-desktop".to_owned()),
+                },
             ],
         },
     ]
@@ -579,6 +655,18 @@ fn launch_entries(cfg: &Config) -> Vec<Entry> {
             label: "Save state on exit",
             help: "Write a save state when a game is closed, so it reopens where you left it.",
             kind: Kind::Toggle(cfg.retroarch.save_state_on_exit),
+        },
+        Entry {
+            field: "retroarch.autofire_hz",
+            label: "Auto-fire speed",
+            help: "Shots a second while auto-fire is held.",
+            kind: Kind::Number {
+                value: cfg.retroarch.autofire_hz as i64,
+                min: 1,
+                max: 30,
+                step: 1,
+                unit: "/s",
+            },
         },
         Entry {
             field: "retroarch.autofire",
@@ -1037,6 +1125,59 @@ mod tests {
             0,
             "an unknown style is the first, not a panic"
         );
+    }
+
+    /// Everything the desktop can change, this can change too — or there is a
+    /// reason written down for why it cannot.
+    ///
+    /// The list on the left is the desktop's `set_config_field` table, verbatim.
+    /// This is what stops the gap reopening: a setting added there and not here
+    /// fails, rather than being noticed months later by somebody looking for it.
+    #[test]
+    fn nothing_the_desktop_can_set_is_quietly_missing() {
+        // (field, why it is absent here) — an empty reason means it must exist.
+        const DESKTOP: &[(&str, &str)] = &[
+            ("library.local_root", ""),
+            ("server.url", ""),
+            ("server.token", ""),
+            ("server.username", ""),
+            ("achievements.enabled", ""),
+            ("achievements.username", ""),
+            ("achievements.token", ""),
+            ("achievements.hardcore", ""),
+            ("shaders.enabled", ""),
+            ("saves.confirm_delete_state", ""),
+            ("controllers.mirror_player_one", ""),
+            ("retroarch.autofire", ""),
+            ("retroarch.autofire_hz", ""),
+            ("retroarch.save_state_on_exit", ""),
+            ("icons.set", ""),
+            ("icons.style", ""),
+            ("media.list_art", ""),
+            ("shaders.motion", ""),
+            ("scraper.ssid", "written by the desktop and read by nothing"),
+            (
+                "scraper.sspassword",
+                "written by the desktop and read by nothing",
+            ),
+            ("retroarch.game_display", "no second display on a handheld"),
+            ("retroarch.fit_window", "no window to fit"),
+            ("retroarch.window_decorations", "no title bar"),
+            ("appearance.app_icon", "no dock to put an icon in"),
+        ];
+
+        let fields: Vec<&str> = built()
+            .iter()
+            .flat_map(|p| p.entries.iter().map(|e| e.field))
+            .collect();
+        for (field, why) in DESKTOP {
+            let here = fields.contains(field);
+            if why.is_empty() {
+                assert!(here, "the desktop can set {field:?} and this cannot");
+            } else {
+                assert!(!here, "{field:?} is here but was excluded because: {why}");
+            }
+        }
     }
 
     /// The panes are the desktop's, in the desktop's order.
