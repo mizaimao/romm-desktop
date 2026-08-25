@@ -155,6 +155,24 @@ describe("covers well away from it", () => {
     assert.ok(art(1).querySelector(".ph"), "nothing was put back in its place");
   });
 
+  /// The bug this is here for: `drawCover` puts a `<canvas>` on the card, not
+  /// an `<img>`, and the release path went on testing for `IMG` after that
+  /// changed. So nothing was ever released in the real app — only in this
+  /// suite, where jsdom has no `createImageBitmap`, `fitted` bails, and every
+  /// cover is the fallback `<img>`. The canvas has to be stood up by hand
+  /// because the path that makes one cannot run here.
+  test("a canvas cover is released too, not just an img", async () => {
+    const card = document.querySelector('.gcard[data-id="1"]');
+    card.dataset.loaded = "1";
+    art(1).replaceChildren(document.createElement("canvas"));
+    assert.ok(art(1).querySelector("canvas"), "the card did not start out holding a canvas");
+
+    far().fire(false);
+    assert.equal(art(1).querySelector("canvas"), null, "the canvas is still being held");
+    assert.ok(art(1).querySelector(".ph"), "nothing was put back in its place");
+    assert.equal(card.dataset.loaded, undefined, "the card cannot ask for its cover again");
+  });
+
   test("what goes back is the placeholder it was drawn with", async () => {
     near().fire(true);
     await settle();

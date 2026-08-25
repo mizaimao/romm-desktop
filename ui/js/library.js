@@ -880,6 +880,26 @@ function placeholder(card) {
   return `<span class="ph">${card.dataset.name ?? ""}</span>${star}`;
 }
 
+/// Whether this card is holding a decoded picture, as opposed to the two
+/// letters it is drawn with before one arrives.
+///
+/// Both shapes count, and that is the whole point of the function. The release
+/// path was written when a cover was an `<img>` and went on testing for one
+/// after `drawCover` started putting a `<canvas>` in — so from the day the
+/// artwork was drawn at tile size until this was found, **nothing was ever
+/// released**. Every cover a browse touched was held until its card left the
+/// window, and on a console short enough not to be windowed at all — fifteen
+/// of Frank's twenty-four are under `visible.THRESHOLD` — that means all of
+/// them, for as long as the console stayed open.
+///
+/// The tests did not catch it because jsdom has no `createImageBitmap`, so
+/// `fitted` bails and every cover in the suite is the `<img>` fallback. There
+/// is a test now that stands a canvas up by hand.
+function holdsPicture(art) {
+  const first = art?.firstElementChild;
+  return first?.tagName === "IMG" || first?.tagName === "CANVAS";
+}
+
 export function observeCovers() {
   const margins = coverMargins();
   forgetPendingCovers();
@@ -910,7 +930,7 @@ export function observeCovers() {
         // Only if there is something to let go of. Putting the placeholder
         // back over a placeholder is a write to the page for no reason, and
         // this runs for every card that leaves the margin.
-        if (!art?.firstElementChild || art.firstElementChild.tagName !== "IMG") continue;
+        if (!holdsPicture(art)) continue;
         art.innerHTML = placeholder(e.target);
         delete e.target.dataset.loaded;
       }

@@ -3,6 +3,69 @@
 > **The decomposition, 2026-08-24 — start here.** Everything the app cannot
 > avoid on macOS is 192 MB, and it is not our document.
 
+## Nothing was ever released: the releaser tested for the wrong tag
+
+Found by reading, not by measuring, and it needs no measurement to establish —
+the code could not have worked.
+
+`observeCovers` sets up a second observer whose whole job is to put the
+placeholder back over a card that has scrolled a screen past the edge, so its
+decoded picture can go. Its test read:
+
+```js
+if (!art?.firstElementChild || art.firstElementChild.tagName !== "IMG") continue;
+```
+
+That was right when a cover was an `<img>`. It stopped being right the day
+`drawCover` started putting a **`<canvas>`** on the card instead — the change
+that draws artwork at tile size, above. A canvas is `CANVAS`, the test skips
+it, and **from that commit until 0.2.787 not one cover was ever released.**
+
+The `<img>` branch below it is only the fallback for when `fitted` returns
+null, which in normal use is never. So the path that did still work was the
+one nothing takes.
+
+### Why the tests passed
+
+jsdom has no `createImageBitmap`, so `fitted` bails at its own guard and every
+cover in `covers.test.js` is the fallback `<img>`. The suite has three tests on
+releasing and all three were exercising a path the app does not use. There is a
+fourth now that stands a canvas up by hand, and it fails against the old
+condition.
+
+The general lesson, and it is the same one this file keeps learning: a test
+that cannot reach the real path is not evidence about the real path.
+
+### What it was costing
+
+Bounded by windowing on the long lists, and not bounded at all on the short
+ones — which is the opposite of where you would want the bug.
+
+Above `visible.THRESHOLD` (400 rows) a card that leaves the window is removed
+from the document and its canvas goes with it, so the leak is only the band
+between the release margin (1.0 screen) and the window's overscan (1.5
+screens) — about one screenful of cards, call it 5 MB.
+
+Below 400 rows nothing is windowed, the whole list is in the document, and the
+releaser is the **only** thing bounding how many pictures are held. **Fifteen
+of Frank's twenty-four consoles are under it:**
+
+| console | games | held after a browse | intended |
+|---|---|---|---|
+| megadrive | 942 | windowed | — |
+| famicom | 416 | windowed | — |
+| mastersystem | 352 | **all 352** | ~3 screens |
+| gamegear | 330 | **all 330** | ~3 screens |
+| pcengine | 290 | **all 290** | ~3 screens |
+
+At about a quarter of a megabyte a canvas, browsing mastersystem end to end
+held ~85 MB of artwork where the margins intend about 25 MB. Not measured in
+the app yet — the rig kills a running instance and Frank's was up — so that is
+arithmetic from the tile size, not a weighing, and it should be weighed before
+it is quoted.
+
+Fixed in 0.2.787: `holdsPicture` accepts either tag.
+
 ## A full scroll does not cost more than a short one
 
 The obvious question, and the answer is not the obvious one. Same console, same
