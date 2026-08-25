@@ -373,6 +373,10 @@ pub struct Named {
     pub id: &'static str,
     pub label: &'static str,
     pub scheme: Scheme,
+    /// What the panels are tinted with. The webview picks this per scheme and
+    /// the panels here were a fixed gray regardless — which is most of why they
+    /// read as slabs rather than glass.
+    pub glass: [f32; 3],
 }
 
 /// The schemes, ported from `ui/js/backdrop.js` so the two front ends offer
@@ -390,6 +394,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.1039, 0.1294, 0.2432],
             high: [0.1647, 0.2078, 0.4],
         },
+        glass: [0.302, 0.5608, 0.8392],
     },
     Named {
         id: "frost",
@@ -399,6 +404,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.1216, 0.1862, 0.249],
             high: [0.2, 0.3137, 0.4196],
         },
+        glass: [0.5608, 0.7216, 0.8471],
     },
     Named {
         id: "abyss",
@@ -408,6 +414,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.047, 0.1451, 0.1745],
             high: [0.0706, 0.2549, 0.302],
         },
+        glass: [0.2275, 0.6275, 0.7098],
     },
     Named {
         id: "moss",
@@ -417,6 +424,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.0804, 0.1804, 0.1392],
             high: [0.1216, 0.2902, 0.2157],
         },
+        glass: [0.2471, 0.6196, 0.5255],
     },
     Named {
         id: "ember",
@@ -426,6 +434,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.2196, 0.0921, 0.0647],
             high: [0.3608, 0.1412, 0.0941],
         },
+        glass: [0.7843, 0.5294, 0.2353],
     },
     Named {
         id: "rust",
@@ -435,6 +444,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.2255, 0.1431, 0.0628],
             high: [0.3686, 0.2275, 0.0902],
         },
+        glass: [0.6902, 0.4157, 0.2078],
     },
     Named {
         id: "wine",
@@ -444,6 +454,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.202, 0.0824, 0.1412],
             high: [0.3294, 0.1255, 0.2275],
         },
+        glass: [0.6902, 0.2902, 0.3333],
     },
     Named {
         id: "plum",
@@ -453,6 +464,7 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.1706, 0.1039, 0.2274],
             high: [0.2706, 0.1686, 0.3686],
         },
+        glass: [0.4824, 0.3843, 0.7686],
     },
     Named {
         id: "slate",
@@ -462,8 +474,14 @@ pub const SCHEMES: &[Named] = &[
             mid: [0.1294, 0.1471, 0.1666],
             high: [0.2, 0.2275, 0.2588],
         },
+        glass: [0.4275, 0.4627, 0.5059],
     },
 ];
+
+/// The panel tint for that scheme, or the first's.
+pub fn glass_of(id: &str) -> [f32; 3] {
+    SCHEMES.iter().find(|s| s.id == id).map(|s| s.glass).unwrap_or(SCHEMES[0].glass)
+}
 
 /// The scheme with that id, or the first.
 pub fn scheme(id: &str) -> &'static Scheme {

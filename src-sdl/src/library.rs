@@ -163,6 +163,25 @@ impl Shelf {
         }
     }
 
+    /// The line the root menu's side panel shows about it.
+    ///
+    /// One of yours is a list you made; a RomM kind is a way the server groups
+    /// things. Saying which is which is the whole reason the two halves of that
+    /// page are separated by a rule.
+    pub fn note(&self) -> String {
+        match self {
+            Shelf::Mine { games, .. } => match games {
+                0 => "One of your collections. Nothing in it yet.".to_owned(),
+                1 => "One of your collections. One game.".to_owned(),
+                n => format!("One of your collections. {n} games."),
+            },
+            Shelf::Kind { label, count, .. } => match count {
+                1 => format!("How RomM groups games by {}. One of them.", label.to_lowercase()),
+                n => format!("How RomM groups games by {}. {n} of them.", label.to_lowercase()),
+            },
+        }
+    }
+
     /// The number on the right: games for one of yours, collections for a kind.
     pub fn count(&self) -> i64 {
         match self {
@@ -291,6 +310,8 @@ pub struct Library {
     /// How many of `shelves` are yours — the divider goes after this many, and
     /// it is 0 when you have none.
     pub mine_count: usize,
+    /// The last collection peeked into, and the names that came back.
+    peeked: (String, Vec<String>),
     pub cols: Vec<CollectionRow>,
     pub col_at: usize,
     /// The open collection's name, for the header once its games are showing.
@@ -364,6 +385,7 @@ impl Library {
             })
             .collect();
         let mut lib = Library {
+            peeked: (String::new(), Vec::new()),
             cache,
             media_root,
             roms_dir,
@@ -708,6 +730,24 @@ impl Library {
     /// The same `rows`/`arranged`/`at` the Library tab fills, so the sorting,
     /// the filters, the info pane and the drawing are all shared — a collection
     /// of games is a list of games.
+    /// A few names out of the highlighted collection, for the side panel.
+    ///
+    /// Held by id rather than re-read: the cursor sits on one row while the
+    /// screen redraws sixty times a second, and reading three hundred rows to
+    /// show four of them each of those times is the kind of thing that makes a
+    /// handheld feel slow.
+    pub fn peek(&mut self, id: &str) -> &[String] {
+        if self.peeked.0 != id {
+            let names = self
+                .cache
+                .roms_in_collection(id)
+                .map(|rows| rows.into_iter().take(6).map(|r| r.name).collect())
+                .unwrap_or_default();
+            self.peeked = (id.to_owned(), names);
+        }
+        &self.peeked.1
+    }
+
     fn open_collection_id(&mut self, id: &str, name: &str) -> Result<()> {
         let fetched = self
             .cache
@@ -1205,6 +1245,7 @@ mod tests {
     /// A library with rows already in it, so the tests need no database.
     fn seeded(rows: Vec<Row>) -> Library {
         let mut lib = Library {
+            peeked: (String::new(), Vec::new()),
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),
             media_root: PathBuf::new(),
             roms_dir: PathBuf::new(),
@@ -1512,6 +1553,7 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "t",
+            blurb: "",
             label: "Test",
             entries: vec![crate::settings::Entry {
                 field: "",
@@ -1538,6 +1580,7 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "t",
+            blurb: "",
             label: "Test",
             entries: vec![crate::settings::Entry {
                 field: "",
@@ -1569,6 +1612,7 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "t",
+            blurb: "",
             label: "Test",
             entries: vec![crate::settings::Entry {
                 field: "bindings_pad.activate",
@@ -1592,6 +1636,7 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "t",
+            blurb: "",
             label: "Test",
             entries: vec![
                 crate::settings::Entry {
@@ -1646,6 +1691,7 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "t",
+            blurb: "",
             label: "Test",
             entries: vec![crate::settings::Entry {
                 field: "",
@@ -1675,6 +1721,7 @@ mod tests {
         let mut lib = seeded(rows(&[("a", false)]));
         lib.panes = vec![crate::settings::Pane {
             id: "device",
+            blurb: "",
             label: "Device",
             entries: vec![crate::settings::Entry {
                 field: "",

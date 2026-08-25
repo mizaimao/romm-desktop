@@ -36,6 +36,7 @@ mod library;
 mod ports;
 mod settings;
 mod status;
+mod sysinfo;
 mod text;
 mod wifi;
 
@@ -424,6 +425,10 @@ fn main() -> Result<()> {
             lib.wifi_at = 0;
             lib.refresh_rows();
         }
+        // The panel tint follows the color scheme, like the webview's does.
+        let g = backdrop::glass_of(&showing.scheme);
+        let glass_tint = Rgba(g[0] * 0.55, g[1] * 0.55, g[2] * 0.62, 0.30);
+
         // A setting is not a setting until it does something. The Appearance
         // pane writes the file; this is what makes the screen change while you
         // are looking at it.
@@ -484,6 +489,7 @@ fn main() -> Result<()> {
             hover,
             typing.as_ref(),
             &status,
+            glass_tint,
         );
         window.gl_swap_window();
 
@@ -801,7 +807,6 @@ mod paint {
     pub const BACKGROUND: Rgba = Rgba::rgb(14, 15, 20);
     /// Furniture: darker than a panel, so it does not compete with artwork.
     pub const BAR: Rgba = Rgba(0.05, 0.05, 0.08, 0.72);
-    pub const COLUMN: Rgba = Rgba(0.08, 0.09, 0.13, 0.55);
     pub const CARD: Rgba = Rgba(0.14, 0.15, 0.21, 0.62);
     pub const CURSOR: Rgba = Rgba::rgb(96, 140, 210);
     pub const TEXT: Rgba = Rgba::rgb(232, 234, 242);
@@ -839,10 +844,6 @@ mod size {
     pub const HEADER: f32 = 20.0;
     /// The strip along the bottom saying what the buttons do.
     pub const HELP: f32 = 18.0;
-    /// The info pane beside the games. Wide enough for a wrapped title and a
-    /// column of facts, and no wider — what is left is the list, and the list
-    /// is the thing being read.
-    pub const ASIDE: f32 = 224.0;
     pub const CARD: f32 = 96.0;
     pub const LABEL: f32 = 12.0;
     pub const TITLE: f32 = 13.0;
@@ -923,6 +924,9 @@ struct Frame<'a> {
     /// the motion handler.
     hover: Option<usize>,
     hits: Hits,
+    /// What panels are tinted with, from the color scheme. A constant here was
+    /// the same gray whichever scheme was chosen.
+    glass_tint: Rgba,
 }
 
 impl Frame<'_> {
@@ -941,9 +945,15 @@ impl Frame<'_> {
         let at = self.px(at);
         let round = round * self.screen.scale.factor();
         let whole = self.whole();
-        self.gfx.rounded(round, || match self.glass {
-            Some(glass) => glass.panel(self.gfx, whole, at.x, at.y, at.w, at.h, tint),
-            None => self.gfx.fill(at, tint),
+        // Lit from above, the way a sheet of glass is: the tint is stronger at
+        // the bottom than the top. A flat tint over a blur reads as a gray slab,
+        // which is what these were.
+        let bottom = Rgba(tint.0, tint.1, tint.2, (tint.3 * 1.45).min(1.0));
+        self.gfx.faded(bottom, || {
+            self.gfx.rounded(round, || match self.glass {
+                Some(glass) => glass.panel(self.gfx, whole, at.x, at.y, at.w, at.h, tint),
+                None => self.gfx.fill(at, tint),
+            })
         });
     }
 
@@ -1056,6 +1066,7 @@ fn draw(
     hover: Option<usize>,
     typing: Option<&keyboard::Keyboard>,
     status: &status::Status,
+    glass_tint: Rgba,
 ) -> Hits {
     let mut f = Frame {
         gfx,
@@ -1065,6 +1076,7 @@ fn draw(
         screen,
         hover,
         hits: Hits::default(),
+        glass_tint,
     };
     let page = Rect::new(0.0, 0.0, screen.width(), screen.height());
 
@@ -1135,7 +1147,7 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         // A port is a name and, if it was scraped, a picture. No size, no
         // console, no star — none of those mean anything for a shell script.
         let [list, aside] = <[Rect; 2]>::try_from(
-            area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]),
+            area.cols(size::GAP, &[8, 4]),
         )
         .unwrap();
         let rows: Vec<_> = lib
@@ -1145,7 +1157,7 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             .collect();
         draw_picker(f, list, &rows, lib.port_at, rows.len());
 
-        f.pane(aside, paint::COLUMN, size::ROUND);
+        f.pane(aside, f.glass_tint, size::ROUND);
         if let Some(port) = lib.ports.get(lib.port_at) {
             let inner = aside.inset(size::PAD);
             let (art, below) = inner.split_top(inner.w * 0.62);
@@ -1180,10 +1192,10 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     // always a list here — a wall of covers and a sidebar do not both fit, and
     // between the two the list is what answers "what is in this console".
     let [list, aside] =
-        <[Rect; 2]>::try_from(area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]))
+        <[Rect; 2]>::try_from(area.cols(size::GAP, &[8, 4]))
             .unwrap();
     draw_game_list(f, lib, list);
-    f.pane(aside, paint::COLUMN, size::ROUND);
+    f.pane(aside, f.glass_tint, size::ROUND);
     draw_detail(f, lib, aside.inset(size::PAD));
 }
 
@@ -1195,29 +1207,61 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
 fn draw_collections(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     match lib.view {
         library::View::Groups => {
-            let rows: Vec<_> = lib
+            let rows: Vec<MenuRow> = lib
                 .shelves
                 .iter()
-                .map(|sh| (sh.name().to_owned(), sh.count().to_string()))
+                .map(|sh| MenuRow {
+                    title: sh.name().to_owned(),
+                    count: sh.count().to_string(),
+                    note: sh.note(),
+                    inside: Vec::new(),
+                })
                 .collect();
-            draw_shelf(f, area, &rows, lib.shelf_at, lib.mine_count);
+            // The rule sits between yours and RomM's, and only if there is
+            // something on both sides of it.
+            let rule = (lib.mine_count > 0 && lib.mine_count < rows.len())
+                .then_some(lib.mine_count);
+            // Only the highlighted one is looked into: it is the only row the
+            // side panel has room to describe.
+            let id = match lib.shelves.get(lib.shelf_at) {
+                Some(library::Shelf::Mine { id, .. }) => Some(id.clone()),
+                _ => None,
+            };
+            let mut rows = rows;
+            if let (Some(id), Some(row)) = (id, rows.get_mut(lib.shelf_at)) {
+                row.inside = lib.peek(&id).to_vec();
+            }
+            draw_menu(f, area, &rows, lib.shelf_at, rule);
         }
         library::View::Collections => {
-            let rows: Vec<_> = lib
+            let rows: Vec<MenuRow> = lib
                 .cols
                 .iter()
-                .map(|c| (c.name.clone(), format!("{}", c.rom_count)))
+                .map(|c| MenuRow {
+                    title: c.name.clone(),
+                    count: c.rom_count.to_string(),
+                    note: match c.rom_count {
+                        1 => "One game.".to_owned(),
+                        n => format!("{n} games."),
+                    },
+                    inside: Vec::new(),
+                })
                 .collect();
-            draw_picker(f, area, &rows, lib.col_at, lib.cols.len());
+            let id = lib.cols.get(lib.col_at).map(|c| c.id.clone());
+            let mut rows = rows;
+            if let (Some(id), Some(row)) = (id, rows.get_mut(lib.col_at)) {
+                row.inside = lib.peek(&id).to_vec();
+            }
+            draw_menu(f, area, &rows, lib.col_at, None);
         }
         // A collection of games is a list of games: same list, same info pane.
         library::View::Roms => {
             let [list, aside] = <[Rect; 2]>::try_from(
-                area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]),
+                area.cols(size::GAP, &[8, 4]),
             )
             .unwrap();
             draw_game_list(f, lib, list);
-            f.pane(aside, paint::COLUMN, size::ROUND);
+            f.pane(aside, f.glass_tint, size::ROUND);
             draw_detail(f, lib, aside.inset(size::PAD));
         }
         // Not reachable: `go_to_section` puts this tab at `Groups` and only
@@ -1243,7 +1287,7 @@ fn draw_history(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         return;
     }
     let [list, aside] =
-        <[Rect; 2]>::try_from(area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]))
+        <[Rect; 2]>::try_from(area.cols(size::GAP, &[8, 4]))
             .unwrap();
 
     let step = size::ROW;
@@ -1281,7 +1325,7 @@ fn draw_history(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     }
 
     // What the highlighted game is, in full.
-    f.pane(aside, paint::COLUMN, size::ROUND);
+    f.pane(aside, f.glass_tint, size::ROUND);
     if let Some(game) = lib.history.get(lib.history_at) {
         let inner = aside.inset(size::PAD);
         let (art, below) = inner.split_top(inner.w * 0.62);
@@ -1409,14 +1453,146 @@ fn draw_picker(f: &mut Frame, area: Rect, rows: &[(String, String)], at: usize, 
     draw_rule_list(f, area, rows, at, total, None)
 }
 
-/// The Collections root: yours, a rule, then RomM's kinds.
+/// One row of a root menu: what it is, what is in it, and a line about it.
 ///
-/// The rule is drawn *between* rows rather than being one, so the cursor never
-/// has to step over a thing that cannot be selected — which is the usual way a
-/// divider in a list turns into a navigation bug.
-fn draw_shelf(f: &mut Frame, area: Rect, rows: &[(String, String)], at: usize, mine: usize) {
-    let rule = (mine > 0 && mine < rows.len()).then_some(mine);
-    draw_rule_list(f, area, rows, at, rows.len(), rule)
+/// The three are separated because they are drawn differently — a name is
+/// read, a count is glanced at, and the note is only read once, on the row the
+/// cursor is on.
+pub struct MenuRow {
+    pub title: String,
+    pub count: String,
+    pub note: String,
+    /// What is inside, for the side panel — a few of the names, so the panel
+    /// says something about *this* collection rather than about collections.
+    pub inside: Vec<String>,
+}
+
+/// A root menu: Settings' list of panes, Collections' list of collections.
+///
+/// These two pages were a name at the left edge and a grey number at the right
+/// with two thirds of the screen left over, which is a list rather than a
+/// screen. Three things change that, and they are the three every menu on a
+/// device like this has:
+///
+///   * **Rows are cards.** Text laid straight onto the backdrop has nothing to
+///     tell the eye where one row stops. A faint plate per row does.
+///   * **The count is a chip, not digits at the far edge.** A number 500 points
+///     from the name it belongs to is not read as belonging to it.
+///   * **The leftover space carries the description.** The note for the row the
+///     cursor is on, which is what the empty two thirds was there for.
+fn draw_menu(
+    f: &mut Frame,
+    area: Rect,
+    rows: &[MenuRow],
+    at: usize,
+    rule_before: Option<usize>,
+) {
+    if rows.is_empty() {
+        let spec = f.spec("Nothing here.", size::TITLE);
+        f.label_centered(&spec, area, paint::DIM);
+        return;
+    }
+    // Seven columns and five: wide enough for a long collection name, and a
+    // side wide enough for a sentence about it.
+    let [list, aside] = <[Rect; 2]>::try_from(area.cols(size::GAP, &[7, 5])).unwrap();
+
+    let step = size::ROW + 4.0;
+    let room = list.h - 10.0 - rule_before.map_or(0.0, |_| size::GAP * 1.6);
+    let fits = (room / step).floor().max(1.0) as usize;
+    let first = at
+        .saturating_sub(fits.saturating_sub(1))
+        .min(rows.len().saturating_sub(1));
+    let shift = |offset: usize| match rule_before {
+        Some(r) if offset >= r && r > first => size::GAP * 1.6,
+        _ => 0.0,
+    };
+    // The column is a panel of its own, full height, with the cards inside it.
+    //
+    // Centering the cards in the empty column was the other way to stop eight
+    // rows hanging from the top of a screen with four hundred points of nothing
+    // under them, and it reads worse: a floating stack beside a full-height
+    // side panel has nothing holding it. A container has the two columns agree.
+    f.pane(list, paint::BAR, size::ROUND);
+    let list = list.inset(Edges::all(5.0));
+    let top = list.y;
+
+    for (offset, row) in rows.iter().enumerate().skip(first).take(fits) {
+        let slot = Rect::new(
+            list.x,
+            top + (offset - first) as f32 * step + shift(offset),
+            list.w,
+            step,
+        );
+        if slot.bottom() > list.bottom() {
+            break;
+        }
+        if rule_before == Some(offset) && offset > first {
+            f.fill(
+                Rect::new(list.x, slot.y - size::GAP * 0.8, list.w, 1.0),
+                paint::RULE,
+                0.0,
+            );
+        }
+        // The card, with the gap between cards taken out of the slot rather
+        // than added to it — so the rows keep their spacing and the list keeps
+        // its count.
+        let card = Rect::new(slot.x, slot.y + 2.0, slot.w, slot.h - 4.0);
+        f.hits.row(f.px(card), offset);
+        let on = offset == at;
+        f.hovering(offset, card, size::ROUND_SMALL);
+        f.pane(
+            card,
+            if on { paint::CURSOR } else { paint::CARD },
+            size::ROUND_SMALL,
+        );
+
+        let inside = card.inset(Edges::xy(10.0, 4.0));
+        let [name, chip] = <[Rect; 2]>::try_from(inside.cols(6.0, &[9, 3])).unwrap();
+        let spec = f.wrapped(&row.title, size::LABEL, name.w, 1);
+        f.label(&spec, name, if on { paint::TEXT } else { paint::DIM });
+        if !row.count.is_empty() {
+            let spec = f.spec(row.count.as_str(), 10.0);
+            let (text_w, _) = f.painter.measure(f.gfx, &spec);
+            let w = (f.screen.scale.pt(text_w as f32) + 12.0).max(24.0);
+            let plate = Rect::new(
+                chip.right() - w,
+                chip.y + (chip.h - 15.0) / 2.0,
+                w,
+                15.0,
+            );
+            f.fill(plate, if on { paint::HOVER } else { paint::BAR }, 7.0);
+            f.label_centered(&spec, plate, if on { paint::TEXT } else { paint::DIM });
+        }
+    }
+
+    // The side: what the highlighted row is.
+    f.pane(aside, f.glass_tint, size::ROUND);
+    let Some(row) = rows.get(at) else { return };
+    let inner = aside.inset(Edges::all(10.0));
+    let spec = f.wrapped(&row.title, size::TITLE, inner.w, 2);
+    let (_, title_h) = f.painter.measure(f.gfx, &spec);
+    f.label(&spec, inner, paint::TEXT);
+    let after = inner.y + f.screen.scale.pt(title_h as f32) + 8.0;
+    let body = Rect::new(inner.x, after, inner.w, inner.bottom() - after);
+    let mut y = body.y;
+    if !row.note.is_empty() {
+        let spec = f.wrapped(&row.note, size::LABEL, body.w, 6);
+        let (_, h) = f.painter.measure(f.gfx, &spec);
+        f.label(&spec, Rect { y, ..body }, paint::DIM);
+        y += f.screen.scale.pt(h as f32) + 10.0;
+    }
+    for name in &row.inside {
+        let line = Rect::new(body.x, y, body.w, 15.0);
+        if line.bottom() > body.bottom() {
+            break;
+        }
+        // A dot, then the name — so a list of six titles reads as a list and
+        // not as a paragraph that has lost its punctuation.
+        f.fill(Rect::new(line.x + 1.0, line.y + 6.0, 3.0, 3.0), paint::FAINT, 1.5);
+        let spec = f.wrapped(name, 10.0, line.w - 10.0, 1);
+        f.label(&spec, Rect { x: line.x + 10.0, ..line }, paint::FAINT);
+        y += 15.0;
+    }
 }
 
 fn draw_rule_list(
@@ -1472,8 +1648,7 @@ fn draw_rule_list(
             f.pane(line, paint::CURSOR, size::ROUND_SMALL);
         }
         let inside = line.inset(Edges::xy(8.0, 5.0));
-        let [title, n] =
-            <[Rect; 2]>::try_from(inside.row(8.0, &[Size::Grow(1.0), Size::Fixed(60.0)])).unwrap();
+        let [title, n] = <[Rect; 2]>::try_from(inside.cols(8.0, &[9, 3])).unwrap();
         let spec = f.wrapped(name, size::LABEL, title.w, 1);
         f.label(&spec, title, if on { paint::TEXT } else { paint::DIM });
         let spec = f.spec(count.as_str(), 10.0);
@@ -1750,12 +1925,17 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     }
 
     if lib.view == library::View::Panes {
-        let rows: Vec<_> = lib
+        let rows: Vec<MenuRow> = lib
             .panes
             .iter()
-            .map(|p| (p.label.to_owned(), format!("{}", p.entries.len())))
+            .map(|p| MenuRow {
+                title: p.label.to_owned(),
+                count: p.entries.len().to_string(),
+                note: p.blurb.to_owned(),
+                inside: p.entries.iter().take(6).map(|e| e.label.to_owned()).collect(),
+            })
             .collect();
-        draw_picker(f, area, &rows, lib.pane_at, rows.len());
+        draw_menu(f, area, &rows, lib.pane_at, None);
         return;
     }
 
@@ -1763,7 +1943,7 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         return;
     };
     let [list, aside] =
-        <[Rect; 2]>::try_from(area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]))
+        <[Rect; 2]>::try_from(area.cols(size::GAP, &[8, 4]))
             .unwrap();
 
     let step = size::ROW;
@@ -1814,7 +1994,7 @@ fn draw_settings(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     }
 
     // What the highlighted setting does.
-    f.pane(aside, paint::COLUMN, size::ROUND);
+    f.pane(aside, f.glass_tint, size::ROUND);
     if let Some(entry) = pane.entries.get(lib.option_at) {
         let inner = aside.inset(size::PAD);
         let title = f.wrapped(entry.label, size::TITLE, inner.w, 2);

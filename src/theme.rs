@@ -363,6 +363,47 @@ pub fn set_dir(media_root: &Path, set: &str, look: &str) -> PathBuf {
     media_root.join("_platforms").join("sets").join(set).join(look)
 }
 
+/// The sets that are actually on this machine, and how many pictures each has.
+///
+/// `iconart::set_ids()` is the shipped catalog — every set the app knows how to
+/// download. Offering that as the choice list means picking one that was never
+/// downloaded, and the screen then draws nothing with no way to tell why. What
+/// belongs in the list is what has files under it.
+pub fn installed_sets(media_root: &Path) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = crate::iconart::set_ids()
+        .into_iter()
+        .filter_map(|id| {
+            let n = count_pictures(&media_root.join("_platforms").join("sets").join(&id));
+            (n > 0).then_some((id, n))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Every picture under a set, across all the looks it keeps side by side.
+fn count_pictures(set: &Path) -> usize {
+    std::fs::read_dir(set)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|look| {
+            std::fs::read_dir(look.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|f| {
+                    f.path()
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| ICON_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+                        .unwrap_or(false)
+                })
+                .count()
+        })
+        .sum()
+}
+
 /// How many pictures a named set holds in each of the looks it offers.
 pub fn set_counts(media_root: &Path, set: &str, looks: &[String], slugs: &[String]) -> Vec<(String, usize)> {
     looks

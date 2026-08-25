@@ -222,6 +222,15 @@ pub enum Size {
     Grow(f32),
 }
 
+/// The grid the column widths in this app are expressed against.
+///
+/// Twelve because it divides by two, three, four and six, which covers every
+/// split a list-and-pane layout wants. Borrowed from the stylesheets on
+/// purpose: hand-written widths are how a value column came out 110 points on
+/// one screen and 56 on another for no reason anybody could state, and how each
+/// of them had to be guessed again when the panel changed size.
+pub const COLUMNS: u16 = 12;
+
 impl Rect {
     pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Rect { x, y, w, h }
@@ -294,6 +303,16 @@ impl Rect {
     /// Fixed children take what they ask for; the rest share what is left in
     /// proportion to their weight. A row that does not fit gives its growing
     /// children nothing rather than negative widths.
+    /// Split across a twelve-column grid.
+    ///
+    /// `spans` are column counts, and what is left over goes to the last one —
+    /// so `cols(gap, &[8, 4])` is two thirds and one third whatever the panel
+    /// is, rather than a width somebody measured once.
+    pub fn cols(self, gap: f32, spans: &[u16]) -> Vec<Rect> {
+        let sizes: Vec<Size> = spans.iter().map(|n| Size::Grow(*n as f32)).collect();
+        self.row(gap, &sizes)
+    }
+
     pub fn row(self, gap: f32, children: &[Size]) -> Vec<Rect> {
         let widths = share(self.w, gap, children);
         let mut out = Vec::with_capacity(children.len());
@@ -415,6 +434,37 @@ fn share(total: f32, gap: f32, children: &[Size]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Twelve columns, and the split holds whatever the panel is.
+    ///
+    /// The point of the grid: a hand-written width is right on one screen and
+    /// arbitrary on every other, and has to be guessed again each time the
+    /// layout moves.
+    #[test]
+    fn columns_split_by_share_not_by_measurement() {
+        let wide = Rect::new(0.0, 0.0, 1200.0, 100.0);
+        let cols = wide.cols(0.0, &[8, 4]);
+        assert_eq!(cols.len(), 2);
+        assert_eq!(cols[0].w, 800.0);
+        assert_eq!(cols[1].w, 400.0);
+        assert_eq!(cols[1].x, 800.0, "the second column does not start where the first ends");
+
+        // The same shares on a panel half the size.
+        let narrow = Rect::new(0.0, 0.0, 600.0, 100.0);
+        let cols = narrow.cols(0.0, &[8, 4]);
+        assert_eq!(cols[0].w, 400.0);
+        assert_eq!(cols[1].w, 200.0);
+    }
+
+    /// The gap comes out of the columns, not out of the rectangle.
+    #[test]
+    fn the_gap_sits_between_the_columns() {
+        let r = Rect::new(0.0, 0.0, 120.0, 10.0);
+        let cols = r.cols(20.0, &[6, 6]);
+        assert_eq!(cols[0].w, 50.0);
+        assert_eq!(cols[1].x, 70.0);
+        assert_eq!(cols[1].right(), 120.0, "the split overflowed its own rectangle");
+    }
 
     /// The handheld, at the size the whole exercise is about.
     const POCKET: (f32, f32) = (960.0, 720.0);

@@ -15,5 +15,6 @@ pub mod library;
 pub mod settings;
 pub mod ports;
 pub mod status;
+pub mod sysinfo;
 pub mod wifi;
 pub mod text;

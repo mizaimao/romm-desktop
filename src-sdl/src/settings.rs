@@ -238,6 +238,10 @@ pub fn look(panes: &[Pane]) -> Look {
 pub struct Pane {
     pub id: &'static str,
     pub label: &'static str,
+    /// One line saying what is in here, for the root menu's side panel.
+    /// A list of eight names with a number beside each says nothing about
+    /// which one holds the thing you came to change.
+    pub blurb: &'static str,
     pub entries: Vec<Entry>,
 }
 
@@ -294,9 +298,9 @@ fn device_entries() -> Vec<Entry> {
     if out.is_empty() {
         out.push(Entry {
             field: "",
-            label: "No device controls",
-            help: "This build has no backlight, battery or radio to offer — it is running on a desktop.",
-            kind: Kind::ReadOnly(String::new()),
+            label: "Backlight, battery, Wi-Fi",
+            help: "This build has no backlight, battery or radio to offer — it is running on a desktop. On the handheld these are the controls for them.",
+            kind: Kind::ReadOnly("Not on this machine".to_owned()),
         });
     }
     out
@@ -439,6 +443,7 @@ pub fn panes(
         Pane {
             id: "general",
             label: "General",
+            blurb: "The RomM server and the accounts games are looked up against, plus what happens when a game closes.",
             entries: vec![
                 Entry {
                     field: "server.url",
@@ -518,6 +523,7 @@ pub fn panes(
         Pane {
             id: "appearance",
             label: "Appearance",
+            blurb: "The color scheme, the moving backdrop behind everything, how much glass the panels have, and what the lists show.",
             entries: vec![
                 Entry {
                     field: "media.list_art",
@@ -595,7 +601,7 @@ pub fn panes(
                     field: "icons.style",
                     label: "Console picture",
                     help: "How a console is drawn on the Library screen.",
-                    kind: choice(icon_style_options(&cfg.icons.set), &cfg.icons.style),
+                    kind: choice(icon_style_options(&cfg.media_dir(), &cfg.icons.set), &cfg.icons.style),
                 },
                 Entry {
                     field: "shaders.motion",
@@ -617,11 +623,13 @@ pub fn panes(
         Pane {
             id: "control",
             label: "Control",
+            blurb: "Which button does what in this app, plus the two face-button swaps for pads that report them the other way round.",
             entries: control,
         },
         Pane {
             id: "library",
             label: "Library",
+            blurb: "Where the ROMs live, whether RomM's own collections appear beside yours, and what to fetch.",
             entries: vec![
                 Entry {
                     field: "library.local_root",
@@ -658,35 +666,51 @@ pub fn panes(
         Pane {
             id: "emulators",
             label: "Emulators",
+            blurb: "Which core runs each console, and what RetroArch is told to do when a game starts and stops.",
             entries: emulators,
         },
         Pane {
             id: "iconsets",
             label: "Icon sets",
+            blurb: "The console pictures the grid draws, and which downloaded set they come from.",
             entries: vec![
                 Entry {
                     field: "icons.set",
                     label: "Drawing from",
                     help: "Which set the console pictures come from.",
-                    kind: choice(icon_set_options(), &cfg.icons.set),
+                    kind: choice(icon_set_options(&cfg.media_dir()), &cfg.icons.set),
                 },
                 Entry {
                     field: "icons.style",
                     label: "Style",
                     help: "How a console is drawn within that set.",
-                    kind: choice(icon_style_options(&cfg.icons.set), &cfg.icons.style),
+                    kind: choice(icon_style_options(&cfg.media_dir(), &cfg.icons.set), &cfg.icons.style),
                 },
             ],
         },
         Pane {
             id: "device",
             label: "Device",
+            blurb: "Screen brightness, Wi-Fi, and the rest of what this machine itself does.",
             entries: device_entries(),
         },
         Pane {
             id: "about",
             label: "About",
-            entries: vec![
+            blurb: "This build, and what it is running on.",
+            entries: about_entries(),
+        },
+    ]
+}
+
+/// The About page: this build, then what it is running on.
+///
+/// The machine facts are the ones KNULLI's own System Information page shows,
+/// read the same way it reads them. A Mac has no thermal zone and no board
+/// name in the same place; those lines are simply absent there rather than
+/// showing a zero.
+fn about_entries() -> Vec<Entry> {
+    let mut entries = vec![
                 Entry {
                     field: "",
                     label: "Version",
@@ -695,7 +719,7 @@ pub fn panes(
                 },
                 Entry {
                     field: "",
-                    label: "Device",
+                    label: "Scheme",
                     help: "Which platform scheme this build selected.",
                     kind: Kind::ReadOnly(romm_desktop::platform::current().scheme().to_owned()),
                 },
@@ -711,9 +735,14 @@ pub fn panes(
                     help: "github.com/mizaimao/romm-desktop",
                     kind: Kind::ReadOnly("romm-desktop".to_owned()),
                 },
-            ],
-        },
-    ]
+    ];
+    entries.extend(crate::sysinfo::facts().into_iter().map(|(label, value)| Entry {
+        field: "",
+        label,
+        help: "Read from this machine.",
+        kind: Kind::ReadOnly(value),
+    }));
+    entries
 }
 
 /// How a game is launched — the desktop's Emulators pane minus the two that
@@ -773,42 +802,50 @@ fn choice(options: Vec<(String, String)>, current: &str) -> Kind {
 }
 
 /// The icon sets the shipped table describes.
-fn icon_set_options() -> Vec<(String, String)> {
-    romm_desktop::iconart::set_ids()
-        .into_iter()
-        .map(|id| {
+fn icon_set_options(media_root: &std::path::Path) -> Vec<(String, String)> {
+    let installed = romm_desktop::theme::installed_sets(media_root);
+    if installed.is_empty() {
+        // Nothing downloaded. One row saying so beats a list of names that all
+        // draw a blank screen.
+        return vec![(String::new(), "None downloaded".to_owned())];
+    }
+    std::iter::once((String::new(), "Off".to_owned()))
+        .chain(installed.into_iter().map(|(id, n)| {
             let label = id.trim_end_matches("-es-de").replace('-', " ");
-            (id, label)
-        })
+            (id, format!("{label} ({n})"))
+        }))
         .collect()
 }
 
 /// The looks one set offers. A set with no table entry offers nothing rather
 /// than a free-text box.
-fn icon_style_options(set: &str) -> Vec<(String, String)> {
-    // An empty set id is the default — the app has not been told which, so the
-    // looks come from the first one rather than from nothing. A list with
-    // nothing in it is a row that cannot be changed and does not say why.
-    let set = if set.is_empty() {
-        romm_desktop::iconart::set_ids()
-            .first()
-            .cloned()
-            .unwrap_or_default()
-    } else {
-        set.to_owned()
+fn icon_style_options(media_root: &std::path::Path, set: &str) -> Vec<(String, String)> {
+    // Same rule as the sets themselves: a look with no pictures under it is a
+    // choice that draws a blank screen, so it is not offered. An empty set id
+    // means none is chosen, and then there are no looks to pick between.
+    if set.is_empty() {
+        return vec![(String::new(), "None".to_owned())];
+    }
+    let Some(art) = romm_desktop::iconart::of(set) else {
+        return vec![(String::new(), "None".to_owned())];
     };
-    romm_desktop::iconart::of(&set)
-        .map(|art| {
-            art.looks
-                .iter()
-                .map(|l| (l.id.clone(), l.label.clone()))
-                .collect::<Vec<_>>()
+    let looks: Vec<(String, String)> = art
+        .looks
+        .iter()
+        .filter(|l| {
+            romm_desktop::theme::set_dir(media_root, set, &l.id)
+                .read_dir()
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false)
         })
-        .filter(|looks: &Vec<(String, String)>| !looks.is_empty())
-        .unwrap_or_else(|| vec![("hardware".to_owned(), "Hardware".to_owned())])
+        .map(|l| (l.id.clone(), l.label.clone()))
+        .collect();
+    if looks.is_empty() {
+        return vec![(String::new(), "None".to_owned())];
+    }
+    looks
 }
 
-/// The motion shaders the app knows how to write a preset for, plus off.
 fn motion_options() -> Vec<(String, String)> {
     std::iter::once((String::new(), "Off".to_owned()))
         .chain(
@@ -882,6 +919,17 @@ fn autofire_at(current: Option<&str>) -> usize {
 /// into this front end's own file. The field is `table.key`; anything without a
 /// dot is not ours to write.
 pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
+    write_to(FILE, field, value)
+}
+
+/// The same, into a named file.
+///
+/// Split out so the wiring audit can round-trip every setting through a scratch
+/// file: change it, read the file back, and check the value actually came back
+/// changed. A field name that does not match anything in `Config` writes
+/// happily into a table nothing reads, which looks exactly like it worked —
+/// that is the failure this exists to catch.
+pub fn write_to(file: &str, field: &str, value: &Written) -> anyhow::Result<()> {
     let Some((table, key)) = field.split_once('.') else {
         anyhow::bail!("{field} is not a config field");
     };
@@ -894,7 +942,7 @@ pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
     // Only now, once it is settled that something is actually going to be
     // written. Seeding before the hardware branch created a config file for a
     // brightness change that never touches one — including while the tests ran.
-    seed()?;
+    seed_into(file)?;
     if table == "bindings_pad" {
         let Written::Text(v) = value else {
             anyhow::bail!("a binding is a button number or nothing");
@@ -908,9 +956,9 @@ pub fn write(field: &str, value: &Written) -> anyhow::Result<()> {
     }
     let table = toml_table(table);
     match value {
-        Written::Bool(v) => config::set_table_bool(FILE, table, key, *v),
-        Written::Number(v) => config::set_table_number(FILE, table, key, *v),
-        Written::Text(v) => config::set_table_entry(FILE, table, key, v),
+        Written::Bool(v) => config::set_table_bool(file, table, key, *v),
+        Written::Number(v) => config::set_table_number(file, table, key, *v),
+        Written::Text(v) => config::set_table_entry(file, table, key, v),
     }
 }
 
@@ -946,12 +994,16 @@ pub fn set_pad_binding(action: &str, button: Option<u8>) -> anyhow::Result<()> {
 /// to its default. One press on the settings screen and the server address was
 /// gone.
 fn seed() -> anyhow::Result<()> {
-    if Config::exists(FILE) {
+    seed_into(FILE)
+}
+
+fn seed_into(file: &str) -> anyhow::Result<()> {
+    if Config::exists(file) {
         return Ok(());
     }
     if Config::exists("config.toml") {
-        std::fs::copy("config.toml", FILE)
-            .with_context(|| format!("seeding {FILE} from config.toml"))?;
+        std::fs::copy("config.toml", file)
+            .with_context(|| format!("seeding {file} from config.toml"))?;
     }
     Ok(())
 }
@@ -1632,5 +1684,116 @@ mod tests {
     #[test]
     fn the_writer_refuses_a_field_with_no_table() {
         assert!(write("nodot", &Written::Bool(true)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod wiring {
+    use super::*;
+
+    /// Every setting that claims a config field is actually read back.
+    ///
+    /// This is the audit. A settings row is "wired" when changing it changes
+    /// what the app reads, and the way to know that is to change it and read.
+    /// The failure it catches is silent: `write` will happily put
+    /// `library.folder = "x"` into the file whether or not `Config` has a
+    /// `folder` in `[library]`, the row will show the new value until the
+    /// screen is rebuilt, and then it reverts with no error anywhere.
+    ///
+    /// `device.*` is excluded because it is hardware rather than a file, and
+    /// `bindings_pad.*` because it goes through `Bindings::set_pad` and has its
+    /// own tests. Everything else round-trips.
+    #[test]
+    fn every_setting_that_names_a_field_is_read_back() {
+        let dir = std::env::temp_dir().join("romm-wiring");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("romm-sdl.toml").to_string_lossy().into_owned();
+        std::fs::write(&file, "").unwrap();
+
+        let consoles = vec![("snes".to_owned(), "Super Nintendo".to_owned())];
+        let map = romm_desktop::coremap::CoreMap::embedded();
+        let load = || Config::load_from(std::path::Path::new(&file)).unwrap_or_default();
+
+        let mut checked = 0;
+        let mut unwired: Vec<String> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
+        // Indices rather than the entries themselves: the panes are rebuilt
+        // after each write, so a borrow taken before it would be of the old
+        // ones.
+        let count = |cfg: &Config| {
+            panes(cfg, &consoles, &map)
+                .iter()
+                .map(|p| p.entries.len())
+                .sum::<usize>()
+        };
+        let total = count(&load());
+        for i in 0..total {
+            let cfg = load();
+            let all: Vec<(String, Kind)> = panes(&cfg, &consoles, &map)
+                .into_iter()
+                .flat_map(|p| p.entries)
+                .map(|e| (e.field.to_owned(), e.kind))
+                .collect();
+            let (field, kind) = all[i].clone();
+            if field.is_empty() {
+                skipped.push(format!("(no field) {kind:?}"));
+                continue;
+            }
+            if field.starts_with("device.") || field.starts_with("bindings_pad.") {
+                skipped.push(format!("{field} — hardware or binding, tested elsewhere"));
+                continue;
+            }
+            // A value this setting is definitely not on right now.
+            let want = match &kind {
+                Kind::Toggle(on) => Written::Bool(!on),
+                Kind::Number { value, min, max, .. } => {
+                    Written::Number(if *value == *min { *max } else { *min })
+                }
+                Kind::Text { .. } => Written::Text("romm-wiring-probe".to_owned()),
+                Kind::Choice { at, options } if options.len() > 1 => {
+                    let other = if *at == 0 { 1 } else { 0 };
+                    Written::Text(options[other].0.clone())
+                }
+                // A choice of one and the rows that hold no value: nothing to
+                // change, so nothing to check.
+                _ => {
+                    skipped.push(format!("{field} — nothing else to change it to"));
+                    continue;
+                }
+            };
+            write_to(&file, &field, &want).unwrap_or_else(|e| panic!("{field}: {e}"));
+
+            let after = load();
+            let now = panes(&after, &consoles, &map)
+                .into_iter()
+                .flat_map(|p| p.entries)
+                .find(|e| e.field == field)
+                .map(|e| e.kind);
+            let stuck = match (&want, &now) {
+                (Written::Bool(v), Some(Kind::Toggle(on))) => on != v,
+                (Written::Number(v), Some(Kind::Number { value, .. })) => value != v,
+                (Written::Text(v), Some(Kind::Text { value, .. })) => value != v,
+                (Written::Text(v), Some(Kind::Choice { at, options })) => {
+                    options.get(*at).map(|o| &o.0) != Some(v)
+                }
+                _ => true,
+            };
+            if stuck {
+                unwired.push(field.clone());
+            }
+            checked += 1;
+        }
+
+        // What was passed over, and why, so the number that was actually
+        // proved is visible rather than implied.
+        eprintln!("wired and checked: {checked}");
+        eprintln!("not checked: {skipped:#?}");
+        assert!(
+            unwired.is_empty(),
+            "{} of {checked} settings write somewhere nothing reads: {unwired:#?}",
+            unwired.len()
+        );
+        assert!(checked > 20, "only {checked} settings were checked");
     }
 }

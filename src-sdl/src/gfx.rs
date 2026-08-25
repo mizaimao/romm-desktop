@@ -72,6 +72,10 @@ in vec2 v_quad;
 out vec4 color;
 uniform sampler2D u_texture;
 uniform vec4 u_tint;
+/// The tint at the bottom edge. Equal to `u_tint` for a flat fill; different
+/// for glass, which is lit from above the way a real sheet is — a flat tint
+/// over a blur reads as a gray slab, which is what the panels were.
+uniform vec4 u_tint2;
 /// Half the quad, in pixels, and how round its corners are. Zero radius is a
 /// plain rectangle and costs one comparison.
 uniform vec2 u_half;
@@ -83,7 +87,7 @@ float rounded(vec2 p, vec2 half_size, float r) {
 }
 
 void main() {
-  vec4 texel = texture(u_texture, v_uv) * u_tint;
+  vec4 texel = texture(u_texture, v_uv) * mix(u_tint, u_tint2, v_quad.y);
   if (u_radius > 0.0) {
     vec2 p = (v_quad - 0.5) * 2.0 * u_half;
     // Smoothed across one pixel, which is what stops a rounded corner looking
@@ -175,6 +179,7 @@ pub struct Gfx {
     vbo: u32,
     u_screen: i32,
     u_tint: i32,
+    u_tint2: i32,
     u_half: i32,
     u_radius: i32,
     u_rect: i32,
@@ -185,6 +190,9 @@ pub struct Gfx {
     /// window's origin, and everything drawn after a glass capture — which is
     /// everything — landed offset from the panel it belonged to.
     origin: (f32, f32),
+    /// The bottom tint for the next quad, when it is a gradient. Set around a
+    /// draw like `radius`, so the call sites that want a flat fill say nothing.
+    fade: std::cell::Cell<Option<Rgba>>,
     /// How round the next quad's corners are, in pixels. Set around a draw
     /// rather than passed to it, so the twenty call sites that want square
     /// corners say nothing.
@@ -232,8 +240,10 @@ impl Gfx {
             let blank = upload(1, 1, &[255, 255, 255, 255]);
             Ok(Gfx {
                 origin: (0.0, 0.0),
+                fade: std::cell::Cell::new(None),
                 u_screen: uniform(program, "u_screen"),
                 u_tint: uniform(program, "u_tint"),
+                u_tint2: uniform(program, "u_tint2"),
                 u_half: uniform(program, "u_half"),
                 u_radius: uniform(program, "u_radius"),
                 u_rect: uniform(program, "u_rect"),
@@ -279,6 +289,17 @@ impl Gfx {
     /// Scoped rather than a parameter, because a card is a picture inside a
     /// panel inside a column and all three want the same corner — and because
     /// every other call site wants none and should not have to say so.
+    /// Draw the next quads with their tint fading to `bottom` down the quad.
+    ///
+    /// Set around a draw rather than passed to it, the same way `rounded` is, so
+    /// the call sites that want a flat fill say nothing.
+    pub fn faded<R>(&self, bottom: Rgba, body: impl FnOnce() -> R) -> R {
+        let was = self.fade.replace(Some(bottom));
+        let out = body();
+        self.fade.set(was);
+        out
+    }
+
     pub fn rounded(&self, pixels: f32, body: impl FnOnce()) {
         let was = self.radius.get();
         self.radius.set(pixels.max(0.0));
@@ -363,6 +384,8 @@ impl Gfx {
             gl::UseProgram(self.program);
             gl::Uniform2f(self.u_screen, self.width, self.height);
             gl::Uniform4f(self.u_tint, tint.0, tint.1, tint.2, tint.3);
+            let bottom = self.fade.get().unwrap_or(tint);
+            gl::Uniform4f(self.u_tint2, bottom.0, bottom.1, bottom.2, bottom.3);
             gl::Uniform2f(self.u_half, w / 2.0, h / 2.0);
             gl::Uniform4f(self.u_rect, x, y, w, h);
             // Never more than half the shorter side, or the corners meet in
