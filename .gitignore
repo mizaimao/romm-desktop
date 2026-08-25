@@ -122,3 +122,7 @@ reference/
 # The manifest is committed so anybody gets byte-for-byte the same ones.
 assets/fonts/*
 !assets/fonts/MANIFEST.tsv
+
+# The aarch64 cross toolchain, fetched by scripts/knulli.sh and removable
+# with `knulli.sh clean`. Large, and not ours.
+.toolchain/

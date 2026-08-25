@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+#
+# Build romm-sdl for the Miyoo Flip running KNULLI, and put it there.
+#
+# Everything this installs lives in one folder inside the project:
+# `.toolchain/`. Not /usr/local, not /opt/homebrew, not ~/.cargo/bin, and not
+# ~/.rustup — it carries its own rust toolchain rather than adding a target to
+# yours. `knulli.sh clean` is `rm -rf` on one directory and there is nothing
+# else to find.
+#
+# That costs about a gigabyte more than sharing the toolchain already on the
+# machine. It is the right trade for a thing installed to talk to one handheld:
+# a large folder you can see and delete beats sixty megabytes in a path nobody
+# will remember six months from now. `SHARED=1` takes the other side of it.
+#
+#   ./scripts/knulli.sh toolchain   fetch zig + cargo-zigbuild into .toolchain/
+#   ./scripts/knulli.sh sysroot     copy the device's SDL2 libraries here
+#   ./scripts/knulli.sh build       cross-compile for aarch64 KNULLI
+#   ./scripts/knulli.sh install     send the build to the device
+#   ./scripts/knulli.sh clean       remove every trace of the above
+#   ./scripts/knulli.sh all         toolchain, sysroot, build, install
+#
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+KIT="$HERE/.toolchain"
+ZIG_VERSION="0.15.1"
+# Checked against the tarball after download. Not paranoia about ziglang.org —
+# a truncated download unpacks into a compiler that fails in a way that reads
+# like a bug in this project.
+ZIG_SHA256="c4bd624d901c1268f2deb9d8eb2d86a2f8b97bafa3f118025344242da2c54d7b"
+# The device: password auth, no keys. Overridable, because an address on a
+# home network is not a constant.
+FLIP="${FLIP:-10.10.10.187}"
+FLIP_PASSWORD="${FLIP_PASSWORD:-linux}"
+# Where it lands on the device. Under /userdata because that is the persistent
+# partition and the only one that is not read-only.
+REMOTE="/userdata/system/romm"
+
+# The target triple, with the glibc the device actually has.
+#
+# KNULLI's is 2.40 (Buildroot). Asking zig for an older one is safe — a binary
+# built against 2.36 runs on 2.40 — and asking for a newer one is a binary that
+# will not start, with a message about a version node that names no file.
+TARGET="aarch64-unknown-linux-gnu"
+GLIBC="2.36"
+
+say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
+
+# zig names its tarballs architecture first — `zig-aarch64-macos-0.15.1`. It
+# used to be the other way round, and the old spelling 404s.
+case "$(uname -m)" in
+  arm64|aarch64) ZIG_HOST="aarch64-macos" ;;
+  *)             ZIG_HOST="x86_64-macos" ;;
+esac
+ZIG_NAME="zig-$ZIG_HOST-$ZIG_VERSION"
+ZIG_DIR="$KIT/$ZIG_NAME"
+
+cmd_toolchain() {
+  mkdir -p "$KIT"
+  if [ ! -x "$ZIG_DIR/zig" ]; then
+    say "fetching zig $ZIG_VERSION ($ZIG_HOST)"
+    local tarball="$KIT/zig.tar.xz"
+    curl -fL --progress-bar \
+      "https://ziglang.org/download/$ZIG_VERSION/$ZIG_NAME.tar.xz" \
+      -o "$tarball"
+    local got
+    got="$(shasum -a 256 "$tarball" | cut -d" " -f1)"
+    if [ "$got" != "$ZIG_SHA256" ]; then
+      echo "zig checksum mismatch: got $got, expected $ZIG_SHA256" >&2
+      rm -f "$tarball"
+      exit 1
+    fi
+    tar -xJf "$tarball" -C "$KIT"
+    rm -f "$tarball"
+  fi
+  [ -x "$ZIG_DIR/zig" ] || { echo "zig did not unpack to $ZIG_DIR" >&2; exit 1; }
+
+  if [ ! -x "$KIT/cargo/bin/cargo-zigbuild" ]; then
+    say "building cargo-zigbuild into .toolchain (not ~/.cargo/bin)"
+    cargo install cargo-zigbuild --root "$KIT/cargo" --locked
+  fi
+
+  # A rust toolchain of our own, inside the project.
+  #
+  # `rustup target add` writes into ~/.rustup, and a folder somebody will not
+  # remember is a folder that stays on the machine forever. `RUSTUP_HOME` moves
+  # the whole thing here instead, so removing this build means removing one
+  # directory and nothing else.
+  #
+  # It costs a second copy of rustc and cargo — about a gigabyte, against sixty
+  # megabytes for adding a target to the toolchain that is already installed.
+  # That is the trade: disk inside a folder you can delete, rather than a small
+  # thing you cannot find. `SHARED=1` takes the other side of it.
+  if [ "${SHARED:-0}" = "1" ]; then
+    say "adding the rust standard library for $TARGET to ~/.rustup (SHARED=1)"
+    say "  remove later with: rustup target remove $TARGET"
+    rustup target add "$TARGET"
+  else
+    say "installing a private rust toolchain in .toolchain/rustup"
+    # The same version the project pins, or a cross build and a native build
+    # are two different compilers and only one of them is the one CI runs.
+    local channel
+    channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$HERE/rust-toolchain.toml")"
+    RUSTUP_HOME="$KIT/rustup" rustup toolchain install "$channel" \
+      --profile minimal --target "$TARGET" --no-self-update
+  fi
+
+  say "toolchain ready in .toolchain/ — 'clean' removes it"
+}
+
+# The device's own SDL2, to link against.
+#
+# Only the SDL libraries, not the whole 1.6 GB of /usr/lib: the linker needs
+# these two by name and everything underneath them is resolved on the device at
+# run time, which is what --allow-shlib-undefined below says.
+cmd_sysroot() {
+  mkdir -p "$KIT/sysroot"
+  say "copying SDL2 from $FLIP"
+  scp_from "/usr/lib/libSDL2-2.0.so.0.3200.8" "$KIT/sysroot/libSDL2.so"
+  scp_from "/usr/lib/libSDL2_image-2.0.so.0.800.5" "$KIT/sysroot/libSDL2_image.so"
+  ls -la "$KIT/sysroot"
+}
+
+cmd_build() {
+  [ -x "$ZIG_DIR/zig" ] || { echo "run 'knulli.sh toolchain' first" >&2; exit 1; }
+  [ -f "$KIT/sysroot/libSDL2.so" ] || { echo "run 'knulli.sh sysroot' first" >&2; exit 1; }
+
+  say "building romm-sdl for $TARGET (glibc $GLIBC)"
+  # `--allow-shlib-undefined`: libSDL2.so names two dozen libraries of its own
+  # and every one of them is on the device. Copying all of them here to satisfy
+  # a link that does not need them is 1.6 GB for nothing.
+  # The private toolchain, unless the shared one was asked for. `rust-toolchain.toml`
+  # names a channel, and a RUSTUP_HOME that does not have it would try to fetch
+  # it mid-build — so the toolchain step installs exactly that one.
+  local home_args=()
+  if [ "${SHARED:-0}" != "1" ] && [ -d "$KIT/rustup" ]; then
+    home_args=(env "RUSTUP_HOME=$KIT/rustup")
+  fi
+
+  PATH="$ZIG_DIR:$KIT/cargo/bin:$PATH" \
+  RUSTFLAGS="-C link-arg=-L$KIT/sysroot -C link-arg=-Wl,--allow-shlib-undefined" \
+    "${home_args[@]}" cargo zigbuild \
+      --release \
+      -p romm-sdl \
+      --features knulli \
+      --target "$TARGET.$GLIBC"
+
+  local out="$HERE/target/$TARGET/release/romm-sdl"
+  file "$out" || true
+  say "built $(du -h "$out" | cut -f1) at $out"
+}
+
+cmd_install() {
+  local out="$HERE/target/$TARGET/release/romm-sdl"
+  [ -f "$out" ] || { echo "nothing built; run 'knulli.sh build'" >&2; exit 1; }
+
+  say "sending to $FLIP:$REMOTE"
+  ssh_do "mkdir -p $REMOTE/data"
+  scp_to "$out" "$REMOTE/romm-sdl"
+  # The tables the app reads at run time, beside the binary — it looks for
+  # `data/esde-core-map.json` relative to where it is started from.
+  for f in esde-core-map.json icon-set-art.toml arcade-names.json; do
+    [ -f "$HERE/data/$f" ] && scp_to "$HERE/data/$f" "$REMOTE/data/$f"
+  done
+  scp_to "$HERE/scripts/romm-launch.sh" "$REMOTE/romm-launch.sh"
+  ssh_do "chmod +x $REMOTE/romm-sdl $REMOTE/romm-launch.sh"
+
+  # A Ports entry, so it starts the way everything else on the device does.
+  ssh_do "cp $REMOTE/romm-launch.sh /userdata/roms/ports/RomM.sh && chmod +x /userdata/roms/ports/RomM.sh"
+  say "installed — it is under Ports as 'RomM'"
+}
+
+cmd_clean() {
+  say "removing .toolchain/ ($(du -sh "$KIT" 2>/dev/null | cut -f1 || echo nothing))"
+  rm -rf "$KIT"
+  say "removing the cross build output"
+  rm -rf "$HERE/target/$TARGET"
+
+  # Only if the shared home was used. Removing a target somebody added for their
+  # own reasons would be worse than leaving one behind.
+  if rustup target list --installed 2>/dev/null | grep -qx "$TARGET"; then
+    say "the shared toolchain also has $TARGET installed"
+    say "  that is from SHARED=1, or from something else you did"
+    say "  remove it with: rustup target remove $TARGET"
+  fi
+
+  cat <<'NOTE'
+
+Gone. Everything this script installed lived in .toolchain/ inside the project,
+including its own copy of rustc — nothing was written to ~/.rustup, /usr/local,
+/opt/homebrew or ~/.cargo/bin. What is left on this machine that was not here
+before is downloaded crates in ~/.cargo/registry, which every build in this
+project already shares.
+
+To check for yourself:  ls ~/.rustup/toolchains
+NOTE
+}
+
+# --- talking to the device -------------------------------------------------
+#
+# Password auth through `expect`. Not keys: KNULLI's sshd refuses them because
+# StrictModes sees a 0777 home, and an earlier attempt lost a day to that.
+
+ssh_do() {
+  expect -c "
+    set timeout 120
+    log_user 0
+    spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$FLIP {$1}
+    expect \"assword:\" { send \"$FLIP_PASSWORD\r\" }
+    log_user 1
+    expect eof
+  "
+}
+
+scp_to() {
+  expect -c "
+    set timeout 600
+    log_user 0
+    spawn scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {$1} root@$FLIP:{$2}
+    expect \"assword:\" { send \"$FLIP_PASSWORD\r\" }
+    expect eof
+  " >/dev/null
+  echo "  sent $(basename "$1")"
+}
+
+scp_from() {
+  expect -c "
+    set timeout 600
+    log_user 0
+    spawn scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$FLIP:{$1} {$2}
+    expect \"assword:\" { send \"$FLIP_PASSWORD\r\" }
+    expect eof
+  " >/dev/null
+  echo "  got $(basename "$2")"
+}
+
+case "${1:-}" in
+  toolchain) cmd_toolchain ;;
+  sysroot)   cmd_sysroot ;;
+  build)     cmd_build ;;
+  install)   cmd_install ;;
+  clean)     cmd_clean ;;
+  all)       cmd_toolchain; cmd_sysroot; cmd_build; cmd_install ;;
+  *) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+esac
