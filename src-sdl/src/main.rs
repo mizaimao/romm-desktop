@@ -506,6 +506,13 @@ fn main() -> Result<()> {
     // fetched: what is on disk is drawn and what is not is a flat card.
     let mut art = covers::Covers::new(
         config.media_dir(),
+        // Where the games actually are. On a handheld the device fixes this —
+        // `/userdata/roms` — and the config's answer is a default nobody set,
+        // which is the wrong place to look for artwork scraped beside a ROM.
+        romm_desktop::platform::current()
+            .default_library()
+            .map(|l| l.roms)
+            .unwrap_or_else(|| config.local_roms_dir()),
         config.media.list_art.clone(),
         (config.icons.style.clone(), config.icons.set.clone()),
     );
@@ -1664,12 +1671,18 @@ impl Frame<'_> {
     /// How wide a pill has to be to hold a word.
 
     /// A console's own picture, in a box.
-    fn console_art(&mut self, slug: &str, at: Rect, round: f32) {
+    /// Says whether there was one, so a caller can give the space to something
+    /// else rather than reserving it for a picture that does not exist.
+    fn console_art(&mut self, slug: &str, at: Rect, round: f32) -> bool {
         let at = self.px(at);
         let round = round * self.screen.scale.factor();
         let gfx = self.gfx;
-        if let Some(picture) = self.art.console(gfx, slug) {
-            gfx.rounded(round, || gfx.picture(picture, at, Rgba::WHITE));
+        match self.art.console(gfx, slug) {
+            Some(picture) => {
+                gfx.rounded(round, || gfx.picture(picture, at, Rgba::WHITE));
+                true
+            }
+            None => false,
         }
     }
 
@@ -2888,7 +2901,7 @@ fn draw_chrome(
         let here = widths[lib.section];
         // Far enough left that the chosen tab's right edge is inside, and never
         // so far that the row pulls away from its own start.
-        offset = (before + here - room).max(0.0).min(total - room);
+        offset = (before + here - room).clamp(0.0, total - room);
     }
 
     let left = tabs.x + size::GAP;
@@ -2899,7 +2912,10 @@ fn draw_chrome(
         x += width + size::TAB_GAP;
         // Outside its half of the row: not drawn at all rather than drawn over
         // the clock.
-        if slot.right() < left || slot.x > left + room {
+        // Both edges. Testing only where a tab *starts* lets one that starts
+        // inside and ends outside draw anyway — which is "Syncing" printed over
+        // the clock, and it is what the split was supposed to prevent.
+        if slot.right() < left || slot.right() > left + room {
             continue;
         }
         let spec = f.spec(section.label, font);
@@ -3251,17 +3267,21 @@ fn draw_detail(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         return;
     };
     let (art, rest) = area.split_top(area.w / lib.aspect.clamp(0.3, 3.0));
-    // The game's own cover if there is one, and the console's picture if not —
-    // an empty pane at the top of the column reads as a broken panel.
-    if !f.cover(
+    // The game's own cover if there is one, and the console's picture if not.
+    //
+    // And if neither — which is every game in a library scanned from a card
+    // with no artwork on it — the space is not reserved at all. It used to be:
+    // two thirds of the pane held an empty grey box, and the facts underneath
+    // were pushed off the bottom, so the column showed a blank rectangle,
+    // Console and Size. That is what "the side bar is meaningless" was.
+    let drew = f.cover(
         detail.id,
         &detail.platform,
         &detail.stem,
         art,
         size::ROUND_SMALL,
-    ) {
-        f.console_art(&detail.platform, art, size::ROUND_SMALL);
-    }
+    ) || f.console_art(&detail.platform, art, size::ROUND_SMALL);
+    let rest = if drew { rest } else { area };
 
     // The one place a title is not cut short: the card had to fit it into 150
     // points and this column is where the whole thing goes.

@@ -25,6 +25,8 @@ pub struct Detail {
     pub platform: String,
     /// What its artwork is filed under.
     pub stem: String,
+    /// The name on disk, extension and all.
+    pub file: String,
     pub size: String,
     pub favorite: bool,
     pub last_played: Option<String>,
@@ -46,6 +48,19 @@ impl Detail {
     /// The pane's rows, as label and value. Skipping what is not known rather
     /// than printing a blank: a field with nothing in it is a question the
     /// pane cannot answer, and a dash is not an answer.
+    /// Whether this game came with anything beyond its file.
+    ///
+    /// A card scan gives a name and a size; a RomM sync gives a rating, a
+    /// genre, a maker and a blurb. The pane shows the file itself only in the
+    /// first case, where without it there is nothing to read.
+    fn facts_are_thin(&self) -> bool {
+        self.rating.is_none()
+            && self.year.is_none()
+            && self.genres.is_empty()
+            && self.summary.is_none()
+            && self.maker.is_none()
+    }
+
     pub fn facts(&self) -> Vec<(&'static str, String)> {
         let mut out = vec![("Console", self.platform.clone())];
         // Rating first: on the desktop it is the line the eye goes to, and a
@@ -80,6 +95,24 @@ impl Detail {
             None => out.push(("Last played", "never".to_owned())),
         }
         out.push(("Downloaded", if self.downloaded { "yes" } else { "no" }.to_owned()));
+        // What the file is, when there is nothing else to say.
+        //
+        // A library scanned from a card has no rating, no genre, no blurb and
+        // no cover — the whole pane came down to Console and Size, which is
+        // less than the row already showed. These two are always knowable, and
+        // "which file is this, and is it a disc set" is a real question in a
+        // folder of `.chd`, `.m3u` and `.cue`.
+        if let Some(kind) = self
+            .file
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_uppercase())
+            .filter(|e| !e.is_empty() && e.len() <= 5)
+        {
+            out.push(("Format", kind));
+        }
+        if self.facts_are_thin() {
+            out.push(("File", self.file.clone()));
+        }
         out
     }
 }
@@ -270,6 +303,8 @@ pub struct Played {
     pub id: i64,
     /// What its artwork is filed under.
     pub stem: String,
+    /// The name on disk, extension and all.
+    pub file: String,
     pub name: String,
     pub platform: String,
     pub seconds: i64,
@@ -329,6 +364,8 @@ pub struct Library {
     /// beside the rows rather than on them because `gamelist::Row` is the
     /// shape a *list* needs, and where a file sits is not part of that.
     stems: Vec<String>,
+    /// The same rows' names on disk, extension and all.
+    files: Vec<String>,
     arranged: Vec<usize>,
     /// Which tab is open.
     pub section: usize,
@@ -421,18 +458,33 @@ impl Library {
         romm_collections: bool,
     ) -> Result<Self> {
         let cache = Cache::open(path).with_context(|| format!("opening {}", path.display()))?;
+        let names = romm_desktop::coremap::CoreMap::load_or_embedded(std::path::Path::new(
+            "data/esde-core-map.json",
+        ));
         let consoles = cache
             .platforms()
             .context("reading the consoles")?
             .into_iter()
             .map(|p| Console {
+                // A library scanned from the card knows the directory name and
+                // nothing else, so the console was called `psx` and `gbc` on
+                // screen. The proper name is already written down here — the
+                // same table the desktop reads — and the slug is the fallback
+                // rather than the answer.
+                name: match p.display_name.trim() {
+                    named if !named.is_empty() && named != p.fs_slug => named.to_owned(),
+                    _ => names
+                        .display_name(&p.fs_slug)
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| p.fs_slug.clone()),
+                },
                 slug: p.fs_slug,
-                name: p.display_name,
                 games: p.rom_count,
                 scripts: false,
             })
             .collect();
         let mut lib = Library {
+            files: Vec::new(),
             peeked: (String::new(), Vec::new()),
             looked_up: (0, None, Vec::new()),
             fetching: None,
@@ -497,6 +549,7 @@ impl Library {
             .unwrap_or_default()
             .into_iter()
             .map(|(r, seconds, runs, last)| Played {
+                file: r.fs_name.clone(),
                 id: r.id,
                 stem: Path::new(&r.fs_name)
                     .file_stem()
@@ -703,6 +756,14 @@ impl Library {
         Some(Detail {
             name: row.name.clone(),
             platform: row.platform.clone(),
+            // The name on disk. `stems` holds it without its extension, and
+            // "is this a .chd or an .m3u" is precisely the question the pane is
+            // there to answer when nothing else is known.
+            file: self
+                .files
+                .get(*self.arranged.get(self.at)?)
+                .cloned()
+                .unwrap_or_else(|| stem.clone()),
             stem: stem.clone(),
             id: row.id,
             size: romm_desktop::util::human(row.size_bytes as u64),
@@ -765,6 +826,7 @@ impl Library {
     fn take_rows(&mut self, fetched: Vec<romm_desktop::cache::RomRow>) {
         let favorites = self.cache.favorite_ids().unwrap_or_default();
         let roms_dir = self.roms_dir.clone();
+        self.files = fetched.iter().map(|r| r.fs_name.clone()).collect();
         self.stems = fetched
             .iter()
             .map(|r| {
@@ -1439,6 +1501,7 @@ mod tests {
     /// A library with rows already in it, so the tests need no database.
     fn seeded(rows: Vec<Row>) -> Library {
         let mut lib = Library {
+            files: Vec::new(),
             peeked: (String::new(), Vec::new()),
             looked_up: (0, None, Vec::new()),
             fetching: None,

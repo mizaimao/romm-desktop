@@ -36,6 +36,8 @@ enum State {
 
 pub struct Covers {
     media_root: PathBuf,
+    /// Where the ROMs are, for artwork the device scraped beside them.
+    roms_root: PathBuf,
     /// Which game artwork to prefer, from `[media] list_art`.
     look: String,
     /// Which console picture the grid draws, from `[icons] style`, and which
@@ -51,9 +53,15 @@ pub struct Covers {
 }
 
 impl Covers {
-    pub fn new(media_root: PathBuf, look: String, icons: (String, String)) -> Self {
+    pub fn new(
+        media_root: PathBuf,
+        roms_root: PathBuf,
+        look: String,
+        icons: (String, String),
+    ) -> Self {
         Covers {
             media_root,
+            roms_root,
             look,
             console_look: icons.0,
             console_set: icons.1,
@@ -175,7 +183,9 @@ impl Covers {
             None => {}
         }
 
-        let Some(path) = media::local_art(&self.media_root, platform, stem, &self.look) else {
+        let path = media::local_art(&self.media_root, platform, stem, &self.look)
+            .or_else(|| self.beside_the_rom(platform, stem));
+        let Some(path) = path else {
             self.known.insert(id, State::None);
             return None;
         };
@@ -195,6 +205,32 @@ impl Covers {
                 None
             }
         }
+    }
+
+    /// Artwork the device scraped for itself, next to the ROM.
+    ///
+    /// A library built by scanning the card has no media folder of ours to draw
+    /// from, and every cover came back empty — which on a handheld with 98
+    /// scraped pictures per system is not "no artwork", it is looking in the
+    /// wrong place. Batocera keeps them at `<system>/images/<stem>-image.png`
+    /// beside the games, which is where its own front end reads them from.
+    ///
+    /// The suffixes are tried in the order a scraper writes them: the box, then
+    /// a screen, then whatever else it managed.
+    fn beside_the_rom(&self, platform: &str, stem: &str) -> Option<PathBuf> {
+        let dir = self.roms_root.join(platform).join("images");
+        if !dir.is_dir() {
+            return None;
+        }
+        for suffix in ["-image", "-box2dfront", "-thumb", "-boxart", "-screenshot", ""] {
+            for ext in ["png", "jpg", "jpeg", "webp"] {
+                let at = dir.join(format!("{stem}{suffix}.{ext}"));
+                if at.is_file() {
+                    return Some(at);
+                }
+            }
+        }
+        None
     }
 
     /// Read the file and hand its pixels to the GPU.

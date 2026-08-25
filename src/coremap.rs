@@ -16,6 +16,13 @@ pub struct CoreMap {
 
 #[derive(Debug, Deserialize)]
 pub struct System {
+    /// What to call it on screen — "Sony PlayStation", not "psx".
+    ///
+    /// The table has carried this all along and nothing read it. A library
+    /// scanned from a card knows only the directory name, so every console on
+    /// the handheld was labelled `psx`, `gbc`, `dc`.
+    #[serde(default)]
+    pub fullname: Option<String>,
     pub romm_platforms: Vec<String>,
     pub emulators: Vec<Emulator>,
 }
@@ -89,6 +96,23 @@ pub const EMBEDDED: &str =
 impl CoreMap {
     /// The compiled-in map. Infallible by construction: it is validated at
     /// build time by the test below, so a malformed file fails CI, not a user.
+    /// What a console directory is called on screen.
+    ///
+    /// Looked up by the *system* name — the directory on the card — and then by
+    /// any RomM slug that maps to it, because a scan files games under the slug
+    /// and the table is keyed by the system.
+    pub fn display_name(&self, slug: &str) -> Option<&str> {
+        if let Some(sys) = self.systems.get(slug) {
+            if let Some(name) = sys.fullname.as_deref() {
+                return Some(name);
+            }
+        }
+        self.systems
+            .values()
+            .find(|sys| sys.romm_platforms.iter().any(|p| p == slug))
+            .and_then(|sys| sys.fullname.as_deref())
+    }
+
     pub fn embedded() -> Self {
         serde_json::from_str(EMBEDDED).expect("the embedded core map is valid JSON")
     }

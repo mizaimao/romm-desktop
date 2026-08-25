@@ -230,6 +230,21 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> 
             let path = f.path();
             // A directory here is a multi-disc game, which ES-DE treats as one
             // entry, same as RomM's folder ROMs.
+            // A leading dot means hidden, and the device means it.
+            //
+            // Batocera's own front end skips these, and multi-disc games are
+            // filed exactly this way: the discs go in `.Final Fantasy VII
+            // (USA)/` and the `.m3u` beside it is the thing to launch. Scanning
+            // the folder as well listed every one of those games twice — once
+            // properly and once as `.Final Fantasy VII (USA)`, with a dot in
+            // front of the name and no way to start it.
+            let hidden = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'));
+            if hidden {
+                continue;
+            }
             let is_dir = path.is_dir();
             if !is_dir && !is_game_file(&path) {
                 continue;
@@ -293,19 +308,19 @@ pub fn media_path(layout: &Layout, system: &str, stem: &str, kind: &str) -> Opti
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
+    pub(super) fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("romm-esde-test-{name}"));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    fn touch(path: &Path, body: &[u8]) {
+    pub(super) fn touch(path: &Path, body: &[u8]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
     }
 
-    fn map() -> CoreMap {
+    pub(super) fn map() -> CoreMap {
         serde_json::from_str(
             r#"{
               "default_core_by_romm_platform": {"snes": "snes9x", "megadrive": "genesisgx"},
@@ -587,5 +602,40 @@ mod tests {
         );
         assert_eq!(media_path(&layout, "snes", "Zelda", "videos"), None);
         assert_eq!(media_path(&layout, "snes", "Missing", "covers"), None);
+    }
+}
+
+#[cfg(test)]
+mod hidden {
+    use super::tests::{map, scratch, touch};
+    use super::*;
+
+    /// A leading dot means hidden, and the device means it.
+    ///
+    /// Batocera files multi-disc games as `.Final Fantasy VII (USA)/` with the
+    /// `.m3u` beside it, and its own front end skips the folder. Scanning it
+    /// anyway listed every one of those games twice — once properly, once with
+    /// a dot in front of the name and no way to start it.
+    #[test]
+    fn hidden_entries_are_not_games() {
+        let dir = scratch("hidden");
+        let roms = dir.join("roms");
+        let psx = roms.join("snes");
+        std::fs::create_dir_all(&psx).unwrap();
+        touch(&psx.join("Super Mario World (USA).sfc"), b"x");
+        touch(&psx.join("Chrono Trigger (USA).sfc"), b"x");
+        std::fs::create_dir_all(psx.join(".Chrono Trigger (USA)")).unwrap();
+        touch(&psx.join(".Chrono Trigger (USA)/disc1.sfc"), b"x");
+        touch(&psx.join(".hidden thing.sfc"), b"x");
+
+        let layout = Layout::new(&dir, Some(&roms));
+        let (games, _) = scan(&layout, &map()).unwrap();
+        let mut names: Vec<&str> = games.iter().map(|g| g.fs_name.as_str()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            ["Chrono Trigger (USA).sfc", "Super Mario World (USA).sfc"],
+            "a hidden entry was scanned"
+        );
     }
 }
