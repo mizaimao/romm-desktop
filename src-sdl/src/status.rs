@@ -58,33 +58,93 @@ impl Status {
     }
 
     /// What the corner shows, right to left. Empty when there is nothing to say.
-    pub fn parts(&self) -> Vec<String> {
+    pub fn parts(&self) -> Vec<Part> {
         let mut out = Vec::new();
         if let Some(clock) = &self.clock {
-            out.push(clock.clone());
+            out.push(Part::Text(clock.clone()));
         }
         if let Some(bars) = self.bars {
-            out.push(signal_glyph(bars));
+            out.push(Part::Wifi(bars));
         }
         if let Some(pct) = self.battery {
-            out.push(format!(
+            out.push(Part::Text(format!(
                 "{}{pct}%",
                 if self.charging { "\u{26a1}" } else { "" }
-            ));
+            )));
         }
         out
     }
 }
 
-/// Signal as blocks, because a 640-point panel has no room for an icon set and
-/// a glyph reads at a glance the way a number does not.
-fn signal_glyph(bars: u8) -> String {
-    match bars {
-        0 => "\u{2581}".to_owned(),
-        1 => "\u{2581}\u{2583}".to_owned(),
-        2 => "\u{2581}\u{2583}\u{2585}".to_owned(),
-        _ => "\u{2581}\u{2583}\u{2585}\u{2587}".to_owned(),
+/// One thing in the corner.
+///
+/// Signal is not text. It used to be four block characters — the bars a phone
+/// shows for a cellular network — and Wi-Fi has been drawn as arcs spreading
+/// from a point for as long as anyone has drawn it. Nothing in a font does
+/// that at four strengths, so it is a picture, made here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Part {
+    Text(String),
+    /// 0 to 3 arcs lit.
+    Wifi(u8),
+}
+
+/// How wide and tall the signal picture is drawn, in pixels.
+///
+/// Odd width so the arcs have a centre column to be symmetrical about. Small,
+/// because the whole corner is: on a 640-point panel the clock beside it is ten
+/// points tall.
+pub const WIFI_SIZE: (u32, u32) = (13, 10);
+
+/// The signal symbol, as pixels: arcs spreading up from a dot.
+///
+/// Drawn rather than typed. Each arc is a band of radius around the dot, cut to
+/// a wedge either side of vertical, and softened across a pixel at every edge —
+/// at this size a hard edge is a staircase and there are only ten rows to make
+/// the shape out of.
+///
+/// Unlit arcs stay, faintly. An icon that loses its outline as the signal drops
+/// reads as a different icon rather than as the same one saying less.
+pub fn wifi_pixels(bars: u8) -> Vec<u8> {
+    let (w, h) = WIFI_SIZE;
+    let (cx, cy) = ((w as f32 - 1.0) / 2.0, h as f32 - 1.0);
+    // The dot, then three bands. Each is (inner, outer) radius.
+    let bands = [(0.0, 1.6), (3.0, 4.3), (5.4, 6.7), (7.8, 9.1)];
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            // Sampled at the pixel's middle, or everything sits half a pixel
+            // up and to the left of where it was meant to.
+            let (dx, dy) = (x as f32 + 0.5 - cx, cy - (y as f32 + 0.5));
+            let r = (dx * dx + dy * dy).sqrt();
+            let mut alpha: f32 = 0.0;
+            for (i, (inner, outer)) in bands.iter().enumerate() {
+                // The wedge: 45 degrees either side of straight up. The dot is
+                // the whole circle, having no direction to point in.
+                if i > 0 && (dy <= 0.0 || dx.abs() > dy) {
+                    continue;
+                }
+                // Coverage across one pixel at each edge of the band.
+                let lit = smooth(r, inner - 0.5, inner + 0.5) * (1.0 - smooth(r, outer - 0.5, outer + 0.5));
+                // An arc beyond the strength is drawn faintly rather than not
+                // at all.
+                let strength = if i == 0 || i as u8 <= bars { 1.0 } else { 0.22 };
+                alpha = alpha.max(lit * strength);
+            }
+            let a = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+            out.extend_from_slice(&[255, 255, 255, a]);
+        }
     }
+    out
+}
+
+/// 0 below `from`, 1 above `to`, an S-curve between.
+fn smooth(v: f32, from: f32, to: f32) -> f32 {
+    if to <= from {
+        return if v >= to { 1.0 } else { 0.0 };
+    }
+    let t = ((v - from) / (to - from)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Read a whole number out of a one-line sysfs file.
@@ -187,8 +247,12 @@ mod tests {
             clock: Some("00:20".into()),
             ..Status::default()
         };
+        let text = |p: &Part| match p {
+            Part::Text(t) => t.clone(),
+            Part::Wifi(n) => format!("wifi{n}"),
+        };
         assert_eq!(
-            s.parts(),
+            s.parts().iter().map(text).collect::<Vec<_>>(),
             ["00:20"],
             "no radio and no battery means no room taken"
         );
@@ -197,13 +261,18 @@ mod tests {
         s.charging = true;
         s.bars = Some(4);
         let parts = s.parts();
-        assert_eq!(parts[0], "00:20");
+        assert_eq!(text(&parts[0]), "00:20");
         assert_eq!(parts.len(), 3);
-        assert!(parts[2].contains("87%"));
-        assert!(parts[2].starts_with('\u{26a1}'), "charging is not marked");
+        // Signal is a picture, not a word — see `Part::Wifi`.
+        assert_eq!(parts[1], Part::Wifi(4));
+        assert!(text(&parts[2]).contains("87%"));
+        assert!(
+            text(&parts[2]).starts_with('\u{26a1}'),
+            "charging is not marked"
+        );
 
         s.charging = false;
-        assert_eq!(s.parts()[2], "87%");
+        assert_eq!(text(&s.parts()[2]), "87%");
     }
 
     /// Polling is on a timer. Sixty reads a second of four sysfs files, for a

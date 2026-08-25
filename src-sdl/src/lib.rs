@@ -14,6 +14,7 @@ pub mod keyboard;
 pub mod library;
 pub mod settings;
 pub mod ports;
+pub mod rescan;
 pub mod status;
 pub mod iconfetch;
 pub mod sysinfo;

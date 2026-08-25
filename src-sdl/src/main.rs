@@ -35,6 +35,7 @@ mod input;
 mod keyboard;
 mod library;
 mod ports;
+mod rescan;
 mod settings;
 mod status;
 mod iconfetch;
@@ -381,12 +382,26 @@ fn main() -> Result<()> {
         config.library.romm_collections,
     )
     .context("opening the library")?;
-    if lib.consoles.is_empty() {
-        eprintln!(
-            "warning: no consoles in {}/cache.sqlite3 — run `romm-desktop sync` to fill it",
-            std::env::current_dir().unwrap_or_default().display()
-        );
-    }
+    // Nothing in the cache: build one from the card.
+    //
+    // This used to print a warning telling you to run a command at a terminal,
+    // which on a handheld is a sentence with nowhere to type it. Every device
+    // this front end is for arrives with ROMs already on it and no cache at
+    // all, so the first run makes one — no server, no network, just the ROM
+    // directories the device already has and the core map that says which
+    // console each of them is.
+    //
+    // Only when it is empty. A library that has been synced from RomM knows
+    // things a scan of the card cannot — cover art, ratings, play time — and
+    // replacing it every launch would throw all of that away.
+    let mut rescan = if !lib.has_cached_library()
+        && romm_desktop::platform::current().default_library().is_some()
+    {
+        println!("no cached library; looking at what is on the card");
+        Some(rescan::Rescan::start(std::path::PathBuf::from("cache.sqlite3")))
+    } else {
+        None
+    };
     println!("{} consoles", lib.consoles.len());
     // The consoles this library actually holds, so the Emulators pane offers
     // rows for those and not for the whole core map.
@@ -749,6 +764,38 @@ fn main() -> Result<()> {
         if lib.fetching.is_some() {
             dirty = true;
         }
+        // The card being read, on its first run. When it lands the library is
+        // reopened, because every list on every tab was built from a cache that
+        // has just been replaced.
+        let scanning = rescan.as_mut().map(|j| j.note()).unwrap_or_default();
+        if let Some(job) = rescan.as_mut() {
+            job.poll();
+            if job.finished() {
+                if let rescan::Progress::Failed(why) = job.poll() {
+                    eprintln!("scan: {why}");
+                }
+                println!("{}", job.note());
+                match library::Library::open(
+                    std::path::Path::new("cache.sqlite3"),
+                    config.media_dir(),
+                    config.local_roms_dir(),
+                    config.library.romm_collections,
+                ) {
+                    Ok(mut fresh) => {
+                        // What the screen was showing, kept: a scan finishing
+                        // is not a reason for the cursor to jump to the top of
+                        // another tab.
+                        fresh.go_to_section(lib.section);
+                        fresh.panes = std::mem::take(&mut lib.panes);
+                        lib = fresh;
+                    }
+                    Err(e) => eprintln!("reopening the library: {e:#}"),
+                }
+                rescan = None;
+            }
+            dirty = true;
+        }
+
         // Sample pictures arriving one at a time, each of which changes the
         // sheet.
         if let Some(previews) = lib.previews.as_mut() {
@@ -845,6 +892,7 @@ fn main() -> Result<()> {
                     typing.as_ref(),
                     &status,
                     glass_tint,
+                    &scanning,
                 );
             });
         }
@@ -1477,6 +1525,25 @@ impl Frame<'_> {
         }
     }
 
+    /// The signal symbol, made once per strength and held.
+    ///
+    /// Kept in the cover cache under a key no rom and no console can have.
+    /// There are five of them and they are on screen constantly, so making the
+    /// pixels every frame would be the one thing in the corner that costs
+    /// anything.
+    fn signal(&mut self, bars: u8, at: Rect) {
+        let key = -(2_000_000 + bars as i64);
+        let at = self.px(at);
+        let gfx = self.gfx;
+        let texture = self.art.made(gfx, key, || {
+            let (w, h) = status::WIFI_SIZE;
+            (w, h, status::wifi_pixels(bars))
+        });
+        if let Some(texture) = texture {
+            gfx.picture(texture, at, paint::DIM);
+        }
+    }
+
     /// A game's cover, in a box. Says whether there was one, so the caller can
     /// put a pane of glass there instead.
     /// A picture named by path — a port's artwork, which the gamelist points
@@ -1523,6 +1590,7 @@ fn draw(
     typing: Option<&keyboard::Keyboard>,
     status: &status::Status,
     glass_tint: Rgba,
+    scanning: &str,
 ) -> Hits {
     let mut f = Frame {
         gfx,
@@ -1556,6 +1624,12 @@ fn draw(
     // room for one list and one pane beside it, so the arrangement is not a
     // question the window gets to answer differently on different days.
     match library::SECTIONS[lib.section.min(library::SECTIONS.len() - 1)].id {
+        // A scan in progress owns the Library page: there is nothing on it yet
+        // and a blank screen is the one thing that cannot say why.
+        "library" if !scanning.is_empty() => {
+            let spec = f.wrapped(scanning, size::TITLE, body.w * 0.7, 3);
+            f.label_centered(&spec, body, paint::DIM);
+        }
         "library" => draw_library(&mut f, lib, body.inset(size::PAD)),
         "mine" => draw_collections(&mut f, lib, body.inset(size::PAD)),
         "history" => draw_history(&mut f, lib, body.inset(size::PAD)),
@@ -2661,12 +2735,27 @@ fn draw_chrome(
     // goes in is the sort of thing you notice every time.
     let mut right = tabs.right() - size::GAP;
     for part in status.parts().iter().rev() {
-        let spec = f.spec(part.as_str(), 10.0);
-        let (w, _) = f.painter.measure(f.gfx, &spec);
-        let w = f.screen.scale.pt(w as f32);
-        let slot = Rect::new(right - w, tabs.y, w, tabs.h);
-        f.label_centered(&spec, slot, paint::DIM);
-        right = slot.x - size::GAP;
+        let w = match part {
+            status::Part::Text(text) => {
+                let spec = f.spec(text.as_str(), 10.0);
+                let (w, _) = f.painter.measure(f.gfx, &spec);
+                let w = f.screen.scale.pt(w as f32);
+                let slot = Rect::new(right - w, tabs.y, w, tabs.h);
+                f.label_centered(&spec, slot, paint::DIM);
+                w
+            }
+            // Arcs, not bars. Drawn at exactly the size it was made, so its
+            // pixels are its pixels — an icon of this size resampled by even a
+            // fraction is a smear rather than a symbol.
+            status::Part::Wifi(bars) => {
+                let (iw, ih) = status::WIFI_SIZE;
+                let (w, h) = (f.screen.scale.pt(iw as f32), f.screen.scale.pt(ih as f32));
+                let at = Rect::new(right - w, tabs.y + (tabs.h - h) / 2.0, w, h);
+                f.signal(*bars, at);
+                w
+            }
+        };
+        right = right - w - size::GAP;
     }
 
     // The line that used to sit between the tabs and the page — where you are

@@ -78,9 +78,133 @@ pub struct Pads {
     held: Option<GameController>,
 }
 
+/// Where KNULLI describes the pads it knows about.
+///
+/// The same file EmulationStation reads. Reading it rather than writing the one
+/// pad down here means this works on the next device too — a handheld's
+/// controls are always in here, and they are always the ones the OS is already
+/// using.
+const ES_INPUT: &str = "/usr/share/emulationstation/es_input.cfg";
+
+/// Which SDL name each of ES's input names goes by.
+///
+/// ES names the buttons after what is printed on them and SDL names them after
+/// where they sit on an Xbox pad. `hotkey` is the odd one: on a handheld it is
+/// whatever the maker chose as a modifier, and SDL calls that slot `guide`.
+const NAMES: &[(&str, &str)] = &[
+    ("a", "a"),
+    ("b", "b"),
+    ("x", "x"),
+    ("y", "y"),
+    ("pageup", "leftshoulder"),
+    ("pagedown", "rightshoulder"),
+    ("l2", "lefttrigger"),
+    ("r2", "righttrigger"),
+    ("l3", "leftstick"),
+    ("r3", "rightstick"),
+    ("select", "back"),
+    ("start", "start"),
+    ("hotkey", "guide"),
+    ("up", "dpup"),
+    ("down", "dpdown"),
+    ("left", "dpleft"),
+    ("right", "dpright"),
+];
+
+/// The axes, which ES names by the direction rather than the axis.
+const AXES: &[(&str, &str)] = &[
+    ("joystick1left", "leftx"),
+    ("joystick1up", "lefty"),
+    ("joystick2left", "rightx"),
+    ("joystick2up", "righty"),
+];
+
+/// Every pad in `es_input.cfg`, as SDL mapping strings.
+fn es_input_mappings() -> Vec<(String, String)> {
+    let Ok(text) = std::fs::read_to_string(ES_INPUT) else {
+        return Vec::new();
+    };
+    mappings_from(&text)
+}
+
+/// The parsing, apart from the file, so it can be tested.
+pub fn mappings_from(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for block in text.split("<inputConfig").skip(1) {
+        let block = block.split("</inputConfig>").next().unwrap_or(block);
+        if attr(block, "type").as_deref() != Some("joystick") {
+            continue;
+        }
+        let (Some(guid), Some(name)) = (attr(block, "deviceGUID"), attr(block, "deviceName"))
+        else {
+            continue;
+        };
+        // A name with a comma in it would split the mapping into fields that
+        // are not fields.
+        let name = name.replace(',', " ");
+        let mut parts = vec![guid.clone(), name];
+        for line in block.split("<input").skip(1) {
+            let (Some(what), Some(kind), Some(id)) =
+                (attr(line, "name"), attr(line, "type"), attr(line, "id"))
+            else {
+                continue;
+            };
+            match kind.as_str() {
+                "button" => {
+                    if let Some((_, sdl)) = NAMES.iter().find(|(es, _)| *es == what) {
+                        parts.push(format!("{sdl}:b{id}"));
+                    }
+                }
+                "axis" => {
+                    if let Some((_, sdl)) = AXES.iter().find(|(es, _)| *es == what) {
+                        parts.push(format!("{sdl}:a{id}"));
+                    }
+                }
+                // A d-pad reported as a hat rather than as four buttons. Both
+                // shapes are in this file across devices.
+                "hat" => {
+                    if let Some((_, sdl)) = NAMES.iter().find(|(es, _)| *es == what) {
+                        let value = attr(line, "value").unwrap_or_else(|| "1".to_owned());
+                        parts.push(format!("{sdl}:h{id}.{value}"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Two fields and nothing else is a pad with no buttons described, and
+        // SDL would take it and then report every button unpressed.
+        if parts.len() < 6 {
+            continue;
+        }
+        parts.push("platform:Linux".to_owned());
+        out.push((guid, parts.join(",")));
+    }
+    out
+}
+
+/// One `name="value"` out of a tag.
+fn attr(block: &str, name: &str) -> Option<String> {
+    let key = format!("{name}=\"");
+    let start = block.find(&key)? + key.len();
+    let end = block[start..].find('"')? + start;
+    Some(block[start..end].to_owned())
+}
+
 impl Pads {
     pub fn open_first(subsystem: &sdl2::GameControllerSubsystem) -> Self {
         let count = subsystem.num_joysticks().unwrap_or(0);
+        // Teach SDL about pads it does not already know.
+        //
+        // The Flip's built-in controls are a plain joystick as far as SDL is
+        // concerned: no entry in its mapping database, so `is_game_controller`
+        // says no, `open_first` finds nothing, and every button on the device
+        // does nothing at all. That is not a fault in the pad — the OS knows
+        // exactly what it is, in the same file its own front end reads.
+        for (guid, mapping) in es_input_mappings() {
+            if subsystem.add_mapping(&mapping).is_err() {
+                eprintln!("could not add the mapping for {guid}");
+            }
+        }
         for index in 0..count {
             if !subsystem.is_game_controller(index) {
                 continue;
@@ -255,5 +379,75 @@ mod tests {
     fn an_unbound_key_does_nothing() {
         let b = binds::Bindings::default();
         assert_eq!(action_for_key(&b, Keycode::F13), None);
+    }
+}
+
+#[cfg(test)]
+mod mapping {
+    use super::*;
+
+    /// The Flip's own entry, out of the device's own file.
+    const FRAGMENT: &str = include_str!("../tests/data/es_input_fragment.cfg");
+
+    /// The pad the device knows about becomes a pad SDL knows about.
+    ///
+    /// Without this every button on the handheld does nothing: SDL sees a plain
+    /// joystick with no mapping, `is_game_controller` says no, and the app
+    /// opens no pad at all. The names on the two sides do not match either —
+    /// ES calls the shoulders `pageup`/`pagedown` and the modifier `hotkey`,
+    /// SDL calls them `leftshoulder`/`rightshoulder` and `guide`.
+    #[test]
+    fn the_devices_own_pad_becomes_an_sdl_mapping() {
+        let all = mappings_from(FRAGMENT);
+        let flip = all
+            .iter()
+            .find(|(guid, _)| guid == "190000004b4800000111000000010000")
+            .map(|(_, m)| m.clone())
+            .expect("the Flip's pad was not read");
+
+        for want in [
+            "a:b0", "b:b1", "x:b2", "y:b3",
+            "leftshoulder:b4", "rightshoulder:b5",
+            "lefttrigger:b6", "righttrigger:b7",
+            "back:b8", "start:b9", "guide:b10",
+            "leftstick:b11", "rightstick:b12",
+            "dpup:b13", "dpdown:b14", "dpleft:b15", "dpright:b16",
+            "leftx:a0", "lefty:a1", "rightx:a2", "righty:a3",
+            "platform:Linux",
+        ] {
+            assert!(flip.contains(want), "{want} missing from:\n{flip}");
+        }
+        assert!(flip.starts_with("190000004b4800000111000000010000,Miyoo Flip Controller,"));
+    }
+
+    /// A keyboard is not a pad, and a pad with one button described is not a
+    /// pad SDL should be told about — it would take the mapping and then report
+    /// every other button unpressed forever.
+    #[test]
+    fn only_real_pads_are_offered() {
+        let all = mappings_from(FRAGMENT);
+        assert_eq!(all.len(), 1, "{all:#?}");
+    }
+
+    /// A comma in a device name would split the mapping into fields that are
+    /// not fields.
+    #[test]
+    fn a_comma_in_a_name_cannot_break_the_format() {
+        let text = FRAGMENT.replace(
+            r#"deviceName="Miyoo Flip Controller""#,
+            r#"deviceName="Odd, Pad""#,
+        );
+        let (_, mapping) = mappings_from(&text).into_iter().next().unwrap();
+        let fields: Vec<&str> = mapping.split(',').collect();
+        assert_eq!(fields[1], "Odd  Pad", "the comma survived into the name");
+        assert!(fields[2].contains(':'), "the fields shifted: {:?}", &fields[..4]);
+    }
+
+    /// A missing file is no mappings rather than a panic — this runs on a Mac
+    /// too, where there is no such file and the pad needs no help.
+    #[test]
+    fn no_file_is_no_mappings() {
+        assert!(mappings_from("").is_empty());
+        assert!(mappings_from("<inputList></inputList>").is_empty());
     }
 }

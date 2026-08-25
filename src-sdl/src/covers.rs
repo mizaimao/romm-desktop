@@ -141,6 +141,26 @@ impl Covers {
         }
     }
 
+    /// A picture this app draws itself, made once and kept.
+    ///
+    /// For the signal symbol, which is pixels computed from a strength rather
+    /// than a file read from anywhere. Held in the same cache as the artwork
+    /// because it is the same kind of thing — a texture that is expensive to
+    /// make and cheap to keep — and under a key nothing else uses.
+    pub fn made(
+        &mut self,
+        gfx: &Gfx,
+        key: i64,
+        make: impl FnOnce() -> (u32, u32, Vec<u8>),
+    ) -> Option<&Texture> {
+        if !self.known.contains_key(&key) {
+            let (w, h, pixels) = make();
+            self.held.insert(key, gfx.upload_rgba(w, h, &pixels));
+            self.known.insert(key, State::Ready);
+        }
+        self.held.get(&key)
+    }
+
     pub fn get(&mut self, gfx: &Gfx, id: i64, platform: &str, stem: &str) -> Option<&Texture> {
         match self.known.get(&id) {
             Some(State::None) => return None,

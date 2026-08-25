@@ -402,6 +402,18 @@ impl Library {
     /// Open the metadata cache and read the consoles.
     /// `romm_collections` is `[library] romm_collections` — whether RomM's
     /// 1,931 generated collections join yours on the Collections tab.
+    /// Whether there is a real library here, as opposed to the groups the
+    /// device's own `es_systems.cfg` always provides.
+    ///
+    /// Ports, Tools and Emulators are pushed onto the console list from that
+    /// file whether or not anything has ever been cached, so "are there any
+    /// consoles" is always yes and cannot be the question. It was: the first
+    /// run on the handheld saw three consoles, decided the library was fine,
+    /// and never scanned the card.
+    pub fn has_cached_library(&self) -> bool {
+        self.consoles.iter().any(|c| !c.scripts)
+    }
+
     pub fn open(
         path: &Path,
         media_root: PathBuf,
@@ -1950,5 +1962,40 @@ mod tests {
         assert!(lib.act("back").unwrap());
         assert_eq!(lib.view, View::Platforms);
         assert!(lib.at_top(), "back left us somewhere that is not the top");
+    }
+}
+
+#[cfg(test)]
+mod library_state {
+    /// The groups do not count as a library.
+    ///
+    /// `Ports`, `Tools` and `Emulators` come from the device's own
+    /// `es_systems.cfg` and are pushed onto the console list every time,
+    /// cached library or not. Asking "are there any consoles" therefore always
+    /// answers yes — which is why the handheld's first run saw three of them,
+    /// decided all was well, and left the card unscanned with 235 GB of games
+    /// on it.
+    #[test]
+    fn three_groups_are_not_a_library() {
+        let group = |slug: &str| super::Console {
+            slug: slug.to_owned(),
+            name: slug.to_owned(),
+            games: 4,
+            scripts: true,
+        };
+        let console = super::Console {
+            slug: "megadrive".to_owned(),
+            name: "Mega Drive".to_owned(),
+            games: 942,
+            scripts: false,
+        };
+
+        let only_groups = vec![group("ports"), group("tools"), group("emulators")];
+        assert!(
+            !only_groups.iter().any(|c| !c.scripts),
+            "the groups counted as a cached library"
+        );
+        let with_a_console = vec![group("ports"), console];
+        assert!(with_a_console.iter().any(|c| !c.scripts));
     }
 }
