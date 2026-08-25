@@ -224,8 +224,26 @@ cmd_install() {
   # may have stopped EmulationStation before that. Between the two the handheld
   # is a black screen, and it stays that way until somebody notices. Nothing
   # here should be able to leave it dark.
+  # Leave a front end on screen, and *say* whether there is one.
+  #
+  # The first version of this ran the check inside a compound command with its
+  # output thrown away, so it could fail silently — and it did: the step
+  # announced it was making sure, and the device stayed black. A check whose
+  # result nobody looks at is not a check.
   say "making sure the device has a front end on screen"
-  ssh_do "pidof emulationstation >/dev/null || { cat /dev/zero > /dev/fb0 2>/dev/null; /etc/init.d/S31emulationstation start >/dev/null 2>&1; }" >/dev/null 2>&1 || true
+  ssh_do "pidof emulationstation >/dev/null && echo ES-UP || echo ES-DOWN" > "$KIT/es.state" 2>&1 || true
+  if grep -q ES-DOWN "$KIT/es.state" 2>/dev/null; then
+    say "  nothing on screen — starting EmulationStation"
+    ssh_do "cat /dev/zero > /dev/fb0 2>/dev/null; /etc/init.d/S31emulationstation start >/dev/null 2>&1; sleep 10; pidof emulationstation >/dev/null && echo ES-UP || echo ES-DOWN" > "$KIT/es.state" 2>&1 || true
+    if grep -q ES-DOWN "$KIT/es.state" 2>/dev/null; then
+      echo "  WARNING: the device has no front end on screen" >&2
+    else
+      say "  EmulationStation is back"
+    fi
+  else
+    say "  EmulationStation is running"
+  fi
+  rm -f "$KIT/es.state"
   say "installed — it is under Ports as 'RomM'"
 }
 
