@@ -369,3 +369,35 @@ What it needs:
 Related: `docs/handheld-frontend.md` for the wider "one library, many cards"
 problem, and `tools/stage_arkos_card.py` / `tools/stage_spruce_card.py`, which
 already carry per-firmware layout knowledge this would extend.
+
+---
+
+## Rapid fire, game launching, and syncing on the handheld
+
+Parked 2026-08-25, in Frank's words: *"Deferr rapid fire and gaming launching.
+I beleive there were sycing parked as well. but we will do those later. First UI
+and control. The rest are meanlingless without UI working."*
+
+Three things, and the first two are one thing:
+
+* **Game launching.** The SDL front end cannot start a game. `activate` on
+  `View::Roms` is not handled at all — only Ports launch, through
+  `emulatorlauncher -system X -rom Y`. A ROM would go the same way; what is
+  missing is the ES system name for a row, which is recoverable from the
+  directory the file sits in.
+* **Rapid fire.** Asked for as *"Another thing I spent a lot of time in the
+  desktop version is the rapid fire in Arcade. I want to bring that to the SDL
+  port as well."* The mechanism is settled and is pure RetroArch config —
+  `input_turbo_mode = "3"`, `input_turbo_default_button = "0"`, a period in
+  frames from shots-per-second, and the hold button bound to `player1_turbo`;
+  see `retroarch.rs` and the long comment there about why every other
+  arrangement is unplayable. The catch is that on KNULLI, `emulatorlauncher`
+  generates RetroArch's config itself, so these have to be injected somewhere
+  Batocera's configgen respects rather than written to a config of ours the way
+  the desktop does. Nothing to design, somewhere to put it.
+* **Syncing.** The tab exists and draws nothing. Manual push and pull of save
+  files, plus "take offline" — needs a worker thread with `Client` from
+  `[server]`, `savesync::scan` and `savesync::run`.
+
+The order is deliberate and it is his: the interface has to be right on the
+device before any of this is worth building on top of.

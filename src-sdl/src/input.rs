@@ -119,16 +119,49 @@ const AXES: &[(&str, &str)] = &[
     ("joystick2up", "righty"),
 ];
 
+/// One pad as `es_input.cfg` describes it.
+pub struct Described {
+    pub guid: String,
+    pub name: String,
+    pub mapping: String,
+}
+
 /// Every pad in `es_input.cfg`, as SDL mapping strings.
-fn es_input_mappings() -> Vec<(String, String)> {
+pub fn es_input_mappings() -> Vec<Described> {
     let Ok(text) = std::fs::read_to_string(ES_INPUT) else {
         return Vec::new();
     };
     mappings_from(&text)
 }
 
+/// Which of them is the pad in your hands.
+///
+/// By name first, because the GUID is shared by four different handhelds and
+/// says nothing. By hats second: an entry that puts the d-pad on a hat cannot
+/// describe a device that reports no hats, whatever it is called — that is the
+/// difference between a d-pad that works and one that is simply absent.
+///
+/// Nothing at all rather than a guess when neither matches. SDL's own database
+/// may still have something, and a wrong mapping is worse than none: it makes
+/// every button do the wrong thing, which reads as the app being broken rather
+/// than the pad being unknown.
+pub fn best_mapping(
+    entries: &[Described],
+    guid: &str,
+    name: &str,
+    has_hats: bool,
+) -> Option<String> {
+    let same_guid: Vec<&Described> = entries.iter().filter(|e| e.guid == guid).collect();
+    let usable = |e: &&&Described| has_hats || !e.mapping.contains(":h");
+    same_guid
+        .iter()
+        .find(|e| e.name.eq_ignore_ascii_case(name.trim()) && usable(e))
+        .or_else(|| same_guid.iter().find(usable))
+        .map(|e| e.mapping.clone())
+}
+
 /// The parsing, apart from the file, so it can be tested.
-pub fn mappings_from(text: &str) -> Vec<(String, String)> {
+pub fn mappings_from(text: &str) -> Vec<Described> {
     let mut out = Vec::new();
     for block in text.split("<inputConfig").skip(1) {
         let block = block.split("</inputConfig>").next().unwrap_or(block);
@@ -177,7 +210,11 @@ pub fn mappings_from(text: &str) -> Vec<(String, String)> {
             continue;
         }
         parts.push("platform:Linux".to_owned());
-        out.push((guid, parts.join(",")));
+        out.push(Described {
+            guid,
+            name: parts[1].clone(),
+            mapping: parts.join(","),
+        });
     }
     out
 }
@@ -191,18 +228,36 @@ fn attr(block: &str, name: &str) -> Option<String> {
 }
 
 impl Pads {
-    pub fn open_first(subsystem: &sdl2::GameControllerSubsystem) -> Self {
+    pub fn open_first(
+        subsystem: &sdl2::GameControllerSubsystem,
+        joysticks: &sdl2::JoystickSubsystem,
+    ) -> Self {
         let count = subsystem.num_joysticks().unwrap_or(0);
-        // Teach SDL about pads it does not already know.
+        // Teach SDL about this pad, and only this one.
         //
-        // The Flip's built-in controls are a plain joystick as far as SDL is
-        // concerned: no entry in its mapping database, so `is_game_controller`
-        // says no, `open_first` finds nothing, and every button on the device
-        // does nothing at all. That is not a fault in the pad — the OS knows
-        // exactly what it is, in the same file its own front end reads.
-        for (guid, mapping) in es_input_mappings() {
-            if subsystem.add_mapping(&mapping).is_err() {
-                eprintln!("could not add the mapping for {guid}");
+        // Two things had to be got right here and the first attempt got one.
+        //
+        // SDL has no mapping for the Flip's controls — they are a plain
+        // joystick to it, so `is_game_controller` says no and nothing opens.
+        // The OS knows exactly what they are, in the same file its own front
+        // end reads, so that file is turned into SDL mappings.
+        //
+        // But **the GUID does not identify the device**. It comes from the
+        // rk3566 joypad driver and four handhelds share it — Anbernic RG-ARC-S,
+        // Miyoo Flip, Powkiddy RGB30 and something called `retrogame_joypad` —
+        // with different buttons each. Adding them all in file order means the
+        // last one wins, and the last one puts the d-pad on a hat this device
+        // does not have and A on button 3 where this device has button 0. The
+        // d-pad did nothing at all and pressing up registered as a stick click.
+        //
+        // So the name decides, and the name comes from the joystick itself.
+        let entries = es_input_mappings();
+        for index in 0..count {
+            let Ok(js) = joysticks.open(index) else { continue };
+            if let Some(mapping) = best_mapping(&entries, &js.guid().to_string(), &js.name(), js.num_hats() > 0) {
+                if let Err(e) = subsystem.add_mapping(&mapping) {
+                    eprintln!("could not describe {} to SDL: {e}", js.name());
+                }
             }
         }
         for index in 0..count {
@@ -401,8 +456,8 @@ mod mapping {
         let all = mappings_from(FRAGMENT);
         let flip = all
             .iter()
-            .find(|(guid, _)| guid == "190000004b4800000111000000010000")
-            .map(|(_, m)| m.clone())
+            .find(|e| e.name == "Miyoo Flip Controller")
+            .map(|e| e.mapping.clone())
             .expect("the Flip's pad was not read");
 
         for want in [
@@ -426,7 +481,56 @@ mod mapping {
     #[test]
     fn only_real_pads_are_offered() {
         let all = mappings_from(FRAGMENT);
-        assert_eq!(all.len(), 1, "{all:#?}");
+        let names: Vec<&str> = all.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["Miyoo Flip Controller", "retrogame_joypad"], "{names:?}");
+    }
+
+    /// The GUID does not say which device this is.
+    ///
+    /// Four handhelds share `190000004b48...` — it comes from the rk3566 joypad
+    /// driver, not from the pad — and they have different buttons. Taking them
+    /// in file order means the last one wins, and on the Flip that was
+    /// `retrogame_joypad`: the d-pad on a hat the device does not have, and A on
+    /// button 3 where the device has button 0. Every direction did nothing and
+    /// pressing up registered as a stick click.
+    #[test]
+    fn the_name_decides_not_the_guid() {
+        let all = mappings_from(FRAGMENT);
+        let guid = "190000004b4800000111000000010000";
+
+        let chosen = best_mapping(&all, guid, "Miyoo Flip Controller", false)
+            .expect("nothing was chosen for a pad that is described");
+        assert!(chosen.contains("a:b0"), "took the wrong entry: {chosen}");
+        assert!(
+            chosen.contains("dpup:b13"),
+            "the d-pad is not on the buttons this device has: {chosen}"
+        );
+        assert!(!chosen.contains(":h"), "a hat, on a pad with no hats: {chosen}");
+    }
+
+    /// A pad with no hats never gets a mapping that uses one, whatever it is
+    /// called — an absent hat is an absent d-pad.
+    #[test]
+    fn a_hat_is_not_offered_to_a_pad_without_one() {
+        let all = mappings_from(FRAGMENT);
+        let guid = "190000004b4800000111000000010000";
+
+        // Asking by the *wrong* name still cannot land on the hat entry.
+        let chosen = best_mapping(&all, guid, "Something Else", false).unwrap();
+        assert!(!chosen.contains(":h"), "{chosen}");
+
+        // With hats present, the named entry is still the one that wins.
+        let by_name = best_mapping(&all, guid, "retrogame_joypad", true).unwrap();
+        assert!(by_name.contains("a:b3"), "{by_name}");
+    }
+
+    /// An unknown pad gets nothing rather than a guess. SDL may know it; a
+    /// wrong mapping makes every button do the wrong thing, which reads as the
+    /// app being broken rather than the pad being unknown.
+    #[test]
+    fn an_unknown_pad_is_left_alone() {
+        let all = mappings_from(FRAGMENT);
+        assert!(best_mapping(&all, "not-a-guid", "Whatever", true).is_none());
     }
 
     /// A comma in a device name would split the mapping into fields that are
@@ -437,7 +541,7 @@ mod mapping {
             r#"deviceName="Miyoo Flip Controller""#,
             r#"deviceName="Odd, Pad""#,
         );
-        let (_, mapping) = mappings_from(&text).into_iter().next().unwrap();
+        let mapping = mappings_from(&text).into_iter().next().unwrap().mapping;
         let fields: Vec<&str> = mapping.split(',').collect();
         assert_eq!(fields[1], "Odd  Pad", "the comma survived into the name");
         assert!(fields[2].contains(':'), "the fields shifted: {:?}", &fields[..4]);

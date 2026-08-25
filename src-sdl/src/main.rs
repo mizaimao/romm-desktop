@@ -23,6 +23,7 @@ use crate::gfx::{Gfx, Rgba};
 use anyhow::{Context, Result};
 use romm_desktop::layout::{Edges, Rect, Scale, Size, Viewport};
 use romm_desktop::{padpoll, rowwindow};
+use sdl2::controller::Button;
 use sdl2::event::{Event, WindowEvent};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -103,6 +104,107 @@ fn motion_fps(style: &str, speed: f32) -> f64 {
 /// Short. A transition is there to say *which way* you moved, and one long
 /// enough to be admired is one you wait for every time.
 const SLIDE_MS: f64 = 180.0;
+
+/// What the pad is actually doing, printed.
+///
+/// `ROMM_SDL_BENCH=pads`. Two rounds of "the controls do not work" went by on
+/// guesses — first that SDL had no mapping, then that the mapping was right and
+/// something else was wrong — and a guess is what this replaces. It says which
+/// mapping SDL settled on, what the joystick reports underneath it, and which
+/// buttons are down right now, for twenty seconds.
+///
+/// Both layers, because the interesting failures are disagreements between
+/// them: a mapping that names a button the pad does not have, or a pad that
+/// reports a button pressed that nobody is touching.
+fn bench_pads(controller: &sdl2::GameControllerSubsystem, joystick: &sdl2::JoystickSubsystem, events: &mut sdl2::EventPump) {
+    let entries = input::es_input_mappings();
+    println!("{} pads described in es_input.cfg", entries.len());
+    let count = joystick.num_joysticks().unwrap_or(0);
+    println!("{count} joystick(s)");
+
+    let mut pads = Vec::new();
+    let mut sticks = Vec::new();
+    for i in 0..count {
+        if let Ok(js) = joystick.open(i) {
+            println!(
+                "  [{i}] {} — guid {} — {} buttons, {} axes, {} hats",
+                js.name(),
+                js.guid(),
+                js.num_buttons(),
+                js.num_axes(),
+                js.num_hats()
+            );
+            let shared = entries.iter().filter(|e| e.guid == js.guid().to_string()).count();
+            println!("       {shared} pad(s) in es_input.cfg share that guid");
+            match input::best_mapping(&entries, &js.guid().to_string(), &js.name(), js.num_hats() > 0) {
+                Some(m) => {
+                    println!("       chose: {m}");
+                    let _ = controller.add_mapping(&m);
+                }
+                None => println!("       none of them fits; leaving SDL's own"),
+            }
+            sticks.push(js);
+        }
+        if controller.is_game_controller(i) {
+            if let Ok(pad) = controller.open(i) {
+                println!("       opens as a controller: {}", pad.name());
+                println!("       mapping in use: {}", pad.mapping());
+                pads.push(pad);
+            }
+        } else {
+            println!("       SDL has no controller mapping for it");
+        }
+    }
+
+    println!("\nwatching for 20 seconds — press things\n");
+    let mut was = String::new();
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < 20 {
+        for event in events.poll_iter() {
+            if matches!(event, Event::Quit { .. }) {
+                return;
+            }
+        }
+        let mut now = String::new();
+        for js in &sticks {
+            let down: Vec<String> = (0..js.num_buttons())
+                .filter(|b| js.button(*b).unwrap_or(false))
+                .map(|b| b.to_string())
+                .collect();
+            let moved: Vec<String> = (0..js.num_axes())
+                .filter_map(|a| {
+                    let v = js.axis(a).unwrap_or(0);
+                    (v.saturating_abs() > 8000).then(|| format!("a{a}={v}"))
+                })
+                .collect();
+            if !down.is_empty() || !moved.is_empty() {
+                now += &format!("raw buttons [{}] axes [{}]  ", down.join(" "), moved.join(" "));
+            }
+        }
+        for pad in &pads {
+            let named: Vec<&str> = [
+                (Button::A, "A"), (Button::B, "B"), (Button::X, "X"), (Button::Y, "Y"),
+                (Button::LeftShoulder, "L1"), (Button::RightShoulder, "R1"),
+                (Button::Back, "Back"), (Button::Start, "Start"), (Button::Guide, "Guide"),
+                (Button::LeftStick, "L3"), (Button::RightStick, "R3"),
+                (Button::DPadUp, "Up"), (Button::DPadDown, "Down"),
+                (Button::DPadLeft, "Left"), (Button::DPadRight, "Right"),
+            ]
+            .iter()
+            .filter(|(b, _)| pad.button(*b))
+            .map(|(_, n)| *n)
+            .collect();
+            if !named.is_empty() {
+                now += &format!("controller [{}]", named.join(" "));
+            }
+        }
+        if now != was {
+            println!("{}", if now.is_empty() { "(nothing)".to_owned() } else { now.clone() });
+            was = now;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+}
 
 /// The floor: one picture, redrawn every frame, and nothing else.
 ///
@@ -443,7 +545,8 @@ fn main() -> Result<()> {
     let pad_map = bindings.pad_map_swapped(config.controllers.swap_ab, config.controllers.swap_xy);
 
     let controller = sdl.game_controller().map_err(anyhow::Error::msg)?;
-    let mut pads = input::Pads::open_first(&controller);
+    let joysticks = sdl.joystick().map_err(anyhow::Error::msg)?;
+    let mut pads = input::Pads::open_first(&controller, &joysticks);
     let mut repeat = padpoll::Repeat::default();
 
     let timer = sdl
@@ -460,6 +563,11 @@ fn main() -> Result<()> {
         }
         Ok("motion") => {
             bench_motion(&video, &window, &mut gfx);
+            return Ok(());
+        }
+        Ok("pads") => {
+            let joystick = sdl.joystick().map_err(anyhow::Error::msg)?;
+            bench_pads(&controller, &joystick, &mut events);
             return Ok(());
         }
         _ => {}
