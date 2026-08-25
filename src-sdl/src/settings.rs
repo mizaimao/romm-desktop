@@ -187,6 +187,7 @@ pub struct Look {
     pub speed: f32,
     pub strength: f32,
     pub glass: i64,
+    pub animations: bool,
 }
 
 impl Default for Look {
@@ -197,6 +198,7 @@ impl Default for Look {
             speed: 1.0,
             strength: 1.0,
             glass: 30,
+            animations: true,
         }
     }
 }
@@ -228,6 +230,7 @@ pub fn look(panes: &[Pane]) -> Look {
                 out.strength = *value as f32 / 100.0;
             }
             ("appearance.glass", Kind::Number { value, .. }) => out.glass = *value,
+            ("appearance.animations", Kind::Toggle(on)) => out.animations = *on,
             _ => {}
         }
     }
@@ -584,6 +587,12 @@ pub fn panes(
                         step: 10,
                         unit: "%",
                     },
+                },
+                Entry {
+                    field: "appearance.animations",
+                    label: "Animations",
+                    help: "Whether pages slide as you move between tabs, and whatever else moves later. One switch for all of it — turning animation off should not mean hunting for six more switches.",
+                    kind: Kind::Toggle(cfg.appearance.animations),
                 },
                 Entry {
                     field: "appearance.glass",

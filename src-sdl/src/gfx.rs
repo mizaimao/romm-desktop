@@ -98,6 +98,14 @@ void main() {
 }
 "#;
 
+/// How many quads the vertex ring holds.
+///
+/// One frame of this interface is a few hundred: every rounded corner, every
+/// word, every cover. A ring this size means a slot is reused only after
+/// several hundred other draws have gone through, by which time the GPU is
+/// long done with it.
+const RING_QUADS: usize = 1024;
+
 /// Somewhere to draw that is not the screen.
 ///
 /// The glass needs one: the backdrop goes into a texture, the texture is
@@ -177,6 +185,8 @@ pub struct Gfx {
     program: u32,
     vao: u32,
     vbo: u32,
+    /// Which slot in the vertex ring the next quad goes into.
+    slot: std::cell::Cell<usize>,
     u_screen: i32,
     u_tint: i32,
     u_tint2: i32,
@@ -222,12 +232,20 @@ impl Gfx {
             gl::GenBuffers(1, &mut vbo);
             gl::BindVertexArray(vao);
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-            // Four floats a vertex — two of position, two of texture — and six
-            // vertices a quad. Filled per draw; there is no static geometry
-            // in an interface where everything moves.
+            // Four floats a vertex — two of position, two of texture — six
+            // vertices a quad, and room for a frame's worth of quads laid end
+            // to end. Filled per draw; there is no static geometry in an
+            // interface where everything moves.
+            //
+            // A frame's worth rather than one, because writing over the same
+            // twenty-four floats for every quad means the driver either waits
+            // for the last draw to finish reading them or quietly allocates a
+            // fresh buffer behind your back. On a Metal-backed GL that showed
+            // up as the single most expensive thing in the app — more than the
+            // backdrop shader and the blur put together.
             gl::BufferData(
                 gl::ARRAY_BUFFER,
-                (24 * 4) as isize,
+                (RING_QUADS * 24 * 4) as isize,
                 std::ptr::null(),
                 gl::STREAM_DRAW,
             );
@@ -251,6 +269,7 @@ impl Gfx {
                 program,
                 vao,
                 vbo,
+                slot: std::cell::Cell::new(0),
                 blank,
                 width: 1.0,
                 height: 1.0,
@@ -395,13 +414,16 @@ impl Gfx {
             gl::BindTexture(gl::TEXTURE_2D, texture.id);
             gl::BindVertexArray(self.vao);
             gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo);
+            // Somewhere the last few draws are not still reading.
+            let slot = self.slot.get();
+            self.slot.set((slot + 1) % RING_QUADS);
             gl::BufferSubData(
                 gl::ARRAY_BUFFER,
-                0,
+                (slot * 24 * 4) as isize,
                 size_of_val(&vertices) as isize,
                 vertices.as_ptr() as *const _,
             );
-            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+            gl::DrawArrays(gl::TRIANGLES, (slot * 6) as i32, 6);
             gl::BindVertexArray(0);
         }
     }

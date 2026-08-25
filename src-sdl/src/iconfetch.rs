@@ -109,6 +109,7 @@ fn run(
     say: &std::sync::mpsc::Sender<Progress>,
 ) -> anyhow::Result<usize> {
     let art = iconart::of(set).ok_or_else(|| anyhow::anyhow!("no artwork recorded for {set}"))?;
+    romm_desktop::util::install_tls();
     let http = reqwest::blocking::Client::builder()
         .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -156,6 +157,100 @@ fn run(
         }
     }
     Ok(written)
+}
+
+/// A few sample pictures from one set, so it can be looked at before it is
+/// downloaded.
+///
+/// The desktop's Icon sets tab shows every set with its own artwork, which is
+/// the only honest way to choose between nine names like `pixel-art` and
+/// `steel`. Same idea here: the highlighted set fetches half a dozen consoles
+/// out of the library into a cache folder, and the picker draws them.
+///
+/// Cached on disk rather than in memory, and kept separate from the installed
+/// sets so a preview is never mistaken for one — `installed_sets` counts what
+/// is under `sets/`, and this writes under `previews/`.
+pub struct Previews {
+    pub set: String,
+    from: Receiver<PathBuf>,
+    pub found: Vec<PathBuf>,
+}
+
+/// Where sample pictures live. Not under `sets/`, which is what counts as
+/// installed.
+pub fn preview_dir(media_root: &std::path::Path, set: &str) -> PathBuf {
+    media_root.join("_platforms").join("previews").join(set)
+}
+
+impl Previews {
+    /// How many consoles to show. Six is what the desktop shows, and it is
+    /// about what fits beside a list on a 640-point panel.
+    pub const WANT: usize = 6;
+
+    pub fn start(media_root: PathBuf, set: &str, slugs: Vec<String>, map: CoreMap) -> Previews {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let id = set.to_owned();
+        let worker = id.clone();
+        std::thread::spawn(move || {
+            let Some(art) = iconart::of(&worker) else { return };
+            let Some(look) = art.best_look().map(|l| l.id.clone()) else {
+                return;
+            };
+            let ext = art
+                .look(&look)
+                .map(|l| l.ext.clone())
+                .unwrap_or_else(|| "png".to_owned());
+            let dir = preview_dir(&media_root, &worker);
+            if std::fs::create_dir_all(&dir).is_err() {
+                return;
+            }
+            romm_desktop::util::install_tls();
+            let Ok(http) = reqwest::blocking::Client::builder()
+                .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(20))
+                .build()
+            else {
+                return;
+            };
+            for system in theme::preview_systems(&map, &slugs, Self::WANT) {
+                let at = dir.join(format!("{system}.{ext}"));
+                // Already fetched: send it and move on. A preview is a picture
+                // of a repository that changes about never.
+                if at.is_file() {
+                    let _ = tx.send(at);
+                    continue;
+                }
+                let Some(url) = art.url(&look, &system) else {
+                    continue;
+                };
+                let Ok(resp) = http.get(&url).send() else { continue };
+                if !resp.status().is_success() {
+                    continue;
+                }
+                let Ok(bytes) = resp.bytes() else { continue };
+                if std::fs::write(&at, &bytes).is_ok() && tx.send(at).is_err() {
+                    // Nobody is listening: the cursor moved to another set.
+                    return;
+                }
+            }
+        });
+        Previews {
+            set: id,
+            from: rx,
+            found: Vec::new(),
+        }
+    }
+
+    /// Whatever has landed since the last look.
+    pub fn poll(&mut self) -> &[PathBuf] {
+        while let Ok(path) = self.from.try_recv() {
+            if !self.found.contains(&path) {
+                self.found.push(path);
+            }
+        }
+        &self.found
+    }
 }
 
 #[cfg(test)]

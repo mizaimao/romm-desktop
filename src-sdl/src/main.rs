@@ -25,6 +25,7 @@ use romm_desktop::layout::{Edges, Rect, Scale, Size, Viewport};
 use romm_desktop::{padpoll, rowwindow};
 use sdl2::event::{Event, WindowEvent};
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 mod backdrop;
 mod covers;
@@ -61,7 +62,38 @@ const PANEL: (u32, u32) = (640, 480);
 /// pixel. It does not have to land exactly: `viewport` divides whatever
 /// drawable it gets by 640, so the layout is a 640-point panel either way and
 /// only the physical size of the preview changes.
-const PREVIEW: u32 = 4;
+const PREVIEW: u32 = 3;
+
+/// How long to wait for something to happen before looking around anyway.
+///
+/// Fifty milliseconds: twenty wake-ups a second, each of which does nothing but
+/// check a clock. Long enough that the process is asleep; short enough that a
+/// button press is never noticeably late.
+const IDLE_WAIT_MS: u32 = 50;
+
+/// How long a frame may stand before it is redrawn regardless.
+const STALE_MS: f64 = 500.0;
+
+/// How often a moving backdrop is redrawn, in frames a second.
+///
+/// Not the display's rate. A frame here is a few hundred separate draw calls —
+/// every rounded corner and every word is one — and the backdrop drifts slowly
+/// enough that half of them are the same picture twice. Thirty is where the
+/// motion still reads as motion, and it is half the work of sixty.
+const MOTION_FPS: f64 = 30.0;
+
+/// How long a page takes to slide in when the tab changes.
+///
+/// Short. A transition is there to say *which way* you moved, and one long
+/// enough to be admired is one you wait for every time.
+const SLIDE_MS: f64 = 180.0;
+
+/// A page on its way out, and which way it is going.
+struct Slide {
+    started: f64,
+    /// +1 when the new tab is to the right of the old one.
+    toward: f32,
+}
 
 fn main() -> Result<()> {
     // Where the app's files are. Config, cache and library are all addressed
@@ -213,6 +245,16 @@ fn main() -> Result<()> {
     let panel = unsafe { gfx::Offscreen::new(PANEL.0, PANEL.1) }
         .context("this driver will not draw into a 640x480 texture")?;
     panel.texture.nearest();
+    // The page being left behind, held while it slides off.
+    //
+    // A copy rather than a re-render: the old page cannot be drawn again once
+    // the state has moved on, and it is already sitting in a texture. Nothing
+    // is spent here until a tab actually changes.
+    let leaving = unsafe { gfx::Offscreen::new(PANEL.0, PANEL.1) }
+        .context("this driver will not draw into a 640x480 texture")?;
+    leaving.texture.nearest();
+    let mut slide: Option<Slide> = None;
+    let mut was_section = lib.section;
 
     let mut screen = viewport(&window);
     say_where_we_are(&screen);
@@ -262,14 +304,54 @@ fn main() -> Result<()> {
         speed: config.appearance.backdrop_speed as f32 / 100.0,
         strength: config.appearance.backdrop_strength as f32 / 100.0,
         glass: config.appearance.glass,
+        animations: config.appearance.animations,
     };
 
     let mut frames = 0u32;
 
+    // Whether anything has happened that the screen does not already show.
+    //
+    // The loop used to draw every frame forever: on this machine that was 75%
+    // of a core to display a settings list that had not changed in a minute,
+    // and on a handheld it is the battery. A frame here is a few hundred
+    // separate draw calls, so the cheapest one is the one not made.
+    //
+    // Starts true — the first frame has never been drawn.
+    let mut dirty = true;
+    let mut drawn_at = 0.0f64;
+    // The corner as the screen last showed it. The clock changing is a reason
+    // to redraw and nothing else notices it.
+    let mut corner = status.parts();
+
     'running: loop {
         let now = ticks(&timer);
 
+        // Wait for something rather than spin.
+        //
+        // How long depends on what is due next. A moving backdrop is due at its
+        // own rate; everything else is due when it happens, and the timeout is
+        // only there so the clock, a finishing download and a held button still
+        // get their turn.
+        //
+        // Skipping a frame without waiting is not the same as waiting: the
+        // first version of this returned to the top of the loop, found nothing
+        // to do, and spun there — which cost *more* than drawing every frame.
+        let animating = backdrop.is_some() && showing.speed > 0.0;
+        let busy = !held.is_empty() || lib.fetching.is_some() || lib.previews.is_some();
+        if !dirty && !busy {
+            let wait = if animating {
+                (1000.0 / MOTION_FPS - (now - drawn_at)).max(1.0) as u32
+            } else {
+                IDLE_WAIT_MS
+            };
+            let _ = events.wait_event_timeout(wait.min(IDLE_WAIT_MS));
+        }
+
         for event in events.poll_iter() {
+            // Every event is a reason to look again. Being wrong in this
+            // direction costs one frame; being wrong the other way leaves a
+            // key press with nothing on screen to show for it.
+            dirty = true;
             match event {
                 Event::Quit { .. } => break 'running,
                 Event::Window {
@@ -412,6 +494,7 @@ fn main() -> Result<()> {
                     break 'running;
                 }
                 act(&mut lib, action);
+                dirty = true;
             }
         }
         repeat.release(&pressed);
@@ -431,6 +514,7 @@ fn main() -> Result<()> {
             lib.wifi_job = None;
             lib.wifi_at = 0;
             lib.refresh_rows();
+            dirty = true;
         }
         // The panel tint follows the color scheme, like the webview's does.
         let g = backdrop::glass_of(&showing.scheme);
@@ -458,9 +542,74 @@ fn main() -> Result<()> {
                 b.strength = want.strength;
             }
             showing = want;
+            dirty = true;
         }
 
         status.poll(now as u64);
+        if status.parts() != corner {
+            corner = status.parts();
+            dirty = true;
+        }
+
+        // A download reports on its own row, and the row has to be redrawn to
+        // say so.
+        if lib.fetching.is_some() {
+            dirty = true;
+        }
+        // Sample pictures arriving one at a time, each of which changes the
+        // sheet.
+        if let Some(previews) = lib.previews.as_mut() {
+            let before = previews.found.len();
+            if previews.poll().len() != before {
+                dirty = true;
+            }
+        }
+
+        // A backstop against an invalidation nobody thought of. Half a second
+        // of a stale screen is invisible on a settings list and costs two
+        // frames a second when the app is otherwise asleep — which is the
+        // trade this whole arrangement is making.
+        if now - drawn_at > STALE_MS {
+            dirty = true;
+        }
+        // A tab changed: keep what is on screen and slide it out.
+        if lib.section != was_section {
+            if showing.animations {
+                unsafe {
+                    gfx.draw_onto(&leaving, |gfx| {
+                        gfx.image_part(
+                            &panel.texture,
+                            0.0,
+                            0.0,
+                            PANEL.0 as f32,
+                            PANEL.1 as f32,
+                            (0.0, 1.0, 1.0, 0.0),
+                            gfx::Rgba::WHITE,
+                        );
+                    });
+                }
+                slide = Some(Slide {
+                    started: now,
+                    // Left along the tab row means the new page comes in from
+                    // the left, which is the direction the eye is already
+                    // travelling.
+                    toward: if lib.section > was_section { 1.0 } else { -1.0 },
+                });
+            }
+            was_section = lib.section;
+            dirty = true;
+        }
+        // A slide is motion, so it draws every frame it lasts.
+        if slide.is_some() {
+            dirty = true;
+        }
+
+        // A moving backdrop redraws on its own clock rather than the display's.
+        if !dirty && (!animating || now - drawn_at < 1000.0 / MOTION_FPS) {
+            continue;
+        }
+        dirty = false;
+        drawn_at = now;
         let (dw, dh) = window.drawable_size();
         let (ox, oy, zoom) = panel_box(dw as f32, dh as f32);
 
@@ -514,15 +663,33 @@ fn main() -> Result<()> {
         // Bottom row first: a texture drawn into through a framebuffer comes
         // out with GL's origin, and everything else here is measured from the
         // top left. Sampling it upside down puts the two back in agreement.
-        gfx.image_part(
-            &panel.texture,
-            ox,
-            oy,
-            pw,
-            ph,
-            (0.0, 1.0, 1.0, 0.0),
-            gfx::Rgba::WHITE,
-        );
+        let flip = (0.0, 1.0, 1.0, 0.0);
+        let shift = match slide.as_ref() {
+            Some(s) => {
+                let t = ((now - s.started) / SLIDE_MS).clamp(0.0, 1.0) as f32;
+                // Eased out: fast at the start, settling at the end, which is
+                // how a thing with weight arrives.
+                let eased = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+                if t >= 1.0 {
+                    slide = None;
+                    0.0
+                } else {
+                    // The old page leaves the way the new one is coming from.
+                    gfx.image_part(
+                        &leaving.texture,
+                        ox - s.toward * eased * pw,
+                        oy,
+                        pw,
+                        ph,
+                        flip,
+                        gfx::Rgba::WHITE,
+                    );
+                    s.toward * (1.0 - eased) * pw
+                }
+            }
+            None => 0.0,
+        };
+        gfx.image_part(&panel.texture, ox + shift, oy, pw, ph, flip, gfx::Rgba::WHITE);
         window.gl_swap_window();
 
         // A portrait, and then out. Taken after a handful of frames rather
@@ -879,6 +1046,10 @@ mod size {
     pub const GAP: f32 = 6.0;
     /// The tab row. Six tabs across 640 points, so ~104 each.
     pub const TABS: f32 = 26.0;
+    /// Air either side of a tab's own name, and between one tab and the next.
+    /// Names set solid read as one long word at this size.
+    pub const TAB_PAD: f32 = 7.0;
+    pub const TAB_GAP: f32 = 5.0;
     /// The line under the tabs saying where you are. Off — see `draw_chrome`.
     #[allow(dead_code)]
     pub const HEADER: f32 = 20.0;
@@ -1158,7 +1329,8 @@ fn draw(
 
     // The keyboard sits over whatever asked for it.
     if let Some(picker) = lib.picking.as_ref() {
-        draw_picker_sheet(&mut f, picker, page);
+        let shots = lib.previews.as_ref().map(|p| p.found.clone()).unwrap_or_default();
+        draw_picker_sheet(&mut f, picker, &shots, page);
     } else if let Some(cap) = lib.capturing.as_ref() {
         draw_capture(&mut f, cap, page);
     }
@@ -1759,7 +1931,7 @@ fn hints_for(lib: &library::Library, typing: bool) -> &'static [(&'static str, &
 /// The shape a mature settings menu uses: the choices are on screen at once and
 /// the current one is marked, so choosing is reading and pressing rather than
 /// holding a direction until the right value goes past.
-fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, page: Rect) {
+fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, previews: &[PathBuf], page: Rect) {
     f.fill(page, paint::SCRIM, 0.0);
 
     let step = size::ROW;
@@ -1777,9 +1949,20 @@ fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, page: Rect) {
     f.fill(sheet, paint::SHEET, 0.0);
 
     let inner = sheet.inset(size::PAD);
-    let (head_rect, list) = inner.split_top(24.0);
+    let (head_rect, body) = inner.split_top(24.0);
     let spec = f.spec(picker.title, size::TITLE);
     f.label(&spec, head_rect, paint::TEXT);
+
+    // Choosing a set of pictures by reading nine names is not choosing. The
+    // desktop shows each one drawn in its own artwork; so does this, for
+    // whichever is under the cursor.
+    let showing_art = picker.field == library::FETCH_ICONS;
+    let (list, samples) = if showing_art {
+        let [list, samples] = <[Rect; 2]>::try_from(body.cols(size::GAP, &[5, 7])).unwrap();
+        (list, Some(samples))
+    } else {
+        (body, None)
+    };
 
     // Keep the highlighted option on screen when the list is longer than the
     // sheet — the core map offers nine cores for some consoles.
@@ -1800,6 +1983,31 @@ fn draw_picker_sheet(f: &mut Frame, picker: &library::Picker, page: Rect) {
         let inside = line.inset(Edges::xy(8.0, 5.0));
         let spec = f.wrapped(label, size::LABEL, inside.w, 1);
         f.label(&spec, inside, if on { paint::TEXT } else { paint::DIM });
+    }
+
+    // The samples, in two rows of three.
+    let Some(samples) = samples else { return };
+    f.pane(samples, paint::CARD, size::ROUND_SMALL);
+    let grid = samples.inset(Edges::all(6.0));
+    if previews.is_empty() {
+        let spec = f.spec("Fetching a look at it…", size::LABEL);
+        f.label_centered(&spec, grid, paint::FAINT);
+        return;
+    }
+    let (across, down) = (3usize, 2usize);
+    let cell_w = (grid.w - size::GAP * (across - 1) as f32) / across as f32;
+    let cell_h = (grid.h - size::GAP * (down - 1) as f32) / down as f32;
+    for (i, path) in previews.iter().take(across * down).enumerate() {
+        let cell = Rect::new(
+            grid.x + (i % across) as f32 * (cell_w + size::GAP),
+            grid.y + (i / across) as f32 * (cell_h + size::GAP),
+            cell_w,
+            cell_h,
+        );
+        // A key no ROM can have and no console picture uses, so a preview
+        // never collides with real artwork in the cache.
+        let key = -(1_000_000 + i as i64);
+        f.picture(key, path, cell, size::ROUND_SMALL);
     }
 }
 
@@ -2147,10 +2355,41 @@ fn draw_chrome(
     for (i, section) in library::SECTIONS.iter().enumerate() {
         let spec = f.spec(section.label, 13.0);
         let (w, _) = f.painter.measure(f.gfx, &spec);
-        let width = f.screen.scale.pt(w as f32) + size::GAP * 1.5;
+        let width = f.screen.scale.pt(w as f32) + size::TAB_PAD * 2.0;
         let slot = Rect::new(x, tabs.y, width, tabs.h);
         let on = i == lib.section;
         if on {
+            // The glow, then the bar.
+            //
+            // Stacked translucent rectangles rather than a blur pass: three
+            // draws against a whole extra framebuffer, and at this size the
+            // difference is not visible. Each is wider, taller and fainter than
+            // the last, which is what a light source spilling past its own edge
+            // looks like.
+            for step in (1..=6).rev() {
+                let spread = step as f32 * 1.6;
+                // Falls off with the square of the distance, the way light
+                // does. Three even steps read as three boxes; this reads as a
+                // haze.
+                let fade = 1.0 / (step as f32 * step as f32);
+                let glow = Rgba(
+                    paint::CURSOR.0,
+                    paint::CURSOR.1,
+                    paint::CURSOR.2,
+                    0.30 * fade,
+                );
+                let h = 3.0 + spread * 1.6;
+                f.fill(
+                    Rect::new(
+                        slot.x - spread * 0.5,
+                        slot.bottom() - 1.5 - h / 2.0,
+                        slot.w + spread,
+                        h,
+                    ),
+                    glow,
+                    h / 2.0,
+                );
+            }
             f.fill(
                 Rect::new(slot.x, slot.bottom() - 3.0, slot.w, 3.0),
                 paint::CURSOR,
@@ -2170,7 +2409,7 @@ fn draw_chrome(
             },
         );
         f.hits.tab(f.px(slot), i);
-        x += width;
+        x += width + size::TAB_GAP;
     }
 
     // The corner every device has: clock, then signal, then charge. Laid out

@@ -53,12 +53,22 @@ pub fn dir_size(dir: &Path) -> u64 {
 /// The cost is that *something* must install a provider before the first
 /// client is created — reqwest panics otherwise — so every client in this
 /// project is built here.
-pub fn http_client(timeout: Option<std::time::Duration>) -> anyhow::Result<reqwest::Client> {
+/// Make sure rustls has a cipher implementation before anything builds a client.
+///
+/// Built with `rustls-no-provider`, so this is not optional and not lazy: a
+/// client built without it panics on the first request, on whatever thread made
+/// it. Separate from [`http_client`] because the front ends build blocking
+/// clients of their own and need the same guarantee.
+pub fn install_tls() {
     static TLS: std::sync::Once = std::sync::Once::new();
     TLS.call_once(|| {
         // Only errors if a provider is already installed, which is harmless.
         let _ = rustls::crypto::ring::default_provider().install_default();
     });
+}
+
+pub fn http_client(timeout: Option<std::time::Duration>) -> anyhow::Result<reqwest::Client> {
+    install_tls();
     let mut b = reqwest::Client::builder()
         .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
         // Bound *connecting* even when the request itself is unbounded.

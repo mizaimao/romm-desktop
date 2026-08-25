@@ -135,6 +135,7 @@ fn main() {
     an_odd_width_is_not_sheared();
     the_backdrop_covers_the_frame();
     the_backdrop_moves_over_time();
+    the_backdrop_does_not_depend_on_how_many_pixels_it_has();
     a_drawn_word_has_gaps_in_it();
     a_wrapped_label_at_retina_scale_has_gaps_too();
     a_label_after_the_backdrop_still_has_gaps();
@@ -259,6 +260,84 @@ fn the_backdrop_covers_the_frame() {
         lit > (WIDTH * HEIGHT) as usize / 2,
         "the backdrop lit {lit} pixels of {}; it is not covering the frame",
         WIDTH * HEIGHT
+    );
+}
+
+/// The backdrop looks the same however many pixels it is given.
+///
+/// This is a promise, not an observation. The panel is 640x480 today and the
+/// window is whatever it is, and one day there will be other sizes; a backdrop
+/// whose pattern is tied to a pixel count is one that has to be re-judged every
+/// time that changes. It is also the bug that hid behind the glass: the blurred
+/// copy is drawn at a quarter size, and if the shader cared about that, every
+/// panel would show a different pattern from the page it sits on.
+///
+/// Drawn at two sizes with the same aspect and the same time, boiled down to a
+/// small grid, and compared. Boiled down because the two are not the same
+/// number of pixels and cannot be compared pixel for pixel — what has to match
+/// is the picture, not the sampling of it.
+fn the_backdrop_does_not_depend_on_how_many_pixels_it_has() {
+    let Some(screen) = screen() else {
+        eprintln!("no display here; skipping");
+        return;
+    };
+    let mut gfx = unsafe { romm_sdl::gfx::Gfx::new(&screen.video) }.expect("a renderer");
+    let backdrop = unsafe { romm_sdl::backdrop::Backdrop::build(&screen.video, "blobs") }
+        .expect("the backdrop should compile");
+
+    // 200x120 and 100x60 — half in each direction, so the same shape.
+    let mut coarse = |w: u32, h: u32| -> Vec<u8> {
+        gfx.resize_at(0.0, 0.0, w as f32, h as f32);
+        gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+        unsafe { backdrop.draw(w as f32, h as f32, 3.0) };
+        let mut raw = vec![0u8; (w * h * 4) as usize];
+        unsafe {
+            gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+            gl::ReadPixels(
+                0,
+                0,
+                w as i32,
+                h as i32,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
+                raw.as_mut_ptr() as *mut _,
+            );
+        }
+        // Ten by six cells, each the average of whatever fell in it.
+        let (cx, cy) = (10usize, 6usize);
+        let mut cells = vec![0u8; cx * cy];
+        for (i, cell) in cells.iter_mut().enumerate() {
+            let (gx, gy) = (i % cx, i / cx);
+            let (x0, x1) = (gx * w as usize / cx, (gx + 1) * w as usize / cx);
+            let (y0, y1) = (gy * h as usize / cy, (gy + 1) * h as usize / cy);
+            let mut sum = 0u64;
+            let mut n = 0u64;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let at = (y * w as usize + x) * 4;
+                    sum += raw[at] as u64 + raw[at + 1] as u64 + raw[at + 2] as u64;
+                    n += 3;
+                }
+            }
+            *cell = (sum / n.max(1)) as u8;
+        }
+        cells
+    };
+
+    let big = coarse(200, 120);
+    let small = coarse(100, 60);
+    screen.window.gl_swap_window();
+
+    let worst = big
+        .iter()
+        .zip(&small)
+        .map(|(a, b)| (*a as i32 - *b as i32).abs())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        worst <= 12,
+        "the same backdrop drawn at two sizes differs by {worst} levels; \
+         it is tied to the pixel count rather than to the shape of the screen"
     );
 }
 

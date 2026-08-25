@@ -346,6 +346,8 @@ pub struct Library {
     looked_up: (i64, Option<String>, Vec<String>),
     /// A set of console pictures being downloaded, if one is.
     pub fetching: Option<crate::iconfetch::Fetch>,
+    /// Sample pictures for whichever set the picker is sitting on.
+    pub previews: Option<crate::iconfetch::Previews>,
     pub cols: Vec<CollectionRow>,
     pub col_at: usize,
     /// The open collection's name, for the header once its games are showing.
@@ -422,6 +424,7 @@ impl Library {
             peeked: (String::new(), Vec::new()),
             looked_up: (0, None, Vec::new()),
             fetching: None,
+            previews: None,
             cache,
             media_root,
             roms_dir,
@@ -620,6 +623,27 @@ impl Library {
         self.option_at = self
             .option_at
             .min(self.panes.get(self.pane_at).map_or(0, |p| p.entries.len().saturating_sub(1)));
+    }
+
+    /// Fetch a few of one set's pictures, to look at before choosing it.
+    ///
+    /// Replaces whatever was being fetched: the cursor has moved and the old
+    /// set's pictures are no longer the answer to anything. The worker notices
+    /// when its channel closes and stops.
+    pub fn start_previews(&mut self, set: &str) {
+        if self.previews.as_ref().is_some_and(|p| p.set == set) {
+            return;
+        }
+        let slugs: Vec<String> = self.consoles.iter().map(|c| c.slug.clone()).collect();
+        let map = romm_desktop::coremap::CoreMap::load_or_embedded(std::path::Path::new(
+            "data/esde-core-map.json",
+        ));
+        self.previews = Some(crate::iconfetch::Previews::start(
+            self.media_root.clone(),
+            set,
+            slugs,
+            map,
+        ));
     }
 
     pub fn start_icon_fetch(&mut self, set: &str) {
@@ -1082,6 +1106,7 @@ impl Library {
     fn act_picking(&mut self, action: &str) -> bool {
         let Some(picker) = self.picking.as_mut() else { return false };
         let n = picker.options.len();
+        let was = picker.at;
         match action {
             "up" => picker.at = (picker.at + n.saturating_sub(1)) % n.max(1),
             "down" => picker.at = (picker.at + 1) % n.max(1),
@@ -1099,6 +1124,7 @@ impl Library {
                     *at = picker.at;
                 }
                 if picker.field == FETCH_ICONS {
+                    self.previews = None;
                     self.start_icon_fetch(&value);
                     return true;
                 }
@@ -1111,8 +1137,19 @@ impl Library {
                     eprintln!("could not save {}: {e:#}", picker.field);
                 }
             }
-            "back" | "back2" => self.picking = None,
+            "back" | "back2" => {
+                self.picking = None;
+                self.previews = None;
+            }
             _ => {}
+        }
+        // A different set under the cursor means different pictures to show.
+        if let Some(picker) = self.picking.as_ref()
+            && picker.field == FETCH_ICONS
+            && (picker.at != was || self.previews.is_none())
+            && let Some((set, _)) = picker.options.get(picker.at).cloned()
+        {
+            self.start_previews(&set);
         }
         true
     }
@@ -1280,6 +1317,10 @@ impl Library {
                             at: 0,
                             field: FETCH_ICONS,
                         });
+                        if let Some(first) = romm_desktop::iconart::ordered().first() {
+                            let id = first.0.clone();
+                            self.start_previews(&id);
+                        }
                         return Ok(true);
                     }
 
@@ -1389,6 +1430,7 @@ mod tests {
             peeked: (String::new(), Vec::new()),
             looked_up: (0, None, Vec::new()),
             fetching: None,
+            previews: None,
             cache: Cache::open(Path::new(":memory:")).expect("an in-memory cache"),
             media_root: PathBuf::new(),
             roms_dir: PathBuf::new(),

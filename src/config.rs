@@ -350,6 +350,15 @@ pub struct AppearanceCfg {
     /// How frosted the panels are, 0 to 60.
     #[serde(default = "default_glass")]
     pub glass: i64,
+    /// Whether the front end animates: pages sliding as the tabs change, and
+    /// whatever else is added later.
+    ///
+    /// One switch for all of it rather than one per effect. Somebody who turns
+    /// animation off has said what they want, and having to find six more
+    /// switches to actually get it is the shape of a settings screen nobody
+    /// trusts.
+    #[serde(default = "yes")]
+    pub animations: bool,
 }
 
 /// Written out rather than derived.
@@ -369,6 +378,7 @@ impl Default for AppearanceCfg {
             backdrop_speed: hundred(),
             backdrop_strength: hundred(),
             glass: default_glass(),
+            animations: yes(),
         }
     }
 }
