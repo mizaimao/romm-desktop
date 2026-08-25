@@ -3,6 +3,64 @@
 > **The decomposition, 2026-08-24 — start here.** Everything the app cannot
 > avoid on macOS is 192 MB, and it is not our document.
 
+## Yes — the cost follows the window's area, not what is in it
+
+The question `ROMM_MEASURE_SIZE` was added to ask, and the answer is clean.
+Same script, same arcade console, `no-covers` throughout so no artwork exists
+in any run, weighed at rest after the browse. The only thing that varied is how
+big the window was.
+
+| window | area | WebContent at rest | samples |
+|---|---|---|---|
+| 730x523 | 0.38 Mpx | **83.2 MB** | 33 |
+| 1032x740 | 0.76 Mpx | **114.9 MB** | 9 |
+| 1460x1046 | 1.53 Mpx | **193.5 MB** | 24 |
+
+A straight line through three points is not usually worth much. This one is:
+
+    WebContent ≈ 44 MB + 97 MB per CSS megapixel of window
+
+    0.38 Mpx   measured  83.2   fit  81.0
+    0.76 Mpx   measured 114.9   fit 118.2
+    1.53 Mpx   measured 193.5   fit 192.4
+
+Every point inside 3 MB. **The window is the memory.** Shrink it to half the
+area and the page process roughly halves, with exactly the same library, the
+same console and the same two and a half thousand rows in it.
+
+This is the same result as "deleting the whole document changed nothing" and
+"a full scroll costs no more than a short one", seen from the other side. All
+three say the page process is not holding the interface. It is holding the
+surface the interface is drawn on.
+
+### What 97 MB per megapixel means
+
+More than it sounds. A CSS megapixel on a 2x display is four device
+megapixels, which is 16 MB of RGBA. So 97 MB per CSS megapixel is about **six
+full-window backing stores**, held at rest, with nothing animating.
+
+That is an inference from one number and not a measurement — the six could be
+five or eight, and nothing here says *which* layers they are. But it is the
+first suggestion in this file of a lever that is neither the artwork nor the
+framework floor: **count the full-window compositing layers and see whether
+six is the number it needs to be.** Candidates worth ruling in or out one at a
+time, the way `no-glass` was: the scroller's own tiles, the sticky group
+headings, the preview column, the tab row, and the shader backdrop when it is
+on.
+
+### The caveat, and it is a real one
+
+This run was contaminated: 127 of its 240 samples tripped the process counter
+and one pass of 1032x740 died on launch and recorded nothing. The table above
+is the clean subset only, and the two smaller sizes rest on fewer samples than
+the largest.
+
+What makes it worth believing anyway is that the discarded samples are noise
+in both directions while the surviving ones are monotonic, tightly grouped,
+and fit a straight line — and that the three groups are all the same state
+(`HELD`/`SETTLED`) of the same script. What would settle it is two clean
+passes per size with nothing else running on the machine.
+
 ## Nothing was ever released: the releaser tested for the wrong tag
 
 Found by reading, not by measuring, and it needs no measurement to establish —

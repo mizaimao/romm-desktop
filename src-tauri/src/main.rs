@@ -3935,7 +3935,17 @@ fn main() {
                 // run. Off the side of the display keeps it drawing while
                 // keeping it off whoever is using the machine — measuring
                 // should not throw a window at them for minutes at a time.
-                let _ = win.set_size(tauri::LogicalSize::new(1460.0, 1046.0));
+                // Size it from the environment, because one of the things
+                // worth weighing is whether the cost follows the window's area
+                // rather than what is in it.
+                let (w, h) = std::env::var("ROMM_MEASURE_SIZE")
+                    .ok()
+                    .and_then(|s| {
+                        let (w, h) = s.split_once('x')?;
+                        Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+                    })
+                    .unwrap_or((1460.0, 1046.0));
+                let _ = win.set_size(tauri::LogicalSize::new(w, h));
                 let _ = win.set_position(tauri::LogicalPosition::new(-4000.0, 200.0));
                 match std::fs::read_to_string(&path) {
                     Ok(script) => {
