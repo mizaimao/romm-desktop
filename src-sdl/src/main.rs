@@ -71,6 +71,14 @@ const PREVIEW: u32 = 3;
 /// button press is never noticeably late.
 const IDLE_WAIT_MS: u32 = 50;
 
+/// How long to wait while a button is held down.
+///
+/// A pad reports what it is holding when asked, not by sending anything, so a
+/// held direction produces no events at all — the loop has to come round on its
+/// own for auto-repeat to keep firing. Eight milliseconds is finer than the
+/// repeat rate and still a hundred and twenty times less work than not waiting.
+const HELD_WAIT_MS: u32 = 8;
+
 /// How long a frame may stand before it is redrawn regardless.
 const STALE_MS: f64 = 500.0;
 
@@ -87,6 +95,74 @@ const MOTION_FPS: f64 = 30.0;
 /// Short. A transition is there to say *which way* you moved, and one long
 /// enough to be admired is one you wait for every time.
 const SLIDE_MS: f64 = 180.0;
+
+/// The floor: one picture, redrawn every frame, and nothing else.
+///
+/// `ROMM_SDL_BENCH=image` — a still frame put on screen at the display's rate
+/// with no shader, no blur, no text and no frame-skipping. It answers the
+/// question every other measurement is relative to: what does it cost this
+/// machine merely to hand SDL a window and put pixels in it?
+///
+/// Without it a number like "19%" means nothing. If the floor is 15 there is
+/// almost nothing left to win; if it is 2 the drawing is the whole cost.
+/// Reported rather than guessed, because guessing is what got the last round's
+/// optimization pointed at the wrong thing.
+fn bench_image(window: &sdl2::video::Window, gfx: &mut Gfx, events: &mut sdl2::EventPump) {
+    // One texture, uploaded once. A gradient rather than a solid: a driver may
+    // notice that a constant color needs no sampling.
+    let (w, h) = (PANEL.0, PANEL.1);
+    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            pixels.extend_from_slice(&[
+                (x * 255 / w) as u8,
+                (y * 255 / h) as u8,
+                128,
+                255,
+            ]);
+        }
+    }
+    let picture = gfx.upload_rgba(w, h, &pixels);
+    let mut frames = 0u64;
+    let start = std::time::Instant::now();
+    loop {
+        for event in events.poll_iter() {
+            if matches!(event, Event::Quit { .. }) {
+                return;
+            }
+        }
+        let (dw, dh) = window.drawable_size();
+        let (ox, oy, zoom) = panel_box(dw as f32, dh as f32);
+        gfx.resize_at(0.0, 0.0, dw as f32, dh as f32);
+        gfx.clear(paint::BACKGROUND);
+        gfx.image(
+            &picture,
+            ox,
+            oy,
+            w as f32 * zoom,
+            h as f32 * zoom,
+            Rgba::WHITE,
+        );
+        window.gl_swap_window();
+        frames += 1;
+        if frames.is_multiple_of(300) {
+            let secs = start.elapsed().as_secs_f64();
+            println!("bench: {frames} frames in {secs:.1}s, {:.0} fps", frames as f64 / secs);
+        }
+    }
+}
+
+/// Everything that arrived: what the wait woke for, then what was queued
+/// behind it.
+///
+/// One line, and a function only so it can be tested. The bug it exists to
+/// prevent is not a hard one to see once it is named — the event that ends the
+/// wait is *consumed* by the wait — and it was still shipped, because the loop
+/// reads perfectly well without it and the symptom is "the mouse stopped
+/// working" rather than anything about events.
+fn collect<E>(woke: Option<E>, queued: impl IntoIterator<Item = E>) -> Vec<E> {
+    woke.into_iter().chain(queued).collect()
+}
 
 /// A page on its way out, and which way it is going.
 struct Slide {
@@ -275,6 +351,12 @@ fn main() -> Result<()> {
         .map_err(anyhow::Error::msg)
         .context("starting the clock")?;
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
+    // The floor, when asked for: a window and one texture, nothing else. The
+    // number every other measurement here is relative to.
+    if std::env::var("ROMM_SDL_BENCH").as_deref() == Ok("image") {
+        bench_image(&window, &mut gfx, &mut events);
+        return Ok(());
+    }
     // What the pad is holding, so the drawing can show that input arrived.
     let mut held: BTreeSet<String> = BTreeSet::new();
 
@@ -337,17 +419,33 @@ fn main() -> Result<()> {
         // first version of this returned to the top of the loop, found nothing
         // to do, and spun there — which cost *more* than drawing every frame.
         let animating = backdrop.is_some() && showing.speed > 0.0;
-        let busy = !held.is_empty() || lib.fetching.is_some() || lib.previews.is_some();
-        if !dirty && !busy {
-            let wait = if animating {
-                (1000.0 / MOTION_FPS - (now - drawn_at)).max(1.0) as u32
-            } else {
-                IDLE_WAIT_MS
-            };
-            let _ = events.wait_event_timeout(wait.min(IDLE_WAIT_MS));
-        }
+        // How long there is to wait before something is due.
+        //
+        // A held button is the short one: nothing arrives while a direction is
+        // down — the state is polled, not sent — so the loop has to come back
+        // often enough for auto-repeat to feel like auto-repeat. Not "not at
+        // all", which is what it was, and which spun a core for as long as a
+        // direction was held.
+        let wait = if dirty {
+            0
+        } else if !held.is_empty() {
+            HELD_WAIT_MS
+        } else if animating {
+            ((1000.0 / MOTION_FPS - (now - drawn_at)).max(1.0) as u32).min(IDLE_WAIT_MS)
+        } else {
+            IDLE_WAIT_MS
+        };
+        // Waiting *takes* the event it woke for. Dropping it — which is what
+        // the first version of this did — means the first press of any
+        // interaction is swallowed, and since the app is asleep between
+        // interactions the first press is every press. The mouse and the pad
+        // both stopped working, and neither symptom pointed at the event loop.
+        let woke = (wait > 0)
+            .then(|| events.wait_event_timeout(wait))
+            .flatten();
+        let arrived = collect(woke, events.poll_iter());
 
-        for event in events.poll_iter() {
+        for event in arrived {
             // Every event is a reason to look again. Being wrong in this
             // direction costs one frame; being wrong the other way leaves a
             // key press with nothing on screen to show for it.
@@ -2717,4 +2815,23 @@ fn draw_detail(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     let lines = ((room / 14.0).floor() as u16).clamp(1, 12);
     let spec = f.wrapped(summary, 10.0, below.w, lines);
     f.label(&spec, Rect::new(below.x, y, below.w, room), paint::DIM);
+}
+
+#[cfg(test)]
+mod loop_tests {
+    use super::collect;
+
+    /// The event that ended the wait is handled, not thrown away.
+    ///
+    /// Between interactions this app is asleep, so the event that wakes it is
+    /// the first press of whatever somebody is doing. Losing it loses every
+    /// first press — which is what "the mouse is not working" turned out to be,
+    /// and the pad with it.
+    #[test]
+    fn the_event_that_woke_us_is_not_lost() {
+        assert_eq!(collect(Some("click"), ["motion"]), ["click", "motion"]);
+        assert_eq!(collect(Some("click"), []), ["click"]);
+        assert_eq!(collect(None::<&str>, ["motion"]), ["motion"]);
+        assert!(collect(None::<&str>, []).is_empty());
+    }
 }
