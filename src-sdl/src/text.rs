@@ -517,13 +517,35 @@ impl Painter {
     }
 
     /// Draw it, with its top-left corner at `x`, `y` in pixels.
+    ///
+    /// Snapped to whole pixels, and that is the whole of this comment's
+    /// reason for existing.
+    ///
+    /// The glyphs are rasterised onto a whole-pixel grid — `physical()` returns
+    /// integers — and then the finished bitmap was being placed at whatever the
+    /// layout worked out, which is fractional almost everywhere: a twelve-column
+    /// split does not divide evenly, and centring divides by two and lands on a
+    /// half by construction. A texture drawn half a pixel off is sampled across
+    /// two pixels at every edge, so every stem of every letter came out as two
+    /// half-lit columns instead of one lit one.
+    ///
+    /// That is what "the whole screen is blurry" was. Not the resolution — the
+    /// panel is 640x480 and the app draws 640x480 — and not the type size. A
+    /// half-pixel, everywhere, on everything.
     pub fn draw(&mut self, gfx: &Gfx, spec: &Spec, x: f32, y: f32, color: Rgba) {
         let (w, h) = {
             let drawn = self.entry(gfx, spec);
             (drawn.width, drawn.height)
         };
         let Some(drawn) = self.cache.get(spec) else { return };
-        gfx.image(&drawn.texture, x, y, w as f32, h as f32, color);
+        gfx.image(
+            &drawn.texture,
+            x.round(),
+            y.round(),
+            w as f32,
+            h as f32,
+            color,
+        );
     }
 
     fn entry(&mut self, gfx: &Gfx, spec: &Spec) -> &Drawn {
