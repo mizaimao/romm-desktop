@@ -16,8 +16,8 @@
 //     `emulatorlauncher -system <system> -rom <path>` — its argument parser
 //     marks exactly those two as required and the rest optional
 //
-// `tools` is empty on this device and `ports` has five, which is why an empty
-// folder shows nothing at all rather than an empty screen.
+// `tools` is empty on this device, `ports` has six and `emulators` has two, which
+// is why an empty folder shows nothing at all rather than an empty screen.
 
 use std::path::{Path, PathBuf};
 
@@ -29,8 +29,18 @@ pub struct Port {
     pub image: Option<PathBuf>,
 }
 
-/// The two folders KNULLI keeps these in, and what to call them.
-pub const FOLDERS: [(&str, &str); 2] = [("ports", "Ports"), ("tools", "Tools")];
+/// The folders KNULLI keeps these in, and what it calls them.
+///
+/// Three, not two. `emulators` holds PPSSPP and ScummVM on this device — the
+/// standalone emulators that are launched as scripts rather than as a libretro
+/// core, so they belong here rather than in the Emulators *settings* pane,
+/// which is about which core runs a console. `tools` is empty on this device
+/// and shows nothing.
+pub const FOLDERS: [(&str, &str); 3] = [
+    ("ports", "Ports"),
+    ("tools", "Tools"),
+    ("emulators", "Emulators"),
+];
 
 /// Everything launchable in one folder, by name.
 ///
@@ -202,6 +212,17 @@ mod tests {
         let found = scan(&dir, "ports");
         assert_eq!(found[0].name, "yatka");
         assert_eq!(found[0].image, None, "a path that does not exist was kept");
+    }
+
+    /// All three of KNULLI's script folders, not just the two obvious ones.
+    ///
+    /// `emulators` holds PPSSPP and ScummVM — standalone emulators launched as
+    /// scripts. Leaving it out is why two things on the device had nowhere to
+    /// appear.
+    #[test]
+    fn all_three_script_folders_are_offered() {
+        let ids: Vec<&str> = FOLDERS.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, ["ports", "tools", "emulators"]);
     }
 
     /// An empty folder is nothing to show. `tools` is empty on this device, and

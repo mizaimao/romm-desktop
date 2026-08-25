@@ -178,13 +178,6 @@ pub struct Pane {
     pub entries: Vec<Entry>,
 }
 
-fn show_options() -> Vec<(String, String)> {
-    vec![
-        ("all".into(), "Everything".into()),
-        ("downloaded".into(), "On this device".into()),
-    ]
-}
-
 /// The Device pane, built from whatever the platform scheme actually offers.
 ///
 /// A row per thing the hardware has, and no row for a thing it does not — on a
@@ -381,49 +374,24 @@ pub fn panes(
     consoles: &[(String, String)],
     map: &romm_desktop::coremap::CoreMap,
 ) -> Vec<Pane> {
-    let emulators = emulator_entries(consoles, map, &cfg.cores.overrides);
-    let bindings = binding_entries(&cfg.bindings);
+    let mut emulators = emulator_entries(consoles, map, &cfg.cores.overrides);
+    emulators.extend(launch_entries(cfg));
+    let mut control = vec![Entry {
+        field: "controllers.mirror_player_one",
+        label: "Match player 1",
+        help: "Give players 2 to 4 the same bindings as player 1.",
+        kind: Kind::Toggle(cfg.controllers.mirror_player_one),
+    }];
+    control.extend(binding_entries(&cfg.bindings));
+
+    // The desktop's panes, in the desktop's order, plus Device — which the
+    // desktop has no equivalent of because a laptop has no backlight you would
+    // set from an app. Named the same on purpose: a settings screen that
+    // reorganises everything is one you have to relearn per machine.
     vec![
         Pane {
-            id: "device",
-            label: "Device",
-            // The pane the desktop does not have. Everything here is the
-            // handheld's own hardware, and every path behind it was measured on
-            // the Flip — see `romm_desktop::platform::knulli`. Built from what
-            // the scheme actually offers, so a desktop build gets a short pane
-            // rather than controls that do nothing.
-            entries: device_entries(),
-        },
-        Pane {
-            id: "library",
-            label: "Library",
-            entries: vec![
-                Entry {
-                    field: "library.local_root",
-                    label: "Games folder",
-                    help: "Set by the device image. Change it in romm-sdl.toml on the card.",
-                    kind: Kind::ReadOnly(cfg.library.local_root.clone()),
-                },
-                Entry {
-                    field: "library.romm_collections",
-                    label: "RomM collections",
-                    help: "Show the collections RomM generates by company, genre and franchise alongside your own.",
-                    kind: Kind::Toggle(cfg.library.romm_collections),
-                },
-                Entry {
-                    field: "media.list_art",
-                    label: "Game list shows",
-                    help: "Which games appear in a console's list.",
-                    kind: Kind::Choice {
-                        at: 0,
-                        options: show_options(),
-                    },
-                },
-            ],
-        },
-        Pane {
-            id: "accounts",
-            label: "Accounts",
+            id: "general",
+            label: "General",
             entries: vec![
                 Entry {
                     field: "server.url",
@@ -442,7 +410,7 @@ pub fn panes(
                 },
                 Entry {
                     field: "achievements.username",
-                    label: "Achievements login",
+                    label: "Account",
                     help: "Your RetroAchievements username.",
                     kind: Kind::Text {
                         value: cfg.achievements.username.clone().unwrap_or_default(),
@@ -451,12 +419,77 @@ pub fn panes(
                 },
                 Entry {
                     field: "achievements.token",
-                    label: "Achievements token",
+                    label: "Token",
                     help: "From your RetroAchievements settings page. Not your password.",
                     kind: Kind::Text {
                         value: cfg.achievements.token.clone().unwrap_or_default(),
                         secret: true,
                     },
+                },
+                Entry {
+                    field: "achievements.hardcore",
+                    label: "Hardcore mode",
+                    help: "No save states and no rewind, for the achievements that require it.",
+                    kind: Kind::Toggle(cfg.achievements.hardcore),
+                },
+                Entry {
+                    field: "saves.confirm_delete_state",
+                    label: "Ask before deleting",
+                    help: "Confirm before a save state is thrown away.",
+                    kind: Kind::Toggle(cfg.saves.confirm_delete_state),
+                },
+            ],
+        },
+        Pane {
+            id: "appearance",
+            label: "Appearance",
+            entries: vec![
+                Entry {
+                    field: "media.list_art",
+                    label: "Game list shows",
+                    help: "Which picture a game is drawn with.",
+                    kind: Kind::Choice {
+                        at: art_at(&cfg.media.list_art),
+                        options: art_options(),
+                    },
+                },
+                Entry {
+                    field: "media.detail_art",
+                    label: "Show",
+                    help: "Which picture the pane beside the list uses.",
+                    kind: Kind::Choice {
+                        at: art_at(&cfg.media.detail_art),
+                        options: art_options(),
+                    },
+                },
+                Entry {
+                    field: "shaders.enabled",
+                    label: "Shaders",
+                    help: "Apply the shader chain when a game launches.",
+                    kind: Kind::Toggle(cfg.shaders.enabled),
+                },
+            ],
+        },
+        Pane {
+            id: "control",
+            label: "Control",
+            entries: control,
+        },
+        Pane {
+            id: "library",
+            label: "Library",
+            entries: vec![
+                Entry {
+                    field: "library.local_root",
+                    label: "Folder",
+                    help: "Set by the device image. Change it in romm-sdl.toml on the card.",
+                    kind: Kind::ReadOnly(cfg.library.local_root.clone()),
+                },
+                Entry {
+                    field: "library.romm_collections",
+                    label: "RomM collections",
+                    help: "Show the collections RomM generates by company, genre and franchise alongside your own.",
+                    kind: Kind::Toggle(cfg.library.romm_collections),
                 },
             ],
         },
@@ -466,9 +499,33 @@ pub fn panes(
             entries: emulators,
         },
         Pane {
-            id: "controls",
-            label: "Controls",
-            entries: bindings,
+            id: "iconsets",
+            label: "Icon sets",
+            entries: vec![
+                Entry {
+                    field: "icons.set",
+                    label: "Drawing from",
+                    help: "Which set the console pictures come from.",
+                    kind: Kind::Text {
+                        value: cfg.icons.set.clone(),
+                        secret: false,
+                    },
+                },
+                Entry {
+                    field: "icons.style",
+                    label: "Style",
+                    help: "How a console is drawn within that set.",
+                    kind: Kind::Text {
+                        value: cfg.icons.style.clone(),
+                        secret: false,
+                    },
+                },
+            ],
+        },
+        Pane {
+            id: "device",
+            label: "Device",
+            entries: device_entries(),
         },
         Pane {
             id: "about",
@@ -489,6 +546,61 @@ pub fn panes(
             ],
         },
     ]
+}
+
+/// How a game is launched — the desktop's Emulators pane minus the two that
+/// mean nothing without a window.
+///
+/// "Fit to the game" and "Title bar" are gone: there is no window to fit and no
+/// bar to hide.
+fn launch_entries(cfg: &Config) -> Vec<Entry> {
+    vec![
+        Entry {
+            field: "retroarch.save_state_on_exit",
+            label: "Save state on exit",
+            help: "Write a save state when a game is closed, so it reopens where you left it.",
+            kind: Kind::Toggle(cfg.retroarch.save_state_on_exit),
+        },
+        Entry {
+            field: "retroarch.autofire",
+            label: "Auto-fire",
+            help: "Hold to repeat, or press once to toggle repeating.",
+            kind: Kind::Choice {
+                at: autofire_at(Some(cfg.retroarch.autofire.as_str())),
+                options: autofire_options(),
+            },
+        },
+    ]
+}
+
+fn art_options() -> Vec<(String, String)> {
+    ["box", "title", "screenshot", "logo", "none"]
+        .iter()
+        .map(|k| ((*k).to_owned(), k.replace('_', " ")))
+        .collect()
+}
+
+fn art_at(current: &str) -> usize {
+    art_options()
+        .iter()
+        .position(|(k, _)| k == current)
+        .unwrap_or(0)
+}
+
+fn autofire_options() -> Vec<(String, String)> {
+    vec![
+        (String::new(), "Off".to_owned()),
+        ("hold".to_owned(), "Hold".to_owned()),
+        ("toggle".to_owned(), "Toggle".to_owned()),
+    ]
+}
+
+fn autofire_at(current: Option<&str>) -> usize {
+    let now = current.unwrap_or("");
+    autofire_options()
+        .iter()
+        .position(|(k, _)| k == now)
+        .unwrap_or(0)
 }
 
 /// Write one setting to [`FILE`].
@@ -625,13 +737,13 @@ mod tests {
     fn a_choice_wraps_both_ways() {
         let mut e = entry(Kind::Choice {
             at: 0,
-            options: show_options(),
+            options: autofire_options(),
         });
-        assert_eq!(e.value(), "Everything");
-        assert_eq!(e.step(-1), Some(Written::Text("downloaded".into())));
-        assert_eq!(e.value(), "On this device");
+        assert_eq!(e.value(), "Off");
+        assert_eq!(e.step(-1), Some(Written::Text("toggle".into())));
+        assert_eq!(e.value(), "Toggle");
         e.step(1);
-        assert_eq!(e.value(), "Everything");
+        assert_eq!(e.value(), "Off");
     }
 
     /// A number stops at its ends rather than wrapping — brightness rolling
@@ -780,7 +892,12 @@ mod tests {
             .find(|p| p.id == "emulators")
             .expect("an Emulators pane");
         assert!(!emu.entries.is_empty(), "no console offered a core choice");
-        for e in &emu.entries {
+        // The per-console rows; the pane also carries the launch settings.
+        for e in emu
+            .entries
+            .iter()
+            .filter(|e| e.field.starts_with("cores_overrides."))
+        {
             let Kind::Choice { options, .. } = &e.kind else {
                 panic!("{} is not a choice", e.label);
             };
@@ -788,12 +905,6 @@ mod tests {
                 options.len() >= 2,
                 "{} has one option and should not be a row",
                 e.label
-            );
-            assert!(
-                e.field.starts_with("cores_overrides."),
-                "{} writes to {:?}, which is not the overrides table",
-                e.label,
-                e.field
             );
         }
     }
@@ -817,21 +928,21 @@ mod tests {
     fn controls_are_pad_only_and_can_be_unbound() {
         let pane = built()
             .into_iter()
-            .find(|p| p.id == "controls")
-            .expect("a Controls pane");
+            .find(|p| p.id == "control")
+            .expect("a Control pane");
         assert!(!pane.entries.is_empty());
-        for e in &pane.entries {
+        // The pane opens with "Match player 1", which is a toggle; the bindings
+        // are the rest.
+        for e in pane
+            .entries
+            .iter()
+            .filter(|e| e.field.starts_with("bindings_pad."))
+        {
             let Kind::Choice { options, .. } = &e.kind else {
                 panic!("{} is not a choice", e.label);
             };
             assert_eq!(options[0].0, "", "{} cannot be unbound", e.label);
             assert_eq!(options[0].1, "not bound");
-            assert!(
-                e.field.starts_with("bindings_pad."),
-                "{} writes to {:?}",
-                e.label,
-                e.field
-            );
         }
     }
 
@@ -848,6 +959,67 @@ mod tests {
                 b.index.to_string(),
                 "button {} selected the wrong option",
                 b.index
+            );
+        }
+    }
+
+    /// The panes are the desktop's, in the desktop's order.
+    ///
+    /// This drifted once already: the first version invented Device, Library,
+    /// Accounts, Emulators, Controls and About, which is a settings screen you
+    /// have to relearn per machine for no reason. The one addition is Device,
+    /// because a laptop has no backlight you would set from an app.
+    #[test]
+    fn the_panes_match_the_desktops() {
+        let ids: Vec<_> = built().iter().map(|p| p.id).collect();
+        assert_eq!(
+            ids,
+            [
+                "general",
+                "appearance",
+                "control",
+                "library",
+                "emulators",
+                "iconsets",
+                "device",
+                "about"
+            ],
+            "the handheld's settings no longer line up with the desktop's"
+        );
+    }
+
+    /// The settings the desktop has that this device cannot honor are absent,
+    /// and the ones it can are present.
+    ///
+    /// Named individually because "38 rows" is not a check: a pane can be the
+    /// right length and hold the wrong things.
+    #[test]
+    fn the_desktops_settings_are_here_except_the_ones_about_windows() {
+        let labels: Vec<String> = built()
+            .iter()
+            .flat_map(|p| p.entries.iter().map(|e| e.label.to_lowercase()))
+            .collect();
+        let has = |what: &str| labels.iter().any(|l| l.contains(what));
+
+        for wanted in [
+            "romm server",
+            "retroachievements",
+            "hardcore",
+            "ask before deleting",
+            "game list shows",
+            "match player 1",
+            "folder",
+            "save state on exit",
+            "auto-fire",
+            "drawing from",
+            "version",
+        ] {
+            assert!(has(wanted), "the desktop has {wanted:?} and this does not");
+        }
+        for absent in ["window", "title bar", "fit to the game"] {
+            assert!(
+                !has(absent),
+                "{absent:?} means nothing on a device with no windows"
             );
         }
     }
