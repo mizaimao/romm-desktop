@@ -56,7 +56,7 @@ const SYSTEM_ALIASES: &[(&str, &str)] = &[
 const NOT_SYSTEMS: &[&str] = &["0_BIOS", "bios", "ports", "SourcePorts", "Ports"];
 
 /// One game found on disk.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Game {
     /// RomM platform slug, so the rest of the app is unchanged.
     pub platform_slug: String,

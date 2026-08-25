@@ -1511,7 +1511,6 @@ mod size {
     /// Below this much room per tile the grid becomes a list. Not the tile
     /// size — there is no fixed tile size any more.
     pub const TILE_MIN: f32 = 84.0;
-    pub const TILE_ART: f32 = 66.0;
     /// Two lines of console name — "Nintendo Entertainment System" needs
     /// both — then the game count under it, then the tile's own padding.
     /// Reserving less is what made the count bleed out of the tile and sit

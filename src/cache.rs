@@ -155,6 +155,22 @@ const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name
                            COALESCE(multi_file, 0), esde_system, local_path, \
                            last_played";
 
+/// Whether a row is something to put on screen.
+///
+/// A leading dot means hidden, and it means it on the card as well as in the
+/// app. Batocera files multi-disc games as `.Final Fantasy VII (USA)/` with the
+/// `.m3u` beside it, and its own front end skips the folder — so the same game
+/// appeared twice, once properly and once with a dot in front of the name and
+/// no way to start it.
+///
+/// The scan no longer picks them up, but a cache filled before that fix still
+/// holds them, and a cache synced from a server can hold anything. Filtered
+/// here, where every list this app draws passes through, so both front ends get
+/// it from one rule rather than two.
+pub fn shown(row: &RomRow) -> bool {
+    !row.fs_name.starts_with('.')
+}
+
 fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
     Ok(RomRow {
         id: r.get(0)?,
@@ -346,6 +362,7 @@ impl Cache {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map([grp], rom_from_row)?
+            .filter(|r| r.as_ref().map(shown).unwrap_or(true))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -360,6 +377,7 @@ impl Cache {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map([id], rom_from_row)?
+            .filter(|r| r.as_ref().map(shown).unwrap_or(true))
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -573,6 +591,7 @@ impl Cache {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map([limit as i64], rom_from_row)?
+            .filter(|r| r.as_ref().map(shown).unwrap_or(true))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -628,6 +647,7 @@ impl Cache {
             .query_map([limit as i64], |r| {
                 Ok((rom_from_row(r)?, r.get("secs")?, r.get("runs")?, r.get("last")?))
             })?
+            .filter(|t| t.as_ref().map(|(row, ..)| shown(row)).unwrap_or(true))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -647,6 +667,7 @@ impl Cache {
             .query_map(rusqlite::params![runs, under, limit as i64], |r| {
                 Ok((rom_from_row(r)?, r.get("secs")?, r.get("runs")?))
             })?
+            .filter(|t| t.as_ref().map(|(row, ..)| shown(row)).unwrap_or(true))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -664,7 +685,10 @@ impl Cache {
     pub fn all_roms(&self) -> Result<Vec<RomRow>> {
         let sql = format!("SELECT {ROM_COLUMNS} FROM roms ORDER BY 2, 3 COLLATE NOCASE");
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map([], rom_from_row)?.collect::<Result<Vec<_>, _>>()?;
+        let rows = stmt
+            .query_map([], rom_from_row)?
+            .filter(|r| r.as_ref().map(shown).unwrap_or(true))
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
@@ -679,6 +703,7 @@ impl Cache {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map([platform_slug], rom_from_row)?
+            .filter(|r| r.as_ref().map(shown).unwrap_or(true))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -721,6 +746,7 @@ impl Cache {
         let pattern = format!("%{needle}%");
         let rows = stmt
             .query_map(params![pattern, limit as i64], rom_from_row)?
+            .filter(|r| r.as_ref().map(shown).unwrap_or(true))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -1524,5 +1550,53 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(c.recently_played(3).unwrap().len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod hiding {
+    use super::*;
+
+    /// A leading dot means hidden, in the app as well as on the card.
+    ///
+    /// The scan stopped picking these up, but a cache filled before that still
+    /// holds them and a synced cache can hold anything — so the rule lives
+    /// where every list passes through, and both front ends get it from one
+    /// place rather than each carrying its own version.
+    #[test]
+    fn hidden_rows_are_not_listed() {
+        let dir = std::env::temp_dir().join("romm-hiding");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cache = Cache::open(&dir.join("cache.sqlite3")).unwrap();
+
+        let game = |id: i64, fs_name: &str| crate::esde::Game {
+            platform_slug: "psx".into(),
+            system: "psx".into(),
+            fs_name: fs_name.into(),
+            name: fs_name.trim_end_matches(".chd").into(),
+            path: std::path::PathBuf::from(format!("/userdata/roms/psx/{fs_name}")),
+            size_bytes: 1000 + id,
+            ..Default::default()
+        };
+        cache
+            .replace_from_esde(&[
+                game(1, "40 Winks (USA).chd"),
+                game(2, ".Final Fantasy VII (USA)"),
+            ])
+            .unwrap();
+
+        let listed = cache.roms_for("psx").unwrap();
+        let names: Vec<&str> = listed.iter().map(|r| r.fs_name.as_str()).collect();
+        assert_eq!(names, ["40 Winks (USA).chd"], "a hidden row was listed");
+
+        assert!(shown(&RomRow {
+            fs_name: "Chrono Trigger.sfc".into(),
+            ..listed[0].clone()
+        }));
+        assert!(!shown(&RomRow {
+            fs_name: ".hidden".into(),
+            ..listed[0].clone()
+        }));
     }
 }

@@ -102,10 +102,8 @@ impl CoreMap {
     /// any RomM slug that maps to it, because a scan files games under the slug
     /// and the table is keyed by the system.
     pub fn display_name(&self, slug: &str) -> Option<&str> {
-        if let Some(sys) = self.systems.get(slug) {
-            if let Some(name) = sys.fullname.as_deref() {
-                return Some(name);
-            }
+        if let Some(name) = self.systems.get(slug).and_then(|s| s.fullname.as_deref()) {
+            return Some(name);
         }
         self.systems
             .values()

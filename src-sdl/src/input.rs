@@ -254,10 +254,11 @@ impl Pads {
         let entries = es_input_mappings();
         for index in 0..count {
             let Ok(js) = joysticks.open(index) else { continue };
-            if let Some(mapping) = best_mapping(&entries, &js.guid().to_string(), &js.name(), js.num_hats() > 0) {
-                if let Err(e) = subsystem.add_mapping(&mapping) {
-                    eprintln!("could not describe {} to SDL: {e}", js.name());
-                }
+            if let Some(mapping) =
+                best_mapping(&entries, &js.guid().to_string(), &js.name(), js.num_hats() > 0)
+                && let Err(e) = subsystem.add_mapping(&mapping)
+            {
+                eprintln!("could not describe {} to SDL: {e}", js.name());
             }
         }
         for index in 0..count {

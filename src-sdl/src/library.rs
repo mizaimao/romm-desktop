@@ -27,6 +27,7 @@ pub struct Detail {
     pub stem: String,
     /// The name on disk, extension and all.
     pub file: String,
+    /// The name on disk, extension and all.
     pub size: String,
     pub favorite: bool,
     pub last_played: Option<String>,
@@ -303,8 +304,6 @@ pub struct Played {
     pub id: i64,
     /// What its artwork is filed under.
     pub stem: String,
-    /// The name on disk, extension and all.
-    pub file: String,
     pub name: String,
     pub platform: String,
     pub seconds: i64,
@@ -549,7 +548,6 @@ impl Library {
             .unwrap_or_default()
             .into_iter()
             .map(|(r, seconds, runs, last)| Played {
-                file: r.fs_name.clone(),
                 id: r.id,
                 stem: Path::new(&r.fs_name)
                     .file_stem()

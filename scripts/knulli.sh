@@ -217,6 +217,15 @@ cmd_install() {
 
   # A Ports entry, so it starts the way everything else on the device does.
   ssh_do "cp $REMOTE/romm-launch.sh /userdata/roms/ports/RomM.sh && chmod +x /userdata/roms/ports/RomM.sh"
+
+  # Leave the device showing something.
+  #
+  # This step stops RomM so the binary can be overwritten, and a testing session
+  # may have stopped EmulationStation before that. Between the two the handheld
+  # is a black screen, and it stays that way until somebody notices. Nothing
+  # here should be able to leave it dark.
+  say "making sure the device has a front end on screen"
+  ssh_do "pidof emulationstation >/dev/null || { cat /dev/zero > /dev/fb0 2>/dev/null; /etc/init.d/S31emulationstation start >/dev/null 2>&1; }" >/dev/null 2>&1 || true
   say "installed — it is under Ports as 'RomM'"
 }
 
