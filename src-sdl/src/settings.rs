@@ -409,12 +409,26 @@ pub fn panes(
 ) -> Vec<Pane> {
     let mut emulators = emulator_entries(consoles, map, &cfg.cores.overrides);
     emulators.extend(launch_entries(cfg));
-    let mut control = vec![Entry {
-        field: "controllers.mirror_player_one",
-        label: "Match player 1",
-        help: "Give players 2 to 4 the same bindings as player 1.",
-        kind: Kind::Toggle(cfg.controllers.mirror_player_one),
-    }];
+    let mut control = vec![
+        Entry {
+            field: "controllers.swap_ab",
+            label: "Swap A and B",
+            help: "For moving around this app only. Some pads report the bottom face button as B; this corrects it without touching what a game sees.",
+            kind: Kind::Toggle(cfg.controllers.swap_ab),
+        },
+        Entry {
+            field: "controllers.swap_xy",
+            label: "Swap X and Y",
+            help: "The same for the other pair. Never written into RetroArch.",
+            kind: Kind::Toggle(cfg.controllers.swap_xy),
+        },
+        Entry {
+            field: "controllers.mirror_player_one",
+            label: "Match player 1",
+            help: "Give players 2 to 4 the same bindings as player 1.",
+            kind: Kind::Toggle(cfg.controllers.mirror_player_one),
+        },
+    ];
     control.extend(binding_entries(&cfg.bindings));
 
     // The desktop's panes, in the desktop's order, plus Device — which the
@@ -581,19 +595,16 @@ pub fn panes(
                     field: "icons.style",
                     label: "Console picture",
                     help: "How a console is drawn on the Library screen.",
-                    kind: Kind::Text {
-                        value: cfg.icons.style.clone(),
-                        secret: false,
-                    },
+                    kind: choice(icon_style_options(&cfg.icons.set), &cfg.icons.style),
                 },
                 Entry {
                     field: "shaders.motion",
                     label: "Motion layer",
                     help: "A shader pass over the game itself — black-frame insertion and the like.",
-                    kind: Kind::Text {
-                        value: cfg.shaders.motion.clone().unwrap_or_default(),
-                        secret: false,
-                    },
+                    kind: choice(
+                        motion_options(),
+                        cfg.shaders.motion.as_deref().unwrap_or(""),
+                    ),
                 },
                 Entry {
                     field: "shaders.enabled",
@@ -657,19 +668,13 @@ pub fn panes(
                     field: "icons.set",
                     label: "Drawing from",
                     help: "Which set the console pictures come from.",
-                    kind: Kind::Text {
-                        value: cfg.icons.set.clone(),
-                        secret: false,
-                    },
+                    kind: choice(icon_set_options(), &cfg.icons.set),
                 },
                 Entry {
                     field: "icons.style",
                     label: "Style",
                     help: "How a console is drawn within that set.",
-                    kind: Kind::Text {
-                        value: cfg.icons.style.clone(),
-                        secret: false,
-                    },
+                    kind: choice(icon_style_options(&cfg.icons.set), &cfg.icons.style),
                 },
             ],
         },
@@ -754,6 +759,63 @@ fn backdrop_options() -> Vec<(String, String)> {
     romm_sdl_styles()
         .iter()
         .map(|(id, label)| ((*id).to_owned(), (*label).to_owned()))
+        .collect()
+}
+
+/// A choice already positioned on the value it holds.
+///
+/// One helper because getting this wrong is silent: an index that does not match
+/// the stored value opens the list on the wrong row and, worse, shows the wrong
+/// answer on the settings screen itself.
+fn choice(options: Vec<(String, String)>, current: &str) -> Kind {
+    let at = options.iter().position(|(v, _)| v == current).unwrap_or(0);
+    Kind::Choice { at, options }
+}
+
+/// The icon sets the shipped table describes.
+fn icon_set_options() -> Vec<(String, String)> {
+    romm_desktop::iconart::set_ids()
+        .into_iter()
+        .map(|id| {
+            let label = id.trim_end_matches("-es-de").replace('-', " ");
+            (id, label)
+        })
+        .collect()
+}
+
+/// The looks one set offers. A set with no table entry offers nothing rather
+/// than a free-text box.
+fn icon_style_options(set: &str) -> Vec<(String, String)> {
+    // An empty set id is the default — the app has not been told which, so the
+    // looks come from the first one rather than from nothing. A list with
+    // nothing in it is a row that cannot be changed and does not say why.
+    let set = if set.is_empty() {
+        romm_desktop::iconart::set_ids()
+            .first()
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        set.to_owned()
+    };
+    romm_desktop::iconart::of(&set)
+        .map(|art| {
+            art.looks
+                .iter()
+                .map(|l| (l.id.clone(), l.label.clone()))
+                .collect::<Vec<_>>()
+        })
+        .filter(|looks: &Vec<(String, String)>| !looks.is_empty())
+        .unwrap_or_else(|| vec![("hardware".to_owned(), "Hardware".to_owned())])
+}
+
+/// The motion shaders the app knows how to write a preset for, plus off.
+fn motion_options() -> Vec<(String, String)> {
+    std::iter::once((String::new(), "Off".to_owned()))
+        .chain(
+            romm_desktop::shaders::MOTION
+                .iter()
+                .map(|o| (o.path.to_owned(), o.label.to_owned())),
+        )
         .collect()
 }
 
@@ -1222,6 +1284,62 @@ mod tests {
             );
         }
         assert!(pane.entries.len() >= 6, "still a stub: {labels:?}");
+    }
+
+    /// Nothing is a text box unless a person genuinely has to type it.
+    ///
+    /// The audit Frank asked for, as a test rather than a reading. A text box on
+    /// a handheld costs the on-screen keyboard and a dozen presses, so it is
+    /// only right for a value nobody can enumerate — an address, a login, a
+    /// token. Everything else is a name from a list this app already holds, and
+    /// a list is one press.
+    #[test]
+    fn only_genuinely_free_text_is_a_text_box() {
+        // The complete set, with why. Anything else typed in is a bug.
+        const TYPED: &[&str] = &[
+            "server.url",
+            "server.username",
+            "server.token",
+            "achievements.username",
+            "achievements.token",
+        ];
+        for pane in built() {
+            for e in pane.entries {
+                if matches!(e.kind, Kind::Text { .. }) {
+                    assert!(
+                        TYPED.contains(&e.field),
+                        "{} ({}) is a text box and its values are a fixed list",
+                        e.label,
+                        e.field
+                    );
+                }
+            }
+        }
+    }
+
+    /// A list must open on the value it is holding.
+    ///
+    /// An index that does not match the stored value is silent twice: the
+    /// settings row shows the wrong answer, and the list opens on the wrong row.
+    #[test]
+    fn every_list_is_positioned_on_its_own_value() {
+        for pane in built() {
+            for e in &pane.entries {
+                let Kind::Choice { at, options } = &e.kind else {
+                    continue;
+                };
+                assert!(
+                    options.is_empty() || *at < options.len(),
+                    "{} points past its own options",
+                    e.label
+                );
+                assert!(
+                    !options.is_empty() || e.field.is_empty(),
+                    "{} is a list with nothing in it",
+                    e.label
+                );
+            }
+        }
     }
 
     /// The renderer is driven by what the pane says, not by the file.

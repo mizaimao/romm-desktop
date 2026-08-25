@@ -158,12 +158,27 @@ pub struct ControllersCfg {
     /// for a genuinely different device, which is why it can be turned off.
     #[serde(default = "yes")]
     pub mirror_player_one: bool,
+
+    /// Swap the two face buttons **for moving around this app only**.
+    ///
+    /// Some pads report the bottom face button as B and the right one as A, so
+    /// Confirm and Back come out the wrong way round. This corrects that where
+    /// it is read — nothing here is written into RetroArch's config, and a game
+    /// plays with the buttons the game expects. The alternative, rebinding
+    /// every action one at a time, is the same fix done twenty times.
+    #[serde(default)]
+    pub swap_ab: bool,
+    /// The same for the other pair.
+    #[serde(default)]
+    pub swap_xy: bool,
 }
 
 impl Default for ControllersCfg {
     fn default() -> Self {
         Self {
             mirror_player_one: true,
+            swap_ab: false,
+            swap_xy: false,
         }
     }
 }

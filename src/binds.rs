@@ -295,6 +295,28 @@ impl Bindings {
         map
     }
 
+    /// The pad map with the face buttons swapped as asked.
+    ///
+    /// Applied to the *map*, not to the bindings — the swap is how this app
+    /// reads the pad, so it never reaches the file, never reaches RetroArch,
+    /// and a game still plays with the buttons the game expects. Turning it off
+    /// restores the pad exactly; nothing was rewritten to turn it on.
+    pub fn pad_map_swapped(&self, ab: bool, xy: bool) -> BTreeMap<u8, Option<String>> {
+        let mut map = self.pad_map();
+        for (on, (l, r)) in [(ab, (0u8, 1u8)), (xy, (2u8, 3u8))] {
+            if !on {
+                continue;
+            }
+            let (a, b) = (
+                map.get(&l).cloned().flatten(),
+                map.get(&r).cloned().flatten(),
+            );
+            map.insert(l, b);
+            map.insert(r, a);
+        }
+        map
+    }
+
     /// Which button currently triggers `action`, or `None`.
     pub fn pad_for(&self, action: &str) -> Option<u8> {
         self.pad_map()
@@ -552,6 +574,61 @@ mod tests {
             Some("random"),
             "the deliberate bind was stolen"
         );
+    }
+
+    /// The face-button swap is how this app reads the pad, and nothing more.
+    ///
+    /// It must not touch the stored bindings: a game plays with the buttons the
+    /// game expects, and turning the swap off has to restore the pad exactly
+    /// rather than leave a rewritten file behind.
+    #[test]
+    fn swapping_the_face_buttons_changes_only_how_this_app_reads_them() {
+        let b = Bindings::default();
+        let plain = b.pad_map();
+        let (a0, b1) = (plain[&0].clone(), plain[&1].clone());
+        assert_eq!(a0.as_deref(), Some("activate"));
+        assert_eq!(b1.as_deref(), Some("back"));
+
+        let swapped = b.pad_map_swapped(true, false);
+        assert_eq!(swapped[&0], b1, "the bottom button did not become Back");
+        assert_eq!(swapped[&1], a0, "the right button did not become Confirm");
+        assert_eq!(
+            swapped.get(&2),
+            plain.get(&2),
+            "the other pair moved as well"
+        );
+
+        assert_eq!(
+            b.pad,
+            Bindings::default().pad,
+            "the swap rewrote the bindings"
+        );
+        assert_eq!(
+            b.pad_map_swapped(false, false),
+            plain,
+            "off is not the plain map"
+        );
+    }
+
+    /// Both pairs at once, and X/Y on its own.
+    #[test]
+    fn each_pair_swaps_independently() {
+        let b = Bindings::default();
+        let plain = b.pad_map();
+        // Button 2 has no default binding, so this also checks that swapping
+        // with an unbound button gives the pair "nothing" rather than panicking.
+        let xy = b.pad_map_swapped(false, true);
+        assert_eq!(xy[&2], plain[&3], "X did not take Y's action");
+        assert_eq!(
+            xy[&3],
+            plain.get(&2).cloned().flatten(),
+            "Y kept an action X never had"
+        );
+        assert_eq!(xy[&0], plain[&0], "A/B moved when only X/Y was asked for");
+
+        let both = b.pad_map_swapped(true, true);
+        assert_eq!(both[&0], plain[&1]);
+        assert_eq!(both[&3], plain.get(&2).cloned().flatten());
     }
 
     /// The lock-out, as a test.

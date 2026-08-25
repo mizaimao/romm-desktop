@@ -212,7 +212,9 @@ fn main() -> Result<()> {
     // The bindings the desktop app writes. Resolved once — the loop below runs
     // at the display's refresh rate, and this is a scan of two tables.
     let bindings = config.bindings.clone();
-    let pad_map = bindings.pad_map();
+    // Read through the face-button swap, which is this app's own and goes no
+    // further — see .
+    let pad_map = bindings.pad_map_swapped(config.controllers.swap_ab, config.controllers.swap_xy);
 
     let controller = sdl.game_controller().map_err(anyhow::Error::msg)?;
     let mut pads = input::Pads::open_first(&controller);
@@ -856,7 +858,6 @@ mod size {
     /// under the row below.
     pub const TILE_CAPTION: f32 = LABEL * 1.3 * 2.0 + 4.0 + 14.0 + 10.0;
     pub const ROUND: f32 = 6.0;
-    pub const STRIP_ART: f32 = 96.0;
     pub const ROUND_SMALL: f32 = 4.0;
     pub const PAD: Edges = Edges::all(GAP);
 }
@@ -1084,7 +1085,6 @@ fn draw(
     // room for one list and one pane beside it, so the arrangement is not a
     // question the window gets to answer differently on different days.
     match library::SECTIONS[lib.section.min(library::SECTIONS.len() - 1)].id {
-        "continue" => draw_continue(&mut f, lib, body.inset(size::PAD)),
         "library" => draw_library(&mut f, lib, body.inset(size::PAD)),
         "mine" => draw_collections(&mut f, lib, body.inset(size::PAD)),
         "history" => draw_history(&mut f, lib, body.inset(size::PAD)),
@@ -1187,23 +1187,6 @@ fn draw_library(f: &mut Frame, lib: &mut library::Library, area: Rect) {
     draw_detail(f, lib, aside.inset(size::PAD));
 }
 
-/// The Continue tab: what you were last playing, biggest thing on the screen.
-///
-/// First tab because on a handheld it is the answer four times out of five.
-fn draw_continue(f: &mut Frame, lib: &mut library::Library, area: Rect) {
-    if lib.recent().is_empty() {
-        let spec = f.wrapped(
-            "Nothing played yet.\nOpen the Library tab and start something.",
-            size::TITLE,
-            area.w * 0.8,
-            2,
-        );
-        f.label_centered(&spec, area, paint::DIM);
-        return;
-    }
-    draw_recent(f, lib, area);
-}
-
 /// The Collections tab: kinds, then collections, then games.
 ///
 /// Three levels because the data is three levels and the middle one is not
@@ -1259,18 +1242,25 @@ fn draw_history(f: &mut Frame, lib: &mut library::Library, area: Rect) {
         f.label_centered(&spec, area, paint::DIM);
         return;
     }
+    let [list, aside] =
+        <[Rect; 2]>::try_from(area.row(size::GAP, &[Size::Grow(1.0), Size::Fixed(size::ASIDE)]))
+            .unwrap();
+
     let step = size::ROW;
     lib.relayout(1);
-    let fits = (area.h / step).floor().max(1.0) as usize;
+    let fits = (list.h / step).floor().max(1.0) as usize;
     let first = lib.history_at.saturating_sub(fits.saturating_sub(1));
 
     for (offset, game) in lib.history.iter().enumerate().skip(first).take(fits) {
         let line = Rect::new(
-            area.x,
-            area.y + (offset - first) as f32 * step,
-            area.w,
+            list.x,
+            list.y + (offset - first) as f32 * step,
+            list.w,
             step,
         );
+        if line.bottom() > list.bottom() {
+            break;
+        }
         f.hits.row(f.px(line), offset);
         let on = offset == lib.history_at;
         f.hovering(offset, line, size::ROUND_SMALL);
@@ -1278,37 +1268,66 @@ fn draw_history(f: &mut Frame, lib: &mut library::Library, area: Rect) {
             f.pane(line, paint::CURSOR, size::ROUND_SMALL);
         }
 
+        // Name and time played. The date moved to the pane: it is the least
+        // useful of the three at a glance and was taking a column from the
+        // titles, which are what you are reading down.
         let inside = line.inset(Edges::xy(8.0, 5.0));
-        let [title, console, runs, time, when] = <[Rect; 5]>::try_from(inside.row(
-            8.0,
-            &[
-                Size::Grow(1.0),
-                Size::Fixed(74.0),
-                Size::Fixed(42.0),
-                Size::Fixed(54.0),
-                Size::Fixed(64.0),
-            ],
-        ))
-        .unwrap();
-
+        let [title, time] =
+            <[Rect; 2]>::try_from(inside.row(8.0, &[Size::Grow(1.0), Size::Fixed(56.0)])).unwrap();
         let spec = f.wrapped(&game.name, size::LABEL, title.w, 1);
         f.label(&spec, title, if on { paint::TEXT } else { paint::DIM });
-        let spec = f.spec(&game.platform, 10.0);
-        f.label(&spec, console, paint::FAINT);
-        let spec = f.spec(
-            if game.runs == 1 {
-                "once".to_owned()
-            } else {
-                format!("{}x", game.runs)
-            },
-            10.0,
-        );
-        f.label_right(&spec, runs, paint::FAINT);
         let spec = f.spec(played_for(game.seconds), 10.0);
         f.label_right(&spec, time, if on { paint::TEXT } else { paint::DIM });
-        // The date only. Nobody is looking for the minute a session started.
-        let spec = f.spec(game.last.chars().take(10).collect::<String>(), 10.0);
-        f.label_right(&spec, when, paint::FAINT);
+    }
+
+    // What the highlighted game is, in full.
+    f.pane(aside, paint::COLUMN, size::ROUND);
+    if let Some(game) = lib.history.get(lib.history_at) {
+        let inner = aside.inset(size::PAD);
+        let (art, below) = inner.split_top(inner.w * 0.62);
+        let key = -(lib.history_at as i64 + 1_000_001);
+        if !f.cover(game.id, &game.platform, &game.stem, art, size::ROUND_SMALL) {
+            f.pane(art, paint::CARD, size::ROUND_SMALL);
+        }
+        let _ = key;
+        let title = f.wrapped(&game.name, size::TITLE, below.w, 2);
+        let used = f.label(
+            &title,
+            below.inset(Edges {
+                top: 8.0,
+                ..Edges::default()
+            }),
+            paint::TEXT,
+        );
+
+        let facts = [
+            ("Console", game.platform.clone()),
+            ("Played", played_for(game.seconds)),
+            (
+                "Times",
+                if game.runs == 1 {
+                    "once".to_owned()
+                } else {
+                    format!("{}", game.runs)
+                },
+            ),
+            ("Last", game.last.chars().take(10).collect::<String>()),
+        ];
+        for (i, (label, value)) in facts.iter().enumerate() {
+            let line = Rect::new(
+                below.x,
+                below.y + used + 16.0 + i as f32 * 18.0,
+                below.w,
+                16.0,
+            );
+            let [name, val] =
+                <[Rect; 2]>::try_from(line.row(6.0, &[Size::Fixed(58.0), Size::Grow(1.0)]))
+                    .unwrap();
+            let spec = f.spec(*label, size::LABEL);
+            f.label(&spec, name, paint::FAINT);
+            let spec = f.spec(value.as_str(), size::LABEL);
+            f.label(&spec, val, paint::DIM);
+        }
     }
 }
 
@@ -1904,16 +1923,13 @@ fn draw_chrome(
 
     // Where you are on the left, how the list is arranged on the right.
     let inner = header.inset(Edges::xy(size::GAP, 0.0));
+    // What the line under the tabs says. One useful fact per screen, not a
+    // count of the furniture — "8 groups" told you how the settings happened to
+    // be filed, which is not something anybody wants to know.
     let here = match (lib.section().id, lib.view) {
+        // Left as it was: Frank said this one already reads right.
         ("library", library::View::Platforms) => format!("{} consoles", lib.consoles.len()),
-        ("library", library::View::Scripts) => match lib.console() {
-            Some(c) => format!("{} — {}", c.name, lib.ports.len()),
-            None => String::new(),
-        },
         ("library", library::View::Roms) => match lib.console() {
-            // The search box is said in the heading rather than drawn as a
-            // field: it is on or off, and a list that is quietly narrowed is a
-            // library that has lost games.
             Some(c) if !lib.query.is_empty() => {
                 format!(
                     "{} — {} matching \u{201c}{}\u{201d}",
@@ -1925,16 +1941,22 @@ fn draw_chrome(
             Some(c) => format!("{} — {} games", c.name, lib.shown()),
             None => String::new(),
         },
-        ("continue", _) => format!("{} recently played", lib.recent().len()),
-        ("mine", library::View::Groups) => match lib.mine_count {
-            0 => format!("{} kinds", lib.shelves.len()),
-            n if n == lib.shelves.len() => format!("{n} collections"),
-            n => format!("{n} of yours, {} kinds", lib.shelves.len() - n),
+        ("library", library::View::Scripts) => match lib.console() {
+            Some(c) => format!("{} — {}", c.name, lib.ports.len()),
+            None => String::new(),
+        },
+        ("mine", library::View::Groups) => match (lib.mine_count, lib.shelves.len()) {
+            (0, n) => format!("{n} from RomM"),
+            (n, all) if n == all => format!("{n} you made"),
+            (n, all) => format!("{n} you made · {} from RomM", all - n),
         },
         ("mine", library::View::Collections) => format!("{} collections", lib.cols.len()),
         ("mine", _) => format!("{} — {} games", lib.col_name, lib.shown()),
-        ("history", _) => format!("{} games played", lib.history.len()),
-        ("settings", library::View::Panes) => format!("{} groups", lib.panes.len()),
+        ("history", _) => {
+            let (games, secs) = (lib.sync.games_played, lib.sync.seconds_played);
+            format!("{games} games · {}", played_for(secs))
+        }
+        ("settings", library::View::Panes) => "How this device behaves".to_owned(),
         ("settings", library::View::Wifi) => "Wi-Fi".to_owned(),
         ("settings", _) => lib
             .panes
@@ -1968,71 +1990,6 @@ fn draw_chrome(
         };
         let spec = f.spec(arranged, 11.0);
         f.label_right(&spec, centered, paint::DIM);
-    }
-}
-
-/// Continue playing: one row that runs off the side.
-///
-/// A shortcut rather than a second library — the webview stops at twenty for
-/// the same reason, and past that it is a screen above the screen you wanted.
-fn draw_recent(f: &mut Frame, lib: &library::Library, area: Rect) {
-    // A wrapped grid rather than the single row this was when it lived in a
-    // 260-point column. It has the whole page now, so it uses it.
-    let across = area.fits(size::GAP, size::CARD).max(1);
-    let grid = area.tracks(size::GAP, across);
-    // Art, one line of name, one line of console. Reserving the two-line
-    // CAPTION here cost a whole row of the page for a second line nothing
-    // draws — the name is wrapped to one. `Tracks::cell` adds the gap on top
-    // of this, so three rows are 3 * step + 2 * GAP and the budget is 422.
-    let step = size::STRIP_ART + 40.0;
-
-    for (i, game) in lib.recent().iter().enumerate() {
-        let cell = grid.cell(i, step);
-        if cell.bottom() > area.bottom() {
-            break;
-        }
-        let (art, caption) = cell.split_top(size::STRIP_ART);
-        if !f.cover(game.id, &game.platform, &game.stem, art, size::ROUND_SMALL) {
-            f.pane(art, paint::CARD, size::ROUND_SMALL);
-        }
-        let name = f.wrapped(&game.name, size::LABEL, caption.w, 1);
-        let used = f.label(
-            &name,
-            caption.inset(Edges {
-                top: 3.0,
-                ..Edges::default()
-            }),
-            paint::DIM,
-        );
-        // The console under the name, with the mark that says whether it will
-        // play offline — this page mixes consoles, so a row cannot say which
-        // one it is on.
-        let under = Rect {
-            y: caption.y + used + 4.0,
-            h: 13.0,
-            ..caption
-        };
-        let [dot, where_] =
-            <[Rect; 2]>::try_from(under.row(3.0, &[Size::Fixed(8.0), Size::Grow(1.0)])).unwrap();
-        let spec = f.spec(
-            if game.downloaded {
-                "\u{25cf}"
-            } else {
-                "\u{25cb}"
-            },
-            8.0,
-        );
-        f.label(
-            &spec,
-            dot,
-            if game.downloaded {
-                paint::HERE
-            } else {
-                paint::AWAY
-            },
-        );
-        let spec = f.spec(&game.platform, 9.0);
-        f.label(&spec, where_, paint::FAINT);
     }
 }
 

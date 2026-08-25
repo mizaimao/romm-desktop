@@ -66,10 +66,10 @@ impl Detail {
 /// A shoulder press that lands on a hole is worse than one that lands on a page
 /// saying what will be there.
 ///
-/// The order is the order of use, not the order they were built: Continue is
-/// first because on a handheld the thing you want four times out of five is
-/// the game you were already playing, and Settings is last because it is the
-/// one you want least often.
+/// Continue is gone: it and History answered the same question with two
+/// different pictures of it, and History is the one that can also say how long.
+/// So History carries both jobs and the tab row is one shorter, which on a
+/// 640-point panel is worth having.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Section {
     pub id: &'static str,
@@ -80,22 +80,12 @@ pub struct Section {
 }
 
 pub const SECTIONS: &[Section] = &[
-    Section { id: "continue", label: "Continue", ready: true },
     Section { id: "library", label: "Library", ready: true },
     Section { id: "mine", label: "Collections", ready: true },
-    Section { id: "settings", label: "Settings", ready: false },
+    Section { id: "settings", label: "Settings", ready: true },
     Section { id: "history", label: "History", ready: true },
     Section { id: "syncing", label: "Syncing", ready: true },
 ];
-
-/// One game in the Continue playing strip.
-pub struct Recent {
-    pub id: i64,
-    pub name: String,
-    pub platform: String,
-    pub stem: String,
-    pub downloaded: bool,
-}
 
 /// Which screen is showing, within whichever tab is open.
 ///
@@ -229,6 +219,9 @@ pub enum Target {
 
 /// One game in the History list.
 pub struct Played {
+    pub id: i64,
+    /// What its artwork is filed under.
+    pub stem: String,
     pub name: String,
     pub platform: String,
     pub seconds: i64,
@@ -330,7 +323,6 @@ pub struct Library {
     /// on. Taken rather than read, so one press opens one keyboard.
     pub wants_keyboard: Option<TextField>,
     pub sync: SyncState,
-    recent: Vec<Recent>,
     /// Where the cursor is, as a place in `arranged`.
     pub at: usize,
     /// The shape of this console's box art, width over height.
@@ -414,7 +406,6 @@ impl Library {
                 sessions: 0,
                 games_played: 0,
             },
-            recent: Vec::new(),
             at: 0,
             aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
@@ -422,25 +413,6 @@ impl Library {
             moves: Moves::default(),
             columns: 1,
         };
-        // One more than fits in the strip, so it can say there is a "more"
-        // without a second query.
-        lib.recent = lib
-            .cache
-            .recently_played(21)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| Recent {
-                downloaded: lib.roms_dir.join(&r.platform_slug).join(&r.fs_name).exists(),
-                stem: Path::new(&r.fs_name)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| r.fs_name.clone()),
-                id: r.id,
-                name: r.name,
-                platform: r.platform_slug,
-            })
-            .collect();
-
         // The kinds of collection, and everything the History and Syncing
         // pages show. All three are counts and short lists out of the same
         // cache, cheap enough to read once here rather than on arriving at a
@@ -452,6 +424,11 @@ impl Library {
             .unwrap_or_default()
             .into_iter()
             .map(|(r, seconds, runs, last)| Played {
+                id: r.id,
+                stem: Path::new(&r.fs_name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| r.fs_name.clone()),
                 name: r.name,
                 platform: r.platform_slug,
                 seconds,
@@ -501,15 +478,6 @@ impl Library {
         // stayed empty until a console was opened — which needs the cursor.
         lib.moves = gridnav::uniform(lib.consoles.len(), 1);
         Ok(lib)
-    }
-
-    /// The games played most recently, for the strip above the consoles.
-    ///
-    /// Server timestamps, so it is the same list on every machine — the point
-    /// is picking up where you left off, and that is rarely the machine you
-    /// are sitting at now.
-    pub fn recent(&self) -> &[Recent] {
-        &self.recent
     }
 
     /// Whether Back has anywhere left to go.
@@ -1279,7 +1247,6 @@ mod tests {
                 sessions: 0,
                 games_played: 0,
             },
-            recent: Vec::new(),
             at: 0,
             aspect: DEFAULT_ASPECT,
             scrolled: 0.0,
@@ -1421,7 +1388,7 @@ mod tests {
     #[test]
     fn the_shoulders_walk_the_tabs_and_wrap() {
         let mut lib = seeded(rows(&[("a", false)]));
-        assert_eq!(SECTIONS.len(), 6);
+        assert_eq!(SECTIONS.len(), 5);
         assert_eq!(lib.section, 0);
         lib.act("nextSection").unwrap();
         assert_eq!(lib.section, 1);
@@ -1439,7 +1406,7 @@ mod tests {
     #[test]
     fn the_tabs_are_the_six_the_panel_was_designed_around() {
         let ids: Vec<_> = SECTIONS.iter().map(|s| s.id).collect();
-        assert_eq!(ids, ["continue", "library", "mine", "settings", "history", "syncing"]);
+        assert_eq!(ids, ["library", "mine", "settings", "history", "syncing"]);
     }
 
     /// The shoulders reach every tab, including the ones with nothing behind
@@ -1469,11 +1436,10 @@ mod tests {
         assert_eq!(lib.view, View::Roms, "the fixture starts inside a console");
         for (i, want) in [
             (0, View::Platforms),
-            (1, View::Platforms),
-            (2, View::Groups),
-            (3, View::Panes),
-            (4, View::History),
-            (5, View::Platforms),
+            (1, View::Groups),
+            (2, View::Panes),
+            (3, View::History),
+            (4, View::Platforms),
         ] {
             lib.go_to_section(i);
             assert_eq!(lib.view, want, "{} landed wrong", SECTIONS[i].id);
@@ -1488,7 +1454,7 @@ mod tests {
     fn back_walks_up_the_tab_it_is_in() {
         let mut lib = seeded(rows(&[("a", false)]));
 
-        lib.go_to_section(2);
+        lib.go_to_section(1); // Collections
         assert!(lib.at_top(), "the kinds are the top of Collections");
         lib.view = View::Collections;
         assert!(!lib.at_top());
@@ -1500,7 +1466,7 @@ mod tests {
         lib.back();
         assert_eq!(lib.view, View::Collections, "a collection's games go up to the collections");
 
-        lib.go_to_section(1);
+        lib.go_to_section(0); // Library
         lib.view = View::Roms;
         lib.back();
         assert_eq!(lib.view, View::Platforms, "a console's games go up to the consoles");
@@ -1554,7 +1520,7 @@ mod tests {
                 kind: crate::settings::Kind::Toggle(false),
             }],
         }];
-        lib.go_to_section(3);
+        lib.go_to_section(2);
         lib.act("activate").unwrap();
         assert_eq!(lib.view, View::Options, "a group did not open");
 
@@ -1587,7 +1553,7 @@ mod tests {
                 },
             }],
         }];
-        lib.go_to_section(3);
+        lib.go_to_section(2);
         lib.act("activate").unwrap();
         lib.act("activate").unwrap();
 
@@ -1611,7 +1577,7 @@ mod tests {
                 kind: crate::settings::Kind::Binding(None),
             }],
         }];
-        lib.go_to_section(3);
+        lib.go_to_section(2);
         lib.act("activate").unwrap();
         lib.act("activate").unwrap();
 
@@ -1642,7 +1608,7 @@ mod tests {
                 },
             ],
         }];
-        lib.go_to_section(3);
+        lib.go_to_section(2);
         lib.act("activate").unwrap();
         lib.act("down").unwrap();
         assert_eq!(lib.option_at, 1, "down did not move between settings");
@@ -1735,7 +1701,7 @@ mod tests {
     #[test]
     fn back_from_the_wifi_list_returns_to_the_settings() {
         let mut lib = seeded(rows(&[("a", false)]));
-        lib.go_to_section(3);
+        lib.go_to_section(2);
         lib.view = View::Wifi;
         assert!(!lib.at_top());
         lib.back();

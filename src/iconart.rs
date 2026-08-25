@@ -25,7 +25,10 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 /// Where each set keeps its art. Compiled in — see `data/icon-set-art.toml`.
-pub const TABLE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icon-set-art.toml"));
+pub const TABLE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/data/icon-set-art.toml"
+));
 
 /// One look a theme offers: a directory of per-system pictures.
 #[derive(Debug, Clone, Deserialize)]
@@ -147,7 +150,10 @@ pub fn ordered() -> Vec<(String, SetArt)> {
     let mut all: Vec<(String, SetArt)> = table().into_iter().collect();
     all.sort_by_key(|(name, _)| {
         (
-            ORDER_FIRST.iter().position(|f| f == name).unwrap_or(usize::MAX),
+            ORDER_FIRST
+                .iter()
+                .position(|f| f == name)
+                .unwrap_or(usize::MAX),
             name.clone(),
         )
     });
@@ -155,6 +161,17 @@ pub fn ordered() -> Vec<(String, SetArt)> {
 }
 
 /// What one set holds, for the tab to show without fetching anything.
+/// Every icon set the shipped table describes.
+///
+/// The front ends offer these as a list to choose from; a set is a name in a
+/// table, not something a person should be typing.
+pub fn set_ids() -> Vec<String> {
+    let Ok(table) = toml::from_str::<toml::Table>(TABLE) else {
+        return Vec::new();
+    };
+    table.keys().cloned().collect()
+}
+
 pub fn of(set: &str) -> Option<SetArt> {
     table().remove(set)
 }
@@ -166,13 +183,24 @@ mod tests {
     #[test]
     fn the_table_parses_and_every_set_offers_at_least_one_look() {
         let t = table();
-        assert!(t.len() > 40, "only {} sets — did the survey run short?", t.len());
+        assert!(
+            t.len() > 40,
+            "only {} sets — did the survey run short?",
+            t.len()
+        );
         for (name, art) in &t {
-            assert!(art.repo.contains('/'), "{name}: repo must be owner/repo, got {}", art.repo);
+            assert!(
+                art.repo.contains('/'),
+                "{name}: repo must be owner/repo, got {}",
+                art.repo
+            );
             assert!(!art.branch.is_empty(), "{name} has no branch");
             assert!(!art.looks.is_empty(), "{name} lists no looks at all");
             for l in &art.looks {
-                assert!(!l.id.is_empty() && !l.label.is_empty() && !l.dir.is_empty(), "{name}: {l:?}");
+                assert!(
+                    !l.id.is_empty() && !l.label.is_empty() && !l.dir.is_empty(),
+                    "{name}: {l:?}"
+                );
             }
         }
     }
@@ -184,9 +212,14 @@ mod tests {
         for (name, art) in table() {
             let mut seen = std::collections::BTreeSet::new();
             for l in &art.looks {
-                assert!(seen.insert(l.id.clone()), "{name} has two looks called {}", l.id);
                 assert!(
-                    l.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                    seen.insert(l.id.clone()),
+                    "{name} has two looks called {}",
+                    l.id
+                );
+                assert!(
+                    l.id.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
                     "{name}: {:?} is not usable as a folder name",
                     l.id
                 );
@@ -202,7 +235,10 @@ mod tests {
         let t = table();
         let counts: Vec<usize> = t.values().map(|a| a.looks.len()).collect();
         assert!(counts.contains(&1), "some sets draw one thing");
-        assert!(counts.iter().any(|n| *n > 3), "and some draw more than three");
+        assert!(
+            counts.iter().any(|n| *n > 3),
+            "and some draw more than three"
+        );
         assert_eq!(t["iconic-es-de"].looks.len(), 2);
         assert!(t["canvas-es-de"].looks.len() >= 8, "Canvas draws nine");
     }
@@ -227,11 +263,23 @@ mod tests {
     /// a given system is the same logotype and tells them apart not at all.
     #[test]
     fn a_preview_prefers_the_console() {
-        assert_eq!(of("codywheel-es-de").unwrap().best_look().unwrap().id, "hardware");
-        assert_eq!(of("meringue-es-de").unwrap().best_look().unwrap().id, "hardware");
+        assert_eq!(
+            of("codywheel-es-de").unwrap().best_look().unwrap().id,
+            "hardware"
+        );
+        assert_eq!(
+            of("meringue-es-de").unwrap().best_look().unwrap().id,
+            "hardware"
+        );
         // Nothing else on offer.
-        assert_eq!(of("razor-es-de").unwrap().best_look().unwrap().id, "styled-text");
-        assert_eq!(of("iconic-es-de").unwrap().best_look().unwrap().id, "controller");
+        assert_eq!(
+            of("razor-es-de").unwrap().best_look().unwrap().id,
+            "styled-text"
+        );
+        assert_eq!(
+            of("iconic-es-de").unwrap().best_look().unwrap().id,
+            "controller"
+        );
     }
 
     /// Sets that draw only the system's name. The tab says so on the card.
@@ -241,7 +289,10 @@ mod tests {
             assert!(of(set).unwrap().wordmarks_only(), "{set} is wordmarks only");
         }
         for set in ["codywheel-es-de", "iconic-es-de", "meringue-es-de"] {
-            assert!(!of(set).unwrap().wordmarks_only(), "{set} draws more than wordmarks");
+            assert!(
+                !of(set).unwrap().wordmarks_only(),
+                "{set} draws more than wordmarks"
+            );
         }
     }
 
@@ -258,11 +309,21 @@ mod tests {
     /// browsing was hopeless and the default is one of them.
     #[test]
     fn the_sets_that_draw_real_consoles_are_still_there() {
-        let with_hw: Vec<String> =
-            table().into_iter().filter(|(_, a)| a.has_hardware()).map(|(k, _)| k).collect();
-        assert!(with_hw.len() >= 8, "only {} sets draw hardware", with_hw.len());
+        let with_hw: Vec<String> = table()
+            .into_iter()
+            .filter(|(_, a)| a.has_hardware())
+            .map(|(k, _)| k)
+            .collect();
+        assert!(
+            with_hw.len() >= 8,
+            "only {} sets draw hardware",
+            with_hw.len()
+        );
         for want in ["meringue-es-de", "codywheel-es-de", "playstation-x-es-de"] {
-            assert!(with_hw.iter().any(|k| k == want), "{want} draws the console");
+            assert!(
+                with_hw.iter().any(|k| k == want),
+                "{want} draws the console"
+            );
         }
     }
 
@@ -276,8 +337,14 @@ mod tests {
                 u.starts_with("https://raw.githubusercontent.com/"),
                 "{name} builds {u}, which is not the anonymous raw host"
             );
-            assert!(!u.contains("api.github.com"), "{name} uses the rate-limited API");
-            assert!(!u.contains('@') && !u.contains("token"), "{name} embeds a credential: {u}");
+            assert!(
+                !u.contains("api.github.com"),
+                "{name} uses the rate-limited API"
+            );
+            assert!(
+                !u.contains('@') && !u.contains("token"),
+                "{name} embeds a credential: {u}"
+            );
         }
     }
 
@@ -293,7 +360,11 @@ mod tests {
         let all = ordered();
         assert_eq!(all.len(), table().len(), "ordering must not drop a set");
         let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(&names[..ORDER_FIRST.len()], ORDER_FIRST, "the nine, in order");
+        assert_eq!(
+            &names[..ORDER_FIRST.len()],
+            ORDER_FIRST,
+            "the nine, in order"
+        );
         assert!(names[ORDER_FIRST.len()..].windows(2).all(|w| w[0] <= w[1]));
     }
 
@@ -301,7 +372,10 @@ mod tests {
     fn every_named_set_is_in_the_table() {
         let t = table();
         for name in ORDER_FIRST {
-            assert!(t.contains_key(*name), "{name} is named first but not in the table");
+            assert!(
+                t.contains_key(*name),
+                "{name} is named first but not in the table"
+            );
         }
     }
 }
