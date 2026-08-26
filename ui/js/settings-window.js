@@ -85,10 +85,31 @@ document.addEventListener(
 );
 
 function close() {
-  // getCurrentWindow rather than a named lookup: this file is only ever loaded
-  // into the settings window, and asking which window we are in cannot go stale.
+  // In an iframe: ask the page that made it to remove it.
+  //
+  // That is how settings opens on Android, because Tauri can build a second
+  // webview window there but cannot close one — `close()` never settles,
+  // `destroy()` and `hide()` do nothing. Measured on the device.
+  if (window.parent !== window) {
+    window.parent.postMessage("close-settings", location.origin);
+    return;
+  }
+  // A real window, which is every desktop build. getCurrentWindow rather than a
+  // named lookup: this file is only ever loaded into the settings window, and
+  // asking which window we are in cannot go stale.
   window.__TAURI__?.window?.getCurrentWindow?.().close();
 }
+
+/// Answer Android's Back button from inside the overlay.
+///
+/// The overlay is an iframe in the main document, so the activity asks the main
+/// page, not this one — but a key press while the iframe has focus lands here.
+/// Defining it on both sides costs one function and removes a question about
+/// which document happened to have focus.
+window.__androidBack = () => {
+  close();
+  return true;
+};
 
 /// The panes call `toast` from util.js, which writes into the main window's
 /// footer — an element this document does not have. Redirected here so a status

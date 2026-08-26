@@ -28,12 +28,32 @@ class MainActivity : TauriActivity() {
      */
     override val handleBackNavigation = false
 
-    /** Set once the webview exists, which is after `onCreate`. */
-    private var webView: WebView? = null
+    /**
+     * Every webview this activity has been given, oldest first.
+     *
+     * Not one reference, because there is more than one. Settings is a real
+     * second window — `WebviewWindowBuilder` with its own settings.html — and
+     * on Android that is a second WebView stacked in this same activity rather
+     * than a separate task. Holding only the newest meant Back asked whichever
+     * page happened to be built last, and holding only the first meant Back
+     * asked the page underneath the one you were looking at. Either way
+     * Settings could not be closed with Back.
+     */
+    private val webViews = mutableListOf<WebView>()
 
     override fun onWebViewCreate(webView: WebView) {
-        this.webView = webView
+        webViews.add(webView)
     }
+
+    /**
+     * The page the user is actually looking at.
+     *
+     * Newest first, skipping any that have been detached — a closed settings
+     * window leaves its WebView in the list but off the view tree, and asking a
+     * dead one would silently answer "no" and quit the app.
+     */
+    private fun topWebView(): WebView? =
+        webViews.lastOrNull { it.isAttachedToWindow && it.isShown }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -42,7 +62,7 @@ class MainActivity : TauriActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val wv = webView
+                val wv = topWebView()
                 if (wv == null) {
                     // Pressed before the page exists. Nothing can have an
                     // opinion yet, so behave like any other app.
@@ -78,7 +98,7 @@ class MainActivity : TauriActivity() {
     }
 
     /**
-     * Offer the All files access toggle, once ever.
+     * Offer the All files access toggle whenever it is not granted.
      *
      * The ES-DE library lives in ordinary folders — /storage/emulated/0/ES-DE
      * and /storage/emulated/0/ROMs — and since Android 11 no ordinary
@@ -86,21 +106,20 @@ class MainActivity : TauriActivity() {
      * a switch in system settings rather than by a dialog an app can raise, so
      * the most an app can do is take you to the switch.
      *
-     * Once ever, and remembered, because this throws the user out to a settings
-     * screen. Doing it on every launch until granted would punish anyone who
-     * looked at it and decided no, and there is a route back: Settings -> Apps
-     * -> RomM-Desktop -> All files access. The Library pane in the app says so.
+     * Every launch until it is granted, which is what the other frontends on
+     * this kind of device do — ES-DE included. An earlier version asked once
+     * and remembered, on the reasoning that throwing someone out to a settings
+     * screen twice is rude; that was the wrong trade. Without this permission a
+     * frontend cannot see the library at all, so a single missed prompt leaves
+     * an app that looks broken and says nothing, and there is no in-app control
+     * to find your way back to.
      *
-     * Not fatal if declined. Without it the ES-DE folders simply do not read,
-     * and everything else — browsing, downloading, the server — is unaffected.
+     * The check is the grant itself, so it stops on its own the moment the
+     * switch is on. Nothing is remembered and there is no state to get stuck.
      */
     private fun askForFilesOnce() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         if (Environment.isExternalStorageManager()) return
-
-        val prefs = getSharedPreferences("romm", MODE_PRIVATE)
-        if (prefs.getBoolean(ASKED, false)) return
-        prefs.edit().putBoolean(ASKED, true).apply()
 
         // Wrapped: the per-app screen is missing on some builds, and a crash on
         // first launch would be a far worse trade than a permission nobody was
@@ -123,6 +142,5 @@ class MainActivity : TauriActivity() {
 
     private companion object {
         const val ASK = "window.__androidBack ? window.__androidBack() : false"
-        const val ASKED = "asked_all_files"
     }
 }
