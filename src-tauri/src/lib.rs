@@ -455,6 +455,11 @@ fn config_fields() -> CmdResult<ConfigFields> {
 fn set_config_field(field: String, value: String) -> CmdResult<String> {
     let (table, key) = match field.as_str() {
         "library_root" => ("library", "local_root"),
+        // These two need more than a restart, and the message below says so:
+        // the artwork root is read once at startup, and the ES-DE system name
+        // that decides *which* artwork folder a game looks in is written only
+        // by the local scan. Until both have happened a game falls back to
+        // this app's own downloads.
         "esde_root" => ("esde", "root"),
         "esde_roms" => ("esde", "roms"),
         "saves_root" => ("saves", "root"),

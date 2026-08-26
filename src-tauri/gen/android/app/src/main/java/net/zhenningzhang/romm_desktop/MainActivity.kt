@@ -12,6 +12,9 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : TauriActivity() {
     /**
@@ -145,6 +148,7 @@ class MainActivity : TauriActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        goFullScreen()
         askForFilesOnce()
 
         // Registered here because a result launcher may only be created before
@@ -197,6 +201,37 @@ class MainActivity : TauriActivity() {
                 isEnabled = true
             }
         })
+    }
+
+    /**
+     * Hide the status bar and the gesture bar.
+     *
+     * This is a games launcher on a handheld; the clock, the battery and the
+     * wifi bars belong to a phone. They also sat *over* the app rather than
+     * above it — `enableEdgeToEdge` draws behind them — so the first tab was
+     * underneath the clock and the last row of the list underneath the gesture
+     * pill.
+     *
+     * BEHAVIOUR_SHOW_TRANSIENT_BARS_BY_SWIPE rather than hiding them outright:
+     * a swipe from the edge brings them back for a few seconds and then they
+     * leave again, so the time and the battery are still reachable while
+     * nothing is permanently covering the library.
+     *
+     * Re-applied on focus because Android puts them back after a dialog, the
+     * recents switcher, or the folder picker returning.
+     */
+    private fun goFullScreen() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) goFullScreen()
     }
 
     /**

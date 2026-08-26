@@ -2958,6 +2958,17 @@ body.uncontained .card {
      working. The only thing the wash added was the white tint. */
   .card { border-color: rgb(var(--glass-rgb) / 22%); }
 
+  /* The message strip.
+     Its background is a color-mix, so on these engines it had none — and it
+     keeps `backdrop-filter: blur(18px) saturate(160%)`, which over a dark page
+     with nothing behind it renders as a pale, washed-out rectangle. That is
+     the white tint that appeared with "Controller connected": not a tint at
+     all, a toast with its colour missing. */
+  footer#toast {
+    background: var(--panel-2, #1b1f26);
+    border-color: rgb(var(--glass-rgb) / 30%);
+  }
+
   /* Text that is deliberately quieter than the body. */
   .meta,
   .hint,
@@ -2984,4 +2995,7 @@ body.mobile > header { display: none !important; }
 /* The bars sat under the status bar rather than below it. With the header gone
    the tab row is the top of the app, so it takes the inset the header used to
    absorb — otherwise the first tab sits behind the clock. */
-body.mobile #tabbar { padding-top: env(safe-area-inset-top, 24px); height: auto; min-height: 42px; }
+/* No inset: `goFullScreen` hides the system bars entirely, so there is nothing
+   for the tab row to clear. It reserved 24px for a status bar that is no longer
+   drawn, which is 24 points of a 469-point screen spent on nothing. */
+body.mobile #tabbar { height: auto; min-height: 42px; }

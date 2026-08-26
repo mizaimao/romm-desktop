@@ -10,7 +10,7 @@
 // bottom face button (A on Xbox, Cross on PlayStation, B on a Nintendo
 // layout), which is "confirm" on every platform.
 
-import { el, state } from "./state.js";
+import { el, state, MOBILE } from "./state.js";
 import { runAction } from "./keys.js";
 import { padMap } from "./bindings.js";
 import { toast } from "./util.js";
@@ -489,7 +489,10 @@ export function installGamepad() {
   window.addEventListener("gamepadconnected", (ev) => {
     // id is a vendor string like "Xbox Wireless Controller (STANDARD GAMEPAD)".
     const name = ev.gamepad.id.replace(/\s*\(.*\)\s*$/, "").trim();
-    toast(`Controller connected — ${name || "gamepad"}`);
+    // Not on Android: the handheld *is* the controller, so announcing that one
+    // is attached is announcing that the device exists. It fired on every
+    // launch, and it is the thing Frank saw as a white tint.
+    if (!MOBILE) toast(`Controller connected — ${name || "gamepad"}`);
     state.gamepad = name;
     // Reveals the shoulder-button hints in the tab bar. Hidden without a pad,
     // where they would be advice for hardware that is not there.
@@ -505,8 +508,12 @@ export function installGamepad() {
       running = false;
       held.clear();
       state.gamepad = null;
-      document.body.classList.remove("has-pad");
-      toast("Controller disconnected");
+      // The hints stay on Android: the built-in pad has not gone anywhere,
+      // the browser has merely stopped reporting it.
+      if (!MOBILE) {
+        document.body.classList.remove("has-pad");
+        toast("Controller disconnected");
+      }
     }
   });
 
@@ -514,5 +521,37 @@ export function installGamepad() {
   if ((navigator.getGamepads() ?? []).some(Boolean)) {
     running = true;
     requestAnimationFrame(poll);
+  }
+
+  // Android: assume the pad, then look for it.
+  //
+  // `navigator.getGamepads()` deliberately returns nothing until a button has
+  // been pressed — the browser will not tell a page what hardware is attached
+  // until the user has interacted with it. On a desktop that is invisible: you
+  // reach for the mouse. On a handheld the pad is the only input there is, so
+  // the app sat there polling nothing and ignoring every press until one of
+  // them happened to register, which reads as several seconds of a frozen app
+  // on every launch.
+  //
+  // This device *is* a controller. So the poll starts immediately and the
+  // shoulder hints are shown immediately, and the probe below keeps looking
+  // until the browser admits what is plainly there. Nothing waits on it.
+  if (MOBILE) {
+    document.body.classList.add("has-pad");
+    if (!running) {
+      running = true;
+      requestAnimationFrame(poll);
+    }
+    // The name is worth having — it picks the button labels — but it only
+    // arrives with the first press, so it is watched for rather than waited on.
+    const probe = setInterval(() => {
+      const pad = (navigator.getGamepads() ?? []).find(Boolean);
+      if (!pad) return;
+      clearInterval(probe);
+      state.gamepad = pad.id.replace(/\s*\(.*\)\s*$/, "").trim();
+    }, 1000);
+    // Two minutes of looking is plenty; a pad connected after that raises
+    // `gamepadconnected` like any other.
+    setTimeout(() => clearInterval(probe), 120000);
   }
 }

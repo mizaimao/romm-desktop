@@ -273,7 +273,17 @@ export function wire(box) {
 
   window.__folderPicked = (field, path) => {
     if (!path) return toast("That folder could not be read", 6000);
-    saveField(field, path);
+    saveField(field, path).then(() => {
+      // Neither takes effect on its own. The artwork root is read once when
+      // the app starts, and the ES-DE system name that decides which artwork
+      // folder each game reads is written only by the local scan — which is
+      // the first half of Sync library. Without both, every game falls back to
+      // this app's own downloads and the ES-DE library looks like it was never
+      // found.
+      if (field === "esde_root" || field === "esde_roms") {
+        toast("Saved. Restart the app, then Sync library, to read it.", 9000);
+      }
+    });
   };
 
   for (const btn of box.querySelectorAll(".set-pick")) {

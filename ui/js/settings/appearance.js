@@ -13,7 +13,7 @@ import {
 import { COLLECTION_ART, collectionArt, setCollectionArt } from "../collection-art.js";
 
 export const html = `      <h4>Layout</h4>
-      <div class="srow">
+      <div class="srow set-window-layout">
         <label>Window<span class="padmark" data-action="layout"></span></label>
         <div class="ctl">
           <select class="shell-mode">
@@ -22,8 +22,8 @@ export const html = `      <h4>Layout</h4>
           </select>
         </div>
       </div>
-      <p class="hint">One pane at a time, with Back. Or three columns —
-        consoles, games, preview — where nothing is ever replaced.</p>
+      <p class="hint set-window-layout">One pane at a time, with Back. Or three
+        columns — consoles, games, preview — where nothing is ever replaced.</p>
 
       <h4>Artwork</h4>
       <div class="srow">
@@ -156,6 +156,13 @@ function markPadControls(box) {
 }
 
 export function wire(box) {
+  // Three columns needs a window. This screen is 833 points wide and the
+  // three-column shell wants roughly twice that before the middle column has
+  // room for a name, so the option offered a layout that could not be drawn.
+  if (/\bAndroid\b/.test(navigator.userAgent)) {
+    box.querySelectorAll(".set-window-layout").forEach((n) => (n.hidden = true));
+  }
+
   markPadControls(box);
   wireShellMode(box);
   wireIconStyles(box);
