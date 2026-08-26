@@ -154,18 +154,89 @@ fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("--status") => return status(&patches),
         Some("--restore") => return restore(&paths, &patches),
+        Some("--plan") => return sync_cli(false),
+        Some("--sync") => return sync_cli(true),
+        Some("--pull-all") => return pull_all_cli(),
         Some("--save") => {
             profile::save(&paths, &patches)?;
             println!("wrote {}", paths.profile().display());
             return Ok(());
         }
         Some(other) if other.starts_with("--") => {
-            eprintln!("moose-patch [--status | --restore | --save]");
+            eprintln!(
+                "moose-patch [--status | --plan | --sync | --pull-all | --restore | --save]"
+            );
             std::process::exit(2);
         }
         _ => {}
     }
     window(&paths, &patches)
+}
+
+/// Ask the server what a sync would do, and print it. Moves nothing.
+///
+/// The same worker the interface uses, drained to the end instead of once a
+/// frame — so this exercises the real path over ssh, on the device, without a
+/// window. Every sync bug so far has been found by looking rather than by
+/// reasoning, and this is the cheapest way to look.
+/// Take everything the server holds. For a device being set up, or one whose
+/// card was wiped — `negotiate` will not re-offer a save this device already
+/// took, which is the same rule that stops a deleted save coming back.
+fn pull_all_cli() -> Result<()> {
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let ra_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
+    let library_root = romm_desktop::util::expand_tilde(&cfg.library.local_root);
+    let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let job = worker::pull_all(&cfg, &ra_root, &app_dir, &library_root);
+    drain_to_end(job)
+}
+
+fn sync_cli(carry_out: bool) -> Result<()> {
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let ra_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
+    let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    println!("saves under {}", ra_root.display());
+
+    let job = if carry_out {
+        let library_root = romm_desktop::util::expand_tilde(&cfg.library.local_root);
+        worker::carry_out(&cfg, &ra_root, &app_dir, &library_root)
+    } else {
+        worker::negotiate(&cfg, &ra_root, &app_dir)
+    };
+    drain_to_end(job)
+}
+
+/// Follow one job to its end, printing each new thing it says.
+fn drain_to_end(job: worker::Job) -> Result<()> {
+    let mut stage = Stage::default();
+    let mut conflicts = Vec::new();
+    let mut last = String::new();
+    loop {
+        worker::apply(&mut stage, &mut conflicts, job.drain());
+        let note = stage.note();
+        if note != last {
+            println!("{note}");
+            last = note;
+        }
+        match &stage {
+            Stage::Ready(review) => {
+                for line in &review.lines {
+                    let why = line.reason.as_deref().unwrap_or("");
+                    println!("  {:<9} {} {why}", line.action.label(), line.title);
+                }
+                return Ok(());
+            }
+            Stage::Done { moved, conflicts: n, .. } => {
+                println!("moved {moved}, {n} conflict(s)");
+                for c in &conflicts {
+                    println!("  conflict  {}  {}", c.file_name, c.reason.as_deref().unwrap_or("both sides changed"));
+                }
+                return Ok(());
+            }
+            Stage::Failed(_) => std::process::exit(1),
+            _ => std::thread::sleep(std::time::Duration::from_millis(200)),
+        }
+    }
 }
 
 fn status(patches: &[Patch]) -> Result<()> {
@@ -284,6 +355,7 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
         tab: Tab::Patches,
         sync: rows::sync(server.as_deref(), &stage.note()),
         stage,
+        conflicts: Vec::new(),
         patches: rows::patches(patches),
         overlay: Overlay::None,
         should_quit: false,
@@ -295,6 +367,7 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     // Where the saves are and where our own files live. Both are wanted only
     // when a sync starts, but reading them once keeps the loop free of it.
     let ra_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
+    let library_root = romm_desktop::util::expand_tilde(&cfg.library.local_root);
     let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     while !app.should_quit {
@@ -325,6 +398,9 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
                     Request::Negotiate => {
                         job = Some(worker::negotiate(&cfg, &ra_root, &app_dir));
                     }
+                    Request::CarryOut => {
+                        job = Some(worker::carry_out(&cfg, &ra_root, &app_dir, &library_root));
+                    }
                 }
             }
         }
@@ -333,7 +409,7 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
         if let Some(running) = &job {
             let messages = running.drain();
             if !messages.is_empty() {
-                worker::apply(&mut app.stage, messages);
+                worker::apply(&mut app.stage, &mut app.conflicts, messages);
                 if !app.stage.is_busy() {
                     job = None;
                 }
@@ -376,6 +452,8 @@ fn run_queue(app: &mut App, paths: &Paths, patches: &[Patch]) {
 enum Request {
     /// Ask the server what a sync would do. Moves nothing.
     Negotiate,
+    /// Do it. Only reachable from a plan that has been shown and accepted.
+    CarryOut,
 }
 
 /// One press. Split out so the whole of the app's behaviour can be exercised
@@ -410,8 +488,20 @@ fn act(
                     if app.stage.is_busy() {
                         return None;
                     }
-                    app.stage = Stage::Asking { note: "starting".into() };
-                    return Some(Request::Negotiate);
+                    // Which of the two stages this press means is decided in
+                    // one place — `Stage::next_step` — so the prompt, the help
+                    // line and this cannot drift apart.
+                    return match app.stage.next_step() {
+                        Some("carry this out") => {
+                            app.stage = Stage::Asking { note: "starting".into() };
+                            Some(Request::CarryOut)
+                        }
+                        Some(_) => {
+                            app.stage = Stage::Asking { note: "starting".into() };
+                            Some(Request::Negotiate)
+                        }
+                        None => None,
+                    };
                 }
                 eprintln!("sync action '{id}' is not wired up yet");
             }
@@ -502,6 +592,7 @@ mod tests {
             tab: Tab::Patches,
             sync: rows::sync(None, "not synced yet"),
             stage: Stage::default(),
+            conflicts: Vec::new(),
             patches: rows::patches(&patches),
             overlay: Overlay::None,
             should_quit: false,
@@ -576,6 +667,37 @@ mod tests {
         assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
         assert!(f.0.stage.is_busy());
         assert!(!f.2.knulli_conf().exists());
+    }
+
+    #[test]
+    fn a_plan_in_hand_turns_the_same_button_into_carry_it_out() {
+        // The two stages, from one row. Which one this press means is decided
+        // by `Stage::next_step` and nowhere else.
+        use moose_patch::sync::Review;
+        let mut f = fixture("sync-two-stage");
+        f.0.stage = Stage::Ready(Review {
+            lines: vec![moose_patch::sync::Line {
+                action: moose_patch::sync::Action::Upload,
+                title: "Zelda.srm".into(),
+                reason: None,
+                rom_id: 1,
+                save_id: None,
+            }],
+            agreed: 0,
+        });
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::CarryOut));
+    }
+
+    #[test]
+    fn an_empty_plan_offers_to_look_again_rather_than_run_nothing() {
+        use moose_patch::sync::Review;
+        let mut f = fixture("sync-empty-plan");
+        f.0.stage = Stage::Ready(Review { lines: vec![], agreed: 380 });
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
     }
 
     #[test]

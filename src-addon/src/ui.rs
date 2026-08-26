@@ -11,6 +11,7 @@ use romm_sdl::gfx::Gfx;
 use romm_sdl::text::{Painter, Spec};
 
 use crate::model::{App, Kind, Overlay, Row, Tab};
+use crate::sync::{Action, Review, Stage};
 
 pub const PANEL: (u32, u32) = (640, 480);
 
@@ -226,7 +227,10 @@ impl Ui {
             (Overlay::Detail, _) => "B close",
             (Overlay::ConfirmApply, _) => "A confirm   B cancel",
             (Overlay::ConfirmDiscard, _) => "A discard   B stay",
-            (Overlay::ConfirmAction { .. }, _) => "A run it   B cancel",
+            (Overlay::ConfirmAction { .. }, _) => match &app.stage {
+                Stage::Ready(r) if !r.is_empty() => "A do all this   B cancel",
+                _ => "A run it   B cancel",
+            },
             (Overlay::Applying { .. }, _) => "working…",
         };
         painter.put(
@@ -334,6 +338,15 @@ impl Ui {
     }
 
     fn confirm_action(&self, gfx: &Gfx, painter: &mut Painter, app: &App, title: &str) {
+        // With a plan in hand, the prompt *is* the plan. Showing the row's
+        // description instead would be asking someone to accept something
+        // they have not been shown, which is the one thing this flow exists
+        // to avoid.
+        if let Stage::Ready(review) = &app.stage
+            && !review.is_empty()
+        {
+            return self.plan(gfx, painter, review);
+        }
         let at = self.panel(gfx, title, painter, 4);
         let detail = app
             .page()
@@ -352,6 +365,48 @@ impl Ui {
             ),
             ink::DIM,
         );
+    }
+
+    /// What the server said it would do, line by line.
+    fn plan(&self, gfx: &Gfx, painter: &mut Painter, review: &Review) {
+        let rows = review.lines.len().min(9);
+        let at = self.panel(gfx, &review.headline(), painter, rows + 1);
+        for (i, line) in review.lines.iter().take(rows).enumerate() {
+            let y = at.y + self.px(28.0 + i as f32 * 13.0);
+            if y > at.bottom() - self.px(13.0) {
+                break;
+            }
+            // The verb on the left, coloured by what it costs you: a conflict
+            // needs a decision, a pull overwrites something here.
+            let ink = match line.action {
+                Action::Conflict => ink::QUEUED,
+                Action::Download => ink::TEXT,
+                Action::Upload => ink::DIM,
+            };
+            painter.put(
+                gfx,
+                &self.spec(line.action.label(), size::SMALL),
+                Rect::new(at.x + self.px(10.0), y, at.w * 0.25, self.px(11.0)),
+                ink,
+            );
+            painter.put(
+                gfx,
+                &self.spec(&line.title, size::SMALL),
+                Rect::new(at.x + self.px(48.0), y, at.w - self.px(58.0), self.px(11.0)),
+                ink::DIM,
+            );
+        }
+        if review.lines.len() > rows {
+            painter.put_right(
+                gfx,
+                &self.spec(
+                    &format!("and {} more", review.lines.len() - rows),
+                    size::SMALL,
+                ),
+                Rect::new(at.x, at.bottom() - self.px(14.0), at.w - self.px(10.0), self.px(11.0)),
+                ink::FAINT,
+            );
+        }
     }
 
     fn applying(&self, gfx: &Gfx, painter: &mut Painter, done: usize, total: usize) {

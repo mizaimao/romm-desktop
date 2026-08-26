@@ -301,6 +301,10 @@ pub struct App {
     /// Where syncing has got to. Lives here so the sync tab can draw it, and
     /// is only ever written by `worker::apply`.
     pub stage: crate::sync::Stage,
+    /// Saves that changed on both sides. Nothing was written for these and
+    /// they still need a person; held here rather than in the stage so the
+    /// stage stays cheap to clone and compare.
+    pub conflicts: Vec<romm_desktop::savesync::SaveConflict>,
     pub sync: Page,
     pub patches: Page,
     pub overlay: Overlay,

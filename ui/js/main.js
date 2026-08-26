@@ -212,7 +212,7 @@ function statusCard(s) {
     <div class="sc-row"><span>Emulator</span><strong>${
       s.retroarch ? `RetroArch · ${s.cores_installed} cores` : "not found"
     }</strong></div>
-    <div class="sc-row"><span>On disk</span><strong>${escapeHtml(human(s.disk_bytes))}</strong></div>
+    <div class="sc-row"><span>On disk</span><strong class="sc-disk">…</strong></div>
     <hr>
     <div class="sc-path"><span>Config</span><code>${escapeHtml(s.config_path)}</code></div>
     <div class="sc-path"><span>Games</span><code>${escapeHtml(s.roms_dir)}</code></div>
@@ -221,6 +221,20 @@ function statusCard(s) {
     <p>Everything downloaded lives there. Deleting that folder reclaims all of
       it.</p>`;
   document.body.appendChild(card);
+
+  // Asked for separately, and not waited on. Measuring it means walking every
+  // file in the library — on a handheld with the library on a card that is
+  // seconds — and on Android a command that takes seconds freezes the page for
+  // seconds, because the IPC there is served on the calling thread.
+  invoke("disk_usage")
+    .then((bytes) => {
+      const cell = card.querySelector(".sc-disk");
+      if (cell) cell.textContent = human(bytes);
+    })
+    .catch(() => {
+      const cell = card.querySelector(".sc-disk");
+      if (cell) cell.textContent = "unknown";
+    });
 
   const place = () => {
     const at = el.status.getBoundingClientRect();

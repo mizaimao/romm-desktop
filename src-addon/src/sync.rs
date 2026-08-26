@@ -138,11 +138,27 @@ pub enum Stage {
     Ready(Review),
     /// Carrying it out.
     Running { done: usize, total: usize },
-    Done { moved: usize, note: String },
+    /// Finished. `conflicts` is a count rather than the conflicts themselves:
+    /// those are held beside the app so this stays cheap to clone and compare.
+    Done { moved: usize, conflicts: usize, note: String },
     Failed(String),
 }
 
 impl Stage {
+    /// What A does next, in words, or `None` when A does nothing.
+    ///
+    /// One place decides this so the help line, the prompt and the handler
+    /// cannot drift apart — which is how "A is not wired to apply" happened.
+    pub fn next_step(&self) -> Option<&'static str> {
+        match self {
+            Stage::Ready(review) if review.is_empty() => Some("see what would sync"),
+            Stage::Ready(_) => Some("carry this out"),
+            Stage::Idle | Stage::Done { .. } | Stage::Failed(_) => Some("see what would sync"),
+            // Asking, Running: the worker has it.
+            _ => None,
+        }
+    }
+
     /// Can a person start something right now?
     ///
     /// False while the network is busy, which is what stops a second press
@@ -272,6 +288,35 @@ mod tests {
     }
 
     #[test]
+    fn a_stage_with_an_empty_plan_offers_to_look_again_not_to_run_it() {
+        // Carrying out nothing is not a thing to offer. Before, the help line
+        // and the handler each decided this for themselves.
+        let empty = Stage::Ready(Review::from_plan(&plan(vec![], 12)));
+        assert_eq!(empty.next_step(), Some("see what would sync"));
+
+        let something = Stage::Ready(Review::from_plan(&plan(vec![op("upload", "a.srm", 1)], 0)));
+        assert_eq!(something.next_step(), Some("carry this out"));
+    }
+
+    #[test]
+    fn nothing_is_offered_while_the_worker_is_busy() {
+        assert_eq!(Stage::Asking { note: "scanning".into() }.next_step(), None);
+        assert_eq!(Stage::Running { done: 1, total: 4 }.next_step(), None);
+    }
+
+    #[test]
+    fn after_a_run_you_can_look_again() {
+        // Including after a failure — a sync that failed on a dropped wifi
+        // should be one button away from being retried, not a restart.
+        let done = Stage::Done { moved: 4, conflicts: 1, note: "4 moved".into() };
+        assert_eq!(done.next_step(), Some("see what would sync"));
+        assert_eq!(
+            Stage::Failed("no route to host".into()).next_step(),
+            Some("see what would sync")
+        );
+    }
+
+    #[test]
     fn a_busy_stage_refuses_to_start_another() {
         // Two syncs at once would race on the same files. The interface asks
         // this before it lets A do anything.
@@ -280,6 +325,7 @@ mod tests {
         assert!(Stage::Running { done: 1, total: 9 }.is_busy());
         assert!(!Stage::Ready(Review::default()).is_busy());
         assert!(!Stage::Failed("no route to host".into()).is_busy());
+        assert!(!Stage::Done { moved: 0, conflicts: 0, note: "done".into() }.is_busy());
     }
 
     #[test]
@@ -290,7 +336,7 @@ mod tests {
             Stage::Asking { note: "scanning saves".into() },
             Stage::Ready(Review::default()),
             Stage::Running { done: 2, total: 7 },
-            Stage::Done { moved: 3, note: "3 saves pushed".into() },
+            Stage::Done { moved: 3, conflicts: 0, note: "3 saves pushed".into() },
             Stage::Failed("no route to host".into()),
         ] {
             assert!(!stage.note().is_empty(), "{stage:?} said nothing");

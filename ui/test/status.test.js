@@ -23,7 +23,6 @@ const STATUS = {
   roms_cached: 2506,
   retroarch: true,
   cores_installed: 41,
-  disk_bytes: 210_000_000_000,
   config_path: "/x/config.toml",
   data_dir: "/x",
   roms_dir: "/x/library",
@@ -45,7 +44,8 @@ before(async () => {
   Object.defineProperty(global, "navigator", { value: dom.window.navigator, configurable: true });
   dom.window.__TAURI__ = {
     core: {
-      invoke: async (cmd) => (cmd === "status" ? STATUS : []),
+      invoke: async (cmd) =>
+        cmd === "status" ? STATUS : cmd === "disk_usage" ? 210_000_000_000 : [],
       convertFileSrc: (p) => p,
     },
     event: { listen: async () => () => {}, emit: () => {} },
@@ -86,10 +86,23 @@ describe("the server tag", () => {
     const text = card.textContent.replace(/\s+/g, " ");
     assert.match(text, /2506/, "the game count is not in it");
     assert.match(text, /41 cores/, "the cores are not in it");
-    assert.match(text, /195\.6 GB/, "the disk usage is not in it");
     assert.match(text, /\/x\/library/, "the folders are not in it");
     // The tooltip it replaces has to go, or hovering gives both.
     assert.ok(!status.title, "the old tooltip is still attached as well");
+  });
+
+  /// Measured separately and filled in when it arrives, because measuring it
+  /// walks every file in the library. On Android that is seconds, and a command
+  /// that takes seconds there freezes the page for seconds — the IPC is served
+  /// on the calling thread. So the row opens with a placeholder rather than the
+  /// panel waiting on a disk walk.
+  test("the disk figure arrives on its own and does not hold the panel up", async () => {
+    const card = dom.window.document.getElementById("status-card");
+    const cell = card.querySelector(".sc-disk");
+    assert.ok(cell, "there is no cell for it");
+    // A tick for the promise the card started when it was built.
+    await new Promise((r) => setTimeout(r, 0));
+    assert.match(cell.textContent, /195\.6 GB/, "the disk usage never arrived");
   });
 
   test("it closes again", () => {

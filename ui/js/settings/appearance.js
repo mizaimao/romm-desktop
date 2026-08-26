@@ -1,6 +1,6 @@
 // The Appearance tab: the pictures the lists draw, the console pictures, the
 // glass, and the shader backdrop.
-import { invoke, listen, convertFileSrc } from "../state.js";
+import { invoke, listen, convertFileSrc, MOBILE } from "../state.js";
 import { toast, escapeHtml, cssColor } from "../util.js";
 import { padFor, padLabelFor, keyLabelFor, actions } from "../bindings.js";
 import {
@@ -54,12 +54,17 @@ export const html = `      <h4>Layout</h4>
       </div>
       <p class="hint collection-art-hint"></p>
 
-      <h4>App icon</h4>
+      <!-- Not on Android. The icon in the launcher there is baked into the
+           APK's mipmaps and set by the manifest, so nothing this app writes at
+           runtime can change it and the row offered a choice that did nothing.
+           wireAppIcons already leaves early when the holder is absent, so
+           dropping the markup drops the app_icons round trip with it. -->
+      ${MOBILE ? "" : `<h4>App icon</h4>
       <div class="srow">
         <label>Icon</label>
         <div class="ctl"><div class="app-icons"></div></div>
       </div>
-      <p class="hint app-icons-note"></p>
+      <p class="hint app-icons-note"></p>`}
 
       <h4>Color</h4>
       <div class="srow">

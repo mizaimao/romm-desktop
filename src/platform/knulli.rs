@@ -88,6 +88,25 @@ impl Platform for Knulli {
         ]
     }
 
+    /// Where KNULLI keeps saves for platforms it spells differently, or does
+    /// not separate at all.
+    ///
+    /// Every one of these was a save that landed in a folder with no system
+    /// behind it. `sfam` is the clearest: RomM keeps Super Famicom apart from
+    /// SNES, and this device has one `snes` folder and nothing else.
+    fn save_folder(&self, romm_slug: &str) -> String {
+        match romm_slug {
+            "sfam" => "snes",
+            "famicom" => "nes",
+            "arcade" => "fbneo",
+            "neo-geo-pocket" => "ngp",
+            "neo-geo-pocket-color" => "ngpc",
+            "genesis-slash-megadrive" => "megadrive",
+            other => other,
+        }
+        .to_string()
+    }
+
     /// What this hardware should actually run, where it differs from the
     /// shipped default.
     ///

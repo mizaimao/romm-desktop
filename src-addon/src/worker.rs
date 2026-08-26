@@ -48,6 +48,13 @@ pub enum Message {
     /// scanning and negotiating have no total until they finish.
     Note(String),
     Plan(Box<Review>),
+    /// A sync ran. `conflicts` are the saves that changed on both sides:
+    /// nothing was written for those and they still need a person.
+    Finished {
+        moved: usize,
+        note: String,
+        conflicts: Vec<romm_desktop::savesync::SaveConflict>,
+    },
     Failed(String),
 }
 
@@ -77,6 +84,179 @@ impl Job {
     }
 }
 
+/// Everything both jobs need before they can talk to the server.
+///
+/// Split out because the two used to be one function with a boolean, and the
+/// half that scans is the half most likely to be wrong on a new device — it
+/// wants to fail in one place with one message.
+struct Ready {
+    candidates: Vec<romm_desktop::saves::Candidate>,
+}
+
+fn prepare(
+    app_dir: &Path,
+    ra_root: &Path,
+    say: &dyn Fn(Message),
+) -> Result<Ready, String> {
+    let Some(cache_path) = find_cache(&cache_search_path(app_dir)) else {
+        return Err("no library index — the save list cannot be matched to the server".into());
+    };
+    say(Message::Note("reading the library index".into()));
+    let cache = Cache::open(&cache_path).map_err(|e| format!("opening the index: {e:#}"))?;
+    let map = CoreMap::load_or_embedded(&app_dir.join("data/esde-core-map.json"));
+
+    say(Message::Note("scanning saves".into()));
+    let candidates = romm_desktop::savesync::scan(&cache, &map, ra_root)
+        .map_err(|e| format!("scanning saves: {e:#}"))?;
+    // The cache and the map have done their work — the candidates carry the
+    // resolved rom ids from here on, and the SQLite handle must not be held
+    // across an await.
+    drop(cache);
+    Ok(Ready { candidates })
+}
+
+/// Carry out what the plan said.
+///
+/// It negotiates again rather than replaying the plan it was shown. That is
+/// deliberate: minutes may have passed, another device may have pushed, and
+/// the server is the one that knows. The plan a person accepted is a
+/// statement of intent, not a set of instructions to execute blind.
+pub fn carry_out(cfg: &Config, ra_root: &Path, app_dir: &Path, library_root: &Path) -> Job {
+    let (tx, rx) = channel();
+    let server = cfg.server.url.clone();
+    let username = cfg.server.username.clone();
+    let password = cfg.server.password.clone();
+    let token = cfg.server.token.clone();
+    let ra_root = ra_root.to_path_buf();
+    let app_dir = app_dir.to_path_buf();
+    let library_root = library_root.to_path_buf();
+
+    std::thread::spawn(move || {
+        let tx2 = tx.clone();
+        let say = move |m: Message| {
+            let _ = tx2.send(m);
+        };
+        let ready = match prepare(&app_dir, &ra_root, &say) {
+            Ok(r) => r,
+            Err(e) => return say(Message::Failed(e)),
+        };
+        say(Message::Note("syncing".into()));
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(r) => r,
+            Err(e) => return say(Message::Failed(format!("starting the network: {e}"))),
+        };
+        let result = runtime.block_on(async {
+            let client = romm_desktop::api::Client::with_auth(
+                &server,
+                &username,
+                &password,
+                token.as_deref(),
+            )?;
+            romm_desktop::savesync::run_all(
+                &client,
+                &ready.candidates,
+                &ra_root,
+                &app_dir,
+                &library_root,
+            )
+            .await
+        });
+        match result {
+            Ok(summary) => say(Message::Finished {
+                moved: summary.uploaded + summary.downloaded,
+                note: summary.headline(),
+                conflicts: summary.conflicts,
+            }),
+            Err(e) => say(Message::Failed(format!("{e:#}"))),
+        }
+    });
+
+    Job { rx }
+}
+
+/// Take everything the server holds, whatever it thinks this device has.
+///
+/// `negotiate` will not offer a save this device already took — correctly, and
+/// that is the same rule that stops a deleted save coming back. So a device
+/// being set up from scratch, or one whose card was wiped, has no way in
+/// through the ordinary path. This is that way in: list, fetch, place.
+///
+/// It overwrites. Everything it replaces goes through `savebackup` first, the
+/// same as any download.
+pub fn pull_all(cfg: &Config, ra_root: &Path, app_dir: &Path, library_root: &Path) -> Job {
+    let (tx, rx) = channel();
+    let server = cfg.server.url.clone();
+    let username = cfg.server.username.clone();
+    let password = cfg.server.password.clone();
+    let token = cfg.server.token.clone();
+    let ra_root = ra_root.to_path_buf();
+    let app_dir = app_dir.to_path_buf();
+    let library_root = library_root.to_path_buf();
+
+    std::thread::spawn(move || {
+        let tx2 = tx.clone();
+        let say = move |m: Message| {
+            let _ = tx2.send(m);
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(r) => r,
+            Err(e) => return say(Message::Failed(format!("starting the network: {e}"))),
+        };
+        say(Message::Note("listing what the server holds".into()));
+
+        let result: anyhow::Result<usize> = runtime.block_on(async {
+            let client = romm_desktop::api::Client::with_auth(
+                &server,
+                &username,
+                &password,
+                token.as_deref(),
+            )?;
+            let identity =
+                romm_desktop::savesync::DeviceIdentity::ensure(&client, &app_dir).await?;
+            let saves = client.saves(None).await?;
+            let total = saves.len();
+            let mut done = 0;
+            for save in saves {
+                let platform = client
+                    .rom_with_files(save.rom_id)
+                    .await
+                    .ok()
+                    .map(|r| r.platform_slug)
+                    .filter(|s| !s.is_empty());
+                let dest = romm_desktop::savesync::download_path(
+                    &ra_root,
+                    &save.file_name,
+                    romm_desktop::savesync::destination(
+                        save.emulator.as_deref(),
+                        platform.as_deref(),
+                    ),
+                );
+                let bytes = client.save_content(save.id, &identity.device_id).await?;
+                if let Some(dir) = dest.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let slot = save.slot.as_deref().unwrap_or("unslotted");
+                let _ = romm_desktop::savebackup::keep(&library_root, save.rom_id, slot, &dest);
+                std::fs::write(&dest, bytes)?;
+                done += 1;
+                say(Message::Note(format!("{done} of {total}")));
+            }
+            Ok(done)
+        });
+
+        match result {
+            Ok(moved) => say(Message::Finished {
+                moved,
+                note: format!("{moved} pulled"),
+                conflicts: Vec::new(),
+            }),
+            Err(e) => say(Message::Failed(format!("{e:#}"))),
+        }
+    });
+
+    Job { rx }
+}
+
 /// Ask the server what a sync would do. Moves nothing.
 ///
 /// This is the whole of the first stage: scan what is on the card, hand it to
@@ -89,39 +269,21 @@ pub fn negotiate(cfg: &Config, ra_root: &Path, app_dir: &Path) -> Job {
     let token = cfg.server.token.clone();
     let ra_root = ra_root.to_path_buf();
     let app_dir = app_dir.to_path_buf();
-    let data_dir = app_dir.clone();
 
     std::thread::spawn(move || {
-        let say = |m: Message| {
-            // A closed channel means the app moved on. Not worth reporting to
-            // a channel that is closed.
+        let say = move |m: Message| {
+            // A closed channel means the app moved on. Nothing to report to.
             let _ = tx.send(m);
         };
-
         if server.trim().is_empty() {
-            say(Message::Failed("no server in config.toml".into()));
-            return;
+            return say(Message::Failed("no server in config.toml".into()));
         }
-        let Some(cache_path) = find_cache(&cache_search_path(&app_dir)) else {
-            say(Message::Failed(
-                "no library index — the save list cannot be matched to the server".into(),
-            ));
-            return;
+        let ready = match prepare(&app_dir, &ra_root, &say) {
+            Ok(r) => r,
+            Err(e) => return say(Message::Failed(e)),
         };
 
-        say(Message::Note("reading the library index".into()));
-        let cache = match Cache::open(&cache_path) {
-            Ok(c) => c,
-            Err(e) => return say(Message::Failed(format!("opening the index: {e:#}"))),
-        };
-        let map = CoreMap::load_or_embedded(&app_dir.join("data/esde-core-map.json"));
-
-        say(Message::Note("scanning saves".into()));
-        let candidates = match romm_desktop::savesync::scan(&cache, &map, &ra_root) {
-            Ok(c) => c,
-            Err(e) => return say(Message::Failed(format!("scanning saves: {e:#}"))),
-        };
-        let (states, skipped) = romm_desktop::savesync::client_states(&candidates);
+        let (states, skipped) = romm_desktop::savesync::client_states(&ready.candidates);
         say(Message::Note(format!(
             "{} saves found, {skipped} unmatched — asking the server",
             states.len()
@@ -136,10 +298,14 @@ pub fn negotiate(cfg: &Config, ra_root: &Path, app_dir: &Path) -> Job {
             Err(e) => return say(Message::Failed(format!("starting the network: {e}"))),
         };
         let result = runtime.block_on(async {
-            let client =
-                romm_desktop::api::Client::with_auth(&server, &username, &password, token.as_deref())?;
+            let client = romm_desktop::api::Client::with_auth(
+                &server,
+                &username,
+                &password,
+                token.as_deref(),
+            )?;
             let identity =
-                romm_desktop::savesync::DeviceIdentity::ensure(&client, &data_dir).await?;
+                romm_desktop::savesync::DeviceIdentity::ensure(&client, &app_dir).await?;
             client.negotiate(&identity.device_id, &states).await
         });
 
@@ -157,12 +323,25 @@ pub fn negotiate(cfg: &Config, ra_root: &Path, app_dir: &Path) -> Job {
 /// Separate from the thread so the whole of it is testable: the interface's
 /// behaviour on a burst of notes, on a plan, and on a failure is decided here
 /// and nowhere else.
-pub fn apply(stage: &mut Stage, messages: Vec<Message>) {
+pub fn apply(
+    stage: &mut Stage,
+    held: &mut Vec<romm_desktop::savesync::SaveConflict>,
+    messages: Vec<Message>,
+) {
     for message in messages {
         *stage = match message {
             Message::Note(note) => Stage::Asking { note },
             Message::Plan(review) => Stage::Ready(*review),
             Message::Failed(why) => Stage::Failed(why),
+            Message::Finished { moved, note, conflicts } => {
+                let count = conflicts.len();
+                // Kept beside the app rather than inside the stage: they are
+                // what the next decision is made from, and a stage that is
+                // cheap to clone and compare is worth more than one that
+                // carries them.
+                *held = conflicts;
+                Stage::Done { moved, conflicts: count, note }
+            }
         };
     }
 }
@@ -178,6 +357,7 @@ mod tests {
         let mut stage = Stage::Idle;
         apply(
             &mut stage,
+            &mut Vec::new(),
             vec![
                 Message::Note("reading the library index".into()),
                 Message::Note("scanning saves".into()),
@@ -191,6 +371,7 @@ mod tests {
         let mut stage = Stage::Idle;
         apply(
             &mut stage,
+            &mut Vec::new(),
             vec![
                 Message::Note("scanning saves".into()),
                 Message::Plan(Box::default()),
@@ -205,7 +386,7 @@ mod tests {
         // The state that mattered: a stage stuck on "asking the server" after
         // the request already failed is indistinguishable from a hang.
         let mut stage = Stage::Asking { note: "asking the server".into() };
-        apply(&mut stage, vec![Message::Failed("no route to host".into())]);
+        apply(&mut stage, &mut Vec::new(), vec![Message::Failed("no route to host".into())]);
         assert_eq!(stage.note(), "failed: no route to host");
         assert!(!stage.is_busy());
     }
@@ -213,7 +394,7 @@ mod tests {
     #[test]
     fn nothing_said_changes_nothing() {
         let mut stage = Stage::Asking { note: "scanning saves".into() };
-        apply(&mut stage, vec![]);
+        apply(&mut stage, &mut Vec::new(), vec![]);
         assert_eq!(stage, Stage::Asking { note: "scanning saves".into() });
     }
 

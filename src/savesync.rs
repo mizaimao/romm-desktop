@@ -197,15 +197,16 @@ pub fn client_states(candidates: &[Candidate]) -> (Vec<ClientSaveState>, usize) 
 }
 
 /// Where a save the server sent us should land.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Destination<'a> {
     /// RetroArch's own layout: `saves/<core folder>/…`, states in `states/`.
     /// Both spellings are offered because neither is reliable on its own —
     /// see [`download_path`].
     Core { core: Option<&'a str> },
     /// Batocera and KNULLI: `saves/<platform>/…`, with states in that same
-    /// folder rather than a sibling `states/`.
-    System(&'a str),
+    /// folder rather than a sibling `states/`. Owned, because the folder is
+    /// not always the server's slug — see `Platform::save_folder`.
+    System(String),
 }
 
 /// The folder RetroArch itself reads, which is not the name the server uses
@@ -245,19 +246,65 @@ fn core_folder(dir: &Path, core: Option<&str>) -> Option<String> {
 /// The core is what RetroArch needs and the platform is what Batocera needs;
 /// which one is used depends on the device, not on the save.
 pub fn destination<'a>(core: Option<&'a str>, platform: Option<&'a str>) -> Destination<'a> {
-    match (crate::platform::current().save_layout(), platform) {
-        (SaveLayout::BySystem, Some(slug)) => Destination::System(slug),
+    let device = crate::platform::current();
+    match (device.save_layout(), platform) {
+        // Through the device's own naming: RomM keeps `sfam` apart from
+        // `snes` and this handheld has only `snes`, so the server's slug is
+        // not always a folder anything reads.
+        (SaveLayout::BySystem, Some(slug)) => Destination::System(device.save_folder(slug)),
         _ => Destination::Core { core },
     }
+}
+
+/// The name the *emulator* will look for, given the name the server stores.
+///
+/// RomM stamps every save it keeps: `Chrono Trigger (USA).srm` is filed as
+/// `Chrono Trigger (USA) [2026-08-06_23-06-01].srm`, which is how several
+/// versions of one save coexist under one `(rom, slot)`. That stamp is the
+/// server's bookkeeping and means nothing to RetroArch, which derives a save
+/// name from the content it loaded — so a download that keeps it lands a file
+/// no emulator will ever open, and which our own scanner cannot match back to
+/// a ROM either.
+///
+/// Only the stamp is removed. Game names are full of brackets — `[!]`,
+/// `[T-En by ...]` — so the shape is matched exactly rather than "the last
+/// bracketed thing".
+pub fn local_name(server_name: &str) -> String {
+    let Some(open) = server_name.rfind(" [") else {
+        return server_name.to_string();
+    };
+    let rest = &server_name[open + 2..];
+    let Some(close) = rest.find(']') else {
+        return server_name.to_string();
+    };
+    if !is_stamp(&rest[..close]) {
+        return server_name.to_string();
+    }
+    format!("{}{}", &server_name[..open], &rest[close + 1..])
+}
+
+/// `2026-08-06_23-06-01`, and nothing else.
+fn is_stamp(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() != 19 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, b)| match i {
+        4 | 7 => *b == b'-',
+        10 => *b == b'_',
+        13 | 16 => *b == b'-',
+        _ => b.is_ascii_digit(),
+    })
 }
 
 /// Mirrors the device's own layout, which is what the scanner reads back.
 /// Without it a download lands somewhere the emulator never looks.
 pub fn download_path(root: &Path, file_name: &str, dest: Destination<'_>) -> PathBuf {
+    let file_name = &local_name(file_name);
     match dest {
         // One folder per system, states included — configgen points both
         // `savefile_directory` and `savestate_directory` at it.
-        Destination::System(slug) => root.join("saves").join(slug).join(file_name),
+        Destination::System(slug) => root.join("saves").join(&slug).join(file_name),
         Destination::Core { core } => {
             let kind = if saves::is_state_name(file_name) { "states" } else { "saves" };
             let dir = root.join(kind);
@@ -695,6 +742,55 @@ pub async fn run_all(
 mod tests {
     use super::*;
 
+    /// A save that keeps the server's stamp is a save no emulator opens.
+    ///
+    /// Found by pulling 13 saves onto the device and looking at where they
+    /// landed: every one was named `… [2026-08-06_23-06-01].srm`, and
+    /// RetroArch derives its save name from the content it loaded.
+    #[test]
+    fn the_servers_version_stamp_comes_off() {
+        assert_eq!(
+            local_name("Chrono Trigger (USA) [2026-08-06_23-06-01].srm"),
+            "Chrono Trigger (USA).srm"
+        );
+        assert_eq!(
+            local_name("Kirby & the Amazing Mirror (USA) [2026-08-06_23-06-01].srm"),
+            "Kirby & the Amazing Mirror (USA).srm"
+        );
+    }
+
+    /// Game names are full of brackets and none of the others may be touched.
+    #[test]
+    fn only_the_stamp_comes_off() {
+        assert_eq!(
+            local_name("Donkey Kong Country (U) (V1.2) [!] [2026-08-15_23-55-09].srm"),
+            "Donkey Kong Country (U) (V1.2) [!].srm",
+            "the [!] is part of the game's name"
+        );
+        for untouched in [
+            "Zelda [!].srm",
+            "Nameless Game The (Japan) (T-En by Nagato and Ryusui) (n).srm",
+            "Crash Bandicoot (USA).srm",
+            "weird [not-a-stamp].srm",
+            "Game [2026-08-06].srm",
+            "Game [2026-08-06_23-06-01x].srm",
+        ] {
+            assert_eq!(local_name(untouched), untouched, "{untouched} was altered");
+        }
+    }
+
+    #[test]
+    fn a_download_strips_the_stamp_wherever_it_lands() {
+        assert_eq!(
+            download_path(
+                Path::new("/userdata"),
+                "Chrono Trigger (USA) [2026-08-06_23-06-01].srm",
+                Destination::System("snes".into()),
+            ),
+            Path::new("/userdata/saves/snes/Chrono Trigger (USA).srm")
+        );
+    }
+
     /// A pull must land in the folder the *emulator* reads.
     ///
     /// RetroArch names the folder after the core's own `corename`; the server
@@ -731,11 +827,11 @@ mod tests {
     fn a_by_system_device_files_everything_under_the_platform() {
         let root = Path::new("/userdata");
         assert_eq!(
-            download_path(root, "Crash Bandicoot (USA).srm", Destination::System("psx")),
+            download_path(root, "Crash Bandicoot (USA).srm", Destination::System("psx".into())),
             Path::new("/userdata/saves/psx/Crash Bandicoot (USA).srm")
         );
         assert_eq!(
-            download_path(root, "Kirby (USA).state1", Destination::System("gba")),
+            download_path(root, "Kirby (USA).state1", Destination::System("gba".into())),
             Path::new("/userdata/saves/gba/Kirby (USA).state1"),
             "states share the platform folder on this layout"
         );

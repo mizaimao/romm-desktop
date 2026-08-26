@@ -155,6 +155,20 @@ pub trait Platform: Sync {
         &[]
     }
 
+    /// RomM slug -> the folder this device actually keeps saves in.
+    ///
+    /// Not the inverse of [`Platform::system_aliases`], and cannot be: the
+    /// mapping is many-to-one. RomM separates `snes` from `sfam`; KNULLI has
+    /// one `snes` folder and no `sfam` at all, so a save filed under the
+    /// server's own slug lands where no emulator looks — which is precisely
+    /// what happened to a Super Famicom save on the first real sync.
+    ///
+    /// Anything not listed keeps its slug, which is right far more often than
+    /// not.
+    fn save_folder(&self, romm_slug: &str) -> String {
+        romm_slug.to_string()
+    }
+
     /// Cores this device should use in preference to the shipped default.
     ///
     /// RomM platform slug -> libretro core stem. The shipped core map is ES-DE's
@@ -330,6 +344,43 @@ mod tests {
             );
             assert_eq!(scheme.save_layout(), SaveLayout::ByCore);
         }
+    }
+
+    #[test]
+    fn every_save_folder_this_device_maps_to_actually_exists() {
+        // The list is /userdata/roms as it really is on the Flip. A mapping to
+        // a folder with no system behind it is a save nothing will ever read —
+        // which is what `sfam` was until a real sync put a Super Famicom save
+        // in a directory KNULLI does not have.
+        const ON_THE_DEVICE: &[&str] = &[
+            "snes", "snes-msu1", "nes", "fds", "fbneo", "mame", "neogeo", "ngp", "ngpc",
+            "megadrive", "gba", "gb", "gbc", "psx", "n64", "dreamcast", "gamegear",
+        ];
+        let device = &knulli::Knulli;
+        for slug in [
+            "sfam",
+            "famicom",
+            "arcade",
+            "neo-geo-pocket",
+            "neo-geo-pocket-color",
+            "genesis-slash-megadrive",
+        ] {
+            let folder = device.save_folder(slug);
+            assert!(
+                ON_THE_DEVICE.contains(&folder.as_str()),
+                "{slug} maps to {folder}, which is not a system on this device"
+            );
+        }
+        // And a system it really has keeps its own name.
+        assert_eq!(device.save_folder("snes-msu1"), "snes-msu1");
+        assert_eq!(device.save_folder("gba"), "gba");
+    }
+
+    #[test]
+    fn other_devices_keep_the_servers_slug() {
+        // Only a device that renames systems should rename them.
+        assert_eq!(macos::MacOs.save_folder("sfam"), "sfam");
+        assert_eq!(android::Android.save_folder("arcade"), "arcade");
     }
 
     #[test]

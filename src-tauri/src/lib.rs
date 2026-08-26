@@ -2916,7 +2916,7 @@ struct EmulatorOption {
     is_default: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct ShaderOptionView {
     path: String,
     label: String,
@@ -2950,6 +2950,28 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
     };
     let ra = state.retroarch.as_ref();
 
+    // Twice, not once per console. `available` checks that each preset really
+    // exists, and there are only two answers — one for televisions and one for
+    // handhelds — so asking per system meant the same couple of dozen files
+    // stat'd thirty-one times over. On the Thor, whose shader pack is on the
+    // card, that was most of the three quarters of a second the Emulators tab
+    // took to open.
+    let options_for = |display| -> Vec<ShaderOptionView> {
+        ra.map(|r| {
+            shaders::available(r, display)
+                .into_iter()
+                .map(|o| ShaderOptionView {
+                    path: o.path.to_owned(),
+                    label: o.label.to_owned(),
+                    note: o.note.to_owned(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    };
+    let crt_shaders = options_for(shaders::Display::Crt);
+    let handheld_shaders = options_for(shaders::Display::Handheld);
+
     Ok(rows
         .into_iter()
         .map(|p| {
@@ -2973,18 +2995,10 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
             emulators.sort_by_key(|e| (!e.installed, !e.is_default));
 
             let display = shaders::display_of(&slug);
-            let shader_list = ra
-                .map(|r| {
-                    shaders::available(r, display)
-                        .into_iter()
-                        .map(|o| ShaderOptionView {
-                            path: o.path.to_owned(),
-                            label: o.label.to_owned(),
-                            note: o.note.to_owned(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let shader_list = match display {
+                shaders::Display::Crt => crt_shaders.clone(),
+                shaders::Display::Handheld => handheld_shaders.clone(),
+            };
 
             SystemView {
                 gun: romm_desktop::lightgun::label(&slug).map(str::to_owned),
@@ -3285,7 +3299,6 @@ struct Status {
     /// Absolute paths, shown in the UI so downloaded data is never a mystery.
     roms_dir: String,
     media_dir: String,
-    disk_bytes: u64,
     /// Directory every relative path is resolved against, and therefore where
     /// `config.toml` is read from. Reported because "it cannot find my config"
     /// is otherwise unanswerable from inside the app.
@@ -3323,12 +3336,31 @@ fn status(state: State<'_, AppState>) -> CmdResult<Status> {
         roms_cached: cache.rom_count().unwrap_or(0),
         roms_dir: abs(&state.roms_dir),
         media_dir: abs(&state.media_dir),
-        disk_bytes: util::dir_size(&state.roms_dir) + util::dir_size(&state.media_dir),
         data_dir: abs(Path::new(".")),
         config_path: abs(Path::new("config.toml")),
         crowded_folder: !Config::exists("config.toml") && neighbours() > 2,
         folder_entries: neighbours(),
     })
+}
+
+/// How much space the library and its artwork take up.
+///
+/// Its own command because it is the only slow thing `status` did, and on
+/// Android slow is not merely slow. Tauri's IPC there is a `fetch` to a custom
+/// protocol that the webview serves on the calling thread, so a command that
+/// takes four seconds freezes the page for four seconds — the whole settings
+/// window, mid-click.
+///
+/// And it had become four seconds. `roms_dir` is the ES-DE library now, so this
+/// walks the card: 9,658 games, stat by stat, over FUSE. It used to be cheap
+/// only because the config was failing to parse and the path fell back to an
+/// empty `./library/roms`.
+///
+/// Nothing waits on it. The one place it is shown fills the figure in when it
+/// arrives.
+#[tauri::command]
+async fn disk_usage(state: State<'_, AppState>) -> CmdResult<u64> {
+    Ok(util::dir_size(&state.roms_dir) + util::dir_size(&state.media_dir))
 }
 
 /// Point the app at a RetroArch install by hand.
@@ -4355,6 +4387,7 @@ pub fn run() {
             game_cores,
             set_game_core,
             status,
+            disk_usage,
             open_settings,
             config_fields,
             set_config_field,
