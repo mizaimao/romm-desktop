@@ -1,6 +1,7 @@
 package net.zhenningzhang.romm_desktop
 
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,6 +54,17 @@ class MainActivity : TauriActivity() {
 
     override fun onWebViewCreate(webView: WebView) {
         webViews.add(webView)
+        // Paint the WebView itself, not just the page inside it.
+        //
+        // A WebView starts white and composites the page over it. This page is
+        // dark and mostly opaque, but not entirely — the backdrop canvas and
+        // the glass surfaces are drawn with alpha — so that white came through
+        // everywhere as a flat wash. Measured: with the page painted pure
+        // black, the screen showed #1f1f1f, a uniform twelve per cent of white
+        // over the whole window. That is the tint, and no amount of stylesheet
+        // work could have reached it, which is why three attempts in the CSS
+        // changed nothing.
+        webView.setBackgroundColor(Color.parseColor("#14161A"))
         // The page's only way to reach Android. See Bridge.
         webView.addJavascriptInterface(Bridge(), "RommAndroid")
     }

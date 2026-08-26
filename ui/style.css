@@ -2999,3 +2999,38 @@ body.mobile > header { display: none !important; }
    for the tab row to clear. It reserved 24px for a status bar that is no longer
    drawn, which is 24 points of a 469-point screen spent on nothing. */
 body.mobile #tabbar { height: auto; min-height: 42px; }
+
+/* ---------------------------------------------------------------------------
+   Android, and any screen this narrow.
+   --------------------------------------------------------------------------- */
+
+/* No underline on the open tab.
+   The active tab is already the bright, bold one in a row of dim ones, so the
+   rule underneath it is a second answer to a question that was not asked
+   twice. It also sat directly under the first tab with the top bar gone,
+   reading as a stray line across the corner of the screen. */
+body.mobile #tabbar .stab.active { border-bottom-color: transparent; }
+
+/* No LB/RB hints in the tab row.
+   They are there so the shoulder mapping is discoverable without opening
+   Settings — which matters on a desktop with a pad plugged in, and not at all
+   on a handheld whose shoulder buttons are part of the case. On a 833-point
+   row they were spending width on advice nobody there needs. */
+body.mobile #tabbar .bumper { display: none !important; }
+
+/* A narrower info pane, and smaller artwork with it.
+   460 points of a 833-point screen is more than half the width for the
+   preview, which leaves the list it is previewing too narrow to read. Tied to
+   the viewport rather than to Android, because the number is about the screen
+   and any window this size has the same problem. */
+@media (max-width: 1100px) {
+  :root { --detail-w: 300px; }
+  #detail .artstrip img,
+  #detail .artstrip .vidtile { max-height: 132px; }
+  #detail h2 { font-size: 15px; }
+}
+@media (max-width: 900px) {
+  :root { --detail-w: 260px; }
+  #detail .artstrip img,
+  #detail .artstrip .vidtile { max-height: 108px; }
+}
