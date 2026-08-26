@@ -2679,6 +2679,33 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
         .collect())
 }
 
+/// Where saves and save states live.
+///
+/// The `[saves] root` setting, which is the same folder written into the config
+/// handed to RetroArch at launch — so what the emulator is told, what the save
+/// sync reads, and what the settings page shows are one answer rather than
+/// three.
+///
+/// Every one of these used to take the RetroArch *install* folder instead. That
+/// is a reasonable guess for a portable desktop install and wrong everywhere
+/// else: it ignored the setting whose entire job is this, and on Android there
+/// is no install folder at all, so save sync failed with "RetroArch not found"
+/// on a device where RetroArch was installed and the saves folder was set.
+///
+/// Falls back to the RetroArch root when the setting is somehow unreadable,
+/// which keeps the old behaviour rather than inventing a new one.
+fn saves_root(state: &State<'_, AppState>) -> PathBuf {
+    Config::load()
+        .map(|c| romm_desktop::util::expand_tilde(&c.saves.root))
+        .unwrap_or_else(|_| {
+            state
+                .retroarch
+                .as_ref()
+                .map(|ra| ra.root.clone())
+                .unwrap_or_else(|| PathBuf::from("Saves"))
+        })
+}
+
 /// Sync saves and save states with the server.
 ///
 /// An explicit action rather than something that happens on launch: a save is
@@ -2687,8 +2714,8 @@ fn systems(state: State<'_, AppState>) -> CmdResult<Vec<SystemView>> {
 #[tauri::command]
 async fn sync_saves(state: State<'_, AppState>) -> CmdResult<String> {
     let client = state.client.clone().ok_or("not connected to a server")?;
-    let ra = state.retroarch.as_ref().ok_or("RetroArch not found")?;
-    let root = ra.root.clone();
+    // Not RetroArch's install folder: the saves folder. See `saves_root`.
+    let root = saves_root(&state);
 
     // The cache is not Sync, so the scan takes the lock and releases it before
     // any awaiting starts. A future holding the connection across an await
