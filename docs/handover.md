@@ -11,60 +11,48 @@ Read this, then `docs/parked.md`, then start.
 
 ## Read this before you touch a button mapping
 
-**Handhelds do not agree on where A is, and SDL does not tell you.**
+**Handhelds do not agree on where A is.** Android handhelds tend to be Xbox
+layout — the **AYN Thor** is — and the smaller Linux ones tend to be Nintendo,
+where the button printed A sits on the right. The **Miyoo Flip** is Nintendo.
 
-SDL names face buttons after where they sit on an *Xbox* pad, so `Button::A` is
-always the **bottom** one. That is a position, not a label. Two kinds of device
-show up here and they disagree:
+SDL makes this look worse than it is, because it names face buttons by their
+position on an Xbox pad: `Button::A` is the bottom one, always, as a position
+rather than a label.
 
-| Layout | Button printed **A** is | SDL calls it | Seen on |
-|---|---|---|---|
-| Xbox | bottom | `Button::A` | Android handhelds — **AYN Thor** |
-| Nintendo | right | `Button::B` | lower-powered Linux handhelds — **Miyoo Flip** |
+### The rule that actually works
 
-The rule of thumb: **Android handhelds tend to be Xbox layout, the smaller
-Linux ones tend to be Nintendo.** It is a tendency, not a law — check the
-device.
+**Trust the letters in `es_input.cfg`. They are the letters printed on the
+plastic.** That file is written by EmulationStation's controller wizard, which
+asks you to press A, then B, and writes down whatever you pressed; vendor
+defaults are made the same way. `romm_sdl::input` maps ES's `a` to SDL's `a`,
+so **SDL's `Button::A` already is the button printed A** — whatever position it
+occupies, and whatever the kernel calls its scancode.
 
-Get it wrong and confirm and cancel are swapped. It does not look like a
-swapped mapping; it looks like *"A does nothing"* and *"B will not let me
-leave"*, and it costs a round trip with the user to work out which. It has
-already cost one.
+So: **no swap, by default, on every device.** If one ever genuinely disagrees,
+there is an explicit setting for it — `[controllers] swap_ab` in `config.toml`,
+which the desktop app already honours and `moose-patch` reads.
 
-### The Flip, worked through
+### Two things that look like evidence and are not
 
-`/usr/share/emulationstation/es_input.cfg` names this pad's buttons in kernel
-index order, not by what is printed on them — which is why reading the letters
-in that file and believing them is a trap:
+**EmulationStation's `InvertButtons` is a preference, not a fact.** It means "I
+would rather confirm with the other button" and lives in ES's own interface.
+The Flip has it set to `true`. Reading that as a description of the hardware and
+swapping A/B on the strength of it made **A quit the app**, which took two
+rounds and a user's patience to undo.
 
-| Kernel code | Position | Index | SDL name | Printed on the Flip |
-|---|---|---|---|---|
-| 304 `BTN_SOUTH` | bottom | 0 | `Button::A` | **B** |
-| 305 `BTN_EAST` | right | 1 | `Button::B` | **A** |
-| 307 `BTN_NORTH` | top | 2 | `Button::X` | **X** |
-| 308 `BTN_WEST` | left | 3 | `Button::Y` | **Y** |
+**Scancode names do not tell you where a button is.** The Flip's `es_input.cfg`
+reads `a` → code 304 `BTN_SOUTH`, `b` → 305 `BTN_EAST`, `x` → 307, `y` → 308.
+It is tempting to read `BTN_SOUTH` as "the bottom one" and conclude the letters
+are positional. They are not: on this device the button printed **A** is the one
+reporting 304. The vendor's driver assigns codes to labels, not to positions,
+and there is no way to tell from the file which it did.
 
-So **A and B need swapping and X and Y do not** — the index order happens to
-put X and Y where SDL expects them on this device. Do not assume the same of
-the next one; check the codes.
+### How to tell, when you have to
 
-The corroboration that the letters in that file are positional rather than
-printed: EmulationStation has `InvertButtons` set to `true` here. If its "a"
-(the bottom button) were the one printed A, there would be nothing to invert.
-
-**Do not hardcode either layout, and do not infer it from the device name.**
-Ask the machine, which already knows:
-
-- Batocera/KNULLI — `InvertButtons` in
-  `/userdata/system/configs/emulationstation/es_settings.cfg`. `true` means
-  Nintendo layout, and EmulationStation is already confirming with the right
-  button. `moose-patch` reads exactly this; see `buttons_inverted` in
-  `src-addon/src/main.rs`.
-- The desktop app — `[controllers] swap_ab` in `config.toml`, applied by
-  `binds::pad_map_swapped`.
-
-One source of truth per device. A third place to keep in sync is a third place
-to get it wrong.
+Not by reasoning. `moose-patch` logs every press it receives to
+`/userdata/system/logs/moose-patch.log`; one launch and a few presses says
+exactly which button produces which action. That log settled this after two
+wrong guesses, and it is cheaper than either of them.
 
 ---
 

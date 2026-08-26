@@ -72,6 +72,14 @@ impl Paths {
         self.at(&format!("userdata/shaders/moose/{rest}"))
     }
 
+    /// A shader *set*. configgen looks here before the stock library, and
+    /// resolves the set's presets relative to `userdata/shaders` — which is
+    /// how the loaded preset ends up in our folder, which is what keeps
+    /// Hotkey + D-pad cycling to four presets instead of seven hundred.
+    pub fn shaderset(&self, name: &str) -> PathBuf {
+        self.at(&format!("userdata/shaders/configs/{name}/rendering-defaults.yml"))
+    }
+
     pub fn blank_logo(&self) -> PathBuf {
         self.at("userdata/system/moose-patch/blank-logo.png")
     }
@@ -96,6 +104,25 @@ impl Paths {
     /// wanted from it is which way round the face buttons are.
     pub fn es_settings(&self) -> PathBuf {
         self.at("userdata/system/configs/emulationstation/es_settings.cfg")
+    }
+
+    /// Where a file we replaced is kept, so "off" can put the original back.
+    ///
+    /// **Not beside the file.** They used to live as `<name>.moose-orig` next
+    /// to the original, which is fine for a config file and wrong for a
+    /// directory something else enumerates: RetroArch cycles the shader folder
+    /// by listing it, and found the backups sitting in there. One directory,
+    /// outside everything we manage, and on real storage so a backup of
+    /// something in /usr survives the reboot that would restore it anyway.
+    pub fn backup_for(&self, path: &Path) -> PathBuf {
+        let flat: String = path
+            .strip_prefix(&self.root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c == '/' || c == '\\' { '_' } else { c })
+            .collect();
+        self.at(&format!("userdata/system/moose-patch/backups/{flat}"))
     }
 
     pub fn profile(&self) -> PathBuf {
@@ -194,8 +221,9 @@ pub enum Step {
     /// would take the volume, power and lid keys away.
     Block { file: PathBuf, id: String, body: Option<String>, seed: Option<PathBuf> },
     /// A file this app owns. `None` means it should not be there, and
-    /// whatever was there before comes back.
-    Place { path: PathBuf, bytes: Option<&'static [u8]> },
+    /// whatever was there before comes back — from `backup`, which is
+    /// deliberately not inside the directory `path` lives in.
+    Place { path: PathBuf, bytes: Option<&'static [u8]>, backup: PathBuf },
 }
 
 /// Write, even if the filesystem says no.
@@ -237,14 +265,6 @@ fn mount_point_of(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Kept beside a file we replaced, so "off" can put the original back rather
-/// than deleting something KNULLI shipped.
-fn backup_of(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_os_string();
-    name.push(".moose-orig");
-    PathBuf::from(name)
-}
-
 impl Step {
     /// Is the device already like this?
     pub fn satisfied(&self) -> bool {
@@ -257,7 +277,7 @@ impl Step {
                     _ => false,
                 }
             }
-            Step::Place { path, bytes } => match bytes {
+            Step::Place { path, bytes, .. } => match bytes {
                 Some(want) => fs::read(path).map(|got| got == *want).unwrap_or(false),
                 None => !path.exists(),
             },
@@ -283,7 +303,7 @@ impl Step {
                 write_through(file, next.as_bytes())
                     .with_context(|| format!("writing {}", file.display()))
             }
-            Step::Place { path, bytes } => match bytes {
+            Step::Place { path, bytes, backup } => match bytes {
                 Some(bytes) => {
                     if let Some(parent) = path.parent() {
                         fs::create_dir_all(parent).ok();
@@ -291,19 +311,20 @@ impl Step {
                     // Keep whatever was there the first time, and only the
                     // first time — a second apply must not back up our own
                     // copy over the real original.
-                    let backup = backup_of(path);
                     if path.exists() && !backup.exists() {
-                        fs::copy(path, &backup).ok();
+                        if let Some(parent) = backup.parent() {
+                            fs::create_dir_all(parent).ok();
+                        }
+                        fs::copy(path, backup).ok();
                     }
                     write_through(path, bytes)
                         .with_context(|| format!("writing {}", path.display()))
                 }
                 None => {
-                    let backup = backup_of(path);
                     if backup.exists() {
-                        fs::copy(&backup, path)
+                        fs::copy(backup, path)
                             .with_context(|| format!("restoring {}", path.display()))?;
-                        fs::remove_file(&backup).ok();
+                        fs::remove_file(backup).ok();
                     } else if path.exists() {
                         fs::remove_file(path)
                             .with_context(|| format!("removing {}", path.display()))?;
@@ -373,6 +394,13 @@ impl Patch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// As the catalogue builds them: the backup lives outside the directory
+    /// the file is in.
+    fn placed(root: &Path, path: PathBuf, bytes: Option<&'static [u8]>) -> Step {
+        let backup = Paths::new(root).backup_for(&path);
+        Step::Place { path, bytes, backup }
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("moose-patch-test-{name}"));
@@ -446,8 +474,8 @@ mod tests {
         let path = dir.join("logo.png");
         fs::write(&path, b"the original").unwrap();
 
-        let on = Step::Place { path: path.clone(), bytes: Some(b"ours") };
-        let off = Step::Place { path: path.clone(), bytes: None };
+        let on = placed(&dir, path.clone(), Some(b"ours"));
+        let off = placed(&dir, path.clone(), None);
 
         on.apply().unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"ours");
@@ -459,7 +487,10 @@ mod tests {
             b"the original",
             "reverting must restore what was there, not delete it"
         );
-        assert!(!backup_of(&path).exists(), "and clean up after itself");
+        assert!(
+            !Paths::new(&dir).backup_for(&path).exists(),
+            "and clean up after itself"
+        );
     }
 
     #[test]
@@ -467,20 +498,46 @@ mod tests {
         let dir = scratch("backup-once");
         let path = dir.join("logo.png");
         fs::write(&path, b"the original").unwrap();
-        let on = Step::Place { path: path.clone(), bytes: Some(b"ours") };
+        let on = placed(&dir, path.clone(), Some(b"ours"));
         on.apply().unwrap();
         on.apply().unwrap();
-        Step::Place { path: path.clone(), bytes: None }.apply().unwrap();
+        placed(&dir, path.clone(), None).apply().unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"the original");
+    }
+
+    #[test]
+    fn a_backup_never_lands_in_the_directory_it_came_from() {
+        // Found on the device, not in the code: RetroArch cycles the shader
+        // folder by listing it, and the backups were sitting in there among
+        // the presets. Anything that enumerates a directory we manage must
+        // see only what we meant to put there.
+        let dir = scratch("backup-elsewhere");
+        let managed = dir.join("userdata/shaders/moose");
+        fs::create_dir_all(&managed).unwrap();
+        let preset = managed.join("1-shimmerless.glslp");
+        fs::write(&preset, b"the old one").unwrap();
+
+        placed(&dir, preset.clone(), Some(b"ours")).apply().unwrap();
+
+        let left: Vec<String> = fs::read_dir(&managed)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["1-shimmerless.glslp"], "stray files: {left:?}");
+
+        // And the original is still recoverable from wherever it went.
+        placed(&dir, preset.clone(), None).apply().unwrap();
+        assert_eq!(fs::read(&preset).unwrap(), b"the old one");
     }
 
     #[test]
     fn a_file_we_added_is_removed_rather_than_restored() {
         let dir = scratch("place-new");
         let path = dir.join("added.conf");
-        Step::Place { path: path.clone(), bytes: Some(b"x") }.apply().unwrap();
+        placed(&dir, path.clone(), Some(b"x")).apply().unwrap();
         assert!(path.exists());
-        Step::Place { path: path.clone(), bytes: None }.apply().unwrap();
+        placed(&dir, path.clone(), None).apply().unwrap();
         assert!(!path.exists(), "nothing was there before, so nothing after");
     }
 

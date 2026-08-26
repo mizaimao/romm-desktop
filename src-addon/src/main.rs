@@ -61,8 +61,8 @@ fn from_key(key: Keycode) -> Option<Press> {
 /// Only consulted when no controller opened. The numbering is the one
 /// `es_input.cfg` gives this family of handhelds — 0 is the button printed A,
 /// 1 the one printed B — which is also what RetroArch is configured with.
-fn from_joy_button(index: u8, inverted: bool) -> Option<Press> {
-    let (accept, back) = if inverted { (1, 0) } else { (0, 1) };
+fn from_joy_button(index: u8, swapped: bool) -> Option<Press> {
+    let (accept, back) = if swapped { (1, 0) } else { (0, 1) };
     Some(match index {
         i if i == accept => Press::Accept,
         i if i == back => Press::Back,
@@ -84,29 +84,30 @@ fn from_hat(state: sdl2::joystick::HatState) -> Option<Press> {
     })
 }
 
-/// Whether this handheld's face buttons are the other way round.
+/// Whether to swap the two face buttons that confirm and cancel.
 ///
-/// SDL names buttons after where they sit on an Xbox pad, so `Button::A` is the
-/// *bottom* one. This device is laid out like a Nintendo pad, where the button
-/// printed **A** is on the right — so SDL calls it `B`. EmulationStation knows
-/// this and carries `InvertButtons` for it; reading the same setting means the
-/// app confirms with the same button the rest of the device confirms with,
-/// rather than with whichever one SDL happens to have named first.
+/// Normally **no**, and the reasoning matters because I got it wrong once.
 ///
-/// This was not a guess. The press log showed four presses arriving as `Back`
-/// where apply was meant, and one earlier session where `Back` then `Accept`
-/// opened the discard prompt and took it.
-fn buttons_inverted(paths: &Paths) -> bool {
-    std::fs::read_to_string(paths.es_settings())
-        .unwrap_or_default()
-        .lines()
-        .find(|line| line.contains("name=\"InvertButtons\""))
-        .map(|line| line.contains("value=\"true\""))
-        .unwrap_or(false)
+/// `es_input.cfg`'s letters are the letters *printed on the plastic*: that
+/// file is written by EmulationStation's controller wizard, which asks you to
+/// press A, then B, and records whatever you pressed. Vendor defaults are made
+/// the same way. `romm_sdl::input` maps ES's `a` to SDL's `a`, so SDL's
+/// `Button::A` already *is* the button printed A, whatever position it sits in
+/// and whatever the kernel calls its scancode.
+///
+/// What misled me: EmulationStation carries `InvertButtons`, and the Flip has
+/// it set. That is a **preference in ES's own interface** — "I would rather
+/// confirm with the other button" — not a statement about the hardware.
+/// Reading it as one made A quit the app, which is the bug this replaces.
+///
+/// So the swap is only ever an explicit choice, from the same setting the
+/// desktop app uses, and off unless asked for.
+fn buttons_swapped(cfg: &romm_desktop::config::Config) -> bool {
+    cfg.controllers.swap_ab
 }
 
-fn from_button(button: Button, inverted: bool) -> Option<Press> {
-    let (accept, back) = if inverted {
+fn from_button(button: Button, swapped: bool) -> Option<Press> {
+    let (accept, back) = if swapped {
         (Button::B, Button::A)
     } else {
         (Button::A, Button::B)
@@ -253,10 +254,6 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     // The pad, through the same code the front end used — the GUID on this
     // family of handhelds is shared by four different devices, so the mapping
     // has to come from the OS's own es_input.cfg rather than SDL's database.
-    // Which button confirms. See `buttons_inverted`.
-    let inverted = buttons_inverted(paths);
-    println!("face buttons inverted: {inverted}");
-
     let controllers = sdl.game_controller().map_err(anyhow::Error::msg)?;
     let joysticks = sdl.joystick().map_err(anyhow::Error::msg)?;
     let pads = input::Pads::open_first(&controllers, &joysticks);
@@ -275,6 +272,10 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     // sync tab shows where it would talk to, and says so plainly when nowhere.
     let cfg = romm_desktop::config::Config::load().unwrap_or_default();
     let server = (!cfg.server.url.is_empty()).then(|| cfg.server.url.clone());
+
+    // Which button confirms. See `buttons_swapped`.
+    let swapped = buttons_swapped(&cfg);
+    println!("confirm/cancel swapped: {swapped}");
 
     let mut app = App {
         tab: Tab::Patches,
@@ -297,9 +298,9 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
             let press = match event {
                 Event::Quit { .. } => Some(Press::Quit),
                 Event::KeyDown { keycode: Some(key), repeat: false, .. } => from_key(key),
-                Event::ControllerButtonDown { button, .. } => from_button(button, inverted),
+                Event::ControllerButtonDown { button, .. } => from_button(button, swapped),
                 Event::JoyButtonDown { button_idx, .. } if raw_pad => {
-                    from_joy_button(button_idx, inverted)
+                    from_joy_button(button_idx, swapped)
                 }
                 Event::JoyHatMotion { state, .. } if raw_pad => from_hat(state),
                 _ => None,
@@ -462,41 +463,32 @@ mod tests {
     }
 
     #[test]
-    fn the_button_printed_a_is_the_one_that_confirms() {
-        // SDL names buttons by Xbox position, so its `A` is the bottom one.
-        // This handheld is laid out like a Nintendo pad and the button printed
-        // A is on the right, which SDL calls `B`. EmulationStation inverts for
-        // exactly this reason, and so must we — the press log showed four
-        // presses arriving as Back where apply was meant.
-        assert_eq!(from_button(Button::B, true), Some(Press::Accept));
-        assert_eq!(from_button(Button::A, true), Some(Press::Back));
-        // And an Xbox-layout device is left alone.
+    fn sdls_a_is_the_button_printed_a_and_confirms() {
+        // `es_input.cfg` records the letters printed on the plastic, because
+        // that is what its wizard asks you to press, and romm_sdl maps ES's
+        // `a` to SDL's `a`. So no swap is the right default, whatever position
+        // the button sits in or the kernel calls its scancode.
+        //
+        // Getting this backwards made A quit the app. The press log said so:
+        // two Accepts, then two Backs, then "exited 0".
         assert_eq!(from_button(Button::A, false), Some(Press::Accept));
         assert_eq!(from_button(Button::B, false), Some(Press::Back));
+        // And the explicit setting, for a device that really is the other way.
+        assert_eq!(from_button(Button::B, true), Some(Press::Accept));
+        assert_eq!(from_button(Button::A, true), Some(Press::Back));
         // The d-pad is unaffected either way.
         assert_eq!(from_button(Button::DPadUp, true), Some(Press::Up));
+        assert_eq!(from_joy_button(0, false), Some(Press::Accept));
+        assert_eq!(from_joy_button(0, true), Some(Press::Back));
     }
 
     #[test]
-    fn inversion_is_read_from_emulationstation() {
-        let dir = std::env::temp_dir().join("moose-invert");
-        let _ = std::fs::remove_dir_all(&dir);
-        let paths = Paths::new(&dir);
-        std::fs::create_dir_all(paths.es_settings().parent().unwrap()).unwrap();
-
-        assert!(!buttons_inverted(&paths), "no file means no inversion");
-        std::fs::write(
-            paths.es_settings(),
-            "<config>\n\t<bool name=\"InvertButtons\" value=\"true\" />\n</config>\n",
-        )
-        .unwrap();
-        assert!(buttons_inverted(&paths));
-        std::fs::write(
-            paths.es_settings(),
-            "<config>\n\t<bool name=\"InvertButtons\" value=\"false\" />\n</config>\n",
-        )
-        .unwrap();
-        assert!(!buttons_inverted(&paths));
+    fn the_swap_is_off_unless_the_config_asks() {
+        // Specifically *not* read from EmulationStation's `InvertButtons`.
+        // That is a preference in its interface, not a fact about the pad, and
+        // treating it as one is what broke A.
+        let cfg = romm_desktop::config::Config::default();
+        assert!(!buttons_swapped(&cfg));
     }
 
     #[test]

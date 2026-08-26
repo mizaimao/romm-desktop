@@ -23,6 +23,11 @@ const SHADER_1: &[u8] = include_bytes!("../../device/retroarch-shaders/1-sharp-s
 const SHADER_2: &[u8] =
     include_bytes!("../../device/retroarch-shaders/2-sharp-shimmerless-scanlines.glslp");
 const SHADER_3: &[u8] = include_bytes!("../../device/retroarch-shaders/3-sharp-shimmerless-lcd.glslp");
+const SHADER_4: &[u8] = include_bytes!("../../device/retroarch-shaders/4-zfast-crt.glslp");
+
+const SET_LCD: &[u8] = include_bytes!("../assets/shadersets/lcd.yml");
+const SET_PLAIN: &[u8] = include_bytes!("../assets/shadersets/plain.yml");
+const SET_ZFAST: &[u8] = include_bytes!("../assets/shadersets/zfast.yml");
 
 const BEZEL_PNG: &[u8] = include_bytes!("../../device/gba-bezel/systems/gba-4_3.png");
 const BEZEL_INFO: &[u8] = include_bytes!("../../device/gba-bezel/systems/gba-4_3.info");
@@ -61,8 +66,40 @@ fn startup(paths: &Paths, id: &str, body: Option<&str>) -> Step {
     }
 }
 
-fn place(path: std::path::PathBuf, bytes: Option<&'static [u8]>) -> Step {
-    Step::Place { path, bytes }
+fn place(paths: &Paths, path: std::path::PathBuf, bytes: Option<&'static [u8]>) -> Step {
+    let backup = paths.backup_for(&path);
+    Step::Place { path, bytes, backup }
+}
+
+/// The four presets, plus whichever set is being chosen. Every option lays
+/// down all four, so the cycle is the same list whichever one you start from.
+fn shader_files(paths: &Paths, set: Option<(&str, &'static [u8])>) -> Vec<Step> {
+    let presets: [(&str, Option<&'static [u8]>); 4] = match set {
+        Some(_) => [
+            ("1-sharp-shimmerless.glslp", Some(SHADER_1)),
+            ("2-sharp-shimmerless-scanlines.glslp", Some(SHADER_2)),
+            ("3-sharp-shimmerless-lcd.glslp", Some(SHADER_3)),
+            ("4-zfast-crt.glslp", Some(SHADER_4)),
+        ],
+        None => [
+            ("1-sharp-shimmerless.glslp", None),
+            ("2-sharp-shimmerless-scanlines.glslp", None),
+            ("3-sharp-shimmerless-lcd.glslp", None),
+            ("4-zfast-crt.glslp", None),
+        ],
+    };
+    let mut steps: Vec<Step> = presets
+        .iter()
+        .map(|(name, bytes)| place(paths, paths.shader(name), *bytes))
+        .collect();
+    for (name, body) in [
+        ("moose-lcd", SET_LCD),
+        ("moose-plain", SET_PLAIN),
+        ("moose-zfast", SET_ZFAST),
+    ] {
+        steps.push(place(paths, paths.shaderset(name), set.map(|_| body)));
+    }
+    steps
 }
 
 fn on_off(name_on: &str, on: Vec<Step>, off: Vec<Step>) -> Vec<Choice> {
@@ -92,16 +129,16 @@ fn bezel(paths: &Paths, slug: &'static str, name: &'static str, ours: bool) -> P
             name: "off".into(),
             steps: vec![
                 block(paths, &format!("bezel-{slug}"), None),
-                place(paths.decoration(&format!("{slug}-4_3.png")), None),
-                place(paths.decoration(&format!("{slug}-4_3.info")), None),
+                place(paths, paths.decoration(&format!("{slug}-4_3.png")), None),
+                place(paths, paths.decoration(&format!("{slug}-4_3.info")), None),
             ],
         },
         Choice {
             name: "KNULLI".into(),
             steps: vec![
                 block(paths, &format!("bezel-{slug}"), Some(&format!("{slug}.bezel=default-knulli"))),
-                place(paths.decoration(&format!("{slug}-4_3.png")), None),
-                place(paths.decoration(&format!("{slug}-4_3.info")), None),
+                place(paths, paths.decoration(&format!("{slug}-4_3.png")), None),
+                place(paths, paths.decoration(&format!("{slug}-4_3.info")), None),
             ],
         },
     ];
@@ -110,8 +147,8 @@ fn bezel(paths: &Paths, slug: &'static str, name: &'static str, ours: bool) -> P
             name: "silver".into(),
             steps: vec![
                 block(paths, &format!("bezel-{slug}"), Some(&format!("{slug}.bezel=moose"))),
-                place(paths.decoration(&format!("{slug}-4_3.png")), Some(BEZEL_PNG)),
-                place(paths.decoration(&format!("{slug}-4_3.info")), Some(BEZEL_INFO)),
+                place(paths, paths.decoration(&format!("{slug}-4_3.png")), Some(BEZEL_PNG)),
+                place(paths, paths.decoration(&format!("{slug}-4_3.info")), Some(BEZEL_INFO)),
             ],
         });
     }
@@ -144,7 +181,7 @@ fn shader(paths: &Paths, slug: &'static str, name: &'static str) -> Patch {
                 steps: vec![block(
                     paths,
                     &format!("shader-{slug}"),
-                    Some(&format!("{slug}.shaderset=sharp-shimmerless")),
+                    Some(&format!("{slug}.shaderset=moose-plain")),
                 )],
             },
             Choice {
@@ -152,7 +189,7 @@ fn shader(paths: &Paths, slug: &'static str, name: &'static str) -> Patch {
                 steps: vec![block(
                     paths,
                     &format!("shader-{slug}"),
-                    Some(&format!("{slug}.shaderset=sharp-shimmerless-lcd-crt")),
+                    Some(&format!("{slug}.shaderset=moose-lcd")),
                 )],
             },
             Choice {
@@ -186,48 +223,44 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
         Patch {
             id: "shaders",
             title: "Shaders",
-            detail: "global.shaderset in knulli.conf, plus three presets in \
-                     /userdata/shaders/moose that Hotkey + D-pad up/down cycles. \
-                     sharp-shimmerless keeps the pixel grid even when the scale factor is not \
-                     a whole number, which at 640x480 is nearly always. The preset directory \
-                     is needed because configgen otherwise points the cycler at the whole \
-                     700-preset library.",
+            detail: "global.shaderset in knulli.conf, pointed at our own set in \
+                     /userdata/shaders. That is not vanity: configgen resolves a set's \
+                     presets relative to that directory, and RetroArch cycles the folder of \
+                     the preset it loaded — so a stock set makes Hotkey + D-pad walk all \
+                     seven hundred presets in the library, most of which this handheld \
+                     cannot afford. Ours holds four, all cheap.",
             choices: vec![
                 Choice {
                     name: "off".into(),
-                    steps: vec![
-                        block(paths, "shaders", None),
-                        place(paths.shader("1-sharp-shimmerless.glslp"), None),
-                        place(paths.shader("2-sharp-shimmerless-scanlines.glslp"), None),
-                        place(paths.shader("3-sharp-shimmerless-lcd.glslp"), None),
-                    ],
+                    steps: {
+                        let mut s = vec![block(paths, "shaders", None)];
+                        s.extend(shader_files(paths, None));
+                        s
+                    },
                 },
                 Choice {
                     name: "shimmerless + LCD/CRT".into(),
-                    steps: vec![
-                        block(paths, "shaders", Some(SHADERS_LCD)),
-                        place(paths.shader("1-sharp-shimmerless.glslp"), Some(SHADER_1)),
-                        place(paths.shader("2-sharp-shimmerless-scanlines.glslp"), Some(SHADER_2)),
-                        place(paths.shader("3-sharp-shimmerless-lcd.glslp"), Some(SHADER_3)),
-                    ],
+                    steps: {
+                        let mut s = vec![block(paths, "shaders", Some(SHADERS_LCD))];
+                        s.extend(shader_files(paths, Some(("moose-lcd", SET_LCD))));
+                        s
+                    },
                 },
                 Choice {
                     name: "shimmerless plain".into(),
-                    steps: vec![
-                        block(paths, "shaders", Some(SHADERS_PLAIN)),
-                        place(paths.shader("1-sharp-shimmerless.glslp"), Some(SHADER_1)),
-                        place(paths.shader("2-sharp-shimmerless-scanlines.glslp"), Some(SHADER_2)),
-                        place(paths.shader("3-sharp-shimmerless-lcd.glslp"), Some(SHADER_3)),
-                    ],
+                    steps: {
+                        let mut s = vec![block(paths, "shaders", Some(SHADERS_PLAIN))];
+                        s.extend(shader_files(paths, Some(("moose-plain", SET_PLAIN))));
+                        s
+                    },
                 },
                 Choice {
                     name: "zfast".into(),
-                    steps: vec![
-                        block(paths, "shaders", Some(SHADERS_ZFAST)),
-                        place(paths.shader("1-sharp-shimmerless.glslp"), Some(SHADER_1)),
-                        place(paths.shader("2-sharp-shimmerless-scanlines.glslp"), Some(SHADER_2)),
-                        place(paths.shader("3-sharp-shimmerless-lcd.glslp"), Some(SHADER_3)),
-                    ],
+                    steps: {
+                        let mut s = vec![block(paths, "shaders", Some(SHADERS_ZFAST))];
+                        s.extend(shader_files(paths, Some(("moose-zfast", SET_ZFAST))));
+                        s
+                    },
                 },
             ],
         },
@@ -283,8 +316,8 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
                      and EmulationStation will not start.",
             choices: on_off(
                 "ON",
-                vec![place(paths.es_input(), Some(ES_INPUT))],
-                vec![place(paths.es_input(), None)],
+                vec![place(paths, paths.es_input(), Some(ES_INPUT))],
+                vec![place(paths, paths.es_input(), None)],
             ),
         },
         Patch {
@@ -297,13 +330,13 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
             choices: on_off(
                 "ON",
                 vec![
-                    place(paths.blank_logo(), Some(BLANK_LOGO)),
-                    place(paths.boot_custom(), Some(BOOT_HOOK)),
-                    place(paths.es_logo(), Some(BLANK_LOGO)),
+                    place(paths, paths.blank_logo(), Some(BLANK_LOGO)),
+                    place(paths, paths.boot_custom(), Some(BOOT_HOOK)),
+                    place(paths, paths.es_logo(), Some(BLANK_LOGO)),
                 ],
                 vec![
-                    place(paths.blank_logo(), None),
-                    place(paths.es_logo(), None),
+                    place(paths, paths.blank_logo(), None),
+                    place(paths, paths.es_logo(), None),
                 ],
             ),
         },
@@ -358,13 +391,13 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
                     // device that has never been touched looks like — and a
                     // fresh install must not read as "changed".
                     name: "stock".into(),
-                    steps: vec![place(paths.gpu_choice(), None)],
+                    steps: vec![place(paths, paths.gpu_choice(), None)],
                 },
                 Choice {
                     name: "wayland".into(),
                     steps: vec![
-                        place(paths.gpu_choice(), Some(b"wayland\n")),
-                        place(paths.boot_custom(), Some(BOOT_HOOK)),
+                        place(paths, paths.gpu_choice(), Some(b"wayland\n")),
+                        place(paths, paths.boot_custom(), Some(BOOT_HOOK)),
                     ],
                 },
             ],
@@ -483,6 +516,57 @@ mod tests {
             }
         }
         assert!(owner.len() >= 12, "expected a block per config patch, saw {}", owner.len());
+    }
+
+    #[test]
+    fn every_shader_option_keeps_the_cycle_inside_our_folder() {
+        // RetroArch cycles the directory of the preset it loaded. Name a stock
+        // set here and Hotkey + D-pad walks the whole library — seven hundred
+        // presets, most of them far too heavy for this handheld. That is a
+        // regression you cannot see from the code, only from the device, so
+        // it gets a test.
+        let paths = scratch("shader-cycle");
+        for patch in all(&paths) {
+            if !(patch.id == "shaders" || patch.id.starts_with("shader-")) {
+                continue;
+            }
+            for choice in &patch.choices {
+                for step in &choice.steps {
+                    let crate::patch::Step::Block { body: Some(body), .. } = step else {
+                        continue;
+                    };
+                    for line in body.lines() {
+                        let Some((_, set)) = line.trim().split_once("shaderset=") else {
+                            continue;
+                        };
+                        assert!(
+                            set == "none" || set.starts_with("moose-"),
+                            "{} / {} points at '{set}', which lives in the stock library",
+                            patch.id,
+                            choice.name
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn choosing_a_shader_lays_down_the_whole_cycle() {
+        // All four presets, whichever option you pick, so the list you cycle
+        // is the same list every time. And "off" takes them all away again.
+        let paths = scratch("shader-files");
+        let shaders = all(&paths).into_iter().find(|p| p.id == "shaders").unwrap();
+
+        shaders.apply(1).unwrap();
+        let present = |n: &str| paths.shader(n).exists();
+        assert!(present("1-sharp-shimmerless.glslp"));
+        assert!(present("4-zfast-crt.glslp"));
+        assert!(paths.shaderset("moose-lcd").exists(), "the set itself must be written");
+
+        shaders.apply(0).unwrap();
+        assert!(!present("1-sharp-shimmerless.glslp"), "off leaves nothing behind");
+        assert!(!paths.shaderset("moose-lcd").exists());
     }
 
     #[test]

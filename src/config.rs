@@ -61,6 +61,7 @@ pub struct Config {
 #[derive(Debug, Default, Deserialize)]
 pub struct AchievementsCfg {
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub enabled: bool,
     /// RetroAchievements account name. The token alone authenticates nothing.
     #[serde(default)]
@@ -72,8 +73,10 @@ pub struct AchievementsCfg {
     /// Disables save states, fast-forward and rewind — four of the gamepad
     /// hotkeys this app binds.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub hardcore: bool,
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub test_unofficial: bool,
 }
 
@@ -130,6 +133,7 @@ pub struct Library {
     /// is mostly a way to find a game you could have found faster in the
     /// Library tab.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub romm_collections: bool,
 }
 
@@ -157,6 +161,7 @@ pub struct ControllersCfg {
     /// whenever the other pads are the same model — the usual case — and wrong
     /// for a genuinely different device, which is why it can be turned off.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub mirror_player_one: bool,
 
     /// Swap the two face buttons **for moving around this app only**.
@@ -167,9 +172,11 @@ pub struct ControllersCfg {
     /// plays with the buttons the game expects. The alternative, rebinding
     /// every action one at a time, is the same fix done twenty times.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub swap_ab: bool,
     /// The same for the other pair.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub swap_xy: bool,
 }
 
@@ -200,6 +207,7 @@ pub struct SavesCfg {
     /// A conflict is still never resolved automatically: both sides are left
     /// as they are and reported.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub auto_sync: bool,
 
     /// Ask before deleting a save state from the shelf.
@@ -211,6 +219,7 @@ pub struct SavesCfg {
     /// is not gone either way: it goes to the same backup folder an overwritten
     /// save does, so the undo exists whether or not the question was asked.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub confirm_delete_state: bool,
 }
 
@@ -363,6 +372,7 @@ pub struct AppearanceCfg {
     /// switches to actually get it is the shape of a settings screen nobody
     /// trusts.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub animations: bool,
 }
 
@@ -444,11 +454,47 @@ impl Default for IconsCfg {
     }
 }
 
+/// A TOML boolean, or the word for one in quotes.
+///
+/// `set_config_field` wrote `swap_ab = "true"` for several versions, because
+/// its list of which settings are booleans had drifted from the struct. TOML is
+/// strict and `toml::from_str` refuses the entire file over one wrong type, so
+/// a single quoted bool took the whole config down — and since every caller
+/// falls back to `Config::default()`, silently. On Frank's Thor that pointed
+/// the library, the artwork and the saves folder at `./library/...`, and the
+/// ES-DE scan found nothing while the grid went on showing a cache from before.
+///
+/// So the reader takes both spellings. The writer is fixed separately; this is
+/// what lets a file written by the broken versions load again without anyone
+/// having to hand-edit it, and what stops the next drift being silent.
+fn lenient_bool<'de, D>(d: D) -> std::result::Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Bool(bool),
+        Text(String),
+    }
+    match Either::deserialize(d)? {
+        Either::Bool(b) => Ok(b),
+        Either::Text(t) => match t.trim().to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" | "1" => Ok(true),
+            "false" | "no" | "off" | "0" => Ok(false),
+            other => Err(serde::de::Error::custom(format!(
+                "expected true or false, found {other:?}"
+            ))),
+        },
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ShadersCfg {
     /// Master switch. Off means no shader is applied and RetroArch's own
     /// setting is left alone.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub enabled: bool,
     /// Platform slug -> preset path under `shaders_slang/` (no extension), or
     /// `"none"` to force no shader for that platform.
@@ -554,6 +600,7 @@ pub struct RetroArchCfg {
 
     /// See [`default_game_display`] above for why this is on.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub fit_window: bool,
 
     /// Make the shot button repeat while held, in arcade shooters.
@@ -590,6 +637,7 @@ pub struct RetroArchCfg {
     /// auto slot is the one this app resumes from. Anyone who wants it can
     /// have it; nobody gets it without asking.
     #[serde(default)]
+    #[serde(deserialize_with = "lenient_bool")]
     pub save_state_on_exit: bool,
 
     /// Keep the game window's title bar.
@@ -599,6 +647,7 @@ pub struct RetroArchCfg {
     /// keyboard hotkey, and someone who has just turned this off is exactly
     /// the person who may not know that yet.
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub window_decorations: bool,
 }
 
@@ -653,6 +702,7 @@ pub struct RetroArchInstall {
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default = "yes")]
+    #[serde(deserialize_with = "lenient_bool")]
     pub enabled: bool,
 }
 
@@ -1240,6 +1290,39 @@ mod tests {
 
     /// A missing config is not an error — most commands work offline against
     /// the local cache and should not require one.
+    /// A quoted boolean has to load.
+    ///
+    /// `set_config_field` wrote `swap_ab = "true"` for several versions, and
+    /// TOML refuses the whole file over one wrong type — which, with every
+    /// caller falling back to defaults, silently moved the library, the artwork
+    /// and the saves folder on the device. The reader takes both spellings so
+    /// those files recover on their own.
+    #[test]
+    fn a_boolean_written_as_a_string_still_loads_the_whole_file() {
+        let dir = std::env::temp_dir().join("romm-cfg-quoted-bool");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[esde]\nroms = \"/storage/CARD/Roms\"\n\n[controllers]\nswap_ab = \"true\"\nswap_xy = \"false\"\n",
+        )
+        .unwrap();
+
+        let cfg = Config::load_from(&path).expect("one quoted bool must not lose the file");
+        assert!(cfg.controllers.swap_ab);
+        assert!(!cfg.controllers.swap_xy);
+        assert_eq!(
+            cfg.esde.roms.as_deref(),
+            Some("/storage/CARD/Roms"),
+            "this is what was actually being lost — the whole file, not just the bool"
+        );
+
+        // Nonsense is still an error rather than quietly false.
+        std::fs::write(&path, "[controllers]\nswap_ab = \"maybe\"\n").unwrap();
+        assert!(Config::load_from(&path).is_err());
+    }
+
     #[test]
     fn a_missing_config_loads_defaults_rather_than_failing() {
         let cfg = Config::load_from(Path::new("/nonexistent/config.toml"))

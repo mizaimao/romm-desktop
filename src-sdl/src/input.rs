@@ -5,18 +5,19 @@
 // `binds::PAD_BUTTONS` names before asking anything. That vocabulary is the
 // contract: a rebind made in the desktop app means the same thing here.
 //
-// WHICH BUTTON IS A DEPENDS ON THE HANDHELD, NOT ON SDL.
+// THE LETTERS IN es_input.cfg ARE THE ONES PRINTED ON THE PLASTIC.
 //
-// SDL names face buttons by where they sit on an Xbox pad, so `Button::A` is
-// always the bottom one — a position, not a label. On a Nintendo-layout
-// device the button *printed* A is on the right, which SDL calls `B`. The
-// Android handhelds here are Xbox layout (AYN Thor); the smaller Linux ones
-// are Nintendo (Miyoo Flip).
+// ES's controller wizard asks you to press A, then B, and writes down what you
+// pressed; vendor defaults are made the same way. The table below maps ES's
+// `a` to SDL's `a`, so SDL's `Button::A` *is* the button printed A — whatever
+// position it sits in, and whatever the kernel calls its scancode.
 //
-// Get it wrong and confirm and cancel swap, which does not look like a
-// swapped mapping — it looks like "A does nothing" and "B will not let me
-// leave". Read the device's own answer rather than guessing. See "Read this
-// before you touch a button mapping" in `docs/handover.md`.
+// So no swap, by default, on every handheld. Do not infer one from the
+// scancode names (BTN_SOUTH is not "the bottom one" on every device) and do
+// not infer one from EmulationStation's `InvertButtons`, which is a
+// preference in its interface rather than a fact about the pad. Both of those
+// were tried; both made A quit the app. See "Read this before you touch a
+// button mapping" in `docs/handover.md`.
 
 use romm_desktop::{binds, padpoll};
 use sdl2::controller::{Axis, Button, GameController};

@@ -503,6 +503,17 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         return Ok(format!("{n} shots a second"));
     }
 
+    // Every field whose struct type is `bool`. Miss one and it is written as
+    // `swap_ab = "true"` — a string where the struct wants a bool — and then
+    // `toml::from_str` refuses *the whole file*. Since every caller of
+    // `Config::load` does `unwrap_or_default()`, one quoted bool silently
+    // reverts the entire app to its defaults: on the Thor it moved the library,
+    // the artwork and the saves folder back to `./library/...` and the ES-DE
+    // scan stopped finding anything, which reads as a stale cache rather than
+    // an unreadable config.
+    //
+    // `autofire` and `game_display` are absent on purpose — those are strings
+    // in the struct too.
     let boolean = matches!(
         field.as_str(),
         "achievements_enabled"
@@ -510,7 +521,10 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
             | "shaders_enabled"
             | "confirm_delete_state"
             | "mirror_player_one"
+            | "swap_ab"
+            | "swap_xy"
             | "fit_window"
+            | "save_state_on_exit"
             | "window_decorations"
     );
 
@@ -1129,6 +1143,17 @@ async fn download_set(
 fn platforms(state: State<'_, AppState>) -> CmdResult<Vec<PlatformView>> {
     let cache = state.cache.lock().map_err(err)?;
     let rows = cache.platforms().map_err(err)?;
+    // Consoles switched off in the library are not offered. ES-DE hides a
+    // system by leaving a `noload.txt` in its directory, and a second frontend
+    // over the same library has to agree with it.
+    //
+    // Filtered here rather than left to the scan, because the scan only decides
+    // which games are found on the device: with a server configured the
+    // platform has rows of its own and would come back into the grid with every
+    // game in it still marked as somewhere else. Hiding a console means hiding
+    // it.
+    let switched_off = romm_desktop::esde::switched_off_slugs(&state.roms_dir, &state.map);
+    let rows: Vec<_> = rows.into_iter().filter(|p| !switched_off.contains(&p.fs_slug)).collect();
     // Read once for the whole grid rather than per platform: the lock would
     // otherwise be taken four times for each of thirty consoles.
     let set = state.icon_set.lock().map_err(err)?.clone();

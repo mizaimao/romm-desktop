@@ -18,7 +18,7 @@
 //! same file that tells us which core runs a platform also tells us which
 //! ES-DE system feeds it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -164,22 +164,66 @@ fn is_game_file(p: &Path) -> bool {
     if name.starts_with('.') {
         return false;
     }
+    // ES-DE's own bookkeeping, which is not filtered by the extension list
+    // below: a disabled `noload.txt` is renamed rather than deleted, and
+    // `noload.txt.masked-off` has the extension `masked-off`. One turned up in
+    // the `mame` directory and the library listed a game called "noload.txt".
+    if name.to_ascii_lowercase().starts_with("noload.") {
+        return false;
+    }
     !matches!(
         p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(),
         Some("xml" | "txt" | "srm" | "state" | "cfg" | "dat" | "db")
     )
 }
 
-/// Scan an ES-DE library into games, keyed to RomM platform slugs.
+/// Whether a system directory has been switched off in the library.
 ///
-/// Systems the core map does not know are skipped rather than guessed at — a
-/// wrong slug would put games under a platform whose core cannot run them.
-pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> {
-    if !layout.roms.is_dir() {
-        bail!("no ROMs directory at {}", layout.roms.display());
-    }
+/// ES-DE's own convention: an empty file called `noload.txt` beside the games.
+/// It is how a console you are not playing gets hidden without moving several
+/// hundred files, and a second frontend reading the same library has to honour
+/// it or the two disagree about what the library contains.
+///
+/// Exactly that name, which is what makes turning the marker *off* work:
+/// renaming it to `noload.txt.masked-off` is how it gets disabled, and that
+/// must not go on matching. Two of the directories on Frank's card are in
+/// exactly that state.
+fn is_switched_off(dir: &Path) -> bool {
+    dir.join("noload.txt").is_file()
+}
 
-    // ES-DE system name -> RomM slug, from the map we already ship.
+/// The RomM slugs of every system the library has switched off.
+///
+/// Read from disk on each call rather than remembered, so adding or removing a
+/// marker shows up the next time the grid is drawn instead of after a sync. It
+/// is one `stat` per system directory, against a list that is a few dozen long.
+///
+/// Separate from [`scan`] because the two answer different questions. `scan`
+/// decides which *games* exist and a switched-off system contributes none; this
+/// decides which *platforms* to show, which matters even when the games came
+/// from the server rather than the card — otherwise a console hidden on the
+/// device reappears in the grid the moment there is a library behind it.
+pub fn switched_off_slugs(roms: &Path, map: &CoreMap) -> BTreeSet<String> {
+    let sys_to_slug = slug_map(map);
+    let mut out = BTreeSet::new();
+    for entry in std::fs::read_dir(roms).into_iter().flatten().flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() || !is_switched_off(&dir) {
+            continue;
+        }
+        if let Some(slug) = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|system| sys_to_slug.get(system))
+        {
+            out.insert((*slug).to_owned());
+        }
+    }
+    out
+}
+
+/// ES-DE system directory name -> RomM slug, most specific source last.
+fn slug_map(map: &CoreMap) -> BTreeMap<&str, &str> {
     let mut sys_to_slug: BTreeMap<&str, &str> = BTreeMap::new();
     for (system, def) in &map.systems {
         if let Some(slug) = def.romm_platforms.first() {
@@ -197,6 +241,19 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> 
     for (system, slug) in crate::platform::current().system_aliases() {
         sys_to_slug.insert(system, slug);
     }
+    sys_to_slug
+}
+
+/// Scan an ES-DE library into games, keyed to RomM platform slugs.
+///
+/// Systems the core map does not know are skipped rather than guessed at — a
+/// wrong slug would put games under a platform whose core cannot run them.
+pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> {
+    if !layout.roms.is_dir() {
+        bail!("no ROMs directory at {}", layout.roms.display());
+    }
+
+    let sys_to_slug = slug_map(map);
     let ignored = crate::platform::current().ignored_systems();
 
     let mut out = Vec::new();
@@ -217,6 +274,11 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> 
         // unknown directory, which is reported so a missing alias can be found.
         if NOT_SYSTEMS.contains(&system) || ignored.contains(&system) || system.starts_with('.')
         {
+            continue;
+        }
+        // Switched off in the library itself. Silent, like `ignored` above — a
+        // system hidden on purpose is not a problem to report.
+        if is_switched_off(&dir) {
             continue;
         }
         let Some(slug) = sys_to_slug.get(system) else {
@@ -522,6 +584,57 @@ mod tests {
             !skipped.iter().any(|s| s == "0_BIOS" || s == "bios" || s == "ports"),
             "these are excluded outright, not reported as unmapped systems"
         );
+    }
+
+    /// ES-DE hides a system by dropping `noload.txt` in its directory, and
+    /// un-hides it by renaming that file rather than deleting it. Both halves
+    /// matter: on Frank's card eight systems are hidden this way and two more
+    /// carry a `noload.txt.masked-off` that must not still count.
+    #[test]
+    fn a_system_marked_noload_is_not_scanned() {
+        let dir = scratch("scan-noload");
+        touch(&dir.join("ROMs/snes/Zelda.sfc"), b"rom");
+        touch(&dir.join("ROMs/megadrive/Sonic.md"), b"rom");
+        touch(&dir.join("ROMs/megadrive/noload.txt"), b"");
+        let layout = Layout::new(&dir, None);
+
+        let (games, skipped) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1, "the hidden system contributes nothing");
+        assert_eq!(games[0].name, "Zelda");
+        assert!(!skipped.iter().any(|s| s == "megadrive"), "hidden on purpose, not unmapped");
+    }
+
+    /// The platform list asks a different question from the scan: with a server
+    /// behind it a switched-off console has rows of its own, so hiding it has to
+    /// be decided from the library rather than from what the scan returned.
+    #[test]
+    fn switched_off_systems_are_reported_as_slugs_for_the_platform_list() {
+        let dir = scratch("scan-switched-off");
+        touch(&dir.join("ROMs/snes/Zelda.sfc"), b"rom");
+        touch(&dir.join("ROMs/megadrive/Sonic.md"), b"rom");
+        touch(&dir.join("ROMs/megadrive/noload.txt"), b"");
+        touch(&dir.join("ROMs/gamegear/Sonic.gg"), b"rom");
+        touch(&dir.join("ROMs/gamegear/noload.txt.masked-off"), b"");
+
+        let off = switched_off_slugs(&dir.join("ROMs"), &map());
+        assert!(off.contains("megadrive"), "hidden by the marker");
+        assert!(!off.contains("gamegear"), "its marker has been disabled by renaming");
+        assert!(!off.contains("snes"), "never had one");
+    }
+
+    /// The marker is turned off by renaming, so the system comes back — and
+    /// the renamed marker is not itself a game.
+    #[test]
+    fn a_masked_off_noload_marker_restores_the_system_without_becoming_a_game() {
+        let dir = scratch("scan-noload-masked");
+        touch(&dir.join("ROMs/megadrive/Sonic.md"), b"rom");
+        touch(&dir.join("ROMs/megadrive/noload.txt.masked-off"), b"");
+        touch(&dir.join("ROMs/megadrive/systeminfo.txt"), b"");
+        let layout = Layout::new(&dir, None);
+
+        let (games, _) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1, "one game, not three");
+        assert_eq!(games[0].name, "Sonic");
     }
 
     /// An unknown system is reported rather than guessed at: a wrong slug puts

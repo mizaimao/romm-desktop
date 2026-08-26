@@ -109,7 +109,13 @@ export async function launch(
   // Say once, on the first gun console launched, that the mouse is the gun.
   // Before the guard below and before the pad goes quiet, because it is a
   // dialog the user answers rather than anything the launch depends on.
-  if (!resolving && !skipSync) {
+  //
+  // Not on Android, where every word of it is wrong: there is no mouse to aim
+  // with, and the light gun setting it is explaining is applied by the desktop
+  // planner, which this platform does not use. It was a modal in front of every
+  // Mega Drive, Master System, NES and PlayStation launch on the handheld,
+  // asking about hardware that is not there.
+  if (!resolving && !skipSync && !MOBILE) {
     try {
       // Shape-checked, not just truthy. `[]` is truthy in JavaScript, so a
       // backend — or a stub — answering with an empty array opened a dialog

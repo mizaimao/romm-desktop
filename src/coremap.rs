@@ -472,6 +472,21 @@ mod android_tests {
     /// `opera_libretro.so` does not exist on a device — there it is
     /// `opera_libretro_android.so`, and RetroArch has wanted the full path to
     /// it rather than a bare name since the 2025-01-17 nightly.
+    /// "Nothing can run it" and "the table has never heard of it" are
+    /// different answers, and only one of them is a gap worth filing. Both
+    /// produce an empty `android_launches`, so the caller needs this to tell
+    /// them apart before it writes a message about either.
+    #[test]
+    fn an_unmapped_platform_is_distinguishable_from_one_with_no_core() {
+        let m = map();
+        assert!(m.knows_platform("gb"), "gb is mapped and has a core");
+        // Real slugs from Frank's library that the ES-DE export never claimed.
+        for slug in ["pico8", "g-and-w", "wii", "easyrpg"] {
+            assert!(!m.knows_platform(slug), "{slug} should be unmapped");
+            assert!(m.android_launches(slug).is_empty(), "{slug}");
+        }
+    }
+
     #[test]
     fn a_libretro_platform_offers_retroarch_with_an_android_core() {
         let out = map().android_launches("3do");

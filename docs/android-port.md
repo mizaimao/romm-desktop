@@ -116,6 +116,25 @@ so it wants deciding rather than discovering.
 
 ## Step 4 — launching, which is the actual project
 
+**Half of this is done and on the device.** Games start in RetroArch, on the
+core ES-DE would have picked, from the card. `android_launch_plan` in
+`src-tauri/src/lib.rs` turns a game into an ordered list of components and core
+files; `Bridge.startEmulator` in `MainActivity.kt` picks the first one really
+installed and sends the Intent; `launch()` in `ui/js/actions.js` is the seam.
+Verified on the Thor across the library: 24 of 32 platforms resolve to a core,
+and the other 8 are platforms `data/esde-core-map.json` has no entry for —
+`easyrpg`, `g-and-w`, `new-nintendo-3ds`, `pico8`, `ps2`, `switch`, `wii`,
+`wiiu` — which is a gap in the table, not in the launcher.
+
+**The other half — the config — is untouched, and the rest of this section is
+still the plan for it.** Nothing per-launch is applied on Android: no shader,
+no override, no autofire, no light gun, no save-state-on-exit. RetroArch runs
+on its own configuration. Nor is there a way back: `startActivity` returns when
+the request is accepted, not when the game ends, so no save sync runs and no
+play time is recorded. Standalone emulators are not started at all — this app's
+manifest can only see the two RetroArch packages, so `getPackageInfo` answers
+"not installed" for every other one whether it is or not.
+
 `retroarch.rs` is 1,950 lines and its job is to build a `Command`, spawn
 RetroArch, and write the config that shapes the session. On Android none of
 those three things happen that way.
