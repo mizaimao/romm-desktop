@@ -85,13 +85,11 @@ document.addEventListener(
 );
 
 function close() {
-  // In an iframe: ask the page that made it to remove it.
-  //
-  // That is how settings opens on Android, because Tauri can build a second
-  // webview window there but cannot close one — `close()` never settles,
-  // `destroy()` and `hide()` do nothing. Measured on the device.
-  if (window.parent !== window) {
-    window.parent.postMessage("close-settings", location.origin);
+  // On Android this page *is* the webview, reached by navigating rather than by
+  // opening a window Tauri cannot close afterwards. Going back is a navigation
+  // too. See settings.js for the two approaches this replaced.
+  if (/\bAndroid\b/.test(navigator.userAgent)) {
+    window.location.href = "index.html";
     return;
   }
   // A real window, which is every desktop build. getCurrentWindow rather than a
@@ -102,10 +100,8 @@ function close() {
 
 /// Answer Android's Back button from inside the overlay.
 ///
-/// The overlay is an iframe in the main document, so the activity asks the main
-/// page, not this one — but a key press while the iframe has focus lands here.
-/// Defining it on both sides costs one function and removes a question about
-/// which document happened to have focus.
+/// On Android this page is the whole webview, so the activity asks it directly.
+/// Always true: Back inside settings means leave settings, at every level.
 window.__androidBack = () => {
   close();
   return true;

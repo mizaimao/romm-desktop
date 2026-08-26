@@ -18,50 +18,41 @@ export function captureKey() {
   return false;
 }
 
-/// Android has no second window, so settings is an overlay there.
+/// Android has no second window, so settings takes over this one.
 ///
-/// Tauri will happily *build* a second webview window on Android and then has
-/// no way to get rid of it: `close()` hangs without settling, and `destroy()`
-/// and `hide()` return quietly and change nothing. All three measured on the
-/// device. That left settings as a room with no door — the one thing a
-/// handheld user cannot work around, because there is no title bar to click.
+/// Three ways were tried and only this one works.
 ///
-/// So on Android the same settings.html is loaded into a full-screen iframe in
-/// this document instead. Same page, same code, same origin; the difference is
-/// that removing an element is something the platform can actually do.
+/// A real second window is what desktop uses. Tauri will build one on Android
+/// and then cannot dispose of it: `close()` never settles, `destroy()` and
+/// `hide()` return quietly and change nothing. Settings became a room with no
+/// door.
 ///
-/// Desktop is untouched and still gets a real window: it is resizable, it can
-/// sit beside the library, and none of the above applies there.
+/// An iframe closes fine — it is an element — but Tauri's IPC does not reach
+/// into one. `window.__TAURI__` is injected and looks right, `invoke` sends,
+/// and the reply never comes back because responses only route to the top
+/// frame. Every control that reads its value hung on that: the toggles kept
+/// their "…" placeholder, the dropdowns stayed empty, the theme list read
+/// forever, and the bindings table drew no rows. Worse than not closing,
+/// because it looked like it worked.
+///
+/// So settings.html is loaded as the whole document. It is the top frame, so
+/// invoke works, the dialog plugin works, and its own stylesheet applies —
+/// nothing special-cased, the same page desktop opens in a window. It costs
+/// the library page a reload when you come back, which on a handheld where
+/// settings fills the screen anyway is a fair price for controls that work.
 const MOBILE = /\bAndroid\b/.test(navigator.userAgent);
-const OVERLAY_ID = "settings-overlay";
 
-/// Whether a settings overlay is up in *this* document.
-///
-/// Always false on desktop, where settings is a separate window and this one
-/// has nothing to close.
+/// Never open in *this* document, on any platform: settings is always its own
+/// page now — a window on desktop, the whole webview on Android.
 export function settingsOpen() {
-  return document.getElementById(OVERLAY_ID) !== null;
+  return false;
 }
 
-export function closeSettings() {
-  document.getElementById(OVERLAY_ID)?.remove();
-}
+export function closeSettings() {}
 
 export async function toggleSettings() {
   if (MOBILE) {
-    if (settingsOpen()) return closeSettings();
-    const frame = document.createElement("iframe");
-    frame.id = OVERLAY_ID;
-    frame.src = "settings.html";
-    // Covering the whole viewport, above everything. Inline rather than a
-    // stylesheet rule because this element exists on one platform and a rule
-    // in style.css would be dead weight in every other build.
-    frame.style.cssText =
-      "position:fixed;inset:0;width:100%;height:100%;border:0;z-index:9999;";
-    document.body.appendChild(frame);
-    // The page inside asks to be closed rather than closing itself, because
-    // from in there `window.close()` is the Tauri call that does nothing.
-    frame.contentWindow?.focus?.();
+    window.location.href = "settings.html";
     return;
   }
   try {
@@ -70,11 +61,3 @@ export async function toggleSettings() {
     toast(`Could not open Settings — ${e}`, 6000);
   }
 }
-
-// The overlay asking to be taken down. Same origin, so the check is a
-// formality, but an unchecked message handler on the main document is not a
-// habit worth having.
-window.addEventListener("message", (ev) => {
-  if (ev.origin !== location.origin) return;
-  if (ev.data === "close-settings") closeSettings();
-});

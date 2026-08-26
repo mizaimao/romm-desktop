@@ -188,4 +188,15 @@ export function wire(box) {
   box.querySelector(".set-libsync-full")?.addEventListener("click", (e) =>
     runLibSync(e.currentTarget, true)
   );
+
+  // The text fields: the library folder and the two ES-DE paths.
+  //
+  // This call was missing. `wireConfigFields` was imported at the top of this
+  // file and never invoked, so every `data-field` control on this tab rendered
+  // its placeholder, held no value, and saved nothing when edited — on every
+  // platform, not just Android. The other three panes that carry config fields
+  // (general, control, emulators) all call it; this one was overlooked, and a
+  // field that shows its placeholder looks exactly like a field that is simply
+  // empty, which is why it went unnoticed.
+  wireConfigFields(box);
 }
