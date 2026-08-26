@@ -44,16 +44,41 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev patchelf
+            libayatana-appindicator3-dev patchelf \
+            libsdl2-dev libsdl2-image-dev
+
+      # SDL, for the handheld front end.
+      #
+      # `sdl2-sys` asks pkg-config where the library is and fails the build when
+      # nothing answers, so the workspace stopped compiling here the moment
+      # `src-sdl` joined it. Installed on the two platforms that can run it;
+      # Windows excludes the crate below instead, because there is no handheld
+      # running Windows and vcpkg for one unbuildable target is not a trade
+      # worth making.
+      - name: Install SDL
+        if: runner.os == 'macOS'
+        run: brew install sdl2 sdl2_image
 
       # No `cargo fmt --check` gate: the tree predates rustfmt and currently
       # differs in 152 files. Run `cargo fmt --all` once and add the gate back
       # if you want it enforced.
       - name: Clippy
+        if: runner.os != 'Windows'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
+        if: runner.os != 'Windows'
         run: cargo test --workspace
+
+      # Windows checks everything except the handheld front end. See the SDL
+      # step above for why.
+      - name: Clippy (without the SDL front end)
+        if: runner.os == 'Windows'
+        run: cargo clippy --workspace --exclude romm-sdl --all-targets -- -D warnings
+
+      - name: Tests (without the SDL front end)
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --exclude romm-sdl
 
   ui:
     name: ui

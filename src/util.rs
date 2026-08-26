@@ -280,6 +280,18 @@ mod webview_path_tests {
 /// `None` if the clock cannot be read, which is a real answer: a handheld that
 /// has been off the network since it was made has no idea what time it is, and
 /// a wrong time in the corner is worse than no time.
+///
+/// Unix only, and deliberately. `localtime_r` is POSIX and does not exist in
+/// the Windows C runtime, which is where this broke the build — the one caller
+/// is the handheld's status corner, and there is no handheld running Windows.
+/// A stub that guessed at a time would be worse than the missing clock this
+/// returns.
+#[cfg(not(unix))]
+pub fn local_hhmm() -> Option<String> {
+    None
+}
+
+#[cfg(unix)]
 pub fn local_hhmm() -> Option<String> {
     // SAFETY: `localtime_r` fills a caller-owned `tm`, so there is no shared
     // buffer to race over — which is the reason it exists rather than
