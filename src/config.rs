@@ -293,7 +293,12 @@ pub struct EsdeCfg {
 }
 
 impl EsdeCfg {
-    /// Artwork root of the ES-DE library, if one is configured.
+    /// Artwork root of a *separately configured* ES-DE library.
+    ///
+    /// Deliberately still `None` when nothing is set, rather than falling back
+    /// the way [`Config::esde_layout`] does. This one answers "is there a
+    /// second library whose artwork should be preferred over ours" — and the
+    /// app's own download folder is not a second library, it is this one.
     pub fn media_dir(&self) -> Option<PathBuf> {
         self.layout().map(|l| l.media).filter(|p| p.is_dir())
     }
@@ -709,6 +714,39 @@ impl Config {
             self.cores.per_game.entry(game).or_insert(core);
         }
         self
+    }
+
+    /// Where to look for games already on this machine.
+    ///
+    /// Two folders, both configurable and both with a default, because they are
+    /// genuinely separate things: the ES-DE base folder holds `gamelists/` and
+    /// `downloaded_media/` — the metadata and artwork for a whole collection —
+    /// while the games themselves are usually somewhere else entirely, often a
+    /// card or an external drive. ES-DE keeps them apart for that reason and so
+    /// does this.
+    ///
+    /// The defaults are the app's own folders, because they already have the
+    /// shape ES-DE uses: `<library>/downloaded_media` beside `<library>/roms`.
+    /// So an install that has never been pointed at anything still has a local
+    /// library to scan — its own — and pointing it at a real ES-DE install is a
+    /// matter of changing two paths rather than arranging anything.
+    ///
+    /// Unlike [`EsdeCfg::layout`] this never returns `None`. There is always
+    /// somewhere to look; whether anything is there is a question for the scan.
+    pub fn esde_layout(&self) -> crate::esde::Layout {
+        let root = self
+            .esde
+            .root
+            .as_deref()
+            .map(crate::util::expand_tilde)
+            .unwrap_or_else(|| PathBuf::from(&self.library.local_root));
+        let roms = self
+            .esde
+            .roms
+            .as_deref()
+            .map(crate::util::expand_tilde)
+            .unwrap_or_else(|| self.local_roms_dir());
+        crate::esde::Layout::new(&root, Some(&roms))
     }
 
     pub fn local_roms_dir(&self) -> PathBuf {

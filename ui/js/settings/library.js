@@ -30,22 +30,24 @@ export const html = `      <h4>Library</h4>
       <div class="srow">
         <label>ES-DE folder</label>
         <div class="ctl"><input class="cf-text" data-field="esde_root"
-          type="text" spellcheck="false" placeholder="~/ES-DE" /></div>
+          type="text" spellcheck="false" placeholder="(the library folder)" /></div>
       </div>
-      <p class="hint">Where ES-DE keeps <code>gamelists/</code> and
-        <code>downloaded_media/</code>. Set this and the artwork ES-DE has
-        already scraped is used instead of fetching it again. On Android it is
-        usually <code>/storage/emulated/0/ES-DE</code>, and the app needs the
-        All files access permission to read it.</p>
+      <p class="hint">Where <code>gamelists/</code> and <code>downloaded_media/</code>
+        live — the metadata and artwork for a whole collection. Empty means the
+        library folder above, which already has that shape. Point it at a real
+        ES-DE install and its artwork is used instead of fetching it again; on
+        Android that is usually <code>/storage/emulated/0/ES-DE</code>, which
+        needs the file access above.</p>
 
       <div class="srow">
         <label>ES-DE ROMs folder</label>
         <div class="ctl"><input class="cf-text" data-field="esde_roms"
-          type="text" spellcheck="false" placeholder="(inside the ES-DE folder)" /></div>
+          type="text" spellcheck="false" placeholder="(roms, inside the library folder)" /></div>
       </div>
-      <p class="hint">Only when the games are not under the folder above, which
-        is the usual arrangement — ES-DE keeps the two separate. On Android
-        often <code>/storage/emulated/0/ROMs</code>.</p>
+      <p class="hint">Where the games themselves are — usually somewhere else
+        entirely, which is why ES-DE keeps the two apart. Empty means
+        <code>roms</code> inside the library folder. On Android often
+        <code>/storage/emulated/0/ROMs</code>.</p>
 
       <div class="srow">
         <label>Fetch game list</label>

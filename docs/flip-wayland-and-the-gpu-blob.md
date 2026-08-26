@@ -149,11 +149,47 @@ Dropping **Mesa's** `libgbm` in front of the Mali driver — Debian trixie's
 and EGL have to be the same implementation: Mesa's `gbm_create_device` returns a
 Mesa device and Mali's EGL reads it as its own. Half a stack is not a stack.
 
-## What this does not yet answer
+## Do the emulators still work on it?
 
-Whether the emulators still work on the newer blob. The whole device runs games
-on `g13p0` today, and nothing here has been tested against RetroArch. That is
-the gate before the blob goes on permanently, not before it is interesting.
+Yes, as far as a log can say. Each core was run against a real game for a fixed
+spell on both drivers, twice over — RetroArch cores first, then the standalone
+emulators, which reach the driver directly rather than through RetroArch's GL
+layer.
+
+| | stock `g13p0` | `g24p0-wayland-gbm` |
+|---|---|---|
+| snes9x | ran | ran |
+| mgba | 17 s | 17 s |
+| pcsx_rearmed | 17 s | 17 s |
+| mupen64plus-next | 14 s | 14 s |
+| flycast (x3) | 14 s, clean | 14 s, clean |
+| flycast standalone | GLES 3.2, Mali-G52 | GLES 3.2, Mali-G52 |
+
+Every flycast run on both drivers passed its own `glBlitFramebuffer test
+successful` check, which is the emulator probing a GL capability and getting a
+working answer rather than merely failing to crash. The standalone build reports
+`Vendor 'ARM' Renderer 'Mali-G52' Version 'OpenGL ES 3.2 v1.g24p0-00eac0'` — the
+new blob, in use, by name.
+
+Two things not to read into this:
+
+* **One flycast run did segfault on the newer blob** during the first pass. It
+  did not reproduce: three further runs on each driver were clean. Recorded
+  because it happened, not because it means anything yet.
+* **`mupen64plus` standalone fails on both drivers** with `not a valid ROM
+  image` on a `.zip`. That is a ROM-format complaint, identical either side, and
+  not a driver difference.
+
+**What a log cannot tell you:** whether the picture was *correct* and whether
+the framerate held. Every measurement here is from a terminal over SSH. A core
+can render garbage, or run at twelve frames a second, and log nothing unusual.
+Before the blob goes on permanently, somebody has to play something on it.
+
+## Trying it without installing it
+
+`scripts/flip-mali-shim.sh` stages the blob under `/tmp` on the device and
+prints the line to run with it. `/usr/lib` is never written to, and a reboot
+forgets the whole thing.
 
 Sources: [ROCKNIX/libmali](https://github.com/ROCKNIX/libmali) ·
 [Miyoo-Flip-Mainline-Linux-Reverse-Engineering](https://github.com/Zetarancio/Miyoo-Flip-Mainline-Linux-Reverse-Engineering)

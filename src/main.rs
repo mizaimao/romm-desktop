@@ -1245,9 +1245,9 @@ fn cmd_scan_esde(root: Option<&str>, roms: Option<&str>) -> Result<()> {
             &romm_desktop::util::expand_tilde(r),
             roms.map(romm_desktop::util::expand_tilde).as_deref(),
         ),
-        None => cfg.esde.layout().context(
-            "no ES-DE library configured — pass --root, or set [esde] root in config.toml",
-        )?,
+        // No --root: the configured library, or this install's own folders,
+        // which have the same shape. There is always somewhere to look.
+        None => cfg.esde_layout(),
     };
 
     println!("roms       {}", layout.roms.display());
