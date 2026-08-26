@@ -156,6 +156,16 @@ export async function showSection(id, { force = false } = {}) {
   current = id;
   paint();
 
+  // Give the focus back to the page on Android.
+  //
+  // A tab holds keyboard focus after it is activated, which on a desktop is
+  // correct — you tabbed to it, and the ring says where the keyboard is. Driven
+  // by a pad nobody tabbed anywhere: the cursor is in the grid below, and a tab
+  // row that still looks focused puts two highlights on screen at once, one of
+  // which does not move. Nothing is lost by dropping it: keys.js listens on the
+  // window rather than on whatever has focus.
+  if (MOBILE) document.activeElement?.blur?.();
+
   // Parking restores the screen a section was left on, which is exactly right
   // when a section *is* the screen. In three columns it is not: a tab owns the
   // left column and the middle, and restoring only the screen left the other

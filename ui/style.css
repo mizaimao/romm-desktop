@@ -2958,6 +2958,24 @@ body.uncontained .card {
      working. The only thing the wash added was the white tint. */
   .card { border-color: rgb(var(--glass-rgb) / 22%); }
 
+  /* The open tab's colour and glow.
+     Both are color-mix, so on these engines the tab lost the lit look it has
+     everywhere else and became plain bold text. `--glass-rgb` carries the same
+     tint the mix would have used. The 45% of white in the original is
+     approximated by mixing toward the text colour, which is near-white. */
+  #tabbar .stab.active {
+    color: rgb(var(--text-rgb) / 92%);
+    text-shadow:
+      0 0 7px rgb(var(--glass-rgb) / 95%),
+      0 0 26px rgb(var(--glass-rgb) / 75%);
+  }
+
+  /* The line under the tab row.
+     A color-mix border, so there was none — the row and the list it sits above
+     ran together with nothing between them. */
+  #tabbar { border-bottom: 1px solid rgb(var(--glass-rgb) / 28%); }
+  header { border-bottom: 1px solid rgb(var(--glass-rgb) / 20%); }
+
   /* The message strip.
      Its background is a color-mix, so on these engines it had none — and it
      keeps `backdrop-filter: blur(18px) saturate(160%)`, which over a dark page
@@ -3039,20 +3057,15 @@ body.mobile #tabbar .bumper { display: none !important; }
   #detail .artstrip .vidtile { max-height: 108px; }
 }
 
-/* The page keeps a background on Android — on `html`, which is the point.
-   With a backdrop running, `html` and `body` are both made transparent so the
-   canvas shows through. That assumes the surface behind the page is the app's
-   own colour, and on Android it is not: it is light, and it came through as a
-   flat wash over everything.
+/* No page background on Android with a backdrop running — this is what caused
+   the tint, and it was added here while chasing it.
 
-   It has to be `html`. A background on `body` alone does not reach the viewport
-   when `html` has an explicit background of its own, even a transparent one —
-   the propagation that would normally carry it up does not happen. Painting
-   body and leaving html transparent is exactly what was tried first, and the
-   wash stayed: with the page at #14161A the device still showed #313236, which
-   is 12% of white over it. With `html` painted, the same test gives the colour
-   asked for.
+   With a backdrop the page is meant to be transparent and the canvas provides
+   the colour. Painting `html` instead gave the engine a CSS background to
+   rasterise, and this WebView lifts what it rasterises: rgb(20, 22, 26) came
+   out #313236, the same colour with twelve per cent of white in it. Canvas
+   pixels never went through that pass, which is why the backdrop stayed dark in
+   the same frame and why every other explanation fitted so badly.
 
-   The canvas is drawn over this, so nothing is hidden by it. */
-html.mobile.backdrop-on,
-html.mobile.backdrop-on body { background: var(--bg); }
+   Found by removing this one rule on the device and measuring: the dominant
+   colour on screen fell from #303238 to #23242A. */
