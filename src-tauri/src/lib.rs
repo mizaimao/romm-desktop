@@ -333,6 +333,16 @@ async fn open_settings(app: tauri::AppHandle) -> CmdResult<()> {
 #[derive(Serialize)]
 struct ConfigFields {
     library_root: String,
+    /// The ES-DE data directory — the one holding `gamelists/` and
+    /// `downloaded_media/` — and the ROMs folder when it is somewhere else,
+    /// which it usually is.
+    ///
+    /// On desktop these are typed once and forgotten. On Android they are the
+    /// whole arrangement: ES-DE is a real app on the device with real folders,
+    /// and pointing at them is what makes this app see the same library rather
+    /// than a second copy hidden in its own private storage.
+    esde_root: String,
+    esde_roms: String,
     server_url: String,
     server_username: String,
     /// Present or not, never the value. A settings pane has no reason to hand a
@@ -361,6 +371,8 @@ fn config_fields() -> CmdResult<ConfigFields> {
     let cfg = Config::load().unwrap_or_default();
     Ok(ConfigFields {
         library_root: cfg.library.local_root.clone(),
+        esde_root: cfg.esde.root.clone().unwrap_or_default(),
+        esde_roms: cfg.esde.roms.clone().unwrap_or_default(),
         server_url: cfg.server.url.clone(),
         server_username: cfg.server.username.clone(),
         server_token_set: cfg.server.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
@@ -397,6 +409,8 @@ fn config_fields() -> CmdResult<ConfigFields> {
 fn set_config_field(field: String, value: String) -> CmdResult<String> {
     let (table, key) = match field.as_str() {
         "library_root" => ("library", "local_root"),
+        "esde_root" => ("esde", "root"),
+        "esde_roms" => ("esde", "roms"),
         "server_url" => ("server", "url"),
         "server_token" => ("server", "token"),
         "server_username" => ("server", "username"),

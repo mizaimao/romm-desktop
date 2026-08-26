@@ -16,6 +16,26 @@ export const html = `      <h4>Library</h4>
       <p class="hint">Everything downloaded lives here — games, artwork, save
         backups. Deleting this folder reclaims all of it.</p>
       <div class="srow">
+        <label>ES-DE folder</label>
+        <div class="ctl"><input class="cf-text" data-field="esde_root"
+          type="text" spellcheck="false" placeholder="~/ES-DE" /></div>
+      </div>
+      <p class="hint">Where ES-DE keeps <code>gamelists/</code> and
+        <code>downloaded_media/</code>. Set this and the artwork ES-DE has
+        already scraped is used instead of fetching it again. On Android it is
+        usually <code>/storage/emulated/0/ES-DE</code>, and the app needs the
+        All files access permission to read it.</p>
+
+      <div class="srow">
+        <label>ES-DE ROMs folder</label>
+        <div class="ctl"><input class="cf-text" data-field="esde_roms"
+          type="text" spellcheck="false" placeholder="(inside the ES-DE folder)" /></div>
+      </div>
+      <p class="hint">Only when the games are not under the folder above, which
+        is the usual arrangement — ES-DE keeps the two separate. On Android
+        often <code>/storage/emulated/0/ROMs</code>.</p>
+
+      <div class="srow">
         <label>Fetch game list</label>
         <div class="ctl">
           <button class="set-libsync">Sync library</button>

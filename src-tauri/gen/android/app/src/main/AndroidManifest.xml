@@ -2,6 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      Read the ES-DE folders.
+
+      ES-DE on Android keeps its library in ordinary places — /storage/emulated/0/ES-DE
+      and /storage/emulated/0/ROMs — and this app is pointed at them rather than
+      keeping a second copy. Since Android 11 an app cannot open arbitrary files
+      there with the ordinary storage permissions; it needs this one, which the
+      user grants by a toggle in system settings rather than a dialog. ES-DE's
+      own Android app asks for exactly the same thing.
+
+      maxSdkVersion on the legacy pair: they do nothing from Android 13 on, and
+      leaving them unbounded reads as if they still did.
+    -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
