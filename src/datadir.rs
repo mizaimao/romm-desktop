@@ -23,6 +23,69 @@ use std::path::{Path, PathBuf};
 /// Nothing is created and nothing is written to the home directory. See
 /// [`choose`], which holds the ordering and is where the tests are.
 pub fn anchor() {
+    // Android has none of the layouts below.
+    //
+    // There is no executable to sit beside — the process is `app_process64`
+    // from /system/bin — no checkout to walk up to, and the working directory
+    // is `/`, which is read-only. Falling through to `choose` finds nothing,
+    // leaves the cwd alone, and the first relative path the app opens fails:
+    //
+    //     opening metadata cache: opening cache at cache.sqlite3
+    //     Error code 14: Unable to open the database file
+    //
+    // which aborted the app before it drew anything. So Android gets the one
+    // directory it does have: the private files dir every app is given, which
+    // is writable, survives updates, and is removed when the app is
+    // uninstalled.
+    #[cfg(target_os = "android")]
+    {
+        match android_files_dir() {
+            Some(root) => {
+                // Created here, unlike every other branch. The directory
+                // belongs to this app and Android does not make it for us —
+                // and the alternative is the abort above.
+                let _ = std::fs::create_dir_all(&root);
+                if std::env::set_current_dir(&root).is_err() {
+                    eprintln!("warning: could not enter {}", root.display());
+                }
+            }
+            None => eprintln!("warning: could not read this app's package name"),
+        }
+        return;
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        anchor_by_layout();
+    }
+}
+
+/// The private files directory Android gives every app: `/data/user/0/<pkg>/files`.
+///
+/// Read from `/proc/self/cmdline` rather than hardcoded or passed in, because
+/// the package name is decided by tauri.conf.json's `identifier` and a second
+/// copy of it here is a second thing to keep in step. cmdline is the process
+/// name, which for an Android app *is* the package name.
+///
+/// `/data/user/0` rather than `/data/data`: the latter is a symlink to it that
+/// exists for compatibility, and the real path is the one that keeps working
+/// under multiple users and work profiles.
+#[cfg(target_os = "android")]
+fn android_files_dir() -> Option<PathBuf> {
+    let cmdline = std::fs::read("/proc/self/cmdline").ok()?;
+    // NUL-terminated, and argv[0] is all we want.
+    let end = cmdline.iter().position(|&b| b == 0).unwrap_or(cmdline.len());
+    let pkg = std::str::from_utf8(&cmdline[..end]).ok()?.trim();
+    if pkg.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from("/data/user/0").join(pkg).join("files"))
+}
+
+/// The desktop rule: config beside the executable, else a checkout, else the
+/// executable's own directory. See [`choose`].
+#[cfg(not(target_os = "android"))]
+fn anchor_by_layout() {
     let cwd = std::env::current_dir().ok();
     let exe = std::env::current_exe().ok();
     match choose(cwd.as_deref(), exe.as_deref(), &|p| p.is_file()) {
