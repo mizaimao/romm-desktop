@@ -66,4 +66,15 @@ log "moose-patch exited $status"
 # Hand the console back clean, or the cursor and whatever text it holds show
 # through whatever draws next.
 printf "\033c" >/dev/tty0 2>/dev/null
+
+# The safety net. Launched as a Port, EmulationStation is waiting on us and
+# comes back by itself; launched any other way, or if ES died while we had the
+# screen, nothing brings it back and the device is a black rectangle with no
+# way into the menu. Cheap to check, and it costs a reboot when it is missing.
+if ! ps -e -o args= | grep -q '^emulationstation '; then
+  log "EmulationStation is not running — starting it"
+  . /etc/profile.d/xdg.sh 2>/dev/null
+  . /etc/profile.d/dbus.sh 2>/dev/null
+  setsid /usr/bin/emulationstation-standalone </dev/null >/dev/null 2>&1 &
+fi
 exit $status

@@ -273,6 +273,14 @@ impl Pads {
         Pads { held: None }
     }
 
+    /// Whether a pad was found and opened. Callers that read SDL's controller
+    /// *events* rather than its state need to know, because a device SDL could
+    /// not describe sends joystick events and no controller ones — and an app
+    /// listening only for the latter looks frozen.
+    pub fn is_open(&self) -> bool {
+        self.held.is_some()
+    }
+
     /// Which actions the pad is asking for this frame.
     ///
     /// Read as state rather than as events, because that is what

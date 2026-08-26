@@ -149,6 +149,14 @@ real device hit that read-only mount and lost every setting that came later in
 the file — on a freshly flashed handheld that is the difference between one
 thing to fix and ten.
 
+### Credentials
+
+`config.toml` beside the binary, holding only the `[server]` section copied from
+the desktop's. Nothing else on that machine belongs on a handheld, and a
+smaller file is a smaller thing to lose. `--status` prints the server and which
+credential it found, so "cannot reach RomM" and "no patch is on" are one line
+apart instead of guesswork.
+
 ### Still to do
 
 The three sync actions are drawn but not wired. `romm_desktop::savesync` already

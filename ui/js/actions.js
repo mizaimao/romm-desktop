@@ -1,7 +1,7 @@
 // Download and launch, kept separate from the pane that triggers them so the
 // grid can call them on double-click without importing the whole sidebar.
 
-import { state, invoke, listen } from "./state.js";
+import { state, invoke, listen, MOBILE } from "./state.js";
 import { toast } from "./util.js";
 import { askConflicts, conflictsFrom, askOffline, offlineFrom, askBios, biosFrom, noteLightGun } from "./conflicts.js";
 import { suspendPad, resumePad } from "./gamepad.js";
@@ -54,6 +54,30 @@ let launching = false;
 
 export function launchInFlight() {
   return launching;
+}
+
+/// Start a game on Android, where launching is asking another app.
+///
+/// Two steps rather than one because neither half can do the other's job. Rust
+/// knows which core the game wants and where the ROM is; only Kotlin can see
+/// which packages exist and start an Intent — Tauri does not hand the Android
+/// context to Rust (tauri-apps/tauri#13267), so a Tauri command cannot reach
+/// `startActivity`. So the backend plans, `RommAndroid` starts, and this is the
+/// seam between them.
+///
+/// Nothing is awaited. `startActivity` returns as soon as the request is
+/// accepted, not when the game ends, so there is no exit code to report and no
+/// moment to sync saves at — see `android_launch_plan` for the rest of what
+/// that costs. The toast says the game is starting because that is the whole of
+/// what is known.
+async function launchAndroid(id) {
+  const bridge = window.RommAndroid;
+  if (!bridge?.startEmulator) throw new Error("this build has no way to start an emulator");
+  const plan = await invoke("android_launch_plan", { id });
+  const failed = bridge.startEmulator(JSON.stringify(plan));
+  if (failed) throw new Error(failed);
+  const via = plan.candidates?.[0]?.label;
+  return `Starting ${plan.name}${via ? ` in ${via}` : ""}…`;
 }
 
 /// Launch, optionally picking up where the game was left.
@@ -122,13 +146,18 @@ export async function launch(
     stop = await listen("launch-progress", ({ payload }) => {
       toast(String(payload), 30_000);
     });
-    const result = await invoke("launch_rom", {
-      id,
-      pad: state.gamepad,
-      refresh: await measureRefresh(),
-      skipSync,
-      entrySlot,
-    });
+    // Android goes another way entirely: no process to spawn and nothing to
+    // wait on. Everything above this line still applies — the guard, the pad,
+    // the toast — because they are about this window, not about the emulator.
+    const result = MOBILE
+      ? await launchAndroid(id)
+      : await invoke("launch_rom", {
+          id,
+          pad: state.gamepad,
+          refresh: await measureRefresh(),
+          skipSync,
+          entrySlot,
+        });
     stop?.();
     toast(result);
   } catch (e) {

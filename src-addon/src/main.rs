@@ -56,6 +56,33 @@ fn from_key(key: Keycode) -> Option<Press> {
     })
 }
 
+/// Raw joystick numbers, for a pad SDL could not describe.
+///
+/// Only consulted when no controller opened. The numbering is the one
+/// `es_input.cfg` gives this family of handhelds — 0 is the button printed A,
+/// 1 the one printed B — which is also what RetroArch is configured with.
+fn from_joy_button(index: u8) -> Option<Press> {
+    Some(match index {
+        0 => Press::Accept,
+        1 => Press::Back,
+        2 | 3 => Press::Detail,
+        4 => Press::TabLeft,
+        5 => Press::TabRight,
+        _ => return None,
+    })
+}
+
+fn from_hat(state: sdl2::joystick::HatState) -> Option<Press> {
+    use sdl2::joystick::HatState as H;
+    Some(match state {
+        H::Up => Press::Up,
+        H::Down => Press::Down,
+        H::Left => Press::Left,
+        H::Right => Press::Right,
+        _ => return None,
+    })
+}
+
 /// SDL names its buttons after the Xbox layout, so `Button::A` is the bottom
 /// one — which is what this device calls A too.
 fn from_button(button: Button) -> Option<Press> {
@@ -78,10 +105,12 @@ fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, Stri
     // the point: the last front end was drawn at four times the size and every
     // judgement made about it was wrong.
     let (w, h) = (ui::PANEL.0, ui::PANEL.1);
+    // Not `fullscreen_desktop`. On this handheld SDL's kmsdrm backend owns the
+    // whole screen anyway, and asking for a fullscreen mode change on top of
+    // that is a mode this app has to hand back cleanly when it exits — which
+    // is one more thing to get wrong between the app quitting and
+    // EmulationStation drawing again.
     let mut builder = video.window("moose-patch", w, h);
-    if cfg!(any(target_os = "linux", target_os = "android")) {
-        builder.fullscreen_desktop();
-    }
     builder
         .position_centered()
         .opengl()
@@ -112,6 +141,22 @@ fn main() -> Result<()> {
 }
 
 fn status(patches: &[Patch]) -> Result<()> {
+    // The server first, because "it cannot reach RomM" and "no patch is on"
+    // are different problems and this is the one line that tells them apart.
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    if cfg.server.url.is_empty() {
+        println!("{:<16} not configured", "server");
+    } else {
+        let auth = if cfg.server.token.is_some() {
+            "token"
+        } else if !cfg.server.password.is_empty() {
+            "password"
+        } else {
+            "no credential"
+        };
+        println!("{:<16} {} ({auth})", "server", cfg.server.url);
+    }
+    println!();
     for patch in patches {
         let at = match patch.state() {
             State::At(i) => patch.choices[i].name.clone(),
@@ -185,11 +230,26 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     // has to come from the OS's own es_input.cfg rather than SDL's database.
     let controllers = sdl.game_controller().map_err(anyhow::Error::msg)?;
     let joysticks = sdl.joystick().map_err(anyhow::Error::msg)?;
-    let _pads = input::Pads::open_first(&controllers, &joysticks);
+    let pads = input::Pads::open_first(&controllers, &joysticks);
+    // A pad SDL cannot describe sends joystick events and no controller ones.
+    // Listening only for controller events would look exactly like the app
+    // having frozen: it draws, and nothing you press does anything.
+    let raw_pad = !pads.is_open();
+    if raw_pad {
+        eprintln!("no controller mapping — falling back to raw joystick buttons");
+        for index in 0..joysticks.num_joysticks().unwrap_or(0) {
+            let _ = joysticks.open(index);
+        }
+    }
+
+    // The server, if this device has been given credentials. Read once: the
+    // sync tab shows where it would talk to, and says so plainly when nowhere.
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let server = (!cfg.server.url.is_empty()).then(|| cfg.server.url.clone());
 
     let mut app = App {
         tab: Tab::Patches,
-        sync: rows::sync(None, None),
+        sync: rows::sync(server.as_deref(), None),
         patches: rows::patches(patches),
         overlay: Overlay::None,
         should_quit: false,
@@ -209,9 +269,17 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
                 Event::Quit { .. } => Some(Press::Quit),
                 Event::KeyDown { keycode: Some(key), repeat: false, .. } => from_key(key),
                 Event::ControllerButtonDown { button, .. } => from_button(button),
+                Event::JoyButtonDown { button_idx, .. } if raw_pad => {
+                    from_joy_button(button_idx)
+                }
+                Event::JoyHatMotion { state, .. } if raw_pad => from_hat(state),
                 _ => None,
             };
             let Some(press) = press else { continue };
+            // Every press, in the log. When a button did nothing, the question
+            // is always whether the app never saw it or saw it and ignored it,
+            // and one line settles that without a second trip to the device.
+            eprintln!("press {press:?}");
             act(&mut app, &mut view, press, paths, patches);
         }
 

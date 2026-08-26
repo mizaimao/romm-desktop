@@ -1,6 +1,8 @@
 package net.zhenningzhang.romm_desktop
 
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import androidx.activity.result.ActivityResultLauncher
@@ -134,6 +136,100 @@ class MainActivity : TauriActivity() {
                     folderPickerTarget = null
                 }
             }
+        }
+
+        /**
+         * Start a game in RetroArch.
+         *
+         * Android does not run emulators, it starts apps. RetroArch is another
+         * package and the only way in is an explicit Intent to
+         * `RetroActivityFuture` carrying three string extras, which is exactly
+         * what ES-DE sends — its `es_systems.xml` entries expand to
+         *
+         *     %EMULATOR_RETROARCH%
+         *       %EXTRA_CONFIGFILE%=/storage/emulated/0/Android/data/<pkg>/files/retroarch.cfg
+         *       %EXTRA_LIBRETRO%=/data/data/<pkg>/cores/<core>_libretro_android.so
+         *       %EXTRA_ROM%=<rom>
+         *
+         * and this builds the same thing. The paths are RetroArch's own, not
+         * ours: its cores are in its private directory, which this app cannot
+         * read, and its config is under `Android/data`, which Android 11 closed
+         * to everyone. Neither has to be readable here — they are handed over
+         * as strings and RetroArch opens them itself.
+         *
+         * Takes the whole plan rather than a component and a core because
+         * *which* RetroArch is installed is a question only this side can
+         * answer, and the answer changes both paths. `com.retroarch.aarch64` on
+         * every handheld worth the name, `com.retroarch` on the rest; the plan
+         * lists both and the first one that is really here wins.
+         *
+         * No flags. `RetroActivityFuture` is `launchMode="singleInstance"`, so
+         * it gets its own task whatever we ask for, and Back comes home.
+         *
+         * Returns an empty string when the game is on its way, and something to
+         * show the user when it is not.
+         */
+        @JavascriptInterface
+        fun startEmulator(planJson: String): String {
+            val plan =
+                try {
+                    org.json.JSONObject(planJson)
+                } catch (e: Exception) {
+                    return "could not read the launch plan"
+                }
+            val rom = plan.optString("rom")
+            if (rom.isEmpty()) return "the launch plan has no ROM path"
+            val candidates = plan.optJSONArray("candidates")
+            if (candidates == null || candidates.length() == 0) {
+                return "nothing is listed that could run this"
+            }
+
+            val looked = LinkedHashSet<String>()
+            for (i in 0 until candidates.length()) {
+                val c = candidates.optJSONObject(i) ?: continue
+                val component = c.optString("component")
+                val slash = component.indexOf('/')
+                if (slash <= 0) continue
+                val pkg = component.substring(0, slash)
+                val rest = component.substring(slash + 1)
+                // ES-DE writes the activity relative to its package when the two
+                // share a prefix. An Intent wants it whole.
+                val activity = if (rest.startsWith(".")) pkg + rest else rest
+                looked.add(pkg)
+
+                val intent = Intent().setComponent(ComponentName(pkg, activity))
+                intent.putExtra("ROM", rom)
+                val core = c.optString("core_file")
+                if (core.isNotEmpty()) {
+                    intent.putExtra("LIBRETRO", "/data/data/$pkg/cores/$core")
+                    intent.putExtra(
+                        "CONFIGFILE",
+                        "/storage/emulated/0/Android/data/$pkg/files/retroarch.cfg",
+                    )
+                }
+
+                // Asked of the component, not the package. A package can be
+                // installed while the activity we want is not the one it
+                // exports, and that is an ActivityNotFoundException on a
+                // background thread — a crash rather than a message. This is
+                // also the visibility check: since Android 11 an activity in a
+                // package the manifest does not declare in `<queries>` is
+                // invisible, and this reports it as missing, which is the same
+                // answer the launch would get.
+                try {
+                    packageManager.getActivityInfo(intent.component!!, 0)
+                } catch (e: PackageManager.NameNotFoundException) {
+                    continue
+                }
+
+                // On the UI thread, like every other `startActivity` here.
+                // Nothing is awaited: the activity is known to exist by now, and
+                // a game takes seconds to appear, so there is nothing useful to
+                // report back that the screen will not say first.
+                runOnUiThread { startActivity(intent) }
+                return ""
+            }
+            return "RetroArch is not installed — looked for " + looked.joinToString(", ")
         }
 
         @JavascriptInterface

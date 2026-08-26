@@ -2187,6 +2187,125 @@ async fn launch_rom(
     })
 }
 
+/// One thing on this device that could run the game.
+#[derive(serde::Serialize)]
+struct AndroidCandidate {
+    /// `package/Activity`, ready for an explicit Intent. A leading dot on the
+    /// activity is ES-DE's shorthand for "in this package" and is expanded
+    /// where the Intent is built.
+    component: String,
+    /// The core's file name — `gambatte_libretro_android.so`. Not a path: the
+    /// directory is RetroArch's own private one and depends on which of its two
+    /// package names turns out to be installed, so it is completed on the
+    /// Kotlin side where that is known.
+    core_file: Option<String>,
+    /// ES-DE's name for the emulator, for the toast.
+    label: String,
+}
+
+/// Everything needed to start a game on Android.
+#[derive(serde::Serialize)]
+struct AndroidPlan {
+    /// Absolute path to the ROM.
+    rom: String,
+    name: String,
+    /// Best first; the first one whose component is actually installed wins.
+    candidates: Vec<AndroidCandidate>,
+}
+
+/// Whether a core file name is the Android build of `core`.
+///
+/// `opera` is `opera_libretro_android.so`. Compared on the part before
+/// `_libretro` and case-insensitively, because the table's own file names are
+/// not always the stem plus a suffix — `DoubleCherryGB_libretro_android.so`
+/// differs from its stem in case alone, and a case-sensitive compare would
+/// quietly drop the user's chosen core back to the default.
+fn core_file_is(file: Option<&str>, core: &str) -> bool {
+    file.and_then(|f| f.split("_libretro").next())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case(core))
+}
+
+/// What to start for a game on Android, and with what.
+///
+/// Android does not launch, it *asks*: RetroArch is a separate app reached by
+/// an Intent, so nothing here spawns anything. This returns a plan and the
+/// Kotlin side starts it — see `Bridge.startEmulator` in MainActivity.kt, and
+/// docs/android-port.md Step 7.
+///
+/// `launch_rom` cannot serve this. It begins by asking for the RetroArch
+/// install, and on Android there is none to find: the app is another package
+/// and its cores live in `/data/data/com.retroarch.aarch64/cores`, which is
+/// unreadable from here — measured, not assumed. Everything that follows from
+/// having that install is unavailable too, and it is worth being plain about
+/// what is therefore not happening on this platform yet: no core download, no
+/// generated `retroarch.cfg`, no shader or BIOS fetch, no save sync, and no
+/// play-time recorded, because `startActivity` returns at once rather than when
+/// the game ends. RetroArch uses its own configuration, which on this device
+/// already points at the card.
+///
+/// RetroArch only. `android_launches` also offers standalone emulators, and
+/// they are dropped here: this app's manifest can only see the two RetroArch
+/// packages, so `getPackageInfo` on any other one answers "not installed"
+/// whether it is or not, and offering a choice that always fails is worse than
+/// not offering it.
+#[tauri::command]
+fn android_launch_plan(state: State<'_, AppState>, id: i64) -> CmdResult<AndroidPlan> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+
+    let rom = row_path(&state, &row).ok_or("not downloaded yet")?;
+
+    // The user's own choice of core, where they made one. The `resolve_core_for`
+    // on `AppState` cannot answer here — it starts by unwrapping the RetroArch
+    // locator and returns `None` the moment there isn't one — so the shared
+    // resolution runs directly with the installed-check left open. Open is the
+    // honest answer: which cores RetroArch has is inside its private directory,
+    // and this app cannot look.
+    let wanted = {
+        let overrides = state.core_overrides.lock().map_err(err)?;
+        let per_game = state.core_per_game.lock().map_err(err)?;
+        coremap::resolve_core_for(
+            &state.map,
+            &overrides,
+            &per_game,
+            &row.platform_slug,
+            Some(&row.fs_name),
+            |_| true,
+        )
+    };
+
+    let mut found = state.map.android_launches(&row.platform_slug);
+    found.retain(|l| l.libretro);
+    if found.is_empty() {
+        return Err(format!(
+            "no libretro core is listed for {} — ES-DE runs it in a standalone \
+             emulator, which this app does not start yet",
+            row.platform_slug
+        ));
+    }
+    // The chosen core ahead of the platform default. A stable sort, so the
+    // order `android_launches` decided survives within each group.
+    if let Some(core) = wanted.as_deref() {
+        found.sort_by_key(|l| !core_file_is(l.core_file.as_deref(), core));
+    }
+
+    Ok(AndroidPlan {
+        rom: rom.to_string_lossy().into_owned(),
+        name: row.name.clone(),
+        candidates: found
+            .into_iter()
+            .map(|l| AndroidCandidate {
+                component: l.component,
+                core_file: l.core_file,
+                label: l.label,
+            })
+            .collect(),
+    })
+}
+
 /// What one half of the automatic sync produced.
 #[derive(Default)]
 struct AutoSync {
@@ -4011,6 +4130,7 @@ pub fn run() {
             download_rom,
             rom_covers,
             launch_rom,
+            android_launch_plan,
             install_theme_logos,
             fetch_icons,
             icon_styles,
