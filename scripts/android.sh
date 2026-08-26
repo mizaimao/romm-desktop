@@ -43,7 +43,12 @@ CLI_SHA256="835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e"
 
 # The Thor is arm64. One target, not the usual four — three quarters of an
 # Android build's time goes on architectures no device here runs.
+#
+# Two spellings of the same thing, and they are not interchangeable. rustup and
+# the target/ directory want the triple; `tauri android build -t` takes an ABI
+# name and rejects the triple outright with a list of the four it accepts.
 TARGET="aarch64-linux-android"
+ABI="aarch64"
 
 # The NDK is resolved rather than pinned.
 #
@@ -227,8 +232,8 @@ cmd_dev() {
 cmd_build() {
   android_env
   [ -d "$HERE/src-tauri/gen/android" ] || die "run './scripts/android.sh init' first"
-  say "building an APK for $TARGET"
-  tauri android build --target "$TARGET"
+  say "building an APK for $ABI ($TARGET)"
+  tauri android build --apk --target "$ABI"
   # The APK is unsigned unless a keystore is configured. Say so rather than
   # letting an install fail on the device with a signature error.
   find "$HERE/src-tauri/gen/android" -name '*.apk' -newermt '-10 minutes' 2>/dev/null \
