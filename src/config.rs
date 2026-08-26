@@ -745,16 +745,31 @@ impl Config {
             .roms
             .as_deref()
             .map(crate::util::expand_tilde)
-            .unwrap_or_else(|| self.local_roms_dir());
+            // Spelled out rather than calling `local_roms_dir`, which is now
+            // defined in terms of this function and would recurse.
+            .unwrap_or_else(|| PathBuf::from(&self.library.local_root).join("roms"));
         crate::esde::Layout::new(&root, Some(&roms))
     }
 
+    /// Where games live — the folder set in Settings, not a folder of our own.
+    ///
+    /// This used to be `<library>/roms` unconditionally, so an install pointed
+    /// at a real ES-DE library read games from one place and downloaded them to
+    /// another. Now there is one answer: the ES-DE ROMs folder, which defaults
+    /// to `<library>/roms` and so is unchanged for anyone who has not set it.
     pub fn local_roms_dir(&self) -> PathBuf {
-        PathBuf::from(&self.library.local_root).join("roms")
+        self.esde_layout().roms
     }
 
+    /// Where artwork lives, for the same reason.
+    ///
+    /// `<esde root>/downloaded_media`, which is where ES-DE keeps it and where
+    /// it already is on a machine that has one. The default ES-DE root is the
+    /// library folder, so this stays `<library>/downloaded_media` until
+    /// somebody points it somewhere — and then everything follows together
+    /// rather than the app keeping a second copy beside the real one.
     pub fn media_dir(&self) -> PathBuf {
-        PathBuf::from(&self.library.local_root).join("downloaded_media")
+        self.esde_layout().media
     }
 
     /// The user's own RetroArch settings file, appended at launch.
@@ -1462,6 +1477,46 @@ mod tests {
 
 #[cfg(test)]
 mod bool_tests {
+
+    /// The games folder and the artwork folder follow the ES-DE settings.
+    ///
+    /// Before this they were always `<library>/roms` and
+    /// `<library>/downloaded_media`, so an install pointed at a real ES-DE
+    /// library read from one place and wrote to another — the app kept a second
+    /// copy of everything beside the one already on the disk.
+    #[test]
+    fn the_library_folders_follow_the_esde_settings() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [library]
+            local_root = "./library"
+            [esde]
+            root = "/sd/ES-DE"
+            roms = "/sd/Roms"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.local_roms_dir(), PathBuf::from("/sd/Roms"));
+        assert_eq!(cfg.media_dir(), PathBuf::from("/sd/ES-DE/downloaded_media"));
+    }
+
+    /// And an install that has never been pointed anywhere is unchanged.
+    ///
+    /// The defaults have to land exactly where they always did, or an existing
+    /// library becomes invisible the moment this ships.
+    #[test]
+    fn nothing_moves_for_an_install_that_has_set_nothing() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [library]
+            local_root = "./library"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.local_roms_dir(), PathBuf::from("./library/roms"));
+        assert_eq!(cfg.media_dir(), PathBuf::from("./library/downloaded_media"));
+    }
+
     use super::*;
 
     /// A TOML boolean is a bare literal. Written as a quoted string it parses
