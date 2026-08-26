@@ -9,4 +9,6 @@ pub mod model;
 pub mod patch;
 pub mod profile;
 pub mod rows;
+pub mod sync;
+pub mod worker;
 pub mod ui;

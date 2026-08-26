@@ -246,6 +246,20 @@ impl Page {
         }
     }
 
+    /// Update a fact in place, keeping the cursor where it was.
+    ///
+    /// Rebuilding the page would be simpler and would also throw the cursor
+    /// back to the top every time the status line changed — which, during a
+    /// sync, is several times a second.
+    pub fn set_fact(&mut self, id: &str, value: &str) {
+        if let Some(row) = self.rows.iter_mut().find(|r| r.id == id)
+            && let Kind::Fact { value: slot } = &mut row.kind
+            && slot != value
+        {
+            *slot = value.to_string();
+        }
+    }
+
     pub fn pending(&self) -> Vec<&Row> {
         self.rows.iter().filter(|r| r.pending()).collect()
     }
@@ -284,6 +298,9 @@ pub enum Overlay {
 /// The whole app, minus the drawing.
 pub struct App {
     pub tab: Tab,
+    /// Where syncing has got to. Lives here so the sync tab can draw it, and
+    /// is only ever written by `worker::apply`.
+    pub stage: crate::sync::Stage,
     pub sync: Page,
     pub patches: Page,
     pub overlay: Overlay,

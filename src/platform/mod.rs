@@ -126,6 +126,16 @@ pub trait Platform: Sync {
         SaveLayout::ByCore
     }
 
+    /// The directory holding `saves/` — and, on `ByCore` devices, `states/`.
+    ///
+    /// `None` means "no better idea than the config's default", which is a
+    /// relative path beside the app. That is right for a portable desktop
+    /// install and wrong for a handheld, where the save tree is somewhere
+    /// fixed that the OS decided.
+    fn saves_root(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Install roots to search for RetroArch, in order.
     fn retroarch_roots(&self) -> &'static [&'static str];
 
@@ -289,6 +299,39 @@ mod tests {
 
     /// The five names are distinct, so a build cannot silently select the
     /// wrong one and still look right in a log line.
+    #[test]
+    fn a_handheld_names_its_own_save_root() {
+        // `./Saves` is the portable-RetroArch answer and is wrong on a device
+        // where the OS decided where saves go. Getting this wrong is silent:
+        // the scan finds an empty directory and the sync reports nothing to do.
+        assert_eq!(super::knulli::Knulli.saves_root(), Some("/userdata"));
+        assert_eq!(
+            super::knulli::Knulli.save_layout(),
+            SaveLayout::BySystem,
+            "and it files by platform, not by core"
+        );
+    }
+
+    #[test]
+    fn every_other_scheme_leaves_the_save_root_to_the_config() {
+        // Only a device with a fixed, OS-chosen tree should override it.
+        let schemes: [&dyn Platform; 4] = [
+            &macos::MacOs,
+            &windows::Windows,
+            &linux::Linux,
+            &android::Android,
+        ];
+        for scheme in schemes {
+            assert_eq!(
+                scheme.saves_root(),
+                None,
+                "{} should not be hardcoding a save root",
+                scheme.scheme()
+            );
+            assert_eq!(scheme.save_layout(), SaveLayout::ByCore);
+        }
+    }
+
     #[test]
     fn scheme_names_are_distinct() {
         let names = [

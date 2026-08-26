@@ -10,29 +10,29 @@ use crate::patch::{Patch, State};
 
 /// The sync tab: status you can read at the top, then the things you can set
 /// going.
-pub fn sync(server: Option<&str>, last: Option<&str>) -> Page {
+pub fn sync(server: Option<&str>, status: &str) -> Page {
     Page::new(vec![
         Row::fact("server", "Server", server.unwrap_or("not configured")),
-        Row::fact("last", "Last sync", last.unwrap_or("never")),
+        Row::fact("status", "Status", status),
+        // One action, not a push button and a pull button.
+        //
+        // The server decides direction per save — some are newer here, some
+        // there, and a few are both — so "push" and "pull" are not choices a
+        // person can sensibly make up front. Asking what *would* happen is,
+        // and it moves nothing.
         Row::action(
-            "push",
-            "Push saves up",
-            "Uploads game saves newer than the server's copy. Where both changed since the \
-             last sync it stops and asks which to keep rather than picking one.",
-            "—",
-        ),
-        Row::action(
-            "pull",
-            "Pull saves down",
-            "Downloads saves newer than this device's copy, with the same question when both \
-             have moved.",
+            "check",
+            "See what would sync",
+            "Scans the saves on this card, hands the list to the server, and shows what it \
+             would do — which way each save would move, and where both sides changed since \
+             the last sync. Nothing is transferred until you accept the plan.",
             "—",
         ),
         Row::action(
             "offline",
             "Take games offline",
             "Downloads chosen games from the server onto the card so they play with no \
-             network.",
+             network. Not wired up yet.",
             "—",
         ),
     ])
@@ -72,7 +72,7 @@ mod tests {
         // Opening the app must not propose a single change, whatever it finds.
         let paths = scratch("fresh");
         assert!(patches(&catalogue::all(&paths)).pending().is_empty());
-        assert!(sync(None, None).pending().is_empty());
+        assert!(sync(None, "not synced yet").pending().is_empty());
     }
 
     #[test]
@@ -125,6 +125,6 @@ mod tests {
     #[test]
     fn the_sync_tab_opens_on_something_you_can_press() {
         // Its first two rows are facts; the cursor has to have skipped them.
-        assert!(sync(None, None).selected().is_some_and(|r| r.selectable()));
+        assert!(sync(None, "not synced yet").selected().is_some_and(|r| r.selectable()));
     }
 }

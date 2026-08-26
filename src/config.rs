@@ -234,7 +234,13 @@ impl Default for SavesCfg {
 }
 
 fn default_saves_root() -> String {
-    "./Saves".to_owned()
+    // The device first, where it has an opinion — a handheld's save tree is
+    // somewhere the OS chose, not somewhere beside the app. `./Saves` is the
+    // portable-RetroArch answer and remains the fallback.
+    crate::platform::current()
+        .saves_root()
+        .unwrap_or("./Saves")
+        .to_owned()
 }
 
 #[derive(Debug, Default, Deserialize)]

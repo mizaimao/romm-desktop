@@ -16,6 +16,8 @@
 use anyhow::{Context, Result};
 use moose_patch::model::{App, Kind, Overlay, Tab};
 use moose_patch::patch::{Patch, Paths, State};
+use moose_patch::sync::Stage;
+use moose_patch::worker;
 use moose_patch::{catalogue, profile, rows, ui};
 use romm_sdl::gfx::Gfx;
 use romm_sdl::input;
@@ -277,15 +279,23 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     let swapped = buttons_swapped(&cfg);
     println!("confirm/cancel swapped: {swapped}");
 
+    let stage = Stage::default();
     let mut app = App {
         tab: Tab::Patches,
-        sync: rows::sync(server.as_deref(), None),
+        sync: rows::sync(server.as_deref(), &stage.note()),
+        stage,
         patches: rows::patches(patches),
         overlay: Overlay::None,
         should_quit: false,
     };
     let mut view = ui::Ui::default();
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
+    let mut job: Option<worker::Job> = None;
+
+    // Where the saves are and where our own files live. Both are wanted only
+    // when a sync starts, but reading them once keeps the loop free of it.
+    let ra_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
+    let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     while !app.should_quit {
         // A menu has nothing moving in it, so it waits for something to happen
@@ -310,8 +320,27 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
             // is always whether the app never saw it or saw it and ignored it,
             // and one line settles that without a second trip to the device.
             eprintln!("press {press:?}");
-            act(&mut app, &mut view, press, paths, patches);
+            if let Some(request) = act(&mut app, &mut view, press, paths, patches) {
+                match request {
+                    Request::Negotiate => {
+                        job = Some(worker::negotiate(&cfg, &ra_root, &app_dir));
+                    }
+                }
+            }
         }
+
+        // Anything the worker has said since the last frame.
+        if let Some(running) = &job {
+            let messages = running.drain();
+            if !messages.is_empty() {
+                worker::apply(&mut app.stage, messages);
+                if !app.stage.is_busy() {
+                    job = None;
+                }
+            }
+        }
+        let note = app.stage.note();
+        app.sync.set_fact("status", &note);
 
         gfx.resize(ui::PANEL.0 as f32, ui::PANEL.1 as f32);
         view.draw(&gfx, &mut painter, &app);
@@ -341,12 +370,26 @@ fn run_queue(app: &mut App, paths: &Paths, patches: &[Patch]) {
     }
 }
 
+/// Something only the outside world can do. Returned rather than performed,
+/// so every button press stays testable without a network or a window.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum Request {
+    /// Ask the server what a sync would do. Moves nothing.
+    Negotiate,
+}
+
 /// One press. Split out so the whole of the app's behaviour can be exercised
 /// without a window — see the tests at the foot of this file.
-fn act(app: &mut App, view: &mut ui::Ui, press: Press, paths: &Paths, patches: &[Patch]) {
+fn act(
+    app: &mut App,
+    view: &mut ui::Ui,
+    press: Press,
+    paths: &Paths,
+    patches: &[Patch],
+) -> Option<Request> {
     if press == Press::Quit {
         app.should_quit = true;
-        return;
+        return None;
     }
     match app.overlay {
         Overlay::Applying { .. } => {}
@@ -359,12 +402,18 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press, paths: &Paths, patches: &
 
         Overlay::ConfirmAction { .. } => match press {
             Press::Accept => {
-                // Push, pull, take offline. `romm_desktop::savesync` already
-                // has the conflict handling these need; wiring them up is the
-                // next piece of work, and until then this must not pretend.
                 let id = app.page().selected().map(|r| r.id.clone()).unwrap_or_default();
-                eprintln!("sync action '{id}' is not wired up yet");
                 app.overlay = Overlay::None;
+                if id == "check" {
+                    // Refusing while one is already in flight: two syncs would
+                    // race on the same files.
+                    if app.stage.is_busy() {
+                        return None;
+                    }
+                    app.stage = Stage::Asking { note: "starting".into() };
+                    return Some(Request::Negotiate);
+                }
+                eprintln!("sync action '{id}' is not wired up yet");
             }
             Press::Back => app.overlay = Overlay::None,
             _ => {}
@@ -434,6 +483,7 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press, paths: &Paths, patches: &
             Press::Quit => app.should_quit = true,
         },
     }
+    None
 }
 
 #[cfg(test)]
@@ -450,7 +500,8 @@ mod tests {
         let patches = catalogue::all(&paths);
         let app = App {
             tab: Tab::Patches,
-            sync: rows::sync(None, None),
+            sync: rows::sync(None, "not synced yet"),
+            stage: Stage::default(),
             patches: rows::patches(&patches),
             overlay: Overlay::None,
             should_quit: false,
@@ -458,8 +509,8 @@ mod tests {
         (app, ui::Ui::default(), paths, patches)
     }
 
-    fn press(f: &mut (App, ui::Ui, Paths, Vec<Patch>), p: Press) {
-        act(&mut f.0, &mut f.1, p, &f.2, &f.3);
+    fn press(f: &mut (App, ui::Ui, Paths, Vec<Patch>), p: Press) -> Option<Request> {
+        act(&mut f.0, &mut f.1, p, &f.2, &f.3)
     }
 
     #[test]
@@ -504,7 +555,7 @@ mod tests {
         assert_eq!(f.0.tab, Tab::Sync);
         press(&mut f, Press::Accept);
         match &f.0.overlay {
-            Overlay::ConfirmAction { title } => assert!(title.contains("Push")),
+            Overlay::ConfirmAction { title } => assert!(title.contains("would sync")),
             other => panic!("expected the action prompt, got {other:?}"),
         }
 
@@ -513,6 +564,40 @@ mod tests {
         assert_eq!(f.0.overlay, Overlay::None);
         assert_eq!(f.0.queue().len(), 1);
         assert!(!f.2.knulli_conf().exists());
+    }
+
+    #[test]
+    fn accepting_the_sync_row_asks_the_server_and_moves_nothing() {
+        // The two-stage rule: pressing A here produces a *request for a plan*.
+        // Nothing is transferred, and the patches queue is untouched.
+        let mut f = fixture("sync-start");
+        press(&mut f, Press::TabLeft);
+        assert_eq!(press(&mut f, Press::Accept), None, "the prompt comes first");
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
+        assert!(f.0.stage.is_busy());
+        assert!(!f.2.knulli_conf().exists());
+    }
+
+    #[test]
+    fn a_second_press_will_not_start_a_second_sync() {
+        // Two in flight would race on the same files, and the second would
+        // overwrite what the first had just written.
+        let mut f = fixture("sync-twice");
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), None, "still busy");
+    }
+
+    #[test]
+    fn cancelling_the_sync_prompt_asks_for_nothing() {
+        let mut f = fixture("sync-cancel");
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Back), None);
+        assert_eq!(f.0.overlay, Overlay::None);
+        assert!(!f.0.stage.is_busy());
     }
 
     #[test]

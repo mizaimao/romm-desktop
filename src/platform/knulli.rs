@@ -32,6 +32,13 @@ impl Platform for Knulli {
 
     /// One root, because there is exactly one RetroArch and it is part of the
     /// image: `/usr/bin/retroarch`, 15.7 MB, confirmed on device.
+    /// Batocera keeps the save tree on the persistent partition, not beside
+    /// any application. Measured, like everything else here: the last game
+    /// launch wrote `/userdata/saves/gba/…`.
+    fn saves_root(&self) -> Option<&'static str> {
+        Some("/userdata")
+    }
+
     /// `/userdata/saves/<system>/Game.srm`, and save states in there too.
     ///
     /// Read off the device: configgen sets both `savefile_directory` and
