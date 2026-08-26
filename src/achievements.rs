@@ -327,7 +327,11 @@ pub async fn verify(username: &str, token: &str) -> Verified {
         q(username),
         q(token)
     );
-    let Ok(client) = reqwest::Client::builder()
+    // Through `tls_roots` and after `install_tls`, like every other client in
+    // this project. This one is https and reaches a public server, so on
+    // Android it is exactly the request that aborts without them.
+    crate::util::install_tls();
+    let Ok(client) = crate::util::tls_roots(reqwest::Client::builder())
         .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
         .build()
     else {

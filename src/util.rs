@@ -67,9 +67,60 @@ pub fn install_tls() {
     });
 }
 
+/// Give a client builder the certificate roots it should trust.
+///
+/// A no-op everywhere except Android, where it is the difference between a
+/// working HTTPS request and an abort.
+///
+/// reqwest verifies certificates through `rustls-platform-verifier`, which asks
+/// the operating system. That is the right answer on macOS, Windows and Linux —
+/// it picks up anything the user or their employer has installed. On Android
+/// the trust store is only reachable through Java, so the verifier has to be
+/// handed a JNI environment before the first request; without one it does not
+/// fail the request, it panics the thread:
+///
+///     thread 'tokio-rt-worker' panicked at rustls-platform-verifier/src/android.rs:90
+///     Expect rustls-platform-verifier to be initialized
+///
+/// Tauri does not expose the Android context during setup, which is the whole
+/// of tauri-apps/tauri#13267, so there is nowhere to do that initialisation
+/// from. Android therefore carries Mozilla's root list in the binary instead.
+///
+/// What this costs: a certificate signed by something only the *device* trusts
+/// is rejected on Android and accepted elsewhere. That is a smaller loss than
+/// it sounds — since Android 7 an app ignores user-installed authorities anyway
+/// unless it ships a network security config — but it is a real difference, and
+/// a self-signed RomM server reached over https will not work on Android until
+/// this is revisited. Plain http is unaffected, and so is any server with a
+/// certificate from a public authority.
+pub fn tls_roots(b: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    #[cfg(not(target_os = "android"))]
+    {
+        b
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        let roots = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+        // `builder_with_provider` rather than `builder`: this crate selects
+        // rustls with no default provider, so the process-wide one installed by
+        // `install_tls` is the only one there is.
+        let cfg = rustls::ClientConfig::builder_with_provider(
+            rustls::crypto::ring::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .expect("ring supports the default protocol versions")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        b.use_preconfigured_tls(cfg)
+    }
+}
+
 pub fn http_client(timeout: Option<std::time::Duration>) -> anyhow::Result<reqwest::Client> {
     install_tls();
-    let mut b = reqwest::Client::builder()
+    let mut b = tls_roots(reqwest::Client::builder())
         .user_agent(concat!("romm-desktop/", env!("CARGO_PKG_VERSION")))
         // Bound *connecting* even when the request itself is unbounded.
         //
