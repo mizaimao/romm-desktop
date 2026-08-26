@@ -11,11 +11,14 @@
 #   ./scripts/flip-gpu-switch.sh install    put the two entries under Ports
 #   ./scripts/flip-gpu-switch.sh remove     take them off, restore stock
 #
-# Unlike the /tmp shim this is a *persistent* change to /usr/lib, which is a
-# writable overlay here. The stock driver is kept beside the new one and either
-# entry restores the other, but a driver that will not load means a black screen
-# fixable only over ssh. That is why the on-device script keeps a backup and
-# checks it before swapping.
+# `/` on this device is an overlay whose writable layer is a **256 MB tmpfs** —
+# so anything written to /usr/lib is gone at the next boot. A switch that only
+# copies the file therefore appears to work and quietly reverts. The choice is
+# recorded in /userdata (which is real storage) and re-applied at every boot by
+# a hook in /boot, which is the earliest thing that runs.
+#
+# The same fact is the safety net: a driver that will not load is undone by
+# pulling the power, because the swap never survived on its own.
 set -euo pipefail
 
 FLIP="${FLIP:-10.10.10.187}"
@@ -50,15 +53,15 @@ send() {
 
 # The script that does the work, written out here so it lives in the repo
 # rather than only on a device.
+# The script that does the work, written out here so it lives in the repo
+# rather than only on a device.
 switcher() {
 cat <<'SWITCH'
 #!/bin/sh
-# Switch the Mali userspace driver. Run from Ports; takes effect on reboot.
+# Choose the Mali userspace driver. Run from Ports.
 #
-# Only /usr/lib/libmali.so.1 is replaced. Everything that matters resolves
-# through it — libEGL.so.1, libGLESv2.so.2, libgbm.so.1 are all symlinks to
-# that one file — so one swap moves the whole stack together, which is the
-# thing that must not be done by halves.
+# This records the choice and applies it now; the boot hook re-applies it every
+# start, because the writable layer of / is a tmpfs and forgets.
 GPU=/userdata/system/gpu
 LIVE=/usr/lib/libmali.so.1
 say() { echo "$*"; echo "$*" > /dev/tty0 2>/dev/null; }
@@ -69,28 +72,49 @@ case "$1" in
   *) echo "usage: $0 wayland|stock" ; exit 1 ;;
 esac
 
-if [ ! -s "$WANT" ]; then
-  say "GPU: $NAME is not on this device — nothing changed."
-  sleep 4; exit 1
-fi
-
+[ -s "$WANT" ] || { say "GPU: $NAME is not on this device — nothing changed."; sleep 4; exit 1; }
 # Never proceed without a way back.
-if [ ! -s "$GPU/libmali-g13p0-stock.so" ]; then
-  say "GPU: no backup of the stock driver — refusing to switch."
-  sleep 4; exit 1
-fi
+[ -s "$GPU/libmali-g13p0-stock.so" ] || { say "GPU: no backup of the stock driver — refusing."; sleep 4; exit 1; }
 
+echo "$1" > "$GPU/selected"
+say "GPU: set to $NAME."
 if cmp -s "$WANT" "$LIVE"; then
-  say "GPU: already using $NAME. Nothing to do."
+  say "Already running it. Nothing else to do."
   sleep 3; exit 0
 fi
-
-say "GPU: switching to $NAME..."
-cp "$WANT" "$LIVE.new" || { say "GPU: copy failed, nothing changed."; sleep 4; exit 1; }
-mv "$LIVE.new" "$LIVE" || { say "GPU: swap failed, nothing changed."; sleep 4; exit 1; }
-say "GPU: now $NAME. Reboot for everything to pick it up."
+cp "$WANT" "$LIVE.new" && mv "$LIVE.new" "$LIVE" \
+  && say "Applied. Reboot so everything picks it up." \
+  || say "Could not swap the live file; it will be applied at the next boot."
 sleep 5
 SWITCH
+}
+
+# The boot hook. /boot is vfat and read-only at runtime, so it is remounted to
+# write this once.
+boothook() {
+cat <<'HOOK'
+#!/bin/bash
+# Re-apply the chosen Mali driver at every boot.
+#
+# The writable layer of / is a tmpfs, so /usr/lib is the stock image again on
+# every start. Whatever was chosen lives in /userdata, which is real storage.
+case "$1" in
+  start)
+    GPU=/userdata/system/gpu
+    [ -s "$GPU/selected" ] || exit 0
+    WANT="$GPU/libmali-$(cat $GPU/selected 2>/dev/null | tr -d '\r\n')"
+    case "$(cat $GPU/selected 2>/dev/null | tr -d '\r\n')" in
+      wayland) WANT=$GPU/libmali-g24p0-wayland.so ;;
+      stock)   WANT=$GPU/libmali-g13p0-stock.so ;;
+      *) exit 0 ;;
+    esac
+    [ -s "$WANT" ] || exit 0
+    cp "$WANT" /usr/lib/libmali.so.1.new 2>/dev/null && \
+      mv /usr/lib/libmali.so.1.new /usr/lib/libmali.so.1 2>/dev/null
+    ;;
+esac
+exit 0
+HOOK
 }
 
 case "${1:-}" in
@@ -104,6 +128,13 @@ case "${1:-}" in
     ssh_do "mkdir -p $GPU && [ -s $GPU/libmali-g13p0-stock.so ] || cp /usr/lib/libmali.so.1 $GPU/libmali-g13p0-stock.so; ls -la $GPU" >/dev/null
     say "sending the Wayland driver"
     send "$CACHE" "$GPU/libmali-g24p0-wayland.so"
+
+    say "installing the boot hook so the choice survives a reboot"
+    boothook > /tmp/boot-custom.sh
+    ssh_do "mount -o remount,rw /boot" >/dev/null 2>&1 || true
+    send /tmp/boot-custom.sh "/boot/boot-custom.sh"
+    rm -f /tmp/boot-custom.sh
+    ssh_do "chmod +x /boot/boot-custom.sh 2>/dev/null; ls -la /boot/boot-custom.sh; mount -o remount,ro /boot 2>/dev/null" >/dev/null
 
     say "installing the switcher and its two Ports entries"
     switcher > /tmp/gpu-switch.sh
@@ -119,10 +150,11 @@ case "${1:-}" in
   remove)
     say "restoring the stock driver and removing the entries"
     ssh_do "[ -s $GPU/libmali-g13p0-stock.so ] && cp $GPU/libmali-g13p0-stock.so /usr/lib/libmali.so.1 && echo 'stock driver restored'; \
-      rm -f '$PORTS/GPU driver - Wayland.sh' '$PORTS/GPU driver - stock.sh'; rm -rf $GPU; echo removed"
+      rm -f '$PORTS/GPU driver - Wayland.sh' '$PORTS/GPU driver - stock.sh'; rm -rf $GPU; \
+      mount -o remount,rw /boot 2>/dev/null; rm -f /boot/boot-custom.sh; mount -o remount,ro /boot 2>/dev/null; echo removed"
     ;;
   status)
-    ssh_do "if cmp -s $GPU/libmali-g24p0-wayland.so /usr/lib/libmali.so.1 2>/dev/null; then echo 'running: g24p0 (Wayland)'; else echo 'running: g13p0 (stock)'; fi; ls $PORTS 2>/dev/null | grep -c GPU"
+    ssh_do "if cmp -s $GPU/libmali-g24p0-wayland.so /usr/lib/libmali.so.1 2>/dev/null; then echo 'running now: g24p0 (Wayland)'; else echo 'running now: g13p0 (stock)'; fi; echo \"chosen for next boot: \$(cat $GPU/selected 2>/dev/null || echo '(none — stock)')\"; echo \"boot hook: \$([ -f /boot/boot-custom.sh ] && echo installed || echo missing)\""
     ;;
   *) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

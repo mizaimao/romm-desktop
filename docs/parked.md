@@ -401,3 +401,26 @@ Three things, and the first two are one thing:
 
 The order is deliberate and it is his: the interface has to be right on the
 device before any of this is worth building on top of.
+
+
+---
+
+## The SDL front end — archived, second time
+
+Parked 2026-08-26, in Frank's words: *"Yes archive SDL for the second time. I
+may revisit that later."* and *"I would really hate to maintain three versions
+of this app Desktop vs Android vs SDL."*
+
+Nothing is deleted. `src-sdl` stays in the workspace and in CI, and it works:
+7,883 games scanned from the card, the device's own pad, GLES on the Mali,
+46 MB resident against EmulationStation's 158 MB, and settings a test holds to
+the desktop's pane for pane. It is the best-fitting front end this device has
+had. What it is not is free to maintain, and three front ends for one app is the
+cost Frank does not want to keep paying.
+
+Still parked from before and unchanged: game launching, rapid fire, syncing.
+
+The direction that replaces it: leave EmulationStation as the front end on the
+handheld — it is maintained by other people and it is good — and ship the part
+KNULLI cannot do, which is talking to a RomM server. That is a tool, not a
+front end, and it has no interface to maintain on any device.

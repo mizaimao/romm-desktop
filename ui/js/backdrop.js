@@ -1016,6 +1016,18 @@ export function glassTint() {
 export function setGlassTint(color, { announce = true } = {}) {
   const value = /^#[0-9a-f]{6}$/i.test(color) ? color : SCHEMES[0].glass;
   document.documentElement.style.setProperty("--glass", value);
+  // The same colour as three numbers, for browsers with no `color-mix()`.
+  //
+  // Every tinted surface in the stylesheet is some percentage of this colour,
+  // written as a mix with `transparent`. An engine that does not know the
+  // function throws the whole declaration away — which is Chromium 109, which
+  // is what the Thor has baked into its system image and cannot update. The
+  // fallback rules say `rgb(var(--glass-rgb) / 40%)` instead, and that needs
+  // the components rather than the hex.
+  document.documentElement.style.setProperty(
+    "--glass-rgb",
+    `${parseInt(value.slice(1, 3), 16)} ${parseInt(value.slice(3, 5), 16)} ${parseInt(value.slice(5, 7), 16)}`
+  );
   if (announce) {
     localStorage.setItem(GLASS_KEY, value);
     window.__TAURI__?.event?.emit?.("glass-tint", value);

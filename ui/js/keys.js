@@ -160,7 +160,20 @@ function focusNode(node) {
     items().forEach((n) => n.classList.toggle("sel", n === node));
     if (node.dataset.slug) showPlatformInfo(node.dataset.slug);
   }
-  node.scrollIntoView({ block: "nearest" });
+  // Centred, not `nearest`.
+  //
+  // `nearest` scrolls by the smallest amount that brings the cursor into view,
+  // which means that once it reaches the bottom edge it stays welded there:
+  // every further press moves the list up by exactly one row and the cursor
+  // never leaves the last line. On a handheld that line is also the one under
+  // the gesture bar, so the thing you are pointing at is the thing you can
+  // least see.
+  //
+  // Centring keeps it in the middle of the list with context above and below,
+  // which is what you want when you are driving with a thumbstick rather than
+  // reading. The browser clamps at both ends, so the first and last few items
+  // sit where they can rather than forcing empty space.
+  node.scrollIntoView({ block: "center", inline: "nearest" });
 }
 
 /// Left/right stop at the ends of their row rather than spilling into the

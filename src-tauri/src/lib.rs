@@ -1546,9 +1546,24 @@ async fn rom_covers(
             .collect());
     }
     let mut out = Vec::with_capacity(rows.len());
-    for chunk in rows.chunks(CONCURRENCY) {
-        let mut set = tokio::task::JoinSet::new();
-        for row in chunk {
+    // A steady stream of `CONCURRENCY` requests, not lockstep batches.
+    //
+    // This walked `rows.chunks(8)` and waited for all eight before starting the
+    // next eight, so the cost was the sum of the slowest cover in each group
+    // rather than the time to fetch them all. One cover the server is slow
+    // about held seven finished ones and eight unstarted ones behind it. Over
+    // wifi on a handheld that is the difference between a grid that fills and
+    // one that arrives in visible steps — which is exactly what it looked like.
+    //
+    // A task is started the moment a slot frees, and each result is emitted as
+    // it lands, so the page keeps filling continuously.
+    let mut set = tokio::task::JoinSet::new();
+    let mut queue = rows.iter();
+    let mut pending = Vec::new();
+    loop {
+        // Fill every free slot.
+        while set.len() < CONCURRENCY {
+            let Some(row) = queue.next() else { break };
             let client = state.client.clone();
             let media_root = state.media_dir.clone();
             let (id, platform, fs_name) =
@@ -1565,23 +1580,22 @@ async fn rom_covers(
                 CoverView { id, cover: cover.map(|p| romm_desktop::util::webview_path(&p)) }
             });
         }
-        let mut batch = Vec::with_capacity(chunk.len());
-        while let Some(res) = set.join_next().await {
-            if let Ok(v) = res {
-                batch.push(v);
+        let Some(res) = set.join_next().await else { break };
+        if let Ok(v) = res {
+            pending.push(v);
+        }
+        // Handed over in small groups as they land, rather than one event per
+        // cover: eighty events would be eighty separate repaints of the same
+        // grid. Flushed whenever the queue drains too, so the last few are not
+        // left waiting for a group that will never fill.
+        if pending.len() >= 4 || set.is_empty() {
+            if pending.iter().any(|c| c.cover.is_some()) {
+                let _ = app.emit("covers-ready", &pending);
             }
+            out.append(&mut pending);
         }
-        // Hand each chunk over as it lands rather than holding the lot.
-        //
-        // A screen of collections wants four covers each, so a first visit
-        // asks for eighty and waited for the eightieth before drawing any of
-        // them — a second or two of two-letter placeholders on a page whose
-        // first eight covers were ready almost immediately.
-        if batch.iter().any(|c| c.cover.is_some()) {
-            let _ = app.emit("covers-ready", &batch);
-        }
-        out.extend(batch);
     }
+    out.append(&mut pending);
     // Keep what this batch learned, so scrolling back over the same cards — and
     // the next launch — costs nothing.
     for platform in rows.iter().map(|r| r.platform_slug.as_str()).collect::<std::collections::BTreeSet<_>>() {

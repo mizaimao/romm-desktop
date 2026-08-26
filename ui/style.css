@@ -287,6 +287,13 @@ header h1 {
   /* The glass tint. Vista let you choose this and it is half of what made the
      look yours rather than the operating system's; Appearance sets it. */
   --glass: #4d8fd6;
+  /* The same colour as components, kept in step by `setGlassTint`. Only the
+     no-color-mix fallback below reads it. */
+  --glass-rgb: 77 143 214;
+  --text-rgb: 230 232 236;
+}
+@media (prefers-color-scheme: light) {
+  :root { --text-rgb: 26 29 34; }
 }
 
 /* `hidden` has to actually hide.
@@ -2900,3 +2907,65 @@ body.uncontained .card {
   white-space: nowrap;
 }
 #tabbar::-webkit-scrollbar { height: 0; }
+
+/* ---------------------------------------------------------------------------
+   For engines with no color-mix(): everything tinted, drawn a longer way.
+
+   `color-mix()` arrived in Chromium 111. The AYN Thor ships Chromium 109 in
+   its system image and cannot update it — `com.google.android.webview` is not
+   installed and Android will not let the Chrome that *is* installed serve as
+   the engine. So on that device all 152 `color-mix()` declarations in this file
+   were being discarded, and the parts of the interface that are nothing but
+   tint simply did not draw. The clearest symptom was the cursor: `.card.sel` is
+   three of those declarations and nothing else, so the selection was set
+   correctly and painted nothing at all.
+
+   Only the rules that carry meaning are repeated here — the cursor, the
+   surfaces you have to be able to tell apart, the states. Decoration that
+   merely looks nice is left to fall away, which is what a fallback is for.
+
+   `rgb(var(--glass-rgb) / N%)` rather than a fixed colour, so the tint chosen
+   in Appearance still applies. Anything mixed with white instead of transparent
+   is approximated with a flat colour, because that cannot be expressed as
+   alpha.
+   --------------------------------------------------------------------------- */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  /* The cursor. Without this there is no cursor. */
+  .card.sel {
+    background: rgb(var(--glass-rgb) / 34%);
+    border-color: rgb(var(--glass-rgb) / 80%);
+    box-shadow: 0 0 22px rgb(var(--glass-rgb) / 65%);
+  }
+  .gcard.sel .art {
+    border-color: rgb(var(--glass-rgb) / 85%);
+    box-shadow: 0 0 24px rgb(var(--glass-rgb) / 70%);
+  }
+  .row.sel {
+    background: rgb(var(--glass-rgb) / 29%);
+    border-color: rgb(var(--glass-rgb) / 70%);
+    box-shadow: 0 0 16px rgb(var(--glass-rgb) / 45%);
+  }
+  .tcard.sel {
+    border-color: rgb(var(--glass-rgb) / 80%);
+    box-shadow: 0 0 18px rgb(var(--glass-rgb) / 55%);
+  }
+
+  /* Surfaces. Panels have to read as panels or the page is one flat sheet. */
+  .card,
+  .row,
+  .panel,
+  #detail,
+  #tabbar,
+  header {
+    background: rgb(var(--glass-rgb) / 10%);
+  }
+  .card { border-color: rgb(var(--glass-rgb) / 22%); }
+
+  /* Text that is deliberately quieter than the body. */
+  .meta,
+  .hint,
+  .sz,
+  .dim {
+    color: rgb(var(--text-rgb) / 62%);
+  }
+}
