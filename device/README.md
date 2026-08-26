@@ -56,21 +56,15 @@ files.
 
 Copied to `/userdata/decorations/romm/`, then selected with `gba.bezel=romm`.
 
-mugwomp93's Perfect GBA overlay, from
-[ourigen/perfect_overlays](https://github.com/ourigen/perfect_overlays) —
-drawn for 640×480 handhelds, which is exactly this screen, so nothing is
-stretched. "GAME BOY" in silver, "ADVANCE" in the rainbow gradient.
+KNULLI's own GBA bezel renders the wordmark in a washed-out khaki-olive
+gradient. This is the same artwork and the **same geometry** — the game keeps
+the full 640 width and the 84px apron at the bottom carries the label — with
+the wordmark recoloured to the console's metallic silver.
 
-It is a full-screen RetroArch overlay rather than a frame with a hole in it:
-every pixel carries some alpha, ~60–71 over the picture, which is the LCD
-grid. The `.info` says the game window is the full 640 wide and the top 426
-rows; the bottom 54 are the opaque label. That is 640×426 ≈ 3:2, which is
-GBA's native aspect, so it lands on whole pixels.
+It lives under `/userdata` because `/` is an overlay whose writable layer is a
+256 MB tmpfs: anything written to `/usr` is gone at the next boot.
 
-Batocera bezels are RetroArch overlays underneath, which is why this drops in.
-
-Because it draws its own grid, `gba.shaderset` is set to plain
-`sharp-shimmerless` — the `-lcd-crt` set would put a second grid on top.
+Choosing bezels per system, from a GUI, is parked — see `docs/parked.md`.
 
 ## `hotkey/`
 
@@ -91,3 +85,20 @@ ES's own L2/R2 navigation is turned off by copying
 `/usr/share/emulationstation/es_input.cfg` to
 `/userdata/system/configs/emulationstation/` with the Flip's `l2` and `r2`
 entries dropped. Every other pad it ships with comes across untouched.
+
+## `splash/custom.sh`
+
+Appended to `/userdata/system/custom.sh`, which `S99userservices` runs at every
+boot with `start`.
+
+This is the fix for the KNULLI logo that appeared on **every game launch and
+every exit**. It is not a setting anywhere, and it is not RetroArch or ES:
+`S03system-splash` writes `/usr/share/knulli/splash/boot-logo-640x480.png`
+directly into `/dev/fb0` during boot and never clears it. ES and the emulators
+draw through DRM planes on top of it, so it is invisible — until a plane is
+torn down, which happens at exactly those two moments, and the framebuffer
+underneath shows through.
+
+Dumping `/dev/fb0` while ES was on screen is what found it: 640×480×32, and it
+still held the scarab. Painting it black is the whole fix. The boot splash
+still plays during boot; it just no longer lingers.

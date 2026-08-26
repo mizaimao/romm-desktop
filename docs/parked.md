@@ -442,3 +442,35 @@ on Chromium 109 in its system image, gets the plainer version.
 What is parked is the plainer version's *appearance*. It repeats the shape of
 the real thing in flat alpha and is recognisably not the same. Wanted, not
 started.
+
+## Bezels, chosen per system, from a GUI
+
+Frank, 2026-08-26: "I am not sure I liked the bazels. So for now you change it
+back to the silver one... We later add an GUI app, to wire some scripts to
+enable or disable bazels and what types of bazels for what systems. Mark this
+or add to to do list when we do the GUI"
+
+Everything it needs already exists on the device and is only reachable by
+editing `knulli.conf` by hand. `global.bezel` and `<system>.bezel` take the
+name of a decoration pack; eleven packs ship under
+`/usr/share/knulli/datainit/decorations`, and user packs go in
+`/userdata/decorations`, which is the one that survives a reboot. `none`
+turns them off. So the GUI is a list of systems, a list of packs, and a
+writer for those two keys — no new device support needed.
+
+Two things learned while fitting one by hand, worth not rediscovering:
+
+A Batocera bezel is a RetroArch overlay underneath, so a RetroArch overlay
+drops straight in — that is how mugwomp93's Perfect GBA overlay from
+`github.com/ourigen/perfect_overlays` was installed. What differs is the
+`.info` file beside the PNG, which states where the game window sits inside
+the artwork.
+
+Artwork drawn for 16:9 is the wrong shape here. The stock `default` GBA bezel
+is 1920×1080 with a 1200×800 window; on this 640×480 screen that shrinks the
+picture to roughly 400×356. Artwork drawn for 640×480 handhelds lands on whole
+pixels and costs nothing.
+
+Parked with it: whether a bezel that draws its own LCD grid should force
+`<system>.shaderset` to the plain shader, since two grids stacked look dirty.
+Doing that by hand is one line; deciding it automatically is a design question.
