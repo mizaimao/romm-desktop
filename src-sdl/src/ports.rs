@@ -92,7 +92,7 @@ pub fn scan_group(all: &[System], group: &str) -> Vec<Port> {
         .filter(|s| s.group.as_deref() == Some(group) || s.name == group)
         .flat_map(scan_system)
         .collect();
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     out
 }
 

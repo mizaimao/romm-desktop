@@ -1768,9 +1768,7 @@ impl Frame<'_> {
     /// The pad reaches these through their bindings, so the button carries the
     /// action name rather than a closure — one string is the label, the hit
     /// and the behavior.
-
-    /// How wide a pill has to be to hold a word.
-
+    ///
     /// A console's own picture, in a box.
     /// Says whether there was one, so a caller can give the space to something
     /// else rather than reserving it for a picture that does not exist.
@@ -1859,6 +1857,11 @@ impl Frame<'_> {
 }
 
 /// One frame.
+///
+/// Fourteen arguments, and clippy is right that it is too many — but the fix is
+/// a struct holding every borrow the drawing needs, which is a refactor to make
+/// deliberately rather than on the way to a release.
+#[allow(clippy::too_many_arguments)]
 ///
 /// The page divides itself: a tab row, a header, and a body split into as many
 /// columns as the window can hold. Nothing below adds a gap to an offset.
@@ -2729,7 +2732,7 @@ fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
     let cell_w = (keys.w - size::GAP * (keyboard::COLS - 1) as f32) / keyboard::COLS as f32;
     let row_y = |row: usize| keys.y + row as f32 * (key_h + size::GAP);
 
-    for row in 0..keyboard::ROWS {
+    for (row, letters) in grid.iter().enumerate().take(keyboard::ROWS) {
         for col in 0..keyboard::COLS {
             let cell = Rect::new(
                 keys.x + col as f32 * (cell_w + size::GAP),
@@ -2743,7 +2746,7 @@ fn draw_keyboard(f: &mut Frame, kb: &keyboard::Keyboard, page: Rect) {
                 if on { paint::CURSOR } else { paint::CARD },
                 size::ROUND_SMALL,
             );
-            let ch: String = grid[row].chars().nth(col).into_iter().collect();
+            let ch: String = letters.chars().nth(col).into_iter().collect();
             let spec = f.spec(ch.as_str(), size::TITLE);
             f.label_centered(&spec, cell, if on { paint::TEXT } else { paint::DIM });
         }

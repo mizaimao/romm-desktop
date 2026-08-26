@@ -887,7 +887,7 @@ impl Library {
         // right order for a wall of cards you are browsing and the wrong one
         // for a list you are looking a known name up in — and yours is always
         // the second thing.
-        mine.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        mine.sort_by_key(|a| a.name.to_lowercase());
         self.mine_count = mine.len();
         self.shelves = mine
             .into_iter()
@@ -2064,12 +2064,12 @@ mod library_state {
             scripts: false,
         };
 
-        let only_groups = vec![group("ports"), group("tools"), group("emulators")];
+        let only_groups = [group("ports"), group("tools"), group("emulators")];
         assert!(
             !only_groups.iter().any(|c| !c.scripts),
             "the groups counted as a cached library"
         );
-        let with_a_console = vec![group("ports"), console];
+        let with_a_console = [group("ports"), console];
         assert!(with_a_console.iter().any(|c| !c.scripts));
     }
 }

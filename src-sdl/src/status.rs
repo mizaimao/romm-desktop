@@ -149,7 +149,7 @@ pub fn battery_pixels(percent: u8, charging: bool) -> Vec<u8> {
             // touches it — a fill that meets the outline reads as a solid
             // block rather than as a level.
             let fill_x0 = wall + 1;
-            if x >= fill_x0 && x < fill_x0 + filled && y >= wall + 1 && y < h - wall - 1 {
+            if x >= fill_x0 && x < fill_x0 + filled && y > wall && y < h - wall - 1 {
                 a = 1.0;
             }
             out.extend_from_slice(&[255, 255, 255, (a.clamp(0.0, 1.0) * 255.0) as u8]);
@@ -364,6 +364,7 @@ mod tests {
         let text = |p: &Part| match p {
             Part::Text(t) => t.clone(),
             Part::Wifi(n) => format!("wifi{n}"),
+            Part::Battery { percent, .. } => format!("battery{percent}"),
         };
         assert_eq!(
             s.parts().iter().map(text).collect::<Vec<_>>(),
