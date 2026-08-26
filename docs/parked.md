@@ -424,3 +424,21 @@ The direction that replaces it: leave EmulationStation as the front end on the
 handheld — it is maintained by other people and it is good — and ship the part
 KNULLI cannot do, which is talking to a RomM server. That is a tool, not a
 front end, and it has no interface to maintain on any device.
+
+## The cursor's look on old engines
+
+Frank, 2026-08-26: "The highlight works, but not what I like on my desktop.
+It's tolerable on a handheld so we branch based on the engine version. For
+newer engines we use the desktop approach and for old engine versions we use
+this approach. I will want to change this visual in the future."
+
+The branch exists and is by capability rather than version number: an
+`@supports not (color: color-mix(...))` block at the foot of `ui/style.css`,
+which only an engine without `color-mix()` ever reads. Chromium 111 and later
+— every desktop build, and any Android device with an updatable WebView — sees
+none of it and draws the cursor exactly as it always did. The AYN Thor, stuck
+on Chromium 109 in its system image, gets the plainer version.
+
+What is parked is the plainer version's *appearance*. It repeats the shape of
+the real thing in flat alpha and is recognisably not the same. Wanted, not
+started.

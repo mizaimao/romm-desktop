@@ -14,6 +14,10 @@
 // rebinding there changes the file, and this document has to be told.
 
 const invoke = (...args) => window.__TAURI__.core.invoke(...args);
+// Read here rather than imported: this file deliberately depends on nothing,
+// so that the settings window and the library window can both load it without
+// dragging the rest of the app in behind it.
+const MOBILE = /\bAndroid\b/.test(navigator.userAgent);
 const emit = (name) => window.__TAURI__?.event?.emit?.(name);
 
 /// The resolved tables, as `ui_bindings` returns them. Null until loaded.
@@ -42,7 +46,26 @@ const now = () => table ?? EMPTY;
 export async function loadBindings() {
   await adoptOldStorage();
   table = await invoke("ui_bindings");
+  androidDefaults();
   return table;
+}
+
+/// Start opens Settings on Android.
+///
+/// The shared default gives Start the help card, on the reasoning that Settings
+/// was a second window of text fields and tables a pad could not navigate — so
+/// the button opened something you then could not use. That is no longer true
+/// here: on Android Settings is a full page reached by navigation, driven by
+/// the same directions as everything else, and Back leaves it. With the top bar
+/// gone it is also the only way in.
+///
+/// A default, not an override: a button somebody has deliberately bound to
+/// something else is left alone, so this cannot undo a choice.
+function androidDefaults() {
+  if (!MOBILE || !table?.pad_map) return;
+  const START = 9;
+  const bound = table.pad_map[START];
+  if (!bound || bound === "help") table.pad_map[START] = "settings";
 }
 
 /// Hand over bindings a previous version left in this document's own storage.

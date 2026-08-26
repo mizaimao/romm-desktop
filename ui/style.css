@@ -2950,15 +2950,12 @@ body.uncontained .card {
     box-shadow: 0 0 18px rgb(var(--glass-rgb) / 55%);
   }
 
-  /* Surfaces. Panels have to read as panels or the page is one flat sheet. */
-  .card,
-  .row,
-  .panel,
-  #detail,
-  #tabbar,
-  header {
-    background: rgb(var(--glass-rgb) / 10%);
-  }
+  /* No blanket tint on the bars.
+     A 10% glass wash was applied to `header` and `#tabbar` here, and on a dark
+     theme that reads as a pale band across the top of the screen — the bars are
+     meant to be transparent with `backdrop-filter` doing the work, and
+     `backdrop-filter` has been supported since Chromium 76, so it was already
+     working. The only thing the wash added was the white tint. */
   .card { border-color: rgb(var(--glass-rgb) / 22%); }
 
   /* Text that is deliberately quieter than the body. */
@@ -2969,3 +2966,22 @@ body.uncontained .card {
     color: rgb(var(--text-rgb) / 62%);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Android: no top bar.
+
+   The header is a desktop object. It carries a drag region for a window that
+   cannot be dragged, a version string for a build you can read in Settings, and
+   a row of controls duplicated by the pad. On a 469-point screen it was costing
+   roughly a fifth of the height the console grid had to work with.
+
+   Everything in it is still reachable: Settings is on Start (see
+   `androidDefaults`), search is on its own binding, and layout, sort and zoom
+   are all bound actions. Removing the bar removes the buttons, not the
+   functions.
+   --------------------------------------------------------------------------- */
+body.mobile > header { display: none !important; }
+/* The bars sat under the status bar rather than below it. With the header gone
+   the tab row is the top of the app, so it takes the inset the header used to
+   absorb — otherwise the first tab sits behind the clock. */
+body.mobile #tabbar { padding-top: env(safe-area-inset-top, 24px); height: auto; min-height: 42px; }

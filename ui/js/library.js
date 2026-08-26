@@ -1,6 +1,6 @@
 // Platform grid, game grid/list, and lazy cover loading.
 
-import { el, state, trail, invoke, convertFileSrc, rememberedRom } from "./state.js";
+import { el, state, trail, invoke, convertFileSrc, rememberedRom, MOBILE } from "./state.js";
 import { fitted, boxSize } from "./fitpicture.js";
 import { resetNav, primeNav } from "./keys.js";
 import { currentOrder, defaultOrder, refreshSortButton, sorted } from "./sort.js";
@@ -77,7 +77,10 @@ export async function showPlatforms() {
     fitConsoleArt();
     return;
   }
-  await showRecent();
+  // Not on Android: it has a tab of its own there, and the library page is for
+  // consoles. The strip costs most of a screen on a 469-point display, which is
+  // the height that decides whether the console grid reads as a grid at all.
+  if (!MOBILE) await showRecent();
 
   restorePlatformCursor();
   fitConsoleArt();

@@ -1,6 +1,6 @@
 // Entry point: wire the header controls and load the first view.
 
-import { el, state, trail, invoke, listen } from "./state.js";
+import { el, state, trail, invoke, listen, MOBILE } from "./state.js";
 import { askDownload } from "./bulk.js";
 import { askConfigPatch } from "./conflicts.js";
 import { openSortMenu } from "./sort.js";
@@ -333,6 +333,9 @@ function statusCard(s) {
   installPageFilter();
   installDetailResizer();
   installColumnResizer();
+  // Android: no top bar, and the tab row becomes the top of the app. A class
+  // rather than inline styles so the stylesheet keeps every rule about it.
+  if (MOBILE) document.body.classList.add("mobile");
   installKeys();
   // Answers the Android Back button. Inert everywhere else.
   installAndroidBack();

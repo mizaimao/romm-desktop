@@ -9,8 +9,8 @@
 // this is the one piece of navigation you use constantly and it should not need
 // the cursor.
 
-import { el, state, trail } from "./state.js";
-import { showPlatforms, backToPlatforms } from "./library.js";
+import { el, state, trail, MOBILE } from "./state.js";
+import { showPlatforms, backToPlatforms, showAllRecent } from "./library.js";
 import { showCollectionGroups, showCollectionsIn } from "./collections.js";
 import { showHistory } from "./history.js";
 import { shellMode } from "./shell.js";
@@ -35,11 +35,25 @@ export const SECTIONS = [
     // group behind this, so the picker was a screen with a single card on it.
     open: () => showCollectionsIn("user", "My collections"),
   },
-  {
-    id: "history",
-    label: "History",
-    open: () => showHistory(),
-  },
+  // History on the desktop; Continue playing on Android.
+  //
+  // Same slot, because the thing you reach for on a handheld is the game you
+  // were in the middle of, and it was three levels down: a strip on the library
+  // page with a "More…" at the end of it. History — every session ever, with
+  // durations — is a thing you sit down and read, which is a desktop activity.
+  // The page behind Continue playing already existed as `showAllRecent`; only
+  // the way in is new.
+  MOBILE
+    ? {
+        id: "history",
+        label: "Continue playing",
+        open: () => showAllRecent(),
+      }
+    : {
+        id: "history",
+        label: "History",
+        open: () => showHistory(),
+      },
   {
     id: "browse",
     // "Browse" said nothing — every tab here browses something. These are the

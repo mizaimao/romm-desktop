@@ -101,3 +101,11 @@ export function rememberedRom(rows) {
   return rows.some((r) => r.id === want) ? want : null;
 }
 
+/// Whether this is the Android build.
+///
+/// A handheld is not a small desktop. It has no window to drag, no title bar to
+/// hide under, and a screen that has to spend every one of its 469 points on
+/// the library rather than on chrome. The differences that follow from that are
+/// gated on this rather than scattered as separate checks, so there is one
+/// answer to change when the next device arrives.
+export const MOBILE = /\bAndroid\b/.test(navigator.userAgent);
