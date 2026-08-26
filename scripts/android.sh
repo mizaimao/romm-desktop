@@ -342,5 +342,5 @@ case "${1:-}" in
   shell)     cmd_shell ;;
   env)       cmd_env ;;
   clean)     cmd_clean ;;
-  *) sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+  *) sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
 esac
