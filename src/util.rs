@@ -79,8 +79,10 @@ pub fn install_tls() {
 /// handed a JNI environment before the first request; without one it does not
 /// fail the request, it panics the thread:
 ///
-///     thread 'tokio-rt-worker' panicked at rustls-platform-verifier/src/android.rs:90
-///     Expect rustls-platform-verifier to be initialized
+/// ```text
+/// thread 'tokio-rt-worker' panicked at rustls-platform-verifier/src/android.rs:90
+/// Expect rustls-platform-verifier to be initialized
+/// ```
 ///
 /// Tauri does not expose the Android context during setup, which is the whole
 /// of tauri-apps/tauri#13267, so there is nowhere to do that initialisation
