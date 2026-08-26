@@ -215,8 +215,7 @@ cmd_install() {
     [ -f "$HERE/data/$f" ] && scp_to "$HERE/data/$f" "$REMOTE/data/$f"
   done
   scp_to "$HERE/scripts/romm-launch.sh" "$REMOTE/romm-launch.sh"
-  scp_to "$HERE/scripts/romm-hotkey.sh" "$REMOTE/romm-hotkey.sh"
-  ssh_do "chmod +x $REMOTE/romm-sdl $REMOTE/romm-launch.sh $REMOTE/romm-hotkey.sh"
+  ssh_do "chmod +x $REMOTE/romm-sdl $REMOTE/romm-launch.sh"
 
   # A Ports entry, so it starts the way everything else on the device does.
   ssh_do "cp $REMOTE/romm-launch.sh /userdata/roms/ports/RomM.sh && chmod +x /userdata/roms/ports/RomM.sh"
@@ -231,8 +230,8 @@ cmd_install() {
   ssh_do "test -f /userdata/system/configs/multimedia_keys.conf || \
           cp /etc/triggerhappy/triggers.d/multimedia_keys.conf \
              /userdata/system/configs/multimedia_keys.conf"
-  ssh_do "grep -q romm-hotkey /userdata/system/configs/multimedia_keys.conf || \
-          printf '\nBTN_TR2+BTN_TL2 1  %s/romm-hotkey.sh\nBTN_TL2+BTN_TR2 1  %s/romm-hotkey.sh\n' \
+  ssh_do "grep -q 'romm-launch.sh --hotkey' /userdata/system/configs/multimedia_keys.conf || \
+          printf '\nBTN_TR2+BTN_TL2 1  %s/romm-launch.sh --hotkey\nBTN_TL2+BTN_TR2 1  %s/romm-launch.sh --hotkey\n' \
             '$REMOTE' '$REMOTE' >> /userdata/system/configs/multimedia_keys.conf"
   ssh_do "/etc/init.d/S50triggerhappy restart" >/dev/null 2>&1 || true
 
