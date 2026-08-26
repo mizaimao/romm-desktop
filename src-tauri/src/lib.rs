@@ -401,6 +401,10 @@ struct ConfigFields {
     shaders_enabled: bool,
     confirm_delete_state: bool,
     mirror_player_one: bool,
+    /// Read the two face-button pairs the other way round. See
+    /// `binds::pad_map_swapped`.
+    swap_ab: bool,
+    swap_xy: bool,
     fit_window: bool,
     window_decorations: bool,
     autofire: String,
@@ -433,6 +437,8 @@ fn config_fields() -> CmdResult<ConfigFields> {
         shaders_enabled: cfg.shaders.enabled,
         confirm_delete_state: cfg.saves.confirm_delete_state,
         mirror_player_one: cfg.controllers.mirror_player_one,
+        swap_ab: cfg.controllers.swap_ab,
+        swap_xy: cfg.controllers.swap_xy,
         fit_window: cfg.retroarch.fit_window,
         window_decorations: cfg.retroarch.window_decorations,
         autofire: cfg.retroarch.autofire.clone(),
@@ -475,6 +481,8 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "shaders_enabled" => ("shaders", "enabled"),
         "confirm_delete_state" => ("saves", "confirm_delete_state"),
         "mirror_player_one" => ("controllers", "mirror_player_one"),
+        "swap_ab" => ("controllers", "swap_ab"),
+        "swap_xy" => ("controllers", "swap_xy"),
         "game_display" => ("retroarch", "game_display"),
         "fit_window" => ("retroarch", "fit_window"),
         "window_decorations" => ("retroarch", "window_decorations"),
@@ -3537,10 +3545,21 @@ struct BindingsView {
 }
 
 fn bindings_view(b: &binds::Bindings) -> BindingsView {
+    // The face-button swap, applied where the pad is *read*.
+    //
+    // `pad_map_swapped` has existed since the setting did and was called by
+    // nothing outside its own tests, so `[controllers] swap_ab` sat in
+    // config.toml doing precisely nothing. Applied here rather than by
+    // rebinding every action, which is the same fix done twenty times and
+    // leaves the pad looking rebound to anyone who opens the list.
+    //
+    // Read per call rather than held: it is a setting somebody changes and
+    // expects to take, and this is called again after every rebind anyway.
+    let cfg = Config::load().unwrap_or_default();
     BindingsView {
         actions: binds::ACTIONS,
         pad_buttons: binds::PAD_BUTTONS,
-        pad_map: b.pad_map(),
+        pad_map: b.pad_map_swapped(cfg.controllers.swap_ab, cfg.controllers.swap_xy),
         keys: binds::ACTIONS.iter().map(|a| (a.id.to_owned(), b.key_for(a.id))).collect(),
         pad_labels: binds::ACTIONS
             .iter()

@@ -29,6 +29,21 @@ export const html = () => `      <h4>Players</h4>
       <p class="hint">Binds players 2–4 like player 1, since RetroArch gives an unknown pad
       none. Turn off only for genuinely different models.</p>
 
+      <div class="srow">
+        <label>Swap A and B</label>
+        <div class="ctl"><button data-field="swap_ab">…</button></div>
+      </div>
+      <div class="srow">
+        <label>Swap X and Y</label>
+        <div class="ctl"><button data-field="swap_xy">…</button></div>
+      </div>
+      <p class="hint">For pads whose face buttons are lettered the other way
+        round — a Nintendo layout read by software expecting an Xbox one, where
+        Confirm and Back come out reversed. This changes how the app *reads* the
+        pad and is not written into RetroArch's config, so a game still plays
+        with the buttons the game expects. Turning it off puts the pad back
+        exactly as it was.</p>
+
       <h4>Bindings</h4>
       <p class="hint">Click a key or a button to rebind it. Esc leaves it
         unset.</p>

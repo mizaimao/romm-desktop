@@ -14,6 +14,8 @@ import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
@@ -304,23 +306,36 @@ class MainActivity : TauriActivity() {
         // and canvas pixels, which this pass does not touch, stay dark in the
         // same frame. So the old switch is set too, and what actually took is
         // logged rather than assumed.
+        // Through the support library, which is the only one this engine hears.
+        //
+        // The platform switches were both set and neither worked: the newer one
+        // reads back false as asked, the older one is a no-op at this target and
+        // still reads AUTO. This WebView is AOSP Chromium 109, baked into the
+        // ROM and not updatable, and it honours the old API — so the call has to
+        // go through androidx.webkit, which routes to whatever the installed
+        // WebView actually implements.
+        //
+        // What it stops: Chromium's auto-dark pass, which rewrites the colours
+        // of pages it judges to be light. It was rewriting this one. Painting
+        // the page #FF0000 came out #EA3D31 and #14161A came out #303238 —
+        // whites pulled down, blacks lifted, which is a contrast transform
+        // rather than anything drawn on top, and is why no background colour
+        // anywhere in the app ever changed it. Images and canvas are exempt
+        // from the pass, which is why the artwork looked right and the page
+        // around it did not.
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                wv.settings.isAlgorithmicDarkeningAllowed = false
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(wv.settings, false)
             }
         } catch (e: Exception) {
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                wv.settings.forceDark = android.webkit.WebSettings.FORCE_DARK_OFF
+            @Suppress("DEPRECATION")
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                WebSettingsCompat.setForceDark(wv.settings, WebSettingsCompat.FORCE_DARK_OFF)
             }
         } catch (e: Exception) {
         }
-        // What actually took, once, because the two switches disagree: the
-        // newer one reads back false as asked, and the older one still reads
-        // AUTO because it is a no-op for a target this recent. Neither stopped
-        // the wash, which is recorded here so the next person does not repeat
-        // the experiment.
     }
 
     /**
