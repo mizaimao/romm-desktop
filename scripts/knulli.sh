@@ -30,8 +30,10 @@ ZIG_VERSION="0.15.1"
 # like a bug in this project.
 ZIG_SHA256="c4bd624d901c1268f2deb9d8eb2d86a2f8b97bafa3f118025344242da2c54d7b"
 # The device: password auth, no keys. Overridable, because an address on a
-# home network is not a constant.
-FLIP="${FLIP:-10.10.10.187}"
+# home network is not a constant — and this one has already moved once, from
+# .187 to .186 across a reboot. The mDNS name is what the device answers to
+# whatever DHCP decides, so that is the default now.
+FLIP="${FLIP:-knulli.local}"
 FLIP_PASSWORD="${FLIP_PASSWORD:-linux}"
 # Where it lands on the device. Under /userdata because that is the persistent
 # partition and the only one that is not read-only.
@@ -213,10 +215,26 @@ cmd_install() {
     [ -f "$HERE/data/$f" ] && scp_to "$HERE/data/$f" "$REMOTE/data/$f"
   done
   scp_to "$HERE/scripts/romm-launch.sh" "$REMOTE/romm-launch.sh"
-  ssh_do "chmod +x $REMOTE/romm-sdl $REMOTE/romm-launch.sh"
+  scp_to "$HERE/scripts/romm-hotkey.sh" "$REMOTE/romm-hotkey.sh"
+  ssh_do "chmod +x $REMOTE/romm-sdl $REMOTE/romm-launch.sh $REMOTE/romm-hotkey.sh"
 
   # A Ports entry, so it starts the way everything else on the device does.
   ssh_do "cp $REMOTE/romm-launch.sh /userdata/roms/ports/RomM.sh && chmod +x /userdata/roms/ports/RomM.sh"
+
+  # L2+R2, through triggerhappy.
+  #
+  # S50triggerhappy prefers /userdata/system/configs/multimedia_keys.conf over
+  # anything in /etc — which is the point, because /etc is on the tmpfs overlay
+  # and would be back to stock at the next boot. Seed it from the shipped file
+  # so the volume, power and lid keys keep working, then append ours.
+  say "binding L2+R2"
+  ssh_do "test -f /userdata/system/configs/multimedia_keys.conf || \
+          cp /etc/triggerhappy/triggers.d/multimedia_keys.conf \
+             /userdata/system/configs/multimedia_keys.conf"
+  ssh_do "grep -q romm-hotkey /userdata/system/configs/multimedia_keys.conf || \
+          printf '\nBTN_TR2+BTN_TL2 1  %s/romm-hotkey.sh\nBTN_TL2+BTN_TR2 1  %s/romm-hotkey.sh\n' \
+            '$REMOTE' '$REMOTE' >> /userdata/system/configs/multimedia_keys.conf"
+  ssh_do "/etc/init.d/S50triggerhappy restart" >/dev/null 2>&1 || true
 
   # Leave the device showing something.
   #

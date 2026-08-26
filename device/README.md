@@ -71,15 +71,21 @@ Choosing bezels per system, from a GUI, is parked — see `docs/parked.md`.
 `multimedia_keys.append` is appended to a copy of KNULLI's own
 `multimedia_keys.conf`, saved as `/userdata/system/configs/multimedia_keys.conf`.
 `S50triggerhappy` prefers that path over anything in `/etc` — which matters,
-because `/etc` is on the tmpfs overlay and would be gone at the next boot.
+because `/etc` is on the tmpfs overlay and would be back to stock at the next
+boot. `scripts/knulli.sh install` does all of this.
 
-**L2+R2** runs `romm-launch.sh`. It has to be a two-button combo whose trigger
-is the *second* button: triggerhappy matches on the exact set of held buttons,
-so a rule on Menu alone would fire the instant Menu went down, before the
-second button of any Menu combo.
+**L2+R2** runs `scripts/romm-hotkey.sh`. It has to be a two-button combo whose
+trigger is the *second* button: triggerhappy matches on the exact set of held
+buttons, so a rule on Menu alone would fire the instant Menu went down, before
+the second button of any Menu combo was pressed.
 
-`romm-launch.sh` exits immediately if an emulator is running, because
-triggerhappy sits below RetroArch and L2/R2 are ordinary game buttons.
+The chain is `romm-hotkey.sh` → `romm-launch.sh` → `romm-sdl`. The hotkey
+script is the part that deals with not having been launched by
+EmulationStation: it bails out if a game is running, stops ES to get the
+display — ES holds DRM master and only drops it for emulators *it* starts —
+and restores ES from a trap, so a crash in the app cannot leave the device on
+a black screen. ES is restarted through its init script rather than by hand,
+because started by hand it comes up without `XDG_RUNTIME_DIR` and has no sound.
 
 ES's own L2/R2 navigation is turned off by copying
 `/usr/share/emulationstation/es_input.cfg` to
