@@ -166,7 +166,7 @@ cmd_toolchain() {
   local ndk_pkg ndk_major
   ndk_pkg="$(sdkmanager --list 2>/dev/null \
     | awk -F'|' '$1 ~ /^ *ndk;/ { gsub(/ /, "", $1); print $1 }' \
-    | sort -V -t';' -k2 | tail -1)"
+    | sort -V | tail -1)"
   [ -n "$ndk_pkg" ] || die "sdkmanager listed no ndk packages"
   ndk_major="${ndk_pkg#ndk;}"; ndk_major="${ndk_major%%.*}"
   if [ "$ndk_major" -lt "$NDK_MIN_MAJOR" ]; then
@@ -177,12 +177,6 @@ cmd_toolchain() {
   say "installing platform-tools, build-tools, a platform and the NDK (a few GB)"
   sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "$ndk_pkg"
 
-  # cargo-ndk into the kit, not ~/.cargo/bin.
-  if [ ! -x "$KIT/cargo/bin/cargo-ndk" ]; then
-    say "building cargo-ndk into the kit"
-    cargo install cargo-ndk --root "$KIT/cargo" --locked
-  fi
-
   # The Android standard library, in the kit's own rustup home. `rustup target
   # add` against the shared home would write to ~/.rustup, which is exactly
   # what this script exists to avoid.
@@ -190,6 +184,12 @@ cmd_toolchain() {
   channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$HERE/rust-toolchain.toml")"
   say "installing rust $channel with $TARGET into the kit"
   rustup toolchain install "$channel" --profile minimal --target "$TARGET" --no-self-update
+
+  # cargo-ndk into the kit, not ~/.cargo/bin.
+  if [ ! -x "$KIT/cargo/bin/cargo-ndk" ]; then
+    say "building cargo-ndk into the kit"
+    cargo install cargo-ndk --root "$KIT/cargo" --locked
+  fi
 
   say "toolchain ready in .toolchain/android — 'clean' removes it"
   cmd_doctor

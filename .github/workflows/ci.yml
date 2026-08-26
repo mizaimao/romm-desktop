@@ -45,7 +45,17 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
             libayatana-appindicator3-dev patchelf \
-            libsdl2-dev libsdl2-image-dev
+            libsdl2-dev libsdl2-image-dev \
+            fonts-noto-cjk fonts-dejavu-core
+
+      # Fonts are installed above, not mocked.
+      #
+      # The text tests ask the system for a face that can draw Japanese, and a
+      # bare Ubuntu runner has none — so they failed there and passed on macOS,
+      # which has CJK faces by default. Faking the answer would test the fake;
+      # the handheld genuinely has Noto CJK, and `fonts-noto-cjk` is the same
+      # `.ttc` holding JP, KR, SC and TC in one file, which is exactly the case
+      # those tests exist to cover.
 
       # SDL, for the handheld front end.
       #
