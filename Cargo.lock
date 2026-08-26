@@ -3773,7 +3773,7 @@ dependencies = [
 
 [[package]]
 name = "romm-desktop"
-version = "0.3.56"
+version = "0.3.60"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -3799,7 +3799,7 @@ dependencies = [
 
 [[package]]
 name = "romm-gui"
-version = "0.3.56"
+version = "0.3.60"
 dependencies = [
  "romm-desktop",
  "serde",
@@ -3812,7 +3812,7 @@ dependencies = [
 
 [[package]]
 name = "romm-sdl"
-version = "0.3.56"
+version = "0.3.60"
 dependencies = [
  "anyhow",
  "cosmic-text",
