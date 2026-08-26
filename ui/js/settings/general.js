@@ -28,6 +28,19 @@ export const html = `      <h4>RetroArch</h4>
 
       <h4>Saves</h4>
       <div class="srow">
+        <label>Folder</label>
+        <div class="ctl"><input class="cf-text" data-field="saves_root"
+          type="text" spellcheck="false" placeholder="./Saves" />
+          <button class="set-pick" data-pick="saves_root"
+                  title="Choose a folder">Browse…</button></div>
+      </div>
+      <p class="hint">Where RetroArch puts battery saves and save states —
+        <code>saves/</code> and <code>states/</code> are made inside it. This is
+        written into the config handed to RetroArch at launch, so it is the
+        folder the emulator actually uses rather than one this app merely reads.
+        Empty means <code>./Saves</code> beside the app.</p>
+
+      <div class="srow">
         <label>Sync now</label>
         <div class="ctl"><button class="set-savesync">Sync saves</button></div>
       </div>
@@ -157,6 +170,44 @@ export function wire(box) {
 
   // config.toml fields. Loaded once and written back on change, through a
   // targeted TOML edit so the hand-written comments in that file survive.
+  // Browse, for the saves folder. Same two mechanisms as the Library tab: a
+  // dialog that can be awaited on desktop, and on Android an activity whose
+  // answer arrives later at __folderPicked.
+  const saveField = async (field, value) => {
+    const input = box.querySelector(`[data-field="${field}"]`);
+    if (input) input.value = value;
+    try {
+      toast(await invoke("set_config_field", { field, value }));
+    } catch (e) {
+      toast(`Could not save — ${e}`, 8000);
+    }
+  };
+  window.__folderPicked = (field, path) => {
+    if (!path) return toast("That folder could not be read", 6000);
+    saveField(field, path);
+  };
+  for (const btn of box.querySelectorAll(".set-pick")) {
+    const field = btn.dataset.pick;
+    btn.addEventListener("click", async () => {
+      if (window.RommAndroid?.pickFolder) {
+        try {
+          window.RommAndroid.pickFolder(field);
+        } catch (e) {
+          toast(`Could not open the picker — ${e}`, 6000);
+        }
+        return;
+      }
+      try {
+        const dir = await invoke("plugin:dialog|open", {
+          options: { directory: true, multiple: false, title: "Choose a folder" },
+        });
+        if (dir) saveField(field, dir);
+      } catch (e) {
+        toast(String(e), 6000);
+      }
+    });
+  }
+
   // Android has no RetroArch *path*. It is a package: installed or not.
   //
   // The folder row asks a question that cannot be answered there — there is

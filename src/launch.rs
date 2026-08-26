@@ -51,6 +51,9 @@ pub struct Request<'a> {
     pub autofire: crate::tweaks::AutoFire,
     /// Write a save state when the game exits. Off unless asked for.
     pub save_state_on_exit: bool,
+    /// Where RetroArch keeps battery saves and save states, when the user has
+    /// said. `None` leaves RetroArch's own default alone.
+    pub saves_root: Option<&'a Path>,
     /// Shots a second, when it is on.
     pub autofire_hz: u32,
     /// Bind players 2-4 like player 1. On by default: the second pad on a desk
@@ -322,6 +325,7 @@ pub fn plan(ra: &RetroArch, map: &CoreMap, req: &Request<'_>) -> Result<Plan> {
                 autofire: req.autofire,
                 autofire_hz: req.autofire_hz,
                 save_state_on_exit: req.save_state_on_exit,
+                saves_root: req.saves_root,
             },
         )
         .ok();

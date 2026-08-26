@@ -335,6 +335,14 @@ main {
      row of labels and a row you aim at. */
   height: 42px;
   padding: 0 10px;
+  /* When the labels do not fit, slide rather than stack. Every item in this
+     row keeps its own line and the row keeps its height; what does not fit is
+     reached by scrolling, which a pad already does by moving between tabs.
+     `overflow-y: hidden` because a horizontal scroller with `auto` on both
+     axes reserves room for a vertical bar it will never use. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   /* Slightly less tint than the header, so the two read as separate sheets of
      glass rather than one thick bar. */
   /* The second sheet: less tint and a weaker highlight, so it reads as glass
@@ -354,8 +362,16 @@ main {
   font: inherit;
   padding: 0 14px;
   cursor: pointer;
-  /* The active marker is a bottom border, so nothing moves when it changes. */
-  border-bottom: 2px solid transparent;
+  /* Never break a label across two lines.
+     The row is a fixed 42px, so a wrapped label does not make it taller — it
+     spills out of it, and every other item in the row loses its baseline. On a
+     handheld at 832 CSS pixels that is not an edge case: "My collections",
+     "RomM browse", "Take offline" and "Platform info" all wrapped at once and
+     the row stopped reading as a row. Narrow is handled by scrolling below. */
+  white-space: nowrap;
+  /* A flex item's floor is its content, which would push the row wider than
+     the screen no matter what overflow says. */
+  min-width: 0;
 }
 #tabbar .stab:hover { opacity: 0.85; }
 #tabbar .stab.active {
@@ -2872,3 +2888,15 @@ body.uncontained .gcard,
 body.uncontained .card {
   content-visibility: visible;
 }
+
+/* The items `installTabs` moves into the tab row.
+   They are declared in the header and relocated, so they never picked up the
+   rule above. Same reasoning: the row has a fixed height and a wrapped label
+   spills out of it rather than growing it. */
+#tabbar #page-filter,
+#tabbar #grab-btn,
+#tabbar #sort-btn,
+#tabbar .stab span {
+  white-space: nowrap;
+}
+#tabbar::-webkit-scrollbar { height: 0; }

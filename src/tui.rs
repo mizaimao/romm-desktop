@@ -71,6 +71,8 @@ pub struct App {
     core_overrides: std::collections::BTreeMap<String, String>,
     core_per_game: std::collections::BTreeMap<String, String>,
     user_ra_cfg: PathBuf,
+    /// Where RetroArch is told to keep saves and states, from `[saves] root`.
+    saves_root: PathBuf,
     shaders_enabled: bool,
     achievements: crate::achievements::Settings,
     auto_sync: bool,
@@ -147,6 +149,9 @@ impl App {
                 .unwrap_or_default(),
             user_ra_cfg: crate::config::Config::load()
                 .map(|c| c.user_retroarch_config())
+                .unwrap_or_default(),
+            saves_root: crate::config::Config::load()
+                .map(|c| crate::util::expand_tilde(&c.saves.root))
                 .unwrap_or_default(),
             shaders_enabled: crate::config::Config::load()
                 .map(|c| c.shaders.enabled)
@@ -317,6 +322,7 @@ impl App {
             // No way to ask a terminal how big the display is; leave the
             // emulator's own window settings alone.
             screen: None,
+            saves_root: Some(&self.saves_root),
         };
         let plan = match crate::launch::plan(ra, &self.map, &req) {
             Ok(p) => p,

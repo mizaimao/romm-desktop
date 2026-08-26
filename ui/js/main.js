@@ -274,12 +274,31 @@ function statusCard(s) {
       // otherwise unanswerable, and the answer is rarely the directory the
       // user expected.
       toast(`No config.toml at ${s.config_path} — copy config.example.toml there`);
-    } else if (!s.retroarch) {
+    } else if (!s.retroarch && !window.RommAndroid?.retroArchPackage) {
       toast("RetroArch not found — set its location in Settings");
+    } else if (window.RommAndroid?.retroArchPackage && !androidRetroArch()) {
+      // Android has no location to set, so the desktop wording would send
+      // somebody to a setting that is not there. Either the app is installed
+      // or it is not.
+      toast("RetroArch is not installed — install it and it will be found");
     }
     statusCard(s);
   } catch (e) {
     el.status.textContent = "backend error";
+  }
+
+  /// Whether RetroArch is on this Android device.
+  ///
+  /// The backend cannot answer this. It looks for a folder, and on Android
+  /// RetroArch is a package — so `s.retroarch` is always false there and the
+  /// desktop warning fired on every launch, telling the user to set a location
+  /// that does not exist while RetroArch sat installed on the device.
+  function androidRetroArch() {
+    try {
+      return !!window.RommAndroid.retroArchPackage();
+    } catch {
+      return false;
+    }
   }
   // Off by default: it is a preference, and starting a GPU loop uninvited on
   // someone's machine is not a decision this app should make for them.

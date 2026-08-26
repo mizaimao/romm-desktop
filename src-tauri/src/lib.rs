@@ -384,6 +384,10 @@ struct ConfigFields {
     /// than a second copy hidden in its own private storage.
     esde_root: String,
     esde_roms: String,
+    /// Where RetroArch is told to put battery saves and save states. Written
+    /// into the per-launch config, so the folder chosen here is the folder the
+    /// emulator actually uses.
+    saves_root: String,
     server_url: String,
     server_username: String,
     /// Present or not, never the value. A settings pane has no reason to hand a
@@ -414,6 +418,7 @@ fn config_fields() -> CmdResult<ConfigFields> {
         library_root: cfg.library.local_root.clone(),
         esde_root: cfg.esde.root.clone().unwrap_or_default(),
         esde_roms: cfg.esde.roms.clone().unwrap_or_default(),
+        saves_root: cfg.saves.root.clone(),
         server_url: cfg.server.url.clone(),
         server_username: cfg.server.username.clone(),
         server_token_set: cfg.server.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
@@ -452,6 +457,7 @@ fn set_config_field(field: String, value: String) -> CmdResult<String> {
         "library_root" => ("library", "local_root"),
         "esde_root" => ("esde", "root"),
         "esde_roms" => ("esde", "roms"),
+        "saves_root" => ("saves", "root"),
         "server_url" => ("server", "url"),
         "server_token" => ("server", "token"),
         "server_username" => ("server", "username"),
@@ -1957,7 +1963,14 @@ async fn launch_rom(
     let motion = state.motion_shader.lock().map_err(err)?.clone();
     let lightgun = state.lightgun.lock().map_err(err)?.clone();
     let lib = state.roms_dir.parent().unwrap_or(Path::new("."));
+    // Read per launch rather than held on AppState: it is a path the settings
+    // window can change while the app is running, and a copy taken at startup
+    // would send saves to the old folder until a restart.
+    let saves_root = Config::load()
+        .map(|c| romm_desktop::util::expand_tilde(&c.saves.root))
+        .unwrap_or_default();
     let req = romm_desktop::launch::Request {
+        saves_root: Some(&saves_root),
         fit_window: state.fit_window,
         window_decorations: state.window_decorations,
         // Only where the metadata says shooter, and only on the platforms

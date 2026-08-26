@@ -219,8 +219,10 @@ async fn cmd_launch(
         .or_else(|| platform_from_path(rom))
         .with_context(|| format!("cannot infer platform from {}", rom.display()))?;
     let user_cfg = cfg.user_retroarch_config();
+    let saves_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
     let achievements = cfg.achievements.settings();
     let req = launch::Request {
+        saves_root: Some(&saves_root),
         // The same settings the window uses, so a dry run writes the same file
         // a real launch does.
         autofire: romm_desktop::tweaks::AutoFire::parse(&cfg.retroarch.autofire),

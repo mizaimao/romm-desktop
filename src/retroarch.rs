@@ -158,6 +158,12 @@ pub struct Input<'a> {
     pub autofire_hz: u32,
     /// Write a save state when the game exits.
     pub save_state_on_exit: bool,
+    /// Where RetroArch should keep battery saves and save states.
+    ///
+    /// `None` leaves RetroArch's own choice alone, which is what every launch
+    /// did before this existed — and what it does on a machine where the
+    /// setting has never been touched.
+    pub saves_root: Option<&'a Path>,
 }
 
 impl Default for Input<'_> {
@@ -168,6 +174,7 @@ impl Default for Input<'_> {
             autofire: crate::tweaks::AutoFire::Off,
             autofire_hz: 5,
             save_state_on_exit: false,
+            saves_root: None,
         }
     }
 }
@@ -578,7 +585,9 @@ input_player2_gun_start_mbtn = \"3\"
         extra: &str,
         input: Input<'_>,
     ) -> Result<PathBuf> {
-        let Input { pad, mirror_players, autofire, autofire_hz, save_state_on_exit } = input;
+        let Input {
+            pad, mirror_players, autofire, autofire_hz, save_state_on_exit, saves_root,
+        } = input;
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
         let mut body = Self::OVERRIDES.to_owned();
@@ -594,6 +603,32 @@ input_player2_gun_start_mbtn = \"3\"
             "\n# ---- Save state on exit ----\nsavestate_auto_save = \"{}\"\n",
             if save_state_on_exit { "true" } else { "false" }
         ));
+        // Where the game's saves land.
+        //
+        // Written into the same per-launch file as everything else, so it is
+        // one setting rather than a folder in this app's settings that the
+        // emulator has never heard of — which is what it would be otherwise.
+        // `sort_by_dir` off: this app addresses saves by core directory, and
+        // RetroArch's per-content subfolders would put them somewhere the save
+        // sync does not look.
+        if let Some(root) = saves_root {
+            let saves = root.join("saves");
+            let states = root.join("states");
+            // Created here because RetroArch does not create a directory it was
+            // told to use; it reports a write error at the moment a game is
+            // saved, which is the worst moment to find out.
+            let _ = std::fs::create_dir_all(&saves);
+            let _ = std::fs::create_dir_all(&states);
+            body.push_str(&format!(
+                "\n# ---- Saves ----\n\
+                 savefile_directory = \"{}\"\n\
+                 savestate_directory = \"{}\"\n\
+                 sort_savefiles_enable = \"false\"\n\
+                 sort_savestates_enable = \"false\"\n",
+                saves.display(),
+                states.display(),
+            ));
+        }
         body.push_str(extra);
 
         if let Some(user) = user_config {
@@ -1105,6 +1140,57 @@ pub fn render(cmd: &Command) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The saves folder chosen in settings has to reach RetroArch.
+    ///
+    /// It is a setting about where *the emulator* writes, so a folder this app
+    /// merely remembers is a folder that does nothing: RetroArch keeps using
+    /// its own, the saves land somewhere else, and the sync looks in the wrong
+    /// place. The only thing that makes it real is these two keys in the file
+    /// handed over at launch.
+    #[test]
+    fn the_chosen_saves_folder_is_written_into_the_launch_config() {
+        let dir = std::env::temp_dir().join("romm-ra-saves-test");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let saves = dir.join("MySaves");
+
+        let path = fake(&dir)
+            .write_overrides_full(
+                &dir,
+                None,
+                "",
+                Input { saves_root: Some(&saves), ..Input::default() },
+            )
+            .unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+
+        assert!(
+            body.contains(&format!("savefile_directory = \"{}\"", saves.join("saves").display())),
+            "battery saves must be pointed at the chosen folder:\n{body}"
+        );
+        assert!(
+            body.contains(&format!("savestate_directory = \"{}\"", saves.join("states").display())),
+            "and so must save states:\n{body}"
+        );
+        // RetroArch does not create these, and reports the failure at the
+        // moment somebody saves.
+        assert!(saves.join("saves").is_dir(), "the folders are made up front");
+        assert!(saves.join("states").is_dir());
+    }
+
+    /// Nothing chosen means nothing said, so RetroArch keeps its own default.
+    #[test]
+    fn no_saves_folder_leaves_retroarch_alone() {
+        let dir = std::env::temp_dir().join("romm-ra-saves-none");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = fake(&dir).write_overrides_with(&dir, None).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(!body.contains("savefile_directory"));
+        assert!(!body.contains("savestate_directory"));
+    }
+
     use super::*;
 
     /// A RetroArch whose files are all inside `root`.
