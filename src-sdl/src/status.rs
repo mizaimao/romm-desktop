@@ -377,17 +377,32 @@ mod tests {
         s.bars = Some(4);
         let parts = s.parts();
         assert_eq!(text(&parts[0]), "00:20");
-        assert_eq!(parts.len(), 3);
-        // Signal is a picture, not a word — see `Part::Wifi`.
+        // Four: the clock, the signal, the battery, and the battery's number.
+        // Both of the last two, because a cell a quarter full and one a third
+        // full are the same picture at this size.
+        assert_eq!(parts.len(), 4, "{parts:?}");
+        // Signal and charge are pictures, not words — see `Part::Wifi` and
+        // `Part::Battery`.
         assert_eq!(parts[1], Part::Wifi(4));
-        assert!(text(&parts[2]).contains("87%"));
-        assert!(
-            text(&parts[2]).starts_with('\u{26a1}'),
-            "charging is not marked"
+        assert_eq!(
+            parts[2],
+            Part::Battery {
+                percent: 87,
+                charging: true
+            }
         );
+        assert_eq!(text(&parts[3]), "87%");
 
+        // Charging is the icon's colour, not a bolt in the text.
         s.charging = false;
-        assert_eq!(text(&s.parts()[2]), "87%");
+        assert_eq!(
+            s.parts()[2],
+            Part::Battery {
+                percent: 87,
+                charging: false
+            }
+        );
+        assert_eq!(text(&s.parts()[3]), "87%");
     }
 
     /// Polling is on a timer. Sixty reads a second of four sysfs files, for a
