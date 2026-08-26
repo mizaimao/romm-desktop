@@ -113,6 +113,21 @@ android_env() {
   export TMPDIR="$KIT/tmp"
   export HOME="$KIT/home"
 
+  # HOME is not enough, because the JVM does not read it.
+  #
+  # On macOS Java takes `user.home` from the password database, not from the
+  # environment, so every variable above is invisible to it. Two things escaped
+  # through that hole and were found in Frank's home directory after a build:
+  #
+  #     ~/.android/analytics.settings                    (the Gradle plugin)
+  #     ~/Library/Application Support/kotlin/daemon/     (the Kotlin compiler)
+  #
+  # JAVA_TOOL_OPTIONS rather than GRADLE_OPTS: the build is not one JVM. Gradle
+  # launches a daemon, which launches a Kotlin compile daemon, and only this is
+  # picked up by all of them. It costs a "Picked up JAVA_TOOL_OPTIONS" line on
+  # stderr from each, which is the whole price.
+  export JAVA_TOOL_OPTIONS="-Duser.home=$KIT/home"
+
   local ndk
   ndk="$(ls -d "$KIT/sdk/ndk/"* 2>/dev/null | sort -V | tail -1 || true)"
   if [ -n "$ndk" ]; then
@@ -323,7 +338,7 @@ cmd_env() {
   android_env
   for v in JAVA_HOME ANDROID_HOME ANDROID_SDK_ROOT ANDROID_USER_HOME \
            ANDROID_EMULATOR_HOME ANDROID_AVD_HOME GRADLE_USER_HOME RUSTUP_HOME \
-           CARGO_HOME NDK_HOME ANDROID_NDK_ROOT TMPDIR HOME; do
+           CARGO_HOME NDK_HOME ANDROID_NDK_ROOT TMPDIR HOME JAVA_TOOL_OPTIONS; do
     [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"
   done
 }
@@ -344,9 +359,14 @@ cmd_doctor() {
   # The check that matters: did anything land outside the kit?
   say "checking nothing leaked onto the machine"
   local leaked=0
-  for d in "$REAL_HOME/.android" "$REAL_HOME/.gradle" "$REAL_HOME/Library/Android"; do
+  # The last two are where it actually got out before JAVA_TOOL_OPTIONS was
+  # set — the JVM ignores HOME on macOS and reads the password database. Dates
+  # are printed rather than judged: this script cannot know whether something
+  # here predates it, and guessing would be worse than saying when.
+  for d in "$REAL_HOME/.android" "$REAL_HOME/.gradle" "$REAL_HOME/Library/Android" \
+           "$REAL_HOME/Library/Application Support/kotlin"; do
     if [ -e "$d" ]; then
-      warn "$d exists — this script did not create it, but check its date"
+      warn "$d exists, last written $(date -r "$d" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown)"
       leaked=1
     fi
   done
