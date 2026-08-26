@@ -1,0 +1,4 @@
+# RomM: L2+R2 opens the sync app. Both orderings, because either shoulder
+# may go down first; the script debounces the second one.
+BTN_TR2+BTN_TL2 1            /userdata/system/romm/romm-launch.sh
+BTN_TL2+BTN_TR2 1            /userdata/system/romm/romm-launch.sh
