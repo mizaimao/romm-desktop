@@ -2,6 +2,8 @@ package net.zhenningzhang.romm_desktop
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -41,6 +43,10 @@ class MainActivity : TauriActivity() {
      * Settings could not be closed with Back.
      */
     private val webViews = mutableListOf<WebView>()
+
+    /** Launcher for the folder picker, and where to send the answer back. */
+    private lateinit var folderPicker: ActivityResultLauncher<Uri?>
+    private var folderPickerTarget: String? = null
 
     override fun onWebViewCreate(webView: WebView) {
         webViews.add(webView)
@@ -91,6 +97,27 @@ class MainActivity : TauriActivity() {
          *
          * Both ABIs are checked because a device may carry either.
          */
+        /**
+         * Open the system folder picker and hand the answer back to the page.
+         *
+         * Android has no directory dialog an app can call and await; it has an
+         * activity that returns a result later. So this returns nothing, and
+         * the answer arrives at `window.__folderPicked(target, path)` — the
+         * target being whichever field asked, so two pickers cannot be
+         * confused.
+         */
+        @JavascriptInterface
+        fun pickFolder(target: String) {
+            runOnUiThread {
+                folderPickerTarget = target
+                try {
+                    folderPicker.launch(null)
+                } catch (e: Exception) {
+                    folderPickerTarget = null
+                }
+            }
+        }
+
         @JavascriptInterface
         fun retroArchPackage(): String {
             for (pkg in arrayOf("com.retroarch.aarch64", "com.retroarch")) {
@@ -119,6 +146,21 @@ class MainActivity : TauriActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         askForFilesOnce()
+
+        // Registered here because a result launcher may only be created before
+        // the activity is STARTED. The page asks for a folder later, by name,
+        // and the name comes back with the answer so two pickers cannot be
+        // confused for each other.
+        folderPicker =
+            registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+                val target = folderPickerTarget ?: return@registerForActivityResult
+                folderPickerTarget = null
+                val path = uri?.let { treeUriToPath(it) } ?: ""
+                val js = "window.__folderPicked && window.__folderPicked(" +
+                    org.json.JSONObject.quote(target) + "," +
+                    org.json.JSONObject.quote(path) + ")"
+                topWebView()?.evaluateJavascript(js, null)
+            }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -205,6 +247,32 @@ class MainActivity : TauriActivity() {
                 // No settings screen to offer. The app works without it.
             }
         }
+    }
+
+    /**
+     * Turn what the folder picker hands back into a path the app can open.
+     *
+     * The picker answers with a tree URI — `content://com.android.externalstorage
+     * .documents/tree/primary%3AGames%2FROMs` — and every path in this app is a
+     * filesystem path. With All files access granted the two describe the same
+     * place, so the URI is unwrapped rather than carried around: `primary` is
+     * shared storage, and anything else is a card, mounted under /storage by
+     * its volume id.
+     *
+     * Returns empty when the shape is not recognised, and the page says it
+     * could not read that folder rather than storing a path that opens nothing.
+     */
+    private fun treeUriToPath(uri: Uri): String {
+        val id = android.provider.DocumentsContract.getTreeDocumentId(uri) ?: return ""
+        val parts = id.split(':', limit = 2)
+        val volume = parts.getOrNull(0) ?: return ""
+        val rest = parts.getOrNull(1).orEmpty()
+        val root = if (volume.equals("primary", true)) {
+            Environment.getExternalStorageDirectory().absolutePath
+        } else {
+            "/storage/$volume"
+        }
+        return if (rest.isEmpty()) root else "$root/$rest"
     }
 
     private companion object {

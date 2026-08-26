@@ -11,7 +11,9 @@ export const html = `      <h4>Library</h4>
       <div class="srow">
         <label>Folder</label>
         <div class="ctl"><input class="cf-text" data-field="library_root"
-          type="text" spellcheck="false" placeholder="./library" /></div>
+          type="text" spellcheck="false" placeholder="./library" />
+          <button class="set-pick" data-pick="library_root"
+                  title="Choose a folder">Browse…</button></div>
       </div>
       <p class="hint">Everything downloaded lives here — games, artwork, save
         backups. Deleting this folder reclaims all of it.</p>
@@ -30,7 +32,9 @@ export const html = `      <h4>Library</h4>
       <div class="srow">
         <label>ES-DE folder</label>
         <div class="ctl"><input class="cf-text" data-field="esde_root"
-          type="text" spellcheck="false" placeholder="(the library folder)" /></div>
+          type="text" spellcheck="false" placeholder="(the library folder)" />
+          <button class="set-pick" data-pick="esde_root"
+                  title="Choose a folder">Browse…</button></div>
       </div>
       <p class="hint">Where <code>gamelists/</code> and <code>downloaded_media/</code>
         live — the metadata and artwork for a whole collection. Empty means the
@@ -42,7 +46,9 @@ export const html = `      <h4>Library</h4>
       <div class="srow">
         <label>ES-DE ROMs folder</label>
         <div class="ctl"><input class="cf-text" data-field="esde_roms"
-          type="text" spellcheck="false" placeholder="(roms, inside the library folder)" /></div>
+          type="text" spellcheck="false" placeholder="(roms, inside the library folder)" />
+          <button class="set-pick" data-pick="esde_roms"
+                  title="Choose a folder">Browse…</button></div>
       </div>
       <p class="hint">Where the games themselves are — usually somewhere else
         entirely, which is why ES-DE keeps the two apart. Empty means
@@ -242,6 +248,58 @@ export function wire(box) {
     window.addEventListener("focus", paint);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) paint();
+    });
+  }
+
+  // Browse, for every path on this tab.
+  //
+  // Typing an absolute path is not a reasonable ask on a handheld, and it is
+  // not much of one on a desktop either — a library is wherever the user put
+  // it, which is exactly the thing they should not have to spell.
+  //
+  // Two mechanisms, because the platforms differ in kind. Desktop has a dialog
+  // that can be awaited. Android has no such thing: it starts an activity and
+  // the answer arrives later, so the bridge takes the name of the field that
+  // asked and calls back with it. `__folderPicked` is that callback.
+  const saveField = async (field, value) => {
+    const input = box.querySelector(`[data-field="${field}"]`);
+    if (input) input.value = value;
+    try {
+      toast(await invoke("set_config_field", { field, value }));
+    } catch (e) {
+      toast(`Could not save — ${e}`, 8000);
+    }
+  };
+
+  window.__folderPicked = (field, path) => {
+    if (!path) return toast("That folder could not be read", 6000);
+    saveField(field, path);
+  };
+
+  for (const btn of box.querySelectorAll(".set-pick")) {
+    const field = btn.dataset.pick;
+    btn.addEventListener("click", async () => {
+      // Android: fires and forgets; the answer comes back to __folderPicked.
+      if (window.RommAndroid?.pickFolder) {
+        try {
+          window.RommAndroid.pickFolder(field);
+        } catch (e) {
+          toast(`Could not open the picker — ${e}`, 6000);
+        }
+        return;
+      }
+      // Desktop: invoked directly rather than imported from
+      // @tauri-apps/plugin-dialog, because frontendDist is ui/ and
+      // node_modules is not in the bundle — the import would take the whole
+      // module graph, and the page, down with it.
+      try {
+        const dir = await invoke("plugin:dialog|open", {
+          options: { directory: true, multiple: false, title: "Choose a folder" },
+        });
+        if (dir) saveField(field, dir);
+      } catch (e) {
+        toast(String(e), 6000);
+      }
     });
   }
 
