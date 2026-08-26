@@ -165,6 +165,8 @@ layer.
 | flycast (x3) | 14 s, clean | 14 s, clean |
 | flycast standalone | GLES 3.2, Mali-G52 | GLES 3.2, Mali-G52 |
 
+Speed and rendered output are compared below.
+
 Every flycast run on both drivers passed its own `glBlitFramebuffer test
 successful` check, which is the emulator probing a GL capability and getting a
 working answer rather than merely failing to crash. The standalone build reports
@@ -180,10 +182,32 @@ Two things not to read into this:
   image` on a `.zip`. That is a ROM-format complaint, identical either side, and
   not a driver difference.
 
-**What a log cannot tell you:** whether the picture was *correct* and whether
-the framerate held. Every measurement here is from a terminal over SSH. A core
-can render garbage, or run at twelve frames a second, and log nothing unusual.
-Before the blob goes on permanently, somebody has to play something on it.
+### Speed, and the picture
+
+Both of those *can* be measured after all. RetroArch has `--max-frames=N`, which
+runs an exact number of frames and exits — so wall-clock is a fair comparison —
+and `--max-frames-ss`, which writes the last frame to a PNG. 900 frames, each
+core, each driver:
+
+| | stock `g13p0` | `g24p0-wayland-gbm` |
+|---|---|---|
+| flycast (Dreamcast) | 22,005 ms — ~40 fps | 22,125 ms — ~40 fps |
+| pcsx_rearmed | 16,593 ms — ~54 fps | 16,742 ms — ~53 fps |
+| snes9x | 16,279 ms — ~55 fps | 16,313 ms — ~55 fps |
+
+Within half a percent everywhere, which is noise. Flycast is the meaningful one:
+at 40 fps it is *not* hitting the vsync ceiling, so that number is the machine's
+real limit under load — and it is the same limit on both drivers.
+
+And the frames those runs wrote out are **byte-identical between the two
+drivers**, all three of them, by md5. Not similar: the same file. They are real
+pictures too, not black screens — the PSX capture is the Eurocom logo with its
+gradient intact, 4,513 distinct colours.
+
+So the newer blob renders the same pixels at the same speed. What no measurement
+here covers is *stutter* — a still frame and a frame count cannot show a hitch
+every few seconds — so playing something is still the last word before this goes
+on permanently.
 
 ## Trying it without installing it
 

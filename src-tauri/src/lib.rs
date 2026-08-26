@@ -236,11 +236,41 @@ struct RomDetail {
 /// the committed rows immediately afterwards.
 #[tauri::command]
 async fn sync_library(app: tauri::AppHandle, state: State<'_, AppState>, full: bool) -> CmdResult<String> {
-    let client = state
-        .client
-        .clone()
-        .ok_or("no server configured — set [server] in config.toml")?;
     let mut store = cache::Cache::open(Path::new(CACHE_DB)).map_err(err)?;
+
+    // Pass one: this machine.
+    //
+    // Before the server and regardless of it. A library that exists on disk is
+    // a library, and it used to be unreachable from here — this command began
+    // by demanding a server and gave up if there was not one, so an install
+    // with a full ES-DE folder and no RomM account showed an empty grid and
+    // said only "no server configured".
+    //
+    // Failure here is reported and stepped over rather than returned. A missing
+    // ROMs folder is the ordinary state of a fresh install, and it must not
+    // stop the server pass that would have filled it.
+    let _ = app.emit("sync-progress", "looking for games on this device…");
+    let cfg = Config::load().unwrap_or_default();
+    let layout = cfg.esde_layout();
+    let local = match romm_desktop::esde::scan(&layout, &state.map) {
+        Ok((games, _skipped)) => store.replace_from_esde(&games).unwrap_or(0),
+        Err(_) => 0,
+    };
+
+    // Pass two: the server, if there is one. Everything below is optional.
+    let Some(client) = state.client.clone() else {
+        // Nothing to fold — absorb only ever matches against server rows.
+        let total = store.rom_count().unwrap_or(0);
+        let _ = app.emit("sync-progress", "done");
+        return Ok(if total == 0 {
+            format!(
+                "No games found under {} and no server configured.",
+                layout.roms.display()
+            )
+        } else {
+            format!("{total} games found on this device. No server configured.")
+        });
+    };
 
     let _ = app.emit("sync-progress", "checking the server…");
     // Refresh the settings that govern hashing before anything downloads.
@@ -283,14 +313,25 @@ async fn sync_library(app: tauri::AppHandle, state: State<'_, AppState>, full: b
     let names = romm_desktop::arcade::names(Path::new("data/arcade-names.json"));
     let renamed = store.apply_arcade_names(&names).unwrap_or(0);
 
+    // Both passes are in now, so the games that are in both stop being two.
+    // Matched on platform and file name — see `absorb_local_into_server`.
+    let folded = store.absorb_local_into_server().unwrap_or(0);
+
     let total = store.rom_count().unwrap_or(0);
     let _ = app.emit("sync-progress", "done");
     Ok(format!(
-        "{} sync: {total} games across {platforms} platforms ({upserted} updated{}{}{})",
+        "{} sync: {total} games across {platforms} platforms ({upserted} updated{}{}{}{})",
         if incremental { "Incremental" } else { "Full" },
         if pruned > 0 { format!(", {pruned} removed") } else { String::new() },
         if collections > 0 { format!(", {collections} collections") } else { String::new() },
         if renamed > 0 { format!(", {renamed} arcade titles") } else { String::new() },
+        // Said out loud because it is the number that explains why a local
+        // scan of 900 games and a server of 900 games is not 1,800.
+        if local > 0 {
+            format!(", {local} found on this device of which {folded} matched the server")
+        } else {
+            String::new()
+        },
     ) + &if icons > 0 { format!(", {icons} console pictures") } else { String::new() })
 }
 
