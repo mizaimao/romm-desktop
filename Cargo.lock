@@ -2686,6 +2686,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "moose-patch"
+version = "0.3.60"
+dependencies = [
+ "anyhow",
+ "romm-desktop",
+ "romm-sdl",
+ "sdl2",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

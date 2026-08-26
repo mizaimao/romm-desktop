@@ -1,0 +1,33 @@
+[package]
+name = "moose-patch"
+version.workspace = true
+edition = "2024"
+
+# The addon. Not a front end — see docs/knulli-addon.md.
+#
+# It patches a stock KNULLI install and syncs with a RomM server, and it is
+# built on top of the archived front end rather than beside it: `romm-sdl` is
+# a library as well as a binary, and its drawing, text and pad handling are
+# already tuned for this exact screen. That work does not want doing twice.
+[lib]
+name = "moose_patch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "moose-patch"
+path = "src/main.rs"
+
+[features]
+default = []
+knulli = ["romm-desktop/knulli", "romm-sdl/knulli"]
+linux = ["romm-desktop/linux", "romm-sdl/linux"]
+
+[dependencies]
+romm-desktop = { path = ".." }
+romm-sdl = { path = "../src-sdl" }
+anyhow = "1.0.104"
+
+[dependencies.sdl2]
+version = "0.38"
+default-features = false
+features = ["use-pkgconfig", "image"]
