@@ -389,6 +389,19 @@ pub const RETROARCH_COMPONENTS: &[&str] = &[
 ];
 
 impl CoreMap {
+    /// Whether the table knows this platform at all.
+    ///
+    /// Distinct from "has nothing to run it with". An unmapped platform means
+    /// the ES-DE export never had a system claiming it, which is a gap in the
+    /// table; a mapped one with no libretro emulator means ES-DE really does
+    /// run it in a standalone app. They need different things said about them,
+    /// and [`Self::android_launches`] returns an empty list for both.
+    pub fn knows_platform(&self, platform: &str) -> bool {
+        self.systems
+            .values()
+            .any(|s| s.romm_platforms.iter().any(|p| p == platform))
+    }
+
     /// Everything that could run this platform on Android, best first.
     ///
     /// Mirrors how ES-DE decides: the system's own emulator list, in the order

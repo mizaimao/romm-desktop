@@ -4,6 +4,19 @@
 // button, so everything here translates into the indices
 // `binds::PAD_BUTTONS` names before asking anything. That vocabulary is the
 // contract: a rebind made in the desktop app means the same thing here.
+//
+// WHICH BUTTON IS A DEPENDS ON THE HANDHELD, NOT ON SDL.
+//
+// SDL names face buttons by where they sit on an Xbox pad, so `Button::A` is
+// always the bottom one — a position, not a label. On a Nintendo-layout
+// device the button *printed* A is on the right, which SDL calls `B`. The
+// Android handhelds here are Xbox layout (AYN Thor); the smaller Linux ones
+// are Nintendo (Miyoo Flip).
+//
+// Get it wrong and confirm and cancel swap, which does not look like a
+// swapped mapping — it looks like "A does nothing" and "B will not let me
+// leave". Read the device's own answer rather than guessing. See "Read this
+// before you touch a button mapping" in `docs/handover.md`.
 
 use romm_desktop::{binds, padpoll};
 use sdl2::controller::{Axis, Button, GameController};
@@ -273,6 +286,7 @@ impl Pads {
         Pads { held: None }
     }
 
+#[allow(dead_code)]
     /// Whether a pad was found and opened. Callers that read SDL's controller
     /// *events* rather than its state need to know, because a device SDL could
     /// not describe sends joystick events and no controller ones — and an app

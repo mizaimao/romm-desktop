@@ -2280,11 +2280,23 @@ fn android_launch_plan(state: State<'_, AppState>, id: i64) -> CmdResult<Android
     let mut found = state.map.android_launches(&row.platform_slug);
     found.retain(|l| l.libretro);
     if found.is_empty() {
-        return Err(format!(
-            "no libretro core is listed for {} — ES-DE runs it in a standalone \
-             emulator, which this app does not start yet",
-            row.platform_slug
-        ));
+        // Two different problems, and saying the wrong one sends whoever reads
+        // it to the wrong place. An unmapped platform is a gap in
+        // `esde-core-map.json`; a mapped one with no libretro emulator is ES-DE
+        // being right that nothing libretro runs it.
+        return Err(if state.map.knows_platform(&row.platform_slug) {
+            format!(
+                "ES-DE runs {} in a standalone emulator, and this app does not \
+                 start those yet — only RetroArch",
+                row.platform_slug
+            )
+        } else {
+            format!(
+                "the core map has no entry for {}, so nothing here knows what \
+                 would run it",
+                row.platform_slug
+            )
+        });
     }
     // The chosen core ahead of the platform default. A stable sort, so the
     // order `android_launches` decided survives within each group.
