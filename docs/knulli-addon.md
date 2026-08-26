@@ -56,3 +56,87 @@ Whether the addon owns `knulli.conf` blocks by rewriting between markers — the
 `## RomM: ...` / `## RomM: ... end` pairs already in there — or keeps its own
 file and merges. Markers are simpler and already work; a separate file is
 safer against a user editing inside the block.
+
+## Plan
+
+### Shape
+
+A new crate, `src-addon`, in the workspace beside the other two. It depends on:
+
+- `romm-sdl` **as a library** — `gfx`, `text`, `input`, `glass`, `backdrop`,
+  `status`, `keyboard` are a working SDL/GLES interface already tuned for this
+  exact screen: 640×480, the 1.5 scale, the pad read out of `es_input.cfg`,
+  text through cosmic-text with font fallback. That work is done and it would
+  be silly to redo it. The RomM-specific modules — `library`, `covers`,
+  `rescan`, `iconfetch` — stay behind.
+- `romm-desktop` — only for the RomM client, and only for the sync part.
+
+### One idea: a patch
+
+    trait Patch {
+        fn id(&self) -> &str;
+        fn title(&self) -> &str;
+        fn why(&self) -> &str;              // one line, shown in the list
+        fn state(&self) -> Result<State>;   // Off | On | Changed
+        fn apply(&self) -> Result<()>;
+        fn revert(&self) -> Result<()>;
+    }
+
+`Changed` is the one that earns its keep: KNULLI shipped a new image and the
+file underneath is not what we wrote. The addon should say so rather than
+silently overwrite or silently skip.
+
+Revert is not a nicety. Several patches this session turned out to be wrong,
+and taking them back off by hand meant remembering the stock value.
+
+### Two kinds of patch, and only two
+
+**A marked block in a config file.** `knulli.conf` takes almost everything —
+hotkeys, shader set, shader cycling directory, bezel choice. Apply rewrites
+between markers, revert deletes between them, state compares:
+
+    ## romm-addon: hotkeys
+    ...
+    ## romm-addon: hotkeys end
+
+One mechanism, and it is already proven — the blocks in `knulli.conf` right
+now have exactly this shape.
+
+**A file we place.** Bezel PNGs, shader presets, `es_input.cfg`,
+`multimedia_keys.conf`, `custom.sh`. These need a backup of whatever was there
+first, so revert can put it back. `es_input.cfg` and `multimedia_keys.conf` are
+both "copy the shipped one, change two things" — that pattern is worth having
+once rather than three times.
+
+### The profile
+
+`/userdata/system/romm-addon/profile.toml`: which patches are on, and their
+options. This is the answer to *"even on a newly installed KNULLI we can easily
+configure and recover all of those customized settings"* — a fresh device means
+copy the binary and the profile, run apply-all.
+
+Which means **the binary has to carry its own assets**. A bezel is a PNG and a
+shader preset is a text file; if they live beside the binary then recovery is a
+directory to remember rather than a file. Embedded, recovery is one file plus
+one profile.
+
+### Order
+
+1. The crate, the `Patch` trait, the marked-block mechanism, and two real
+   patches — hotkeys and shaders — with apply, revert and state.
+2. The file-placement mechanism, with backups, and the rest of the patches.
+3. Profile: save, load, apply-all. This is the part that has to work on a
+   device that has never seen the addon.
+4. The interface. Three screens: patches, sync, status.
+5. Sync.
+
+Steps 1–3 are usable from a shell before there is any interface at all, which
+is the order that gets it tested.
+
+### Undecided
+
+The name. `romm-addon` is wrong — it patches KNULLI and only one of its jobs is
+RomM.
+
+Which half of sync comes first: pushing saves up, pulling saves down, or taking
+games offline.

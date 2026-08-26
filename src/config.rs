@@ -780,17 +780,37 @@ impl Config {
         }
     }
 
-    /// The BIOS folder synced from the server, used as RetroArch's system
-    /// directory when it exists. Inside `library/` so one visible folder still
-    /// holds everything this app downloads.
+    /// The BIOS folder, used as RetroArch's system directory.
+    ///
+    /// `<roms>/0_BIOS`, which is where ES-DE keeps it — the leading zero sorts
+    /// it above the systems, and `esde::NOT_SYSTEMS` already knows to skip it
+    /// when scanning. Frank's card has 174 files in exactly that folder, so
+    /// writing to a `BIOS` beside it would have made a second, empty one.
+    ///
+    /// It moved out of `<library>/system`, which was chosen so that one visible
+    /// folder held everything this app downloaded. That property is worth less
+    /// than sharing a BIOS folder with the emulator that reads it: the files
+    /// are large, they are the same files, and two copies is the arrangement
+    /// this whole change exists to end.
     pub fn system_dir(&self) -> PathBuf {
-        PathBuf::from(&self.library.local_root).join("system")
+        self.esde_layout().roms.join("0_BIOS")
     }
 
-    /// Where downloaded ES-DE themes go. Inside the library folder so the
-    /// "delete one folder to reclaim everything" property holds.
+    /// ES-DE themes, read from where ES-DE downloads them.
+    ///
+    /// `<esde root>/themes`. ES-DE puts its themes there and this app draws
+    /// console pictures out of them, so a machine with ES-DE on it already has
+    /// everything needed and nothing has to be fetched twice. Defaults to
+    /// `<library>/themes` as before, because the ES-DE root defaults to the
+    /// library folder.
     pub fn themes_dir(&self) -> PathBuf {
-        PathBuf::from(&self.library.local_root).join("themes")
+        let root = self
+            .esde
+            .root
+            .as_deref()
+            .map(crate::util::expand_tilde)
+            .unwrap_or_else(|| PathBuf::from(&self.library.local_root));
+        root.join("themes")
     }
 }
 
@@ -1516,6 +1536,53 @@ mod bool_tests {
         assert_eq!(cfg.local_roms_dir(), PathBuf::from("./library/roms"));
         assert_eq!(cfg.media_dir(), PathBuf::from("./library/downloaded_media"));
     }
+
+    /// BIOS and themes live with ES-DE too.
+    ///
+    /// The BIOS folder is `0_BIOS` and not `BIOS`: that is ES-DE's name for it,
+    /// and it is the folder that already holds the files on a machine that has
+    /// them. Getting the name wrong makes a second empty folder beside a full
+    /// one, which looks exactly like the app not finding anything.
+    #[test]
+    fn bios_and_themes_follow_esde_as_well() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [library]
+            local_root = "./library"
+            [esde]
+            root = "/sd/ES-DE"
+            roms = "/sd/Roms"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.system_dir(), PathBuf::from("/sd/Roms/0_BIOS"));
+        assert_eq!(cfg.themes_dir(), PathBuf::from("/sd/ES-DE/themes"));
+    }
+
+    /// RetroArch's own files stay put, deliberately.
+    ///
+    /// Frank asked for these to stay in the library folder: they are this app's
+    /// working files for one emulator, not part of an ES-DE library, and moving
+    /// them into one would put this app's generated config among somebody
+    /// else's.
+    #[test]
+    fn the_retroarch_files_stay_in_the_library_folder() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [library]
+            local_root = "./library"
+            [esde]
+            root = "/sd/ES-DE"
+            roms = "/sd/Roms"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.user_retroarch_config(),
+            PathBuf::from("./library/retroarch-user.cfg")
+        );
+    }
+
 
     use super::*;
 

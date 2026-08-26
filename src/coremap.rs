@@ -12,6 +12,17 @@ pub struct CoreMap {
     /// RomM platform slug -> default core stem, e.g. `"snes" -> "snes9x"`.
     pub default_core_by_romm_platform: BTreeMap<String, String>,
     pub systems: BTreeMap<String, System>,
+    /// ES-DE's app id -> the Android `package/Activity` pairs that run it.
+    ///
+    /// `"AETHERSX2-TURNIP" -> ["xyz.aethersx2.custom/xyz.aethersx2.android.EmulationActivity"]`.
+    /// This is ES-DE's own table, taken from the same device export as the rest
+    /// of this file, and it is how a standalone emulator is started on Android:
+    /// there is no command line, only an Intent naming a component.
+    ///
+    /// More than one entry because a package can be forked — the list is in
+    /// preference order and the first one installed wins.
+    #[serde(default)]
+    pub android_packages: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,6 +45,36 @@ pub struct Emulator {
     /// Present only when `kind == "libretro"`.
     #[serde(default)]
     pub core: Option<String>,
+    /// The core stem Android uses, when it differs from the desktop one.
+    #[serde(default)]
+    pub core_android: Option<String>,
+    /// Per-platform file names for the core. Android's is the one that matters
+    /// here: `opera_libretro_android.so`, not `opera_libretro.so`.
+    #[serde(default)]
+    pub files: BTreeMap<String, String>,
+    /// ES-DE's app id for a standalone emulator, looked up in
+    /// [`CoreMap::android_packages`]. Present only when `kind == "standalone"`.
+    #[serde(default)]
+    pub app: Option<String>,
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// How to start something on Android: a component, and what to hand it.
+///
+/// Two shapes, because Android has two. A libretro core runs inside RetroArch,
+/// which takes the ROM, the full path to the core and a config file as Intent
+/// extras. A standalone emulator is its own app and takes the ROM as the
+/// Intent's data.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AndroidLaunch {
+    /// `package/Activity`, ready for an explicit Intent.
+    pub component: String,
+    /// The core's file name, for RetroArch. `None` for a standalone emulator.
+    pub core_file: Option<String>,
+    pub label: String,
+    /// True when this runs inside RetroArch rather than being its own app.
+    pub libretro: bool,
 }
 
 /// Pick the core for a platform: an explicit config override, else the ES-DE
@@ -335,5 +376,119 @@ mod tests {
     #[test]
     fn standalone_emulators_are_not_offered_as_cores() {
         assert_eq!(map().alternatives("snes"), vec!["snes9x", "bsnes"]);
+    }
+}
+
+/// RetroArch's own component, in preference order.
+///
+/// Two names because a device may carry either build, and `aarch64` is the one
+/// on every handheld worth the name.
+pub const RETROARCH_COMPONENTS: &[&str] = &[
+    "com.retroarch.aarch64/com.retroarch.browser.retroactivity.RetroActivityFuture",
+    "com.retroarch/com.retroarch.browser.retroactivity.RetroActivityFuture",
+];
+
+impl CoreMap {
+    /// Everything that could run this platform on Android, best first.
+    ///
+    /// Mirrors how ES-DE decides: the system's own emulator list, in the order
+    /// that file gives, with the one marked default first. Whether a component
+    /// is actually installed is not decided here — the caller knows that, and
+    /// this module deliberately does not reach for a package manager.
+    ///
+    /// A libretro entry becomes RetroArch plus a core file name; a standalone
+    /// entry becomes whatever `android_packages` says runs it. An emulator with
+    /// neither is skipped rather than guessed at.
+    pub fn android_launches(&self, platform: &str) -> Vec<AndroidLaunch> {
+        let Some(sys) = self
+            .systems
+            .values()
+            .find(|s| s.romm_platforms.iter().any(|p| p == platform))
+        else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        for e in &sys.emulators {
+            if e.kind == "libretro" {
+                // The Android file name if the table has one, otherwise built
+                // from the stem — Android's cores are suffixed `_android.so`
+                // and a desktop name will not resolve on the device.
+                let file = e.files.get("android").cloned().or_else(|| {
+                    let stem = e.core_android.as_deref().or(e.core.as_deref())?;
+                    Some(format!("{stem}_libretro_android.so"))
+                });
+                let Some(core_file) = file else { continue };
+                for component in RETROARCH_COMPONENTS {
+                    out.push(AndroidLaunch {
+                        component: (*component).to_owned(),
+                        core_file: Some(core_file.clone()),
+                        label: e.label.clone(),
+                        libretro: true,
+                    });
+                }
+            } else if let Some(app) = e.app.as_deref() {
+                for component in self.android_packages.get(app).into_iter().flatten() {
+                    out.push(AndroidLaunch {
+                        component: component.clone(),
+                        core_file: None,
+                        label: e.label.clone(),
+                        libretro: false,
+                    });
+                }
+            }
+        }
+        // The default emulator first, keeping the file's order within each group.
+        let default_label = sys.emulators.iter().find(|e| e.default).map(|e| e.label.clone());
+        out.sort_by_key(|l| Some(&l.label) != default_label.as_ref());
+        out
+    }
+}
+
+#[cfg(test)]
+mod android_tests {
+    use super::*;
+
+    fn map() -> CoreMap {
+        CoreMap::load_or_embedded(std::path::Path::new("data/esde-core-map.json"))
+    }
+
+    /// RetroArch is offered for a platform with a libretro core, and with the
+    /// Android core file rather than the desktop one.
+    ///
+    /// `opera_libretro.so` does not exist on a device — there it is
+    /// `opera_libretro_android.so`, and RetroArch has wanted the full path to
+    /// it rather than a bare name since the 2025-01-17 nightly.
+    #[test]
+    fn a_libretro_platform_offers_retroarch_with_an_android_core() {
+        let out = map().android_launches("3do");
+        assert!(!out.is_empty(), "3do should have somewhere to run");
+        let ra = out.iter().find(|l| l.libretro).expect("a libretro entry");
+        assert!(ra.component.starts_with("com.retroarch"), "{}", ra.component);
+        assert_eq!(ra.core_file.as_deref(), Some("opera_libretro_android.so"));
+    }
+
+    /// A standalone emulator becomes the component ES-DE uses for it, and
+    /// carries no core.
+    #[test]
+    fn a_standalone_emulator_becomes_its_own_component() {
+        let m = map();
+        let found = m
+            .systems
+            .values()
+            .flat_map(|s| s.romm_platforms.clone())
+            .flat_map(|p| m.android_launches(&p))
+            .find(|l| !l.libretro);
+        let Some(l) = found else {
+            panic!("the export lists standalone emulators; none resolved")
+        };
+        assert!(l.core_file.is_none(), "a standalone app runs no core");
+        assert!(l.component.contains('/'), "package/Activity expected: {}", l.component);
+    }
+
+    /// A platform nothing claims gets an empty list rather than a guess.
+    #[test]
+    fn an_unknown_platform_offers_nothing() {
+        assert!(map().android_launches("not-a-platform").is_empty());
     }
 }
