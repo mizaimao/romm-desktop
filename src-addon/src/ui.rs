@@ -96,6 +96,7 @@ impl Ui {
             Overlay::Detail => self.detail(gfx, painter, app),
             Overlay::ConfirmApply => self.confirm_apply(gfx, painter, app),
             Overlay::ConfirmDiscard => self.confirm_discard(gfx, painter, app),
+            Overlay::ConfirmAction { title } => self.confirm_action(gfx, painter, app, title),
             Overlay::Applying { done, total } => self.applying(gfx, painter, *done, *total),
         }
     }
@@ -216,12 +217,17 @@ impl Ui {
     fn help(&self, gfx: &Gfx, painter: &mut Painter, at: (f32, f32), app: &App) {
         let (y, w) = at;
         gfx.fill(self.rect(0.0, y, w, size::HELP), ink::BAR);
-        let keys = match app.overlay {
-            Overlay::None => "←→ change   A apply   B back   X details   L/R tabs",
-            Overlay::Detail => "B close",
-            Overlay::ConfirmApply => "A confirm   B cancel",
-            Overlay::ConfirmDiscard => "A discard   B stay",
-            Overlay::Applying { .. } => "working…",
+        // Tab-aware, because A means different things on the two tabs: on
+        // patches it applies everything queued, on sync it runs the one row
+        // the cursor is on.
+        let keys = match (&app.overlay, app.tab) {
+            (Overlay::None, Tab::Patches) => "←→ change   A apply   B back   X what it does",
+            (Overlay::None, Tab::Sync) => "A run this   B back   X what it does   L/R tabs",
+            (Overlay::Detail, _) => "B close",
+            (Overlay::ConfirmApply, _) => "A confirm   B cancel",
+            (Overlay::ConfirmDiscard, _) => "A discard   B stay",
+            (Overlay::ConfirmAction { .. }, _) => "A run it   B cancel",
+            (Overlay::Applying { .. }, _) => "working…",
         };
         painter.put(
             gfx,
@@ -322,6 +328,27 @@ impl Ui {
                 at.y + self.px(29.0),
                 at.w - self.px(20.0),
                 self.px(28.0),
+            ),
+            ink::DIM,
+        );
+    }
+
+    fn confirm_action(&self, gfx: &Gfx, painter: &mut Painter, app: &App, title: &str) {
+        let at = self.panel(gfx, title, painter, 4);
+        let detail = app
+            .page()
+            .selected()
+            .map(|r| r.detail.clone())
+            .unwrap_or_default();
+        let width_points = at.w / self.scale - 20.0;
+        painter.put(
+            gfx,
+            &self.spec(&detail, size::SMALL).wrapped(width_points, 4),
+            Rect::new(
+                at.x + self.px(10.0),
+                at.y + self.px(28.0),
+                at.w - self.px(20.0),
+                self.px(40.0),
             ),
             ink::DIM,
         );

@@ -92,6 +92,12 @@ impl Paths {
         self.at("etc/triggerhappy/triggers.d/multimedia_keys.conf")
     }
 
+    /// EmulationStation's own settings. Read, never written — the one thing
+    /// wanted from it is which way round the face buttons are.
+    pub fn es_settings(&self) -> PathBuf {
+        self.at("userdata/system/configs/emulationstation/es_settings.cfg")
+    }
+
     pub fn profile(&self) -> PathBuf {
         self.at("userdata/system/moose-patch/profile.toml")
     }

@@ -17,8 +17,6 @@ const SHADERS_LCD: &str = include_str!("../assets/shaders.conf");
 const SHADERS_PLAIN: &str = include_str!("../assets/shaders-plain.conf");
 const SHADERS_ZFAST: &str = include_str!("../assets/shaders-zfast.conf");
 const POWER: &str = include_str!("../assets/power.conf");
-const BEZEL_GBA: &str = include_str!("../assets/bezel-gba.conf");
-const BEZEL_KNULLI: &str = include_str!("../assets/bezel-knulli.conf");
 const WIFI_AWAKE: &str = include_str!("../assets/wifi-awake.sh");
 
 const SHADER_1: &[u8] = include_bytes!("../../device/retroarch-shaders/1-sharp-shimmerless.glslp");
@@ -72,6 +70,101 @@ fn on_off(name_on: &str, on: Vec<Step>, off: Vec<Step>) -> Vec<Choice> {
         Choice { name: "off".into(), steps: off },
         Choice { name: name_on.into(), steps: on },
     ]
+}
+
+/// One system's bezel. `ours` is whether we carry artwork for it — only GBA,
+/// so far, and only because the stock one is a washed-out khaki.
+fn bezel(paths: &Paths, slug: &'static str, name: &'static str, ours: bool) -> Patch {
+    let id: &'static str = Box::leak(format!("bezel-{slug}").into_boxed_str());
+    let title: &'static str = Box::leak(format!("{name} bezel").into_boxed_str());
+    let detail: &'static str = Box::leak(
+        format!(
+            "{slug}.bezel in knulli.conf. KNULLI's own artwork lives on the squashfs and \
+             does not survive an upgrade; ours goes in /userdata/decorations, which does. \
+             The game keeps the full width either way — the border only fills the strip \
+             this system's picture leaves empty on a 4:3 screen."
+        )
+        .into_boxed_str(),
+    );
+
+    let mut choices = vec![
+        Choice {
+            name: "off".into(),
+            steps: vec![
+                block(paths, &format!("bezel-{slug}"), None),
+                place(paths.decoration(&format!("{slug}-4_3.png")), None),
+                place(paths.decoration(&format!("{slug}-4_3.info")), None),
+            ],
+        },
+        Choice {
+            name: "KNULLI".into(),
+            steps: vec![
+                block(paths, &format!("bezel-{slug}"), Some(&format!("{slug}.bezel=default-knulli"))),
+                place(paths.decoration(&format!("{slug}-4_3.png")), None),
+                place(paths.decoration(&format!("{slug}-4_3.info")), None),
+            ],
+        },
+    ];
+    if ours {
+        choices.push(Choice {
+            name: "silver".into(),
+            steps: vec![
+                block(paths, &format!("bezel-{slug}"), Some(&format!("{slug}.bezel=moose"))),
+                place(paths.decoration(&format!("{slug}-4_3.png")), Some(BEZEL_PNG)),
+                place(paths.decoration(&format!("{slug}-4_3.info")), Some(BEZEL_INFO)),
+            ],
+        });
+    }
+    Patch { id, title, detail, choices }
+}
+
+/// One system's shader, over the global set.
+fn shader(paths: &Paths, slug: &'static str, name: &'static str) -> Patch {
+    let id: &'static str = Box::leak(format!("shader-{slug}").into_boxed_str());
+    let title: &'static str = Box::leak(format!("{name} shader").into_boxed_str());
+    let detail: &'static str = Box::leak(
+        format!(
+            "{slug}.shaderset in knulli.conf, which wins over the global one. Worth setting \
+             when a bezel already draws an LCD grid, because two grids stacked look dirty. \
+             Left at 'follow global' there is no {slug} line in the file at all."
+        )
+        .into_boxed_str(),
+    );
+    Patch {
+        id,
+        title,
+        detail,
+        choices: vec![
+            Choice {
+                name: "follow global".into(),
+                steps: vec![block(paths, &format!("shader-{slug}"), None)],
+            },
+            Choice {
+                name: "shimmerless plain".into(),
+                steps: vec![block(
+                    paths,
+                    &format!("shader-{slug}"),
+                    Some(&format!("{slug}.shaderset=sharp-shimmerless")),
+                )],
+            },
+            Choice {
+                name: "shimmerless + LCD".into(),
+                steps: vec![block(
+                    paths,
+                    &format!("shader-{slug}"),
+                    Some(&format!("{slug}.shaderset=sharp-shimmerless-lcd-crt")),
+                )],
+            },
+            Choice {
+                name: "none".into(),
+                steps: vec![block(
+                    paths,
+                    &format!("shader-{slug}"),
+                    Some(&format!("{slug}.shaderset=none")),
+                )],
+            },
+        ],
+    }
 }
 
 /// The patches tab, in the order it is drawn.
@@ -138,40 +231,25 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
                 },
             ],
         },
-        Patch {
-            id: "bezels",
-            title: "Bezels",
-            detail: "<system>.bezel in knulli.conf, with artwork in /userdata/decorations — \
-                     the shipped packs live on the squashfs and do not survive an upgrade. On \
-                     a 4:3 640x480 screen a bezel only earns its place on the handhelds, \
-                     whose picture is narrower than the screen anyway.",
-            choices: vec![
-                Choice {
-                    name: "off".into(),
-                    steps: vec![
-                        block(paths, "bezels", None),
-                        place(paths.decoration("gba-4_3.png"), None),
-                        place(paths.decoration("gba-4_3.info"), None),
-                    ],
-                },
-                Choice {
-                    name: "GBA only".into(),
-                    steps: vec![
-                        block(paths, "bezels", Some(BEZEL_GBA)),
-                        place(paths.decoration("gba-4_3.png"), Some(BEZEL_PNG)),
-                        place(paths.decoration("gba-4_3.info"), Some(BEZEL_INFO)),
-                    ],
-                },
-                Choice {
-                    name: "KNULLI default".into(),
-                    steps: vec![
-                        block(paths, "bezels", Some(BEZEL_KNULLI)),
-                        place(paths.decoration("gba-4_3.png"), None),
-                        place(paths.decoration("gba-4_3.info"), None),
-                    ],
-                },
-            ],
-        },
+        // Bezels, one system at a time.
+        //
+        // Only these three have 4:3 artwork, and that is not an oversight in
+        // KNULLI: a 4:3 console game already fills a 4:3 screen, so there is
+        // nowhere for a border to go that is not the picture. The handhelds
+        // are narrower than the screen and have real space going spare.
+        bezel(paths, "gba", "Game Boy Advance", true),
+        bezel(paths, "gb", "Game Boy", false),
+        bezel(paths, "gbc", "Game Boy Color", false),
+
+        // And the shader, per system, over the global one.
+        //
+        // Not `<system>.smooth` — knulli.conf says of it, in its own words,
+        // "Is overidden if using a shader set", so a bilinear-filter row would
+        // do nothing at all while any shader set is on.
+        shader(paths, "gba", "Game Boy Advance"),
+        shader(paths, "gb", "Game Boy"),
+        shader(paths, "gbc", "Game Boy Color"),
+
         Patch {
             id: "hotkey-app",
             title: "L2+R2 opens this app",
@@ -275,11 +353,12 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
                      g24p0 one does, and the emulators behave identically on both.",
             choices: vec![
                 Choice {
+                    // No marker file at all, rather than one saying "stock".
+                    // The hook does nothing without it, so this is what a
+                    // device that has never been touched looks like — and a
+                    // fresh install must not read as "changed".
                     name: "stock".into(),
-                    steps: vec![
-                        place(paths.gpu_choice(), Some(b"stock\n")),
-                        place(paths.boot_custom(), Some(BOOT_HOOK)),
-                    ],
+                    steps: vec![place(paths.gpu_choice(), None)],
                 },
                 Choice {
                     name: "wayland".into(),
@@ -306,20 +385,21 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_device_reads_as_off_everywhere_it_can() {
-        // Nothing applied, nothing on disk. Every patch with an "off" option
-        // should say so rather than "Changed" — otherwise a new install looks
-        // like a corrupted one.
+    fn a_fresh_device_reads_as_the_first_option_everywhere() {
+        // The convention every other part of this leans on: **option 0 is the
+        // one that touches nothing**. "off" for most, "follow global" for the
+        // per-system shaders, "stock" for the driver. A bare device must read
+        // as that, or a new install looks like a corrupted one and `--restore`
+        // has nothing sane to fall back to.
         let paths = scratch("fresh");
         for patch in all(&paths) {
-            if patch.choices.iter().any(|c| c.name == "off") {
-                assert_eq!(
-                    patch.state(),
-                    State::At(0),
-                    "{} should read as off on a bare device",
-                    patch.id
-                );
-            }
+            assert_eq!(
+                patch.state(),
+                State::At(0),
+                "{} should read as '{}' on a bare device",
+                patch.id,
+                patch.choices[0].name
+            );
         }
     }
 
@@ -346,27 +426,78 @@ mod tests {
     }
 
     #[test]
-    fn turning_everything_on_then_off_leaves_no_trace() {
+    fn turning_everything_on_then_back_leaves_no_trace() {
         // A full revert has to be a full revert. Anything left behind is
-        // something the next person has to find by hand.
+        // something the next person has to find by hand — and knulli.conf is
+        // read last-wins, so a stray block is a setting still in force.
         let paths = scratch("revert");
         let patches = all(&paths);
         for patch in &patches {
-            let last = patch.choices.len() - 1;
-            patch.apply(last).unwrap();
+            patch.apply(patch.choices.len() - 1).unwrap();
         }
         for patch in &patches {
-            if let Some(off) = patch.choices.iter().position(|c| c.name == "off") {
-                patch.apply(off).unwrap();
-                assert_eq!(patch.state(), State::At(off), "{} would not revert", patch.id);
-            }
+            patch.apply(0).unwrap();
+            assert_eq!(patch.state(), State::At(0), "{} would not go back", patch.id);
         }
-        // knulli.conf should be back to nothing of ours.
         let conf = std::fs::read_to_string(paths.knulli_conf()).unwrap_or_default();
         assert!(
             !conf.contains("## moose-patch:"),
             "knulli.conf still holds our blocks:\n{conf}"
         );
+        let startup = std::fs::read_to_string(paths.user_startup()).unwrap_or_default();
+        assert!(
+            !startup.contains("## moose-patch:"),
+            "custom.sh still holds our blocks:\n{startup}"
+        );
+    }
+
+    #[test]
+    fn no_two_patches_write_the_same_block() {
+        // Sharing a marker would mean one patch silently overwriting the
+        // other's settings, and both reporting the same state. Within a single
+        // patch the repeats are the point — that is how "off" undoes "on" —
+        // so the check is per (file, block) across *different* patches.
+        let paths = scratch("unique");
+        let mut ids = std::collections::BTreeSet::new();
+        let mut owner: std::collections::BTreeMap<(std::path::PathBuf, String), &str> =
+            Default::default();
+
+        for patch in all(&paths) {
+            assert!(ids.insert(patch.id.to_string()), "duplicate patch id {}", patch.id);
+            for choice in &patch.choices {
+                for step in &choice.steps {
+                    if let crate::patch::Step::Block { file, id, .. } = step {
+                        let key = (file.clone(), id.clone());
+                        match owner.get(&key) {
+                            Some(first) if *first != patch.id => panic!(
+                                "{} and {first} both write block '{id}' in {}",
+                                patch.id,
+                                file.display()
+                            ),
+                            _ => {
+                                owner.insert(key, patch.id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(owner.len() >= 12, "expected a block per config patch, saw {}", owner.len());
+    }
+
+    #[test]
+    fn only_the_systems_with_artwork_get_a_bezel_row() {
+        // gba, gb and gbc, and no others. A 4:3 console game already fills a
+        // 4:3 screen, so a border there costs picture and buys nothing —
+        // which is also why KNULLI ships no 4:3 artwork for them.
+        let paths = scratch("bezel-rows");
+        let rows: Vec<&str> = all(&paths)
+            .iter()
+            .map(|p| p.id)
+            .filter(|id| id.starts_with("bezel-"))
+            .map(|id| Box::leak(id.to_string().into_boxed_str()) as &str)
+            .collect();
+        assert_eq!(rows, vec!["bezel-gba", "bezel-gb", "bezel-gbc"]);
     }
 
     #[test]

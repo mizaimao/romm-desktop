@@ -272,6 +272,9 @@ pub enum Overlay {
     /// B is pressed with a queue outstanding. Leaving would throw it away, so
     /// it asks instead of silently discarding work.
     ConfirmDiscard,
+    /// A on a sync row. Those are actions, not dials — there is nothing to
+    /// queue, so they ask once and then run.
+    ConfirmAction { title: String },
     /// X on a row.
     Detail,
     /// The scripts are running, one after another.

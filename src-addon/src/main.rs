@@ -61,10 +61,11 @@ fn from_key(key: Keycode) -> Option<Press> {
 /// Only consulted when no controller opened. The numbering is the one
 /// `es_input.cfg` gives this family of handhelds — 0 is the button printed A,
 /// 1 the one printed B — which is also what RetroArch is configured with.
-fn from_joy_button(index: u8) -> Option<Press> {
+fn from_joy_button(index: u8, inverted: bool) -> Option<Press> {
+    let (accept, back) = if inverted { (1, 0) } else { (0, 1) };
     Some(match index {
-        0 => Press::Accept,
-        1 => Press::Back,
+        i if i == accept => Press::Accept,
+        i if i == back => Press::Back,
         2 | 3 => Press::Detail,
         4 => Press::TabLeft,
         5 => Press::TabRight,
@@ -83,16 +84,40 @@ fn from_hat(state: sdl2::joystick::HatState) -> Option<Press> {
     })
 }
 
-/// SDL names its buttons after the Xbox layout, so `Button::A` is the bottom
-/// one — which is what this device calls A too.
-fn from_button(button: Button) -> Option<Press> {
+/// Whether this handheld's face buttons are the other way round.
+///
+/// SDL names buttons after where they sit on an Xbox pad, so `Button::A` is the
+/// *bottom* one. This device is laid out like a Nintendo pad, where the button
+/// printed **A** is on the right — so SDL calls it `B`. EmulationStation knows
+/// this and carries `InvertButtons` for it; reading the same setting means the
+/// app confirms with the same button the rest of the device confirms with,
+/// rather than with whichever one SDL happens to have named first.
+///
+/// This was not a guess. The press log showed four presses arriving as `Back`
+/// where apply was meant, and one earlier session where `Back` then `Accept`
+/// opened the discard prompt and took it.
+fn buttons_inverted(paths: &Paths) -> bool {
+    std::fs::read_to_string(paths.es_settings())
+        .unwrap_or_default()
+        .lines()
+        .find(|line| line.contains("name=\"InvertButtons\""))
+        .map(|line| line.contains("value=\"true\""))
+        .unwrap_or(false)
+}
+
+fn from_button(button: Button, inverted: bool) -> Option<Press> {
+    let (accept, back) = if inverted {
+        (Button::B, Button::A)
+    } else {
+        (Button::A, Button::B)
+    };
     Some(match button {
         Button::DPadUp => Press::Up,
         Button::DPadDown => Press::Down,
         Button::DPadLeft => Press::Left,
         Button::DPadRight => Press::Right,
-        Button::A => Press::Accept,
-        Button::B => Press::Back,
+        b if b == accept => Press::Accept,
+        b if b == back => Press::Back,
         Button::X | Button::Y => Press::Detail,
         Button::LeftShoulder => Press::TabLeft,
         Button::RightShoulder => Press::TabRight,
@@ -228,6 +253,10 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     // The pad, through the same code the front end used — the GUID on this
     // family of handhelds is shared by four different devices, so the mapping
     // has to come from the OS's own es_input.cfg rather than SDL's database.
+    // Which button confirms. See `buttons_inverted`.
+    let inverted = buttons_inverted(paths);
+    println!("face buttons inverted: {inverted}");
+
     let controllers = sdl.game_controller().map_err(anyhow::Error::msg)?;
     let joysticks = sdl.joystick().map_err(anyhow::Error::msg)?;
     let pads = input::Pads::open_first(&controllers, &joysticks);
@@ -268,9 +297,9 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
             let press = match event {
                 Event::Quit { .. } => Some(Press::Quit),
                 Event::KeyDown { keycode: Some(key), repeat: false, .. } => from_key(key),
-                Event::ControllerButtonDown { button, .. } => from_button(button),
+                Event::ControllerButtonDown { button, .. } => from_button(button, inverted),
                 Event::JoyButtonDown { button_idx, .. } if raw_pad => {
-                    from_joy_button(button_idx)
+                    from_joy_button(button_idx, inverted)
                 }
                 Event::JoyHatMotion { state, .. } if raw_pad => from_hat(state),
                 _ => None,
@@ -327,6 +356,19 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press, paths: &Paths, patches: &
             }
         }
 
+        Overlay::ConfirmAction { .. } => match press {
+            Press::Accept => {
+                // Push, pull, take offline. `romm_desktop::savesync` already
+                // has the conflict handling these need; wiring them up is the
+                // next piece of work, and until then this must not pretend.
+                let id = app.page().selected().map(|r| r.id.clone()).unwrap_or_default();
+                eprintln!("sync action '{id}' is not wired up yet");
+                app.overlay = Overlay::None;
+            }
+            Press::Back => app.overlay = Overlay::None,
+            _ => {}
+        },
+
         Overlay::ConfirmApply => match press {
             Press::Accept => {
                 run_queue(app, paths, patches);
@@ -365,16 +407,20 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press, paths: &Paths, patches: &
                 }
             }
             Press::Accept => {
-                if !app.queue().is_empty() {
+                // A means "do what this tab is for". On sync that is the one
+                // row under the cursor — those are actions, with nothing to
+                // reconcile, so they ask once and go. On patches it is
+                // everything queued.
+                let action = match app.page().selected() {
+                    Some(row) if matches!(row.kind, Kind::Action { .. }) => {
+                        Some(row.title.clone())
+                    }
+                    _ => None,
+                };
+                if let Some(title) = action {
+                    app.overlay = Overlay::ConfirmAction { title };
+                } else if !app.queue().is_empty() {
                     app.overlay = Overlay::ConfirmApply;
-                } else if matches!(
-                    app.page().selected().map(|r| &r.kind),
-                    Some(Kind::Action { .. })
-                ) {
-                    // Push, pull, take offline. Nothing to reconcile against,
-                    // so these run on their own rather than joining the queue.
-                    // The core already has the conflict handling they need —
-                    // `romm_desktop::savesync` — and wiring them up is next.
                 }
             }
             Press::Back => {
@@ -413,6 +459,68 @@ mod tests {
 
     fn press(f: &mut (App, ui::Ui, Paths, Vec<Patch>), p: Press) {
         act(&mut f.0, &mut f.1, p, &f.2, &f.3);
+    }
+
+    #[test]
+    fn the_button_printed_a_is_the_one_that_confirms() {
+        // SDL names buttons by Xbox position, so its `A` is the bottom one.
+        // This handheld is laid out like a Nintendo pad and the button printed
+        // A is on the right, which SDL calls `B`. EmulationStation inverts for
+        // exactly this reason, and so must we — the press log showed four
+        // presses arriving as Back where apply was meant.
+        assert_eq!(from_button(Button::B, true), Some(Press::Accept));
+        assert_eq!(from_button(Button::A, true), Some(Press::Back));
+        // And an Xbox-layout device is left alone.
+        assert_eq!(from_button(Button::A, false), Some(Press::Accept));
+        assert_eq!(from_button(Button::B, false), Some(Press::Back));
+        // The d-pad is unaffected either way.
+        assert_eq!(from_button(Button::DPadUp, true), Some(Press::Up));
+    }
+
+    #[test]
+    fn inversion_is_read_from_emulationstation() {
+        let dir = std::env::temp_dir().join("moose-invert");
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = Paths::new(&dir);
+        std::fs::create_dir_all(paths.es_settings().parent().unwrap()).unwrap();
+
+        assert!(!buttons_inverted(&paths), "no file means no inversion");
+        std::fs::write(
+            paths.es_settings(),
+            "<config>\n\t<bool name=\"InvertButtons\" value=\"true\" />\n</config>\n",
+        )
+        .unwrap();
+        assert!(buttons_inverted(&paths));
+        std::fs::write(
+            paths.es_settings(),
+            "<config>\n\t<bool name=\"InvertButtons\" value=\"false\" />\n</config>\n",
+        )
+        .unwrap();
+        assert!(!buttons_inverted(&paths));
+    }
+
+    #[test]
+    fn a_on_the_sync_tab_runs_that_row_rather_than_the_patch_queue() {
+        // The two tabs mean different things by A. Queuing a patch change and
+        // then pressing A on "Push saves up" must not apply the patch — that
+        // is a different tab's business and a nasty surprise.
+        let mut f = fixture("sync-a");
+        press(&mut f, Press::Right);
+        assert_eq!(f.0.queue().len(), 1);
+
+        press(&mut f, Press::TabLeft);
+        assert_eq!(f.0.tab, Tab::Sync);
+        press(&mut f, Press::Accept);
+        match &f.0.overlay {
+            Overlay::ConfirmAction { title } => assert!(title.contains("Push")),
+            other => panic!("expected the action prompt, got {other:?}"),
+        }
+
+        // Cancelling leaves both the queue and the device untouched.
+        press(&mut f, Press::Back);
+        assert_eq!(f.0.overlay, Overlay::None);
+        assert_eq!(f.0.queue().len(), 1);
+        assert!(!f.2.knulli_conf().exists());
     }
 
     #[test]
