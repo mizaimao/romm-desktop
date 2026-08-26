@@ -33,6 +33,7 @@ one is a worked example of where a patch has to live:
 | Bezels | `/userdata/decorations` | `/usr/share/knulli/datainit/decorations` is on the squashfs |
 | L2+R2 binding | `/userdata/system/configs/multimedia_keys.conf` | `S50triggerhappy` prefers it over `/etc`, which is tmpfs |
 | ES ignoring L2/R2 | `/userdata/system/configs/emulationstation/es_input.cfg` | the shipped one is on the squashfs |
+| ES's loading logo | blank PNG over `resources/logo.png`, from `/boot/boot-custom.sh` | `/usr` is tmpfs; and it must land before `S31` starts ES |
 | Anything at boot | `/userdata/system/custom.sh` | run by `S99userservices` |
 
 The pattern is that KNULLI already provides a `/userdata` override for nearly

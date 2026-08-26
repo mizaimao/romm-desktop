@@ -92,19 +92,33 @@ ES's own L2/R2 navigation is turned off by copying
 `/userdata/system/configs/emulationstation/` with the Flip's `l2` and `r2`
 entries dropped. Every other pad it ships with comes across untouched.
 
-## `splash/custom.sh`
+## `splash/`
 
-Appended to `/userdata/system/custom.sh`, which `S99userservices` runs at every
-boot with `start`.
+This is the fix for the KNULLI beetle that appeared on **every game launch and
+every exit**.
 
-This is the fix for the KNULLI logo that appeared on **every game launch and
-every exit**. It is not a setting anywhere, and it is not RetroArch or ES:
-`S03system-splash` writes `/usr/share/knulli/splash/boot-logo-640x480.png`
-directly into `/dev/fb0` during boot and never clears it. ES and the emulators
-draw through DRM planes on top of it, so it is invisible — until a plane is
-torn down, which happens at exactly those two moments, and the framebuffer
-underneath shows through.
+It is not a setting, and it is not RetroArch or the framebuffer — both of which
+I chased first and both of which were wrong. EmulationStation draws
+`/usr/share/emulationstation/resources/logo.png`, a 1280×720 image of the
+beetle with KNULLI under it, whenever it is loading. Launching a game and
+returning from one are exactly when that happens. There is no option for it:
+the file is referenced once in the ES binary and drawn unconditionally.
 
-Dumping `/dev/fb0` while ES was on screen is what found it: 640×480×32, and it
-still held the scarab. Painting it black is the whole fix. The boot splash
-still plays during boot; it just no longer lingers.
+So `blank-logo.png` — 1280×720, fully transparent — is copied over it.
+
+`boot-custom.sh` goes to `/boot/boot-custom.sh`, which runs as `S00bootcustom`.
+It has to be that early: `/usr` is on the tmpfs overlay and is stock again at
+every boot, and ES starts at `S31`, so the swap must happen before then. The
+same hook also re-applies the chosen Mali driver; the GPU half was there first
+and its early `exit 0`s would have skipped anything appended after it, so both
+are functions now.
+
+Reverting is deleting the hook — the real logo is on the read-only squashfs and
+comes back by itself.
+
+`custom.sh` is appended to `/userdata/system/custom.sh`, run by
+`S99userservices`. It zeroes `/dev/fb0`, where `S03system-splash` leaves the
+boot logo. That is **not** what was causing the flash — the framebuffer was
+verified black across all three buffers while the logo was still appearing —
+but it is what shows if anything stops drawing, so it is worth keeping and the
+app's launcher no longer has to do it itself.
