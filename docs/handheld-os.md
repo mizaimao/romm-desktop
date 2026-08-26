@@ -46,6 +46,20 @@ strip it to the parts we reuse, and add our own front end.
   application userland (RetroArch, cores, PortMaster, standalone emulators) is
   portable across kernels.
 
+## A Wayland compositor does run on the Flip (2026-08-25)
+
+KNULLI ships the **GBM-only, no-Wayland** build of the Mali blob, and that alone
+is why no compositor starts — not the GPU, not the kernel. Swapping in
+`libmali-bifrost-g52-g24p0-wayland-gbm.so` (same vendor driver, different build)
+brings up both Weston and Sway with GLES 3.2. Emulators are unaffected: same
+speed, and byte-identical rendered frames.
+
+Full account, with reproduction: **`docs/flip-wayland-and-the-gpu-blob.md`**.
+Staging script: `scripts/flip-mali-shim.sh`.
+
+This is what makes a WebKitGTK — and therefore a Tauri — build worth attempting
+on this device at all.
+
 ## Hardware status on the base (RE repo, kernel 7.0.2, 2026-07)
 
 Working: boot, display, backlight, audio (PipeWire + rk817), WiFi (RTL8733BU),
