@@ -87,10 +87,13 @@ and restores ES from a trap, so a crash in the app cannot leave the device on
 a black screen. ES is restarted through its init script rather than by hand,
 because started by hand it comes up without `XDG_RUNTIME_DIR` and has no sound.
 
-ES's own L2/R2 navigation is turned off by copying
-`/usr/share/emulationstation/es_input.cfg` to
-`/userdata/system/configs/emulationstation/` with the Flip's `l2` and `r2`
-entries dropped. Every other pad it ships with comes across untouched.
+ES's own L2/R2 navigation is turned off by `es_input.cfg` — **just the Flip's
+own entry**, 24 lines, with `l2` and `r2` dropped.
+
+Copying the shipped file across whole does not work. It holds 291 pad
+definitions and 412 KB, and ES will not start with it as the user config: it
+exits before writing a line to its log. A user `es_input.cfg` is meant to hold
+the pads ES has been told about, not the catalogue it ships with.
 
 ## `splash/`
 
@@ -104,7 +107,10 @@ beetle with KNULLI under it, whenever it is loading. Launching a game and
 returning from one are exactly when that happens. There is no option for it:
 the file is referenced once in the ES binary and drawn unconditionally.
 
-So `blank-logo.png` — 1280×720, fully transparent — is copied over it.
+So `blank-logo.png` — 1280×720, black, **RGB not RGBA** — is copied over it.
+Same size and same mode as the file it replaces, because a resource ES loads
+unconditionally is not the place to find out whether it minds an alpha
+channel.
 
 `boot-custom.sh` goes to `/boot/boot-custom.sh`, which runs as `S00bootcustom`.
 It has to be that early: `/usr` is on the tmpfs overlay and is stock again at
@@ -122,3 +128,28 @@ boot logo. That is **not** what was causing the flash — the framebuffer was
 verified black across all three buffers while the logo was still appearing —
 but it is what shows if anything stops drawing, so it is worth keeping and the
 app's launcher no longer has to do it itself.
+
+## Restarting EmulationStation over SSH
+
+`/etc/init.d/S31emulationstation start` runs `emulationstation-standalone &` —
+backgrounded from *your* shell. Over SSH that means the session is its parent,
+and when the command returns, SIGHUP takes ES with it. It looks exactly like ES
+crashing a minute after it starts, and it cost most of an afternoon.
+
+    . /etc/profile.d/xdg.sh; . /etc/profile.d/dbus.sh
+    setsid /usr/bin/emulationstation-standalone </dev/null >/dev/null 2>&1 &
+
+`setsid` is the whole difference. Sourcing the two profiles is the other half:
+started without them ES comes up with no `XDG_RUNTIME_DIR`, cannot reach
+PipeWire, and has no sound. `scripts/knulli.sh` has done this correctly all
+along — `setsid nohup` at line 260.
+
+Starting it more than once leaves two respawn loops, and two EmulationStations
+fight over DRM so neither survives. Check with `ps -e -o args= | grep -c
+'^emulationstation '` — and note that a `grep` for the *wrapper* matches its
+own command line, so that count reads one too high.
+
+## `flip-power.conf`
+
+`system.batterysaver.extendedmode=none`. The device suspends itself after 15
+minutes idle, which drops the network and reads as a dead device. Dimming stays.
