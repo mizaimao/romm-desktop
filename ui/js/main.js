@@ -335,7 +335,12 @@ function statusCard(s) {
   installColumnResizer();
   // Android: no top bar, and the tab row becomes the top of the app. A class
   // rather than inline styles so the stylesheet keeps every rule about it.
-  if (MOBILE) document.body.classList.add("mobile");
+  if (MOBILE) {
+    document.body.classList.add("mobile");
+    // On the root element as well as the body, because one rule needs to reach
+    // `html` itself: the page background. See `html.mobile.backdrop-on`.
+    document.documentElement.classList.add("mobile");
+  }
   installKeys();
   // Answers the Android Back button. Inert everywhere else.
   installAndroidBack();

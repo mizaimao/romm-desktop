@@ -65,6 +65,7 @@ class MainActivity : TauriActivity() {
         // work could have reached it, which is why three attempts in the CSS
         // changed nothing.
         webView.setBackgroundColor(Color.parseColor("#14161A"))
+        stopDarkening(webView)
         // The page's only way to reach Android. See Bridge.
         webView.addJavascriptInterface(Bridge(), "RommAndroid")
     }
@@ -243,7 +244,66 @@ class MainActivity : TauriActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) goFullScreen()
+        if (hasFocus) {
+            goFullScreen()
+            paintWebViews()
+        }
+    }
+
+    /**
+     * Make every webview opaque, again.
+     *
+     * Setting this in `onWebViewCreate` is too early: wry configures the view
+     * after handing it over, and Tauri supports transparent windows, so it puts
+     * the background back to nothing. The result is a surface composited at
+     * roughly 88% over white — which is arithmetic, not a guess: with the page
+     * painted #14161A the device showed #313236, and 20*0.88 + 255*0.12 = 48.2,
+     * which is 0x31. Every "tint" chased through the stylesheet was that white
+     * coming through a page that could not be opaque no matter what it drew.
+     */
+    private fun paintWebViews() {
+        val bg = Color.parseColor("#14161A")
+        for (wv in webViews) {
+            // An opaque colour is what makes a WebView opaque; `isOpaque` is
+            // derived and read-only.
+            wv.setBackgroundColor(bg)
+            stopDarkening(wv)
+        }
+    }
+
+    /**
+     * Stop the WebView rewriting this page's colours.
+     *
+     * The device is in night mode, so the WebView applies its own darkening
+     * pass on top of the page: it decides dark backgrounds are too dark and
+     * lifts them toward a Material surface colour. This app is already dark and
+     * did not ask.
+     *
+     * The effect is a flat wash over everything the stylesheet paints, and it
+     * is invisible from inside the page — `getComputedStyle` still reports
+     * rgb(20, 22, 26) while the device draws #313236. That is why it survived
+     * being chased through the CSS: the CSS was right, and something after it
+     * was changing the answer.
+     *
+     * Canvas pixels are exempt from the pass, which is why the backdrop looked
+     * correct and everything around it did not, and why the wash appeared to
+     * arrive when the cursor moved — moving it is what makes the canvas repaint
+     * over the part that was washed.
+     *
+     * Two APIs because the name changed: `isAlgorithmicDarkeningAllowed` from
+     * 33, `forceDark` before it.
+     */
+    @Suppress("DEPRECATION")
+    private fun stopDarkening(wv: WebView) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                wv.settings.isAlgorithmicDarkeningAllowed = false
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                wv.settings.forceDark = android.webkit.WebSettings.FORCE_DARK_OFF
+            }
+        } catch (e: Exception) {
+            // An engine that does not offer it is an engine that does not do it.
+        }
     }
 
     /**

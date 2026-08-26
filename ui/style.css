@@ -3005,11 +3005,15 @@ body.mobile #tabbar { height: auto; min-height: 42px; }
    --------------------------------------------------------------------------- */
 
 /* No underline on the open tab.
-   The active tab is already the bright, bold one in a row of dim ones, so the
-   rule underneath it is a second answer to a question that was not asked
-   twice. It also sat directly under the first tab with the top bar gone,
-   reading as a stray line across the corner of the screen. */
+   Two rules draw one, and the obvious one was not the culprit: the active tab
+   has a bottom border, and `:focus-visible` adds `text-decoration: underline`.
+   On a desktop that second one is a focus ring you see while tabbing. Driven by
+   a pad the focused tab *is* the open tab, permanently, so it read as a line
+   under the first word on the screen with nothing above it. The tab is already
+   the bright bold one in a row of dim ones; that is the answer, and it does not
+   need a second. */
 body.mobile #tabbar .stab.active { border-bottom-color: transparent; }
+body.mobile #tabbar .stab:focus-visible { text-decoration: none; }
 
 /* No LB/RB hints in the tab row.
    They are there so the shoulder mapping is discoverable without opening
@@ -3034,3 +3038,21 @@ body.mobile #tabbar .bumper { display: none !important; }
   #detail .artstrip img,
   #detail .artstrip .vidtile { max-height: 108px; }
 }
+
+/* The page keeps a background on Android — on `html`, which is the point.
+   With a backdrop running, `html` and `body` are both made transparent so the
+   canvas shows through. That assumes the surface behind the page is the app's
+   own colour, and on Android it is not: it is light, and it came through as a
+   flat wash over everything.
+
+   It has to be `html`. A background on `body` alone does not reach the viewport
+   when `html` has an explicit background of its own, even a transparent one —
+   the propagation that would normally carry it up does not happen. Painting
+   body and leaving html transparent is exactly what was tried first, and the
+   wash stayed: with the page at #14161A the device still showed #313236, which
+   is 12% of white over it. With `html` painted, the same test gives the colour
+   asked for.
+
+   The canvas is drawn over this, so nothing is hidden by it. */
+html.mobile.backdrop-on,
+html.mobile.backdrop-on body { background: var(--bg); }

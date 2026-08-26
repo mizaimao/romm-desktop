@@ -743,6 +743,18 @@ export function installDetailResizer() {
 }
 
 function applyWidth(px) {
+  // A narrow screen has no room for a remembered width.
+  //
+  // This writes an *inline* custom property on the root element, and an inline
+  // property beats any stylesheet — so a width dragged out on a 27-inch
+  // display followed the app onto a 833-point handheld and sat there,
+  // untouched by the media query written for exactly that case. On anything
+  // this narrow the stylesheet is the better judge, so the inline value is
+  // removed and it decides.
+  if (window.innerWidth <= 1100) {
+    document.documentElement.style.removeProperty("--detail-w");
+    return;
+  }
   // Clamped in code as well as in CSS: the CSS bound stops it rendering wrong,
   // this stops a nonsense value being written to storage.
   const max = Math.min(window.innerWidth * 0.7, 900);
