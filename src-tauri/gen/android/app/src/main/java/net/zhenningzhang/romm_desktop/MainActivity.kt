@@ -295,15 +295,32 @@ class MainActivity : TauriActivity() {
      */
     @Suppress("DEPRECATION")
     private fun stopDarkening(wv: WebView) {
+        // Both, not one or the other.
+        //
+        // The newer switch is the documented one and defaults to off for a
+        // target this recent, so on paper neither is needed. The device says
+        // otherwise: the page paints rgb(20, 22, 26) and the screen shows
+        // #313236, which is that colour lifted by twelve per cent of white —
+        // and canvas pixels, which this pass does not touch, stay dark in the
+        // same frame. So the old switch is set too, and what actually took is
+        // logged rather than assumed.
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 wv.settings.isAlgorithmicDarkeningAllowed = false
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            }
+        } catch (e: Exception) {
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 wv.settings.forceDark = android.webkit.WebSettings.FORCE_DARK_OFF
             }
         } catch (e: Exception) {
-            // An engine that does not offer it is an engine that does not do it.
         }
+        // What actually took, once, because the two switches disagree: the
+        // newer one reads back false as asked, and the older one still reads
+        // AUTO because it is a no-op for a target this recent. Neither stopped
+        // the wash, which is recorded here so the next person does not repeat
+        // the experiment.
     }
 
     /**

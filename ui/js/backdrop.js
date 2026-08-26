@@ -692,6 +692,21 @@ function build() {
     // driver so lets it skip preserving the buffer between frames.
     preserveDrawingBuffer: false,
     powerPreference: "low-power",
+    // Opaque on Android, transparent everywhere else.
+    //
+    // This device's WebView rasterises the page's own background lighter than
+    // it is asked to — rgb(20, 22, 26) comes out #313236, the same colour with
+    // twelve per cent of white in it. Not compositing: SurfaceFlinger reports
+    // the layer as alpha=1, blend=NONE, identity colour transform, so the wash
+    // is in the raster. Canvas pixels are exempt from whatever does it, which
+    // is the one lever there is.
+    //
+    // With `alpha: false` the drawing buffer is opaque, so the canvas covers
+    // the viewport in colour that has not been through that pass and the
+    // washed background behind it never shows. Left transparent elsewhere,
+    // where the page beneath is drawn correctly and showing through it is the
+    // point.
+    alpha: !/\bAndroid\b/.test(navigator.userAgent),
   });
   if (!gl) return null;
 
