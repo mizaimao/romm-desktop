@@ -80,6 +80,29 @@ class MainActivity : TauriActivity() {
         fun openAllFilesAccess() {
             runOnUiThread { openAllFilesScreen() }
         }
+
+        /**
+         * Whether RetroArch is installed, and which build.
+         *
+         * On Android RetroArch is a package, not a path — there is nothing to
+         * browse for and nothing to point at. Either the app is on the device
+         * or it is not, and the settings page should say which rather than
+         * offering a file picker that cannot mean anything.
+         *
+         * Both ABIs are checked because a device may carry either.
+         */
+        @JavascriptInterface
+        fun retroArchPackage(): String {
+            for (pkg in arrayOf("com.retroarch.aarch64", "com.retroarch")) {
+                try {
+                    packageManager.getPackageInfo(pkg, 0)
+                    return pkg
+                } catch (e: Exception) {
+                    // Not installed under that name; try the next.
+                }
+            }
+            return ""
+        }
     }
 
     /**

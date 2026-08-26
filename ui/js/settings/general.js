@@ -4,7 +4,7 @@ import { toast } from "../util.js";
 import { wireConfigFields } from "./fields.js";
 
 export const html = `      <h4>RetroArch</h4>
-      <div class="srow">
+      <div class="srow set-ra-path">
         <label>Location</label>
         <div class="ctl">
           <input class="set-ra" type="text" spellcheck="false"
@@ -13,8 +13,17 @@ export const html = `      <h4>RetroArch</h4>
           <button class="set-ra-save">Save</button>
         </div>
       </div>
-      <p class="hint">Empty searches the usual locations. Set it when the install
-        lives elsewhere, such as <code>E:\\Emulators\\RetroArch</code>.</p>
+      <p class="hint set-ra-path">Empty searches the usual locations. Set it when
+        the install lives elsewhere, such as <code>E:\\Emulators\\RetroArch</code>.</p>
+
+      <div class="srow set-ra-pkg" hidden>
+        <label>RetroArch</label>
+        <div class="ctl"><span class="set-ra-pkg-state"></span></div>
+      </div>
+      <p class="hint set-ra-pkg" hidden>Android installs RetroArch as an app, so
+        there is no folder to point at — it is either on the device or it is not.
+        Install it from the Play Store or retroarch.com and it will be found.</p>
+
       <p class="hint set-ra-status"></p>
 
       <h4>Saves</h4>
@@ -148,6 +157,29 @@ export function wire(box) {
 
   // config.toml fields. Loaded once and written back on change, through a
   // targeted TOML edit so the hand-written comments in that file survive.
+  // Android has no RetroArch *path*. It is a package: installed or not.
+  //
+  // The folder row asks a question that cannot be answered there — there is
+  // nothing to browse to, and a path saved into config.toml would be read by a
+  // launcher that will be using an Intent rather than a command line. So on
+  // Android the row is replaced by a straight statement of whether the app is
+  // present, read from the package manager through the bridge.
+  const bridge = window.RommAndroid;
+  if (bridge?.retroArchPackage) {
+    box.querySelectorAll(".set-ra-path").forEach((n) => (n.hidden = true));
+    box.querySelectorAll(".set-ra-pkg").forEach((n) => (n.hidden = false));
+    let pkg = "";
+    try {
+      pkg = bridge.retroArchPackage();
+    } catch {
+      pkg = "";
+    }
+    const state = box.querySelector(".set-ra-pkg-state");
+    if (state) {
+      state.textContent = pkg ? `Installed — ${pkg}` : "Not installed";
+    }
+  }
+
   wireConfigFields(box);
 }
 

@@ -24,6 +24,24 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!--
+      The emulators this app talks to.
+
+      Since Android 11 an app cannot see that another package exists unless it
+      says so here: `getPackageInfo` throws NameNotFoundException and the answer
+      is indistinguishable from "not installed". That is exactly what happened —
+      the settings page reported RetroArch missing on a device it was installed
+      on.
+
+      Both RetroArch names, because a device may carry either build. This is
+      also what a launch will need: an Intent to a package you cannot see does
+      not resolve.
+    -->
+    <queries>
+        <package android:name="com.retroarch.aarch64" />
+        <package android:name="com.retroarch" />
+    </queries>
+
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
