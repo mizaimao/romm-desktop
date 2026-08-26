@@ -12,6 +12,9 @@ edition = "2024"
 [lib]
 name = "moose_patch"
 path = "src/lib.rs"
+# No doc examples here, and rustdoc's harness cannot resolve romm-sdl when it
+# goes looking for them.
+doctest = false
 
 [[bin]]
 name = "moose-patch"

@@ -33,8 +33,18 @@ impl Tab {
 pub enum Kind {
     /// A setting with named options, cycled left and right. Not a checkbox:
     /// the graphics driver has two names rather than an on and an off, and
-    /// bezels will have a list of packs.
-    Choice { options: Vec<String>, live: usize, picked: usize },
+    /// bezels have a list of packs.
+    ///
+    /// `live` is `None` when the device is at none of them — KNULLI shipped an
+    /// update, or somebody edited the file. That is shown rather than papered
+    /// over, and it is deliberately *not* queued on sight: the app should not
+    /// propose work the moment it opens.
+    Choice {
+        options: Vec<String>,
+        live: Option<usize>,
+        picked: usize,
+        touched: bool,
+    },
     /// Something to read. No options, never pending.
     Fact { value: String },
     /// An action — push saves, pull saves. Runs on its own rather than
@@ -62,16 +72,46 @@ impl Row {
         options: &[&str],
         live: usize,
     ) -> Self {
+        Row::dial(
+            id,
+            title,
+            detail,
+            options.iter().map(|s| (*s).to_string()).collect(),
+            Some(live),
+        )
+    }
+
+    pub fn dial(
+        id: &str,
+        title: &str,
+        detail: &str,
+        options: Vec<String>,
+        live: Option<usize>,
+    ) -> Self {
         Row {
             id: id.into(),
             title: title.into(),
             detail: detail.into(),
             kind: Kind::Choice {
-                options: options.iter().map(|s| (*s).to_string()).collect(),
+                options,
                 live,
-                picked: live,
+                picked: live.unwrap_or(0),
+                touched: false,
             },
         }
+    }
+
+    /// Which option is dialled up, for whoever has to go and do it.
+    pub fn picked(&self) -> Option<usize> {
+        match &self.kind {
+            Kind::Choice { picked, .. } => Some(*picked),
+            _ => None,
+        }
+    }
+
+    /// The device is at none of this row's options.
+    pub fn adrift(&self) -> bool {
+        matches!(&self.kind, Kind::Choice { live: None, .. })
     }
 
     pub fn fact(id: &str, title: &str, value: &str) -> Self {
@@ -94,7 +134,13 @@ impl Row {
 
     /// Turned away from what the device is actually doing.
     pub fn pending(&self) -> bool {
-        matches!(&self.kind, Kind::Choice { live, picked, .. } if live != picked)
+        match &self.kind {
+            Kind::Choice { live: Some(live), picked, .. } => live != picked,
+            // Adrift: queued only once you have actually chosen where it
+            // should land, so opening the app proposes nothing.
+            Kind::Choice { live: None, touched, .. } => *touched,
+            _ => false,
+        }
     }
 
     /// Only rows you can put a cursor on. A fact is not one of them — landing
@@ -107,6 +153,10 @@ impl Row {
     /// What the right-hand column reads.
     pub fn value(&self) -> &str {
         match &self.kind {
+            Kind::Choice { options, live: None, touched: false, .. } => {
+                let _ = options;
+                "changed"
+            }
             Kind::Choice { options, picked, .. } => {
                 options.get(*picked).map(String::as_str).unwrap_or("")
             }
@@ -118,9 +168,10 @@ impl Row {
     /// What it read before you touched it, if that is different.
     pub fn was(&self) -> Option<&str> {
         match &self.kind {
-            Kind::Choice { options, live, picked } if live != picked => {
+            Kind::Choice { options, live: Some(live), picked, .. } if live != picked => {
                 options.get(*live).map(String::as_str)
             }
+            Kind::Choice { live: None, touched: true, .. } => Some("changed"),
             _ => None,
         }
     }
@@ -128,26 +179,29 @@ impl Row {
     /// Cycling wraps. With two options that is the only sane behaviour, and
     /// with six it saves a long walk back.
     pub fn turn(&mut self, by: i32) {
-        if let Kind::Choice { options, picked, .. } = &mut self.kind {
+        if let Kind::Choice { options, picked, touched, .. } = &mut self.kind {
             if options.is_empty() {
                 return;
             }
             let n = options.len() as i32;
             *picked = (((*picked as i32 + by) % n + n) % n) as usize;
+            *touched = true;
         }
     }
 
     /// After the script has run and the device really is like this.
     pub fn settle(&mut self) {
-        if let Kind::Choice { live, picked, .. } = &mut self.kind {
-            *live = *picked;
+        if let Kind::Choice { live, picked, touched, .. } = &mut self.kind {
+            *live = Some(*picked);
+            *touched = false;
         }
     }
 
     /// Put the dial back where the device is.
     pub fn revert(&mut self) {
-        if let Kind::Choice { live, picked, .. } = &mut self.kind {
-            *picked = *live;
+        if let Kind::Choice { live, picked, touched, .. } = &mut self.kind {
+            *picked = live.unwrap_or(0);
+            *touched = false;
         }
     }
 }
@@ -259,6 +313,15 @@ impl App {
             .collect()
     }
 
+    /// The queue as instructions rather than borrows, so it can be carried
+    /// out while the rows themselves are being written back.
+    pub fn orders(&self) -> Vec<(String, usize)> {
+        self.queue()
+            .iter()
+            .filter_map(|r| r.picked().map(|i| (r.id.clone(), i)))
+            .collect()
+    }
+
     pub fn next_tab(&mut self, by: i32) {
         let n = Tab::ALL.len() as i32;
         let at = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0) as i32;
@@ -326,6 +389,23 @@ mod tests {
         assert_eq!(p.pending().len(), 1);
         p.revert_all();
         assert!(p.pending().is_empty());
+    }
+
+    #[test]
+    fn a_row_the_device_has_drifted_from_says_so_without_queueing_itself() {
+        // KNULLI shipped an update and the file is not any of our options.
+        // The menu must show that, and must not propose a fix on sight —
+        // opening the app should never leave work sitting in the queue.
+        let mut row = Row::dial("a", "t", "", vec!["ON".into(), "off".into()], None);
+        assert!(row.adrift());
+        assert_eq!(row.value(), "changed");
+        assert!(!row.pending(), "nothing may be queued before it is touched");
+
+        row.turn(1);
+        assert!(row.pending(), "choosing where it should land queues it");
+        assert_eq!(row.was(), Some("changed"));
+        row.settle();
+        assert!(!row.adrift(), "applying puts it back on a known option");
     }
 
     #[test]

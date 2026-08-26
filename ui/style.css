@@ -2955,7 +2955,7 @@ body.uncontained .card {
      theme that reads as a pale band across the top of the screen — the bars are
      meant to be transparent with `backdrop-filter` doing the work, and
      `backdrop-filter` has been supported since Chromium 76, so it was already
-     working. The only thing the wash added was the white tint. */
+     working. All the wash added was a pale band. */
   .card { border-color: rgb(var(--glass-rgb) / 22%); }
 
   /* The open tab's colour and glow.
@@ -3057,15 +3057,20 @@ body.mobile #tabbar .bumper { display: none !important; }
   #detail .artstrip .vidtile { max-height: 108px; }
 }
 
-/* No page background on Android with a backdrop running — this is what caused
-   the tint, and it was added here while chasing it.
+/* No page background on Android with a backdrop running.
 
-   With a backdrop the page is meant to be transparent and the canvas provides
-   the colour. Painting `html` instead gave the engine a CSS background to
-   rasterise, and this WebView lifts what it rasterises: rgb(20, 22, 26) came
-   out #313236, the same colour with twelve per cent of white in it. Canvas
-   pixels never went through that pass, which is why the backdrop stayed dark in
-   the same frame and why every other explanation fitted so badly.
+   `html.mobile.backdrop-on { background: var(--bg) }` was here, added while
+   chasing the tint on the theory that a transparent page over a light window
+   was the cause. It is gone and it should stay gone — but not for the reason it
+   was removed for.
 
-   Found by removing this one rule on the device and measuring: the dominant
-   colour on screen fell from #303238 to #23242A. */
+   It was never the tint. That was Android drawing a focus highlight over the
+   whole webview, outside anything a stylesheet can reach; docs/tint.md has it.
+   Removing this rule looked like a partial fix because it changed what the
+   twelve per cent of white was sitting on, not because it took away any of the
+   white.
+
+   What the rule actually did was hide the backdrop. It is later in the file and
+   more specific than `html.backdrop-on { background: transparent }`, so it won,
+   and the shader ran perfectly behind an opaque page. With a backdrop the page
+   is meant to be see-through and the canvas provides the colour. */

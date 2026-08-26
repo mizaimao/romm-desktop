@@ -7,8 +7,11 @@
          Left bare, `Theme.MaterialComponents.DayNight` supplies its own window
          background and its own splash. On this device that composited over the
          launcher wallpaper as a pale rectangle for the first frame of every
-         launch — the "white tint", which was never in the stylesheet at all and
-         survived two fixes aimed at CSS.
+         launch.
+
+         That first frame is all this fixes. It was set while chasing the flat
+         wash over the whole app, which is a different thing and is not here —
+         see docs/tint.md and `stopFocusHighlight` in MainActivity.kt.
 
          `windowSplashScreenBackground` is the Android 12+ splash; `windowBackground`
          is what is drawn before and behind the webview. Both are set, because

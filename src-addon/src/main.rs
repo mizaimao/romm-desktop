@@ -3,10 +3,20 @@
 //! Two tabs, a list of dials, and one deliberate moment where everything you
 //! turned actually happens. See `docs/knulli-addon.md` for what it is for and
 //! `model` for why nothing applies as you touch it.
+//!
+//! It also runs without a window:
+//!
+//!     moose-patch --status     what every patch is currently at
+//!     moose-patch --restore    put the device back to the saved profile
+//!
+//! `--restore` is what a freshly installed KNULLI needs, and it is deliberately
+//! reachable over ssh — a device that has just been reflashed has no way to
+//! launch a windowed app until the patches that make that possible are on.
 
 use anyhow::{Context, Result};
 use moose_patch::model::{App, Kind, Overlay, Tab};
-use moose_patch::{rows, ui};
+use moose_patch::patch::{Patch, Paths, State};
+use moose_patch::{catalogue, profile, rows, ui};
 use romm_sdl::gfx::Gfx;
 use romm_sdl::input;
 use romm_sdl::text;
@@ -47,9 +57,7 @@ fn from_key(key: Keycode) -> Option<Press> {
 }
 
 /// SDL names its buttons after the Xbox layout, so `Button::A` is the bottom
-/// one — which is what this device calls A too. `input::index_of` is the
-/// translation the rest of the project uses; this is the only place that
-/// needs the letters rather than the indices.
+/// one — which is what this device calls A too.
 fn from_button(button: Button) -> Option<Press> {
     Some(match button {
         Button::DPadUp => Press::Up,
@@ -68,7 +76,7 @@ fn from_button(button: Button) -> Option<Press> {
 fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, String> {
     // The device's screen exactly. On a desktop it is a small window, which is
     // the point: the last front end was drawn at four times the size and every
-    // judgement about it was wrong.
+    // judgement made about it was wrong.
     let (w, h) = (ui::PANEL.0, ui::PANEL.1);
     let mut builder = video.window("moose-patch", w, h);
     if cfg!(any(target_os = "linux", target_os = "android")) {
@@ -83,7 +91,63 @@ fn open_window(video: &sdl2::VideoSubsystem) -> Result<sdl2::video::Window, Stri
 
 fn main() -> Result<()> {
     romm_desktop::datadir::anchor();
+    let paths = Paths::default();
+    let patches = catalogue::all(&paths);
 
+    match std::env::args().nth(1).as_deref() {
+        Some("--status") => return status(&patches),
+        Some("--restore") => return restore(&paths, &patches),
+        Some("--save") => {
+            profile::save(&paths, &patches)?;
+            println!("wrote {}", paths.profile().display());
+            return Ok(());
+        }
+        Some(other) if other.starts_with("--") => {
+            eprintln!("moose-patch [--status | --restore | --save]");
+            std::process::exit(2);
+        }
+        _ => {}
+    }
+    window(&paths, &patches)
+}
+
+fn status(patches: &[Patch]) -> Result<()> {
+    for patch in patches {
+        let at = match patch.state() {
+            State::At(i) => patch.choices[i].name.clone(),
+            State::Changed => "changed — not at any known setting".into(),
+        };
+        println!("{:<16} {at}", patch.id);
+    }
+    Ok(())
+}
+
+fn restore(paths: &Paths, patches: &[Patch]) -> Result<()> {
+    let done = profile::restore(paths, patches)?;
+    for line in &done.applied {
+        println!("applied  {line}");
+    }
+    for id in &done.already {
+        println!("already  {id}");
+    }
+    for line in &done.failed {
+        eprintln!("failed   {line}");
+    }
+    for id in &done.unknown {
+        // Not an error that stops the rest: a profile from a newer build
+        // should still restore everything this one understands.
+        eprintln!("unknown  {id}");
+    }
+    if done.applied.is_empty() && done.already.is_empty() && done.unknown.is_empty() {
+        eprintln!("nothing to restore — no profile at {}", paths.profile().display());
+    }
+    if !done.failed.is_empty() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     let sdl = sdl2::init()
         .map_err(anyhow::Error::msg)
         .context("starting SDL")?;
@@ -103,14 +167,14 @@ fn main() -> Result<()> {
         }
     }
 
-    let window = open_window(&video)
+    let win = open_window(&video)
         .map_err(anyhow::Error::msg)
         .context("opening a window")?;
-    let _context = window
+    let _context = win
         .gl_create_context()
         .map_err(anyhow::Error::msg)
         .context("creating an OpenGL context")?;
-    window.gl_set_context_to_current().map_err(anyhow::Error::msg)?;
+    win.gl_set_context_to_current().map_err(anyhow::Error::msg)?;
 
     let mut gfx = unsafe { Gfx::new(&video) }.context("setting up the renderer")?;
     let _ = video.gl_set_swap_interval(sdl2::video::SwapInterval::VSync);
@@ -125,8 +189,8 @@ fn main() -> Result<()> {
 
     let mut app = App {
         tab: Tab::Patches,
-        sync: rows::sync(),
-        patches: rows::patches(),
+        sync: rows::sync(None, None),
+        patches: rows::patches(patches),
         overlay: Overlay::None,
         should_quit: false,
     };
@@ -148,19 +212,40 @@ fn main() -> Result<()> {
                 _ => None,
             };
             let Some(press) = press else { continue };
-            act(&mut app, &mut view, press);
+            act(&mut app, &mut view, press, paths, patches);
         }
 
         gfx.resize(ui::PANEL.0 as f32, ui::PANEL.1 as f32);
         view.draw(&gfx, &mut painter, &app);
-        window.gl_swap_window();
+        win.gl_swap_window();
     }
     Ok(())
 }
 
+/// Carry out the queue. Everything that failed is left showing as still
+/// pending, which is the honest thing for the menu to say afterwards.
+fn run_queue(app: &mut App, paths: &Paths, patches: &[Patch]) {
+    for (id, index) in app.orders() {
+        let Some(patch) = patches.iter().find(|p| p.id == id) else { continue };
+        match patch.apply(index) {
+            Ok(()) => {
+                for page in [&mut app.sync, &mut app.patches] {
+                    if let Some(row) = page.rows.iter_mut().find(|r| r.id == id) {
+                        row.settle();
+                    }
+                }
+            }
+            Err(e) => eprintln!("{id}: {e:#}"),
+        }
+    }
+    if let Err(e) = profile::save(paths, patches) {
+        eprintln!("could not write the profile: {e:#}");
+    }
+}
+
 /// One press. Split out so the whole of the app's behaviour can be exercised
 /// without a window — see the tests at the foot of this file.
-fn act(app: &mut App, view: &mut ui::Ui, press: Press) {
+fn act(app: &mut App, view: &mut ui::Ui, press: Press, paths: &Paths, patches: &[Patch]) {
     if press == Press::Quit {
         app.should_quit = true;
         return;
@@ -176,12 +261,7 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press) {
 
         Overlay::ConfirmApply => match press {
             Press::Accept => {
-                // Where the scripts will run. Settling is what they leave
-                // behind: the device now *is* what the dials say.
-                let total = app.queue().len();
-                app.sync.settle_all();
-                app.patches.settle_all();
-                app.overlay = Overlay::Applying { done: total, total };
+                run_queue(app, paths, patches);
                 app.overlay = Overlay::None;
             }
             Press::Back => app.overlay = Overlay::None,
@@ -223,9 +303,10 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press) {
                     app.page().selected().map(|r| &r.kind),
                     Some(Kind::Action { .. })
                 ) {
-                    // Push, pull, take offline. Nothing to reconcile, so these
-                    // run on their own rather than joining the queue.
-                    // Not wired yet.
+                    // Push, pull, take offline. Nothing to reconcile against,
+                    // so these run on their own rather than joining the queue.
+                    // The core already has the conflict handling they need —
+                    // `romm_desktop::savesync` — and wiring them up is next.
                 }
             }
             Press::Back => {
@@ -244,71 +325,101 @@ fn act(app: &mut App, view: &mut ui::Ui, press: Press) {
 mod tests {
     use super::*;
 
-    fn app() -> (App, ui::Ui) {
-        (
-            App {
-                tab: Tab::Patches,
-                sync: rows::sync(),
-                patches: rows::patches(),
-                overlay: Overlay::None,
-                should_quit: false,
-            },
-            ui::Ui::default(),
-        )
+    /// A whole app pointed at a temporary directory, so pressing buttons in
+    /// these tests really does write files and read them back.
+    fn fixture(name: &str) -> (App, ui::Ui, Paths, Vec<Patch>) {
+        let dir = std::env::temp_dir().join(format!("moose-main-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = Paths::new(dir);
+        let patches = catalogue::all(&paths);
+        let app = App {
+            tab: Tab::Patches,
+            sync: rows::sync(None, None),
+            patches: rows::patches(&patches),
+            overlay: Overlay::None,
+            should_quit: false,
+        };
+        (app, ui::Ui::default(), paths, patches)
+    }
+
+    fn press(f: &mut (App, ui::Ui, Paths, Vec<Patch>), p: Press) {
+        act(&mut f.0, &mut f.1, p, &f.2, &f.3);
     }
 
     #[test]
     fn b_leaves_straight_away_when_nothing_is_queued() {
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Back);
-        assert!(a.should_quit);
+        let mut f = fixture("leave");
+        press(&mut f, Press::Back);
+        assert!(f.0.should_quit);
     }
 
     #[test]
     fn b_asks_first_when_something_is_queued() {
         // The whole point of queuing: work in hand must not vanish because a
         // thumb found the wrong button.
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Right);
-        act(&mut a, &mut v, Press::Back);
-        assert_eq!(a.overlay, Overlay::ConfirmDiscard);
-        assert!(!a.should_quit);
+        let mut f = fixture("ask");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Back);
+        assert_eq!(f.0.overlay, Overlay::ConfirmDiscard);
+        assert!(!f.0.should_quit);
     }
 
     #[test]
     fn a_never_applies_without_confirming() {
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Right);
-        let queued = a.queue().len();
-        act(&mut a, &mut v, Press::Accept);
-        assert_eq!(a.overlay, Overlay::ConfirmApply);
-        assert_eq!(a.queue().len(), queued, "nothing may be applied yet");
+        let mut f = fixture("confirm");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Accept);
+        assert_eq!(f.0.overlay, Overlay::ConfirmApply);
+        assert_eq!(f.0.queue().len(), 1, "nothing may be applied yet");
+        // And nothing has been written.
+        assert!(!f.2.knulli_conf().exists());
     }
 
     #[test]
-    fn confirming_empties_the_queue_and_cancelling_does_not() {
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Right);
-        act(&mut a, &mut v, Press::Accept);
-        act(&mut a, &mut v, Press::Back);
-        assert_eq!(a.queue().len(), 1, "cancelling keeps the queue");
-        act(&mut a, &mut v, Press::Accept);
-        act(&mut a, &mut v, Press::Accept);
-        assert!(a.queue().is_empty(), "confirming applies it");
-        assert_eq!(a.overlay, Overlay::None);
+    fn confirming_writes_the_files_and_empties_the_queue() {
+        // End to end: a press of A really does put the block in knulli.conf.
+        let mut f = fixture("apply");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Accept);
+        press(&mut f, Press::Accept);
+        assert!(f.0.queue().is_empty());
+        let conf = std::fs::read_to_string(f.2.knulli_conf()).unwrap();
+        assert!(conf.contains("## moose-patch: hotkeys"), "{conf}");
+        assert_eq!(f.3[0].state(), State::At(1));
+    }
+
+    #[test]
+    fn cancelling_keeps_the_queue_and_writes_nothing() {
+        let mut f = fixture("cancel");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Accept);
+        press(&mut f, Press::Back);
+        assert_eq!(f.0.queue().len(), 1);
+        assert!(!f.2.knulli_conf().exists());
+    }
+
+    #[test]
+    fn applying_writes_a_profile_that_can_rebuild_the_device() {
+        let mut f = fixture("profile");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Accept);
+        press(&mut f, Press::Accept);
+        let saved = std::fs::read_to_string(f.2.profile()).unwrap();
+        assert!(saved.contains("hotkeys = \"ON\""), "{saved}");
     }
 
     #[test]
     fn discarding_puts_every_dial_back() {
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Right);
-        act(&mut a, &mut v, Press::Down);
-        act(&mut a, &mut v, Press::Right);
-        assert_eq!(a.queue().len(), 2);
-        act(&mut a, &mut v, Press::Back);
-        act(&mut a, &mut v, Press::Accept);
-        assert!(a.queue().is_empty());
-        assert!(a.should_quit);
+        let mut f = fixture("discard");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Right);
+        assert_eq!(f.0.queue().len(), 2);
+        press(&mut f, Press::Back);
+        press(&mut f, Press::Accept);
+        assert!(f.0.queue().is_empty());
+        assert!(f.0.should_quit);
     }
 
     #[test]
@@ -316,28 +427,44 @@ mod tests {
         // Turning a dial on one tab and wandering to the other must not
         // quietly drop it — the counter says "not applied", and it has to
         // mean it.
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Right);
-        act(&mut a, &mut v, Press::TabLeft);
-        assert_eq!(a.tab, Tab::Sync);
-        assert_eq!(a.queue().len(), 1);
+        let mut f = fixture("tabs");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::TabLeft);
+        assert_eq!(f.0.tab, Tab::Sync);
+        assert_eq!(f.0.queue().len(), 1);
     }
 
     #[test]
     fn x_opens_the_detail_and_b_closes_it() {
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Detail);
-        assert_eq!(a.overlay, Overlay::Detail);
-        act(&mut a, &mut v, Press::Back);
-        assert_eq!(a.overlay, Overlay::None);
-        assert!(!a.should_quit, "closing a panel is not leaving the app");
+        let mut f = fixture("detail");
+        press(&mut f, Press::Detail);
+        assert_eq!(f.0.overlay, Overlay::Detail);
+        press(&mut f, Press::Back);
+        assert_eq!(f.0.overlay, Overlay::None);
+        assert!(!f.0.should_quit, "closing a panel is not leaving the app");
     }
 
     #[test]
     fn dials_do_nothing_while_a_panel_is_up() {
-        let (mut a, mut v) = app();
-        act(&mut a, &mut v, Press::Detail);
-        act(&mut a, &mut v, Press::Right);
-        assert!(a.queue().is_empty(), "the list is not live behind a panel");
+        let mut f = fixture("behind");
+        press(&mut f, Press::Detail);
+        press(&mut f, Press::Right);
+        assert!(f.0.queue().is_empty(), "the list is not live behind a panel");
+    }
+
+    #[test]
+    fn a_second_visit_opens_at_what_the_first_one_did() {
+        // Apply, then rebuild the menu the way starting the app again would.
+        // The row has to come back already on, or every session proposes the
+        // same change forever.
+        let mut f = fixture("again");
+        press(&mut f, Press::Right);
+        press(&mut f, Press::Accept);
+        press(&mut f, Press::Accept);
+
+        let fresh = rows::patches(&catalogue::all(&f.2));
+        let row = fresh.rows.iter().find(|r| r.id == "hotkeys").unwrap();
+        assert_eq!(row.value(), "ON");
+        assert!(!row.pending());
     }
 }

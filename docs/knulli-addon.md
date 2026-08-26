@@ -121,6 +121,44 @@ shader preset is a text file; if they live beside the binary then recovery is a
 directory to remember rather than a file. Embedded, recovery is one file plus
 one profile.
 
+### Where it got to
+
+Steps 1 to 3 are done and running on the device.
+
+`patch.rs` is the engine: a patch is a list of steps, a step is either a marked
+block in a text config or a file we own, and both can be asked whether they are
+already satisfied. That last part is what lets the menu open at what the device
+*actually is* rather than at what it ought to be — and lets it say **changed**
+when a patch sits at none of its options, which is what a KNULLI update looks
+like from in here.
+
+`catalogue.rs` is ten patches, with their bodies and their files compiled in.
+`profile.rs` is the recovery story: `--save`, `--restore`, `--status`, all of
+which run without a window, because a device that has just been reflashed
+cannot launch a windowed app until some of these patches are on.
+
+Two things the device taught the engine, neither of which was guessed:
+
+`/boot` is mounted **read-only**, and `boot-custom.sh` has to live there because
+it is the only hook that runs before EmulationStation starts. So a write that
+comes back `EROFS` gets one retry with the mount flipped, and the mount is put
+back afterwards whichever way it goes.
+
+A patch that fails must not abandon the ones after it. The first restore on the
+real device hit that read-only mount and lost every setting that came later in
+the file — on a freshly flashed handheld that is the difference between one
+thing to fix and ten.
+
+### Still to do
+
+The three sync actions are drawn but not wired. `romm_desktop::savesync` already
+has `SaveConflict`, `Keep` and `Summary`, so this is plumbing rather than design.
+
+`fast-launch` — the preforked configgen daemon, measured at 1241 ms down to
+7.9 ms — is **not** in the catalogue. It is the only one of these that replaces
+the program that starts games, and shipping it untested alongside nine patches
+that only write config would be trading a real risk for a second saved.
+
 ### Order
 
 1. The crate, the `Patch` trait, the marked-block mechanism, and two real

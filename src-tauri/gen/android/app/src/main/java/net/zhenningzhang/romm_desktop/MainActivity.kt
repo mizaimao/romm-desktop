@@ -56,16 +56,16 @@ class MainActivity : TauriActivity() {
 
     override fun onWebViewCreate(webView: WebView) {
         webViews.add(webView)
+        // Before anything can focus it. See stopFocusHighlight: after the view
+        // has been focused once, the highlight is already installed and turning
+        // this off does not take it away again.
+        stopFocusHighlight(webView)
         // Paint the WebView itself, not just the page inside it.
         //
-        // A WebView starts white and composites the page over it. This page is
-        // dark and mostly opaque, but not entirely — the backdrop canvas and
-        // the glass surfaces are drawn with alpha — so that white came through
-        // everywhere as a flat wash. Measured: with the page painted pure
-        // black, the screen showed #1f1f1f, a uniform twelve per cent of white
-        // over the whole window. That is the tint, and no amount of stylesheet
-        // work could have reached it, which is why three attempts in the CSS
-        // changed nothing.
+        // A WebView starts white and composites the page over it, and this page
+        // is not opaque everywhere — with a backdrop running `html` and `body`
+        // are transparent by design and the canvas provides the colour. Whatever
+        // the canvas does not cover would show that white.
         webView.setBackgroundColor(Color.parseColor("#14161A"))
         stopDarkening(webView)
         // The page's only way to reach Android. See Bridge.
@@ -257,11 +257,9 @@ class MainActivity : TauriActivity() {
      *
      * Setting this in `onWebViewCreate` is too early: wry configures the view
      * after handing it over, and Tauri supports transparent windows, so it puts
-     * the background back to nothing. The result is a surface composited at
-     * roughly 88% over white — which is arithmetic, not a guess: with the page
-     * painted #14161A the device showed #313236, and 20*0.88 + 255*0.12 = 48.2,
-     * which is 0x31. Every "tint" chased through the stylesheet was that white
-     * coming through a page that could not be opaque no matter what it drew.
+     * the background back to nothing. A transparent WebView over a white
+     * default is white anywhere the page does not paint, and with a backdrop
+     * running the page deliberately does not paint.
      */
     private fun paintWebViews() {
         val bg = Color.parseColor("#14161A")
@@ -270,59 +268,83 @@ class MainActivity : TauriActivity() {
             // derived and read-only.
             wv.setBackgroundColor(bg)
             stopDarkening(wv)
+            stopFocusHighlight(wv)
+        }
+    }
+
+    /**
+     * Stop Android painting its own focus highlight over the whole page.
+     *
+     * **This is the tint.** A flat wash over everything, arriving the moment the
+     * stick or the d-pad is touched and never leaving. It is documented at
+     * length in docs/tint.md; the short version:
+     *
+     * Since Oreo, a focused view that has no focus state of its own gets one
+     * drawn for it — `?android:attr/selectableItemBackground`, a ripple, painted
+     * over the view's whole bounds. It appears only once the window leaves touch
+     * mode, and a d-pad or stick press is exactly what does that; a fresh launch
+     * is in touch mode, which is why the first frames look right. Re-entering
+     * touch mode does not undo it, because the drawable is only chosen when
+     * focus changes.
+     *
+     * The colour is arithmetic rather than a guess. `colorControlHighlight` in a
+     * night-mode Material theme is #33FFFFFF — twenty per cent of white — and
+     * `RippleBackground.FOCUSED_ALPHA` is 0.6, so what lands is twelve per cent
+     * of white. Measured on the device: the page painted #000000 came out
+     * #1F1F1F, and 0.12 * 255 = 30.6, which is 0x1F.
+     *
+     * Everything that made this hard to find follows from *where* it is drawn.
+     * It is a View foreground, so it goes on after Chromium has finished: the
+     * page cannot see it, `getComputedStyle` reports the colour the stylesheet
+     * asked for, and no background anywhere in the app — page, webview, window,
+     * theme — is underneath it. It is inside the app's own raster, so
+     * SurfaceFlinger reports the layer as opaque with an identity colour
+     * transform. And it covers the view's bounds, so it lands on the canvas and
+     * the artwork too, at which point the whole screen has a floor: measured
+     * across 1920x1080, one pixel out of 2,073,600 was darker than #1F1F1F.
+     *
+     * The one number that ever argued against "something white on top" was
+     * #FF0000 coming out #EA3D31, which no white overlay produces. That was the
+     * capture, not the app: `screencap` reads back in Display-P3, and twelve per
+     * cent of white over red, converted to P3, is (234, 61, 49) exactly.
+     *
+     * There is nothing in this app for the highlight to be useful to — one
+     * webview, filling the window, and every focus ring the user sees is drawn
+     * by the page.
+     */
+    private fun stopFocusHighlight(wv: WebView) {
+        // API 26. Below it there is no default focus highlight to turn off.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            wv.defaultFocusHighlightEnabled = false
         }
     }
 
     /**
      * Stop the WebView rewriting this page's colours.
      *
-     * The device is in night mode, so the WebView applies its own darkening
+     * The device is in night mode, so the WebView may apply its own darkening
      * pass on top of the page: it decides dark backgrounds are too dark and
      * lifts them toward a Material surface colour. This app is already dark and
      * did not ask.
      *
-     * The effect is a flat wash over everything the stylesheet paints, and it
-     * is invisible from inside the page — `getComputedStyle` still reports
-     * rgb(20, 22, 26) while the device draws #313236. That is why it survived
-     * being chased through the CSS: the CSS was right, and something after it
-     * was changing the answer.
+     * Housekeeping rather than a fix for anything observed. It was set while
+     * chasing the tint, on the theory that the wash was this pass; it was not
+     * (see stopFocusHighlight), and turning it off changed nothing. It stays
+     * because it is the correct setting for a page that themes itself, and
+     * because leaving it at the default invites the question again.
      *
-     * Canvas pixels are exempt from the pass, which is why the backdrop looked
-     * correct and everything around it did not, and why the wash appeared to
-     * arrive when the cursor moved — moving it is what makes the canvas repaint
-     * over the part that was washed.
+     * Through androidx.webkit rather than the platform, which is the part worth
+     * remembering. The platform switches were both set and neither took: the
+     * newer one reads back false as asked, and the older one is a no-op at this
+     * target and still reads AUTO. This WebView is AOSP Chromium 109, baked into
+     * the ROM and not updatable; `WebSettingsCompat` routes to whatever the
+     * installed WebView actually implements.
      *
      * Two APIs because the name changed: `isAlgorithmicDarkeningAllowed` from
      * 33, `forceDark` before it.
      */
     @Suppress("DEPRECATION")
     private fun stopDarkening(wv: WebView) {
-        // Both, not one or the other.
-        //
-        // The newer switch is the documented one and defaults to off for a
-        // target this recent, so on paper neither is needed. The device says
-        // otherwise: the page paints rgb(20, 22, 26) and the screen shows
-        // #313236, which is that colour lifted by twelve per cent of white —
-        // and canvas pixels, which this pass does not touch, stay dark in the
-        // same frame. So the old switch is set too, and what actually took is
-        // logged rather than assumed.
-        // Through the support library, which is the only one this engine hears.
-        //
-        // The platform switches were both set and neither worked: the newer one
-        // reads back false as asked, the older one is a no-op at this target and
-        // still reads AUTO. This WebView is AOSP Chromium 109, baked into the
-        // ROM and not updatable, and it honours the old API — so the call has to
-        // go through androidx.webkit, which routes to whatever the installed
-        // WebView actually implements.
-        //
-        // What it stops: Chromium's auto-dark pass, which rewrites the colours
-        // of pages it judges to be light. It was rewriting this one. Painting
-        // the page #FF0000 came out #EA3D31 and #14161A came out #303238 —
-        // whites pulled down, blacks lifted, which is a contrast transform
-        // rather than anything drawn on top, and is why no background colour
-        // anywhere in the app ever changed it. Images and canvas are exempt
-        // from the pass, which is why the artwork looked right and the page
-        // around it did not.
         try {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                 WebSettingsCompat.setAlgorithmicDarkeningAllowed(wv.settings, false)

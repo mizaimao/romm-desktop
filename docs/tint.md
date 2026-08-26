@@ -1,148 +1,156 @@
 # The tint
 
-A flat wash over the whole app on the AYN Thor, Android 13. Not fixed. This is
-everything measured, and everything ruled out, so the next person starts where
-this stopped rather than where it started.
+A flat wash over the whole app on the AYN Thor, Android 13. **Fixed.** It was
+Android's default focus highlight, drawn over the entire webview from the first
+press of the stick or the d-pad.
 
-Reported by Frank repeatedly from 2026-08-26. Roughly a dozen attempts, none of
-which worked. One of them — a `background` on `html` added *while looking for
-it* — made it materially worse for several rounds before being found by
-bisection and removed.
+Reported by Frank repeatedly from 2026-08-26. Roughly a dozen attempts missed
+it, and this file is kept because *how* they missed it is worth more than the
+one-line fix. Every one of them was aimed inside the app; the wash was painted
+after the app had finished.
 
-## What it looks like
+## The fix
 
-The interface is washed out and grey where it should be near-black. It is
-absent for the first frames of a launch and permanent from the first press of
-the d-pad or stick. Frank consistently describes it as appearing "the moment I
-move the left stick or dpad".
+`MainActivity.onWebViewCreate`, one line:
 
-## What it measurably is
-
-**A contrast transform, not something drawn on top.** This is the single most
-important fact and it took far too long to establish. Painting the page a known
-colour and reading the device's framebuffer:
-
-| page painted | device shows |
-|---|---|
-| `#FF0000` | `#EA3D31` |
-| `#14161A` | `#303238` |
-| `#000000` | `#1F1F1F` |
-
-Whites are pulled down and blacks are lifted. No overlay of any single colour at
-any single alpha produces that pair of results — `#FF0000 → #EA3D31` and
-`#14161A → #303238` cannot both come from mixing with one colour. Every attempt
-that assumed "something white is on top" was therefore doomed, and most of the
-attempts below assumed exactly that.
-
-**Canvas pixels are exempt.** The WebGL backdrop measured `#030306` in the same
-frame where CSS-painted regions measured `#313236`. Whatever performs the
-transform does not touch canvas output. This is also why the app looks correct
-until the canvas stops covering the viewport, and why cover art looks right
-while the page around it does not.
-
-**It is not compositing.** `dumpsys SurfaceFlinger` for the app's layer:
-
-```
-blend=NONE (1) alpha=1.000000 backgroundBlurRadius=0 composition type=DEVICE (2)
-isOpaque=true colorTransform=[identity] dimming enabled=true
+```kotlin
+webView.defaultFocusHighlightEnabled = false
 ```
 
-Alpha is 1, blend is NONE, the colour transform is the identity matrix. The wash
-is already in the raster the app hands over.
+Set at creation, before anything can focus the view. Turning it off later does
+not help: the drawable is chosen when focus changes, and once it is installed it
+stays until focus changes again.
 
-**The page does not know.** `getComputedStyle(document.documentElement)
-.backgroundColor` reports `rgb(20, 22, 26)` throughout, while the device draws
-`#303238`. Nothing observable from inside the page differs between the washed
-and unwashed states.
+## What it was
 
-## The environment
+Since Oreo, a focused view that has no focus state of its own gets one drawn for
+it. `View.switchDefaultFocusHighlight` fetches `?android:attr/selectableItemBackground`
+— a ripple — and paints it over the view's whole bounds.
 
-```
-device            AYN Thor, Android 13 (SDK 33), arm64-v8a
-WebView           com.android.webview 109.0.5414.123   (AOSP, not updatable)
-                  com.google.android.webview NOT installed
-                  com.android.chrome 151 installed but not offered as provider
-viewport          833 x 469 CSS px, devicePixelRatio 2.30625
-app targetSdk     36
-night mode        on
-```
+Three conditions, all met here:
 
-`color-mix()` is unsupported at Chromium 109, which is a separate and real
-problem this app works around with an `@supports` block. It is *not* the tint —
-deleting that block from the live stylesheet on the device changed nothing.
+* **The view is focused.** The webview fills the window and is the only focusable
+  thing in it.
+* **It has no focus state of its own.** Its background is `setBackgroundColor(#14161A)`,
+  a `ColorDrawable`, which is not stateful. A null background would have done the
+  same.
+* **The window is out of touch mode.** This is the trigger Frank kept describing
+  and nobody followed. A launch starts in touch mode, so the first frames are
+  clean; the first d-pad or stick press leaves touch mode and the highlight is
+  installed. Touching the screen afterwards does not undo it, because nothing
+  re-runs `switchDefaultFocusHighlight` unless focus changes.
 
-## Ruled out
+The colour is arithmetic, not a coincidence. `colorControlHighlight` in a
+night-mode Material theme is `#33FFFFFF` — twenty per cent of white — and
+`RippleBackground.FOCUSED_ALPHA` is `0.6f`. Twenty per cent of white at
+six-tenths is **twelve per cent of white**, which is what was measured every
+time.
 
-Each was built, installed and measured on the device. None changed the numbers
-in the table above.
+## Why every fix aimed at the app missed
 
-* The stylesheet. The page painted pure black with `!important` still washes.
-* The `@supports not (color-mix(...))` fallback block, deleted live.
-* The backdrop canvas — hidden, shown, removed from the DOM, and its WebGL
-  context switched to `alpha: false`.
-* The toast, and its missing `color-mix` background.
+Everything follows from *where* it is drawn: a View foreground, after Chromium
+has handed over its raster and before the layer reaches the compositor.
+
+* **The page cannot see it.** `getComputedStyle` reports the colour the
+  stylesheet asked for, because the stylesheet got what it asked for.
+* **Nothing in the app is underneath it.** Page background, webview background,
+  window background, theme, splash — all of them are below Chromium's output,
+  and the highlight is above it. A full-screen opaque `<div>` at
+  `z-index: 2147483647` was still washed.
+* **SurfaceFlinger is honest.** `alpha=1`, `blend=NONE`, `colorTransform=[identity]`.
+  The wash really is in the raster the app hands over; it is just that the app
+  puts it there in `View.draw`, not in Blink.
+* **`forceDark` and algorithmic darkening were never involved.** Both were set,
+  through both the platform and `androidx.webkit`, and neither changed the
+  numbers — because there was nothing there to turn off.
+
+## The measurement that settles it
+
+Run on the device with the app focused after a d-pad press. A full-screen div is
+painted a known colour; `Page.captureScreenshot` over the DevTools protocol reads
+Chromium's own raster, and `adb exec-out screencap` reads what the device
+composites.
+
+| page paints | Chromium raster | device, before | device, after |
+|---|---|---|---|
+| `#000000` | `#000000` | `#1F1F1F` | `#000000` |
+| `#14161A` | `#14161A` | `#313236` | `#14161A` |
+| `#FF0000` | `#FF0000` | `#EA3D31` | `#EA3323` |
+
+Chromium's raster was always correct. That single comparison — the same frame,
+read at two points in the pipeline — locates the wash between Blink and the
+compositor, which is the Android view layer and nothing else. It should have been
+the second measurement taken.
+
+Whole-frame check, no div: before, exactly one pixel in 2,073,600 was darker than
+`#1F1F1F`. The screen had a floor. After, the darkest pixel is `#000000` and 1.34
+million pixels sit below the old floor.
+
+## The number that sent it wrong, and why
+
+The doc that preceded this one concluded, in bold, that the wash was "a contrast
+transform, not something drawn on top", and ruled out every overlay theory on the
+strength of one measurement: `#FF0000` came out `#EA3D31`, which no white overlay
+produces. That was correct arithmetic about the wrong pipeline.
+
+`adb exec-out screencap` reads back in **Display-P3**. Convert twelve per cent of
+white over `#FF0000` from sRGB into P3 and you get `(234, 61, 49)` — `#EA3D31`,
+exact on all three channels. The overlay theory fitted perfectly the whole time;
+the capture was wide-gamut and nobody checked.
+
+The residual `#EA3323` in the table above is the same effect with the wash gone:
+sRGB red expressed in P3 is `(234, 51, 35)`. The panel shows the right red. Any
+future measurement of a saturated colour on this device has to account for this;
+near-neutral darks are unaffected, which is why `#14161A` reads back as itself.
+
+The "canvas pixels are exempt" claim was wrong too, and for a duller reason —
+whatever region was sampled for it, the highlight covers the view's bounds and
+lands on canvas and artwork alike. The floor measurement above is the check that
+should have been run instead.
+
+## What the earlier attempts were worth
+
+Each was built, installed and measured, and none moved the numbers. They are
+listed because the list is now evidence, not a lament: nothing reachable from
+inside the app could have worked.
+
+* The stylesheet, including the page painted pure black with `!important`.
+* The `@supports not (color-mix(...))` fallback block, deleted live on the
+  device. `color-mix()` really is unsupported at Chromium 109 and the app really
+  does need that block — it is a separate, real problem, and not this one.
+* The backdrop canvas: hidden, shown, removed from the DOM, and its WebGL context
+  switched to `alpha: false`.
 * `backgroundColor` on the window in `tauri.conf.json`.
 * The Android theme's `windowBackground`, `colorBackground` and
-  `windowSplashScreenBackground`, set to the app's colour in both `values/` and
-  `values-night/`.
-* `WebView.setBackgroundColor`, applied in `onWebViewCreate` and again on every
-  focus change in case wry overwrites it.
-* `WebSettings.forceDark = FORCE_DARK_OFF`. Reads back as `AUTO` — it is a no-op
-  at targetSdk 33+.
-* `WebSettings.isAlgorithmicDarkeningAllowed = false`. Reads back `false`.
-* Both of the above again through `androidx.webkit`'s `WebSettingsCompat`, which
-  routes to whatever the installed WebView implements.
-  `WebViewFeature.isFeatureSupported` returns true for both. No effect, before
-  or after a page reload.
-* `<meta name="color-scheme" content="dark">`, in addition to the existing
-  `color-scheme: dark` in CSS.
-* Android accessibility filters. All off:
-  `accessibility_display_daltonizer_enabled`, `reduce_bright_colors_activated`,
-  `high_text_contrast_enabled`, `accessibility_display_inversion_enabled` are
-  null or 0.
+  `windowSplashScreenBackground`, in both `values/` and `values-night/`. These
+  stay — they fix a genuinely pale *first frame* over the launcher wallpaper,
+  which is a different bug that was solved along the way.
+* `WebView.setBackgroundColor`, in `onWebViewCreate` and again on focus change.
+  This stays too: with a backdrop running the page is transparent by design, and
+  a transparent webview defaults to white.
+* `WebSettings.forceDark`, `isAlgorithmicDarkeningAllowed`, both again through
+  `androidx.webkit`. `stopDarkening` stays as housekeeping, not as a fix.
+* `<meta name="color-scheme" content="dark">`. Stays for the same reason.
+* Android accessibility filters. All off, and screencap would not have shown them
+  anyway.
 
-## What was found by bisection, and mattered
+One attempt made things visibly worse before being found by bisection: an
+`html.mobile.backdrop-on { background: var(--bg) }` added while looking for the
+tint. It was removed, correctly, but the reasoning recorded at the time was
+wrong — it was not a contributor to the wash, it was hiding the shader behind an
+opaque page. The comment in `style.css` says so now.
 
-Removing the `mobile` classes from `html` and `body` at runtime dropped the
-dominant colour from `#303238` to `#232327`. Deleting one rule did the same
-alone:
+## What to do with the next one of these
 
-```css
-html.mobile.backdrop-on { background: var(--bg); }
-```
-
-That rule had been added a few rounds earlier while chasing the tint, on the
-theory that a transparent page over a light window was the cause. It was the
-opposite: with a backdrop running the page is *meant* to be transparent and the
-canvas provides the colour, and painting `html` gave the transform a large CSS
-background to act on. It is removed. The tint is smaller without it and still
-present.
-
-**Bisection should have been the first move, not the tenth.** It located a real
-contributor in two steps after many rounds of hypothesis-led guessing found
-nothing.
-
-## Where to look next
-
-1. **Establish whether it is the panel or the capture.** Everything here is
-   `adb exec-out screencap`. Frank reports seeing it, but no test has separated
-   "the app renders this" from "screencap reports this". Photograph the screen,
-   or display a known colour full-screen from a non-WebView app and capture that
-   for comparison.
-2. **A trivial page in the same WebView.** Load `data:text/html,<body
-   style=background:#000>` and measure. Washed means the engine or the ROM and
-   nothing in this app can reach it; clean means it is this page and the search
-   has been in the wrong place.
-3. **HDR and colour space.** The panel is HDR (`mMaxLuminance 420`), and
-   SurfaceFlinger reports `dimming enabled=true`. sRGB `#FF0000` expressed in
-   Display-P3 is roughly `(234, 51, 35)`, and the measurement is `(234, 61, 49)`
-   — close enough to be worth ruling in or out properly. Check the layer's
-   dataspace and whether the WebView surface is wide-gamut.
-4. **A different WebView.** `com.android.chrome` 151 is installed. If it can be
-   made the provider — Developer options, WebView implementation — that
-   distinguishes engine from ROM in one step.
-
-## What not to repeat
-
-Do not add a background to `html` or `body` on Android to "cover" it. That was
-tried, it is what made the tint worse, and the removal is documented above.
+* **Bisect early.** It found the one real contributor in two steps after ten
+  rounds of hypothesis-led guessing found nothing.
+* **Believe the trigger.** "The moment I move the left stick or dpad" was in
+  every report from the first one. It is a touch-mode transition, it is a
+  platform-level fact, and no explanation that could not account for it should
+  have been pursued as far as any of these were.
+* **Measure at two points in the pipeline before theorising about one.** Blink's
+  raster versus the composited frame is one command each and answers "who is
+  doing this" outright.
+* **Know your capture's colour space.** One un-checked assumption about
+  `screencap` produced a confident, bolded, wrong conclusion that steered several
+  rounds of work.

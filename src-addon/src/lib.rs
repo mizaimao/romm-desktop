@@ -4,6 +4,9 @@
 //! why its tests run anywhere. `rows` is the two lists. `ui` needs a real
 //! context and is only the drawing.
 
+pub mod catalogue;
 pub mod model;
+pub mod patch;
+pub mod profile;
 pub mod rows;
 pub mod ui;

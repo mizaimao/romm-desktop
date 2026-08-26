@@ -38,6 +38,9 @@ FLIP_PASSWORD="${FLIP_PASSWORD:-linux}"
 # Where it lands on the device. Under /userdata because that is the persistent
 # partition and the only one that is not read-only.
 REMOTE="/userdata/system/romm"
+# The addon keeps its own folder: it outlives the front end, and its profile
+# is the thing you carry to a freshly flashed device.
+MOOSE="/userdata/system/moose-patch"
 
 # The target triple, with the glibc the device actually has.
 #
@@ -162,7 +165,7 @@ cmd_build() {
   [ -x "$ZIG_DIR/zig" ] || { echo "run 'knulli.sh toolchain' first" >&2; exit 1; }
   [ -f "$KIT/sysroot/usr/lib/libSDL2.so" ] || { echo "run 'knulli.sh sysroot' first" >&2; exit 1; }
 
-  say "building romm-sdl for $TARGET (glibc $GLIBC)"
+  say "building romm-sdl and moose-patch for $TARGET (glibc $GLIBC)"
   # `--allow-shlib-undefined`: libSDL2.so names two dozen libraries of its own
   # and every one of them is on the device. Copying all of them here to satisfy
   # a link that does not need them is 1.6 GB for nothing.
@@ -189,13 +192,16 @@ cmd_build() {
   RUSTFLAGS="-C link-arg=-Wl,--allow-shlib-undefined" \
     "${home_args[@]}" cargo zigbuild \
       --release \
-      -p romm-sdl \
+      -p romm-sdl -p moose-patch \
       --features knulli \
       --target "$TARGET.$GLIBC"
 
-  local out="$HERE/target/$TARGET/release/romm-sdl"
-  file "$out" || true
-  say "built $(du -h "$out" | cut -f1) at $out"
+  for out in "$HERE/target/$TARGET/release/romm-sdl" \
+             "$HERE/target/$TARGET/release/moose-patch"; do
+    [ -f "$out" ] || continue
+    file "$out" || true
+    say "built $(du -h "$out" | cut -f1) at $out"
+  done
 }
 
 cmd_install() {
@@ -217,23 +223,25 @@ cmd_install() {
   scp_to "$HERE/scripts/romm-launch.sh" "$REMOTE/romm-launch.sh"
   ssh_do "chmod +x $REMOTE/romm-sdl $REMOTE/romm-launch.sh"
 
+  # The addon. Everything it needs to patch a device is compiled into it, so
+  # this is one binary and one launcher — no assets to keep beside it.
+  local addon="$HERE/target/$TARGET/release/moose-patch"
+  if [ -f "$addon" ]; then
+    say "sending moose-patch to $FLIP:$MOOSE"
+    ssh_do "mkdir -p $MOOSE"
+    scp_to "$addon" "$MOOSE/moose-patch"
+    scp_to "$HERE/scripts/moose-launch.sh" "$MOOSE/moose-launch.sh"
+    ssh_do "chmod +x $MOOSE/moose-patch $MOOSE/moose-launch.sh"
+    ssh_do "cp $MOOSE/moose-launch.sh /userdata/roms/ports/moose-patch.sh && chmod +x /userdata/roms/ports/moose-patch.sh"
+  fi
+
   # A Ports entry, so it starts the way everything else on the device does.
   ssh_do "cp $REMOTE/romm-launch.sh /userdata/roms/ports/RomM.sh && chmod +x /userdata/roms/ports/RomM.sh"
 
-  # L2+R2, through triggerhappy.
-  #
-  # S50triggerhappy prefers /userdata/system/configs/multimedia_keys.conf over
-  # anything in /etc — which is the point, because /etc is on the tmpfs overlay
-  # and would be back to stock at the next boot. Seed it from the shipped file
-  # so the volume, power and lid keys keep working, then append ours.
-  say "binding L2+R2"
-  ssh_do "test -f /userdata/system/configs/multimedia_keys.conf || \
-          cp /etc/triggerhappy/triggers.d/multimedia_keys.conf \
-             /userdata/system/configs/multimedia_keys.conf"
-  ssh_do "grep -q 'romm-launch.sh --hotkey' /userdata/system/configs/multimedia_keys.conf || \
-          printf '\nBTN_TR2+BTN_TL2 1  %s/romm-launch.sh --hotkey\nBTN_TL2+BTN_TR2 1  %s/romm-launch.sh --hotkey\n' \
-            '$REMOTE' '$REMOTE' >> /userdata/system/configs/multimedia_keys.conf"
-  ssh_do "/etc/init.d/S50triggerhappy restart" >/dev/null 2>&1 || true
+  # L2+R2 is not bound here. moose-patch's own "hotkey-app" patch owns that
+  # rule, so binding it from the installer as well would put two copies in the
+  # file and leave the app unable to say honestly whether it is on. The Ports
+  # entry above is how you reach it on a device that has never run it.
 
   # Leave the device showing something.
   #

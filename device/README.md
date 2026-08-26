@@ -1,6 +1,17 @@
 # Device configuration for the Miyoo Flip
 
-Files here are applied to the handheld, not built into anything.
+Files here are applied to the handheld, not built into anything — but most of
+them are now **also compiled into `moose-patch`**, which applies and reverts
+them itself. See `docs/knulli-addon.md`.
+
+Read this file for *why* each one goes where it goes; the app is where the
+doing lives. Anything applied by hand from here uses `## RomM:` markers, and
+the app uses `## moose-patch:` — two sets of the same settings in one config
+is last-wins and unreadable, so pick one.
+
+    moose-patch --status     what every patch is currently at
+    moose-patch --restore    put a device back to the saved profile
+    moose-patch --save       write down what it is at now
 
 ## `flip-hotkeys.conf`
 
