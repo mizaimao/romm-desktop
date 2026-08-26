@@ -120,6 +120,15 @@ export function wire(box) {
   const raStatus = box.querySelector(".set-ra-status");
   invoke("status")
     .then((s) => {
+      // On Android the backend cannot answer this: it looks for a folder and
+      // RetroArch is a package, so `s.retroarch` is always false there. The row
+      // above already says installed or not, from the package manager — this
+      // line would sit under it contradicting it and telling the user to set a
+      // path that does not exist. Left blank instead.
+      if (window.RommAndroid?.retroArchPackage) {
+        raStatus.textContent = "";
+        return;
+      }
       if (s?.retroarch) raInput.placeholder = s.retroarch;
       raStatus.textContent = s?.retroarch
         ? `Currently using ${s.retroarch} (${s.cores_installed} cores)`
