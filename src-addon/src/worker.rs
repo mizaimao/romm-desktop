@@ -286,7 +286,7 @@ pub fn pull_all(cfg: &Config, ra_root: &Path, app_dir: &Path, library_root: &Pat
                     .rom_with_files(save.rom_id)
                     .await
                     .ok()
-                    .map(|r| r.platform_slug)
+                    .and_then(|r| r.platform_fs_slug)
                     .filter(|s| !s.is_empty());
                 let dest = romm_desktop::savesync::download_path(
                     &ra_root,

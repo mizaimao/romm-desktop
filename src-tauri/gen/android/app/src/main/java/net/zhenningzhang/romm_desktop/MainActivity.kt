@@ -52,6 +52,22 @@ class MainActivity : TauriActivity() {
      */
     private val webViews = mutableListOf<WebView>()
 
+    /**
+     * The game handed to another app, and when.
+     *
+     * There is no other way to know how long a game was played. RetroArch is a
+     * separate app started by an Intent; `startActivity` returns as soon as the
+     * request is accepted and nothing reports back when the emulator stops. What
+     * *is* observable is this activity coming back to the front, which is what
+     * happens when the game ends — so the two ends of the measurement are the
+     * Intent going out and the window regaining focus.
+     *
+     * `elapsedRealtime` rather than the wall clock, which a user can change and
+     * which would then produce a negative play time.
+     */
+    private var playingRomId = -1L
+    private var playingSince = 0L
+
     /** Launcher for the folder picker, and where to send the answer back. */
     private lateinit var folderPicker: ActivityResultLauncher<Uri?>
     private var folderPickerTarget: String? = null
@@ -250,6 +266,8 @@ class MainActivity : TauriActivity() {
                 // Nothing is awaited: the activity is known to exist by now, and
                 // a game takes seconds to appear, so there is nothing useful to
                 // report back that the screen will not say first.
+                playingRomId = plan.optLong("id", -1L)
+                playingSince = android.os.SystemClock.elapsedRealtime()
                 runOnUiThread { startActivity(intent) }
                 return ""
             }
@@ -369,7 +387,27 @@ class MainActivity : TauriActivity() {
         if (hasFocus) {
             goFullScreen()
             paintWebViews()
+            reportGameFinished()
         }
+    }
+
+    /**
+     * Tell the page the game is over, and how long it lasted.
+     *
+     * Only once per launch: focus comes back for a dialog, the recents
+     * switcher and the folder picker too, and each of those would otherwise be
+     * reported as a finished game. Clearing the id first is what makes it once.
+     *
+     * The page does the rest — recording the play and pushing saves — because
+     * that is Rust's work and this side cannot reach it.
+     */
+    private fun reportGameFinished() {
+        if (playingRomId < 0) return
+        val id = playingRomId
+        val seconds = (android.os.SystemClock.elapsedRealtime() - playingSince) / 1000
+        playingRomId = -1L
+        val js = "window.__gameFinished && window.__gameFinished($id, $seconds)"
+        topWebView()?.evaluateJavascript(js, null)
     }
 
     /**

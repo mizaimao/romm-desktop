@@ -158,6 +158,7 @@ fn main() -> Result<()> {
         Some("--sync") => return sync_cli(true),
         Some("--pull-all") => return pull_all_cli(),
         Some("--refresh") => return refresh_cli(),
+        Some("--saves") => return saves_cli(),
         Some("--save") => {
             profile::save(&paths, &patches)?;
             println!("wrote {}", paths.profile().display());
@@ -181,6 +182,32 @@ fn main() -> Result<()> {
 /// frame — so this exercises the real path over ssh, on the device, without a
 /// window. Every sync bug so far has been found by looking rather than by
 /// reasoning, and this is the cheapest way to look.
+/// Every save on the card and what it resolved to.
+///
+/// The plan only says how many were unmatched. When one is, the question is
+/// always *which* and *why*, and this is the difference between knowing and
+/// guessing at it.
+fn saves_cli() -> Result<()> {
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let ra_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
+    let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let Some(cache_path) = worker::find_cache(&worker::cache_search_path(&app_dir)) else {
+        anyhow::bail!("no library index — run --refresh first");
+    };
+    let cache = romm_desktop::cache::Cache::open(&cache_path)?;
+    let map = romm_desktop::coremap::CoreMap::load_or_embedded(
+        &app_dir.join("data/esde-core-map.json"),
+    );
+    for c in romm_desktop::savesync::scan(&cache, &map, &ra_root)? {
+        let name = c.path.file_name().unwrap_or_default().to_string_lossy();
+        println!(
+            "{name}\n    folder={} core={:?} slot={} canonical={} -> {:?}",
+            c.core_dir, c.core, c.slot, c.canonical, c.resolution
+        );
+    }
+    Ok(())
+}
+
 /// Rebuild the game list. Everything else depends on it being current.
 fn refresh_cli() -> Result<()> {
     let cfg = romm_desktop::config::Config::load().unwrap_or_default();

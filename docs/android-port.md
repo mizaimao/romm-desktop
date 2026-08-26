@@ -156,15 +156,28 @@ Verified on the Thor: the merged file is the same 3,365 lines as the user's,
 directories in place, RetroArch logging `[ENV] Config file: …/launch.cfg`, and
 Select+Y opening its menu.
 
-**What is still not done.** No shader actually applies, because RetroArch on
-Android ships no shader pack — its `files/` holds a config and nothing else. The
-config lines are generated correctly and the launch says so in a note; fetching
-the pack into RetroArch's own directory is a decision, not an oversight. There
-is also no way back: `startActivity` returns when the request is accepted, not
-when the game ends, so no save sync runs and no play time is recorded. And
-standalone emulators are not started at all — this app's manifest can only see
-the two RetroArch packages, so `getPackageInfo` answers "not installed" for
-every other one whether it is or not.
+**Save sync and play time work too, in two halves.** There is no single moment
+to hang them off — `startActivity` returns when the request is accepted, not when
+the game ends — so the pull is `android_sync_before` at launch and the push is
+`android_after_play` on the way back. What closes the loop is that this activity
+regains focus when RetroArch stops: `reportGameFinished` measures the gap with
+`elapsedRealtime` and calls `window.__gameFinished(id, seconds)`, once per launch
+so a dialog or the recents switcher is not mistaken for a finished game.
+
+**Settings that could not work on Android are gone from it.** Fit to the game,
+Title bar and Open games on all fed `window_lines`, which the Android launch does
+not generate — RetroArch takes the whole screen from an Intent, and there is no
+window to shape and no second display to choose. The light gun column went for a
+plainer reason: its binds are mouse buttons, and a handheld has no mouse. The App
+icon row went because the launcher icon is baked into the APK.
+
+**What is still not done.** No shader applies unless RetroArch has a shader pack;
+`shaders_dir()` reads its `video_shader_dir`, so wherever the user keeps it is
+found, but a device without one gets a note rather than a shader. Standalone
+emulators are not started at all — this app's manifest can only see the two
+RetroArch packages, so `getPackageInfo` answers "not installed" for every other
+one whether it is or not. And core options are written but untested: no core on
+this device has any set.
 
 `retroarch.rs` is 1,950 lines and its job is to build a `Command`, spawn
 RetroArch, and write the config that shapes the session. On Android none of

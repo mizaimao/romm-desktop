@@ -205,7 +205,11 @@ fn system_folder(map: &CoreMap, folder: &str) -> (Option<String>, Vec<String>) {
         .map(|(_, core)| (*core).to_string())
         .or_else(|| map.default_core(&slug).map(str::to_string));
 
-    (core, vec![slug])
+    // Every platform this folder collects, not just the one it is named
+    // after: KNULLI keeps Super Famicom in `snes`, and a save searched for
+    // under `snes` alone comes back unmatched.
+    let platforms = device.platforms_in_folder(&slug);
+    (core, platforms)
 }
 
 fn resolve(cache: &Cache, platforms: &[String], rom_base: &str) -> Result<Resolution> {

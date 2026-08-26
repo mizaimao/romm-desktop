@@ -169,6 +169,18 @@ pub trait Platform: Sync {
         romm_slug.to_string()
     }
 
+    /// The inverse: every RomM platform whose saves land in one folder.
+    ///
+    /// Needed because [`Platform::save_folder`] is many-to-one, and a scanner
+    /// that only looks up the folder's own name cannot find a game filed under
+    /// any of the others. A Super Famicom save sits in `saves/snes/` on this
+    /// handheld and is `sfam` on the server; searching only `snes` for it
+    /// finds nothing, which reads as the save being unmatched rather than as
+    /// the search being too narrow.
+    fn platforms_in_folder(&self, folder: &str) -> Vec<String> {
+        vec![folder.to_string()]
+    }
+
     /// Cores this device should use in preference to the shipped default.
     ///
     /// RomM platform slug -> libretro core stem. The shipped core map is ES-DE's
@@ -355,15 +367,21 @@ mod tests {
         const ON_THE_DEVICE: &[&str] = &[
             "snes", "snes-msu1", "nes", "fds", "fbneo", "mame", "neogeo", "ngp", "ngpc",
             "megadrive", "gba", "gb", "gbc", "psx", "n64", "dreamcast", "gamegear",
+            "wswan", "wswanc", "gamecube", "mastersystem", "pcengine", "psp", "saturn",
+            "3do", "nds",
         ];
         let device = &knulli::Knulli;
+        // Every one of these is a platform_fs_slug this server really reports.
         for slug in [
-            "sfam",
+            "sfc",
             "famicom",
             "arcade",
+            "neogeoaes",
+            "dc",
             "neo-geo-pocket",
-            "neo-geo-pocket-color",
-            "genesis-slash-megadrive",
+            "wonderswan",
+            "wonderswancolor",
+            "ngc",
         ] {
             let folder = device.save_folder(slug);
             assert!(
@@ -377,9 +395,33 @@ mod tests {
     }
 
     #[test]
+    fn what_a_folder_collects_is_what_gets_searched_in_it() {
+        // The two halves have to agree or a save is written somewhere the
+        // reader will not look for it. `Dear Boys (Japan)` is `sfam` on the
+        // server, was filed into `saves/snes/` correctly, and then came back
+        // unmatched because only `snes` was searched.
+        let device = &knulli::Knulli;
+        for slug in [
+            "sfc", "famicom", "arcade", "neogeoaes", "dc", "neo-geo-pocket",
+            "wonderswan", "wonderswancolor", "ngc", "snes", "gba", "megadrive",
+        ] {
+            let folder = device.save_folder(slug);
+            assert!(
+                device.platforms_in_folder(&folder).iter().any(|p| p == slug),
+                "{slug} is written to {folder} but is not searched for there"
+            );
+        }
+    }
+
+    #[test]
+    fn other_devices_look_only_where_they_wrote() {
+        assert_eq!(macos::MacOs.platforms_in_folder("snes"), vec!["snes".to_string()]);
+    }
+
+    #[test]
     fn other_devices_keep_the_servers_slug() {
         // Only a device that renames systems should rename them.
-        assert_eq!(macos::MacOs.save_folder("sfam"), "sfam");
+        assert_eq!(macos::MacOs.save_folder("sfc"), "sfc");
         assert_eq!(android::Android.save_folder("arcade"), "arcade");
     }
 

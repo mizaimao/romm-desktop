@@ -80,8 +80,16 @@ impl Paths {
         self.at(&format!("userdata/shaders/configs/{name}/rendering-defaults.yml"))
     }
 
+    /// The blank logo, **on /boot**.
+    ///
+    /// Not in /userdata, which is where it started and where it did not work:
+    /// the hook that installs it runs as `S00bootcustom`, and `S02resize` is
+    /// what mounts /userdata. At S00 there is no /userdata to read from, so
+    /// the hook found nothing and EmulationStation came back with its own
+    /// logo after every reboot. /boot is already mounted — the init script
+    /// reads the hook itself from there — and has 2.1 GB spare.
     pub fn blank_logo(&self) -> PathBuf {
-        self.at("userdata/system/moose-patch/blank-logo.png")
+        self.at("boot/moose-blank-logo.png")
     }
 
     /// The image EmulationStation draws while it loads. On the squashfs, so
@@ -407,6 +415,23 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_boot_hook_only_reads_from_partitions_it_can_see() {
+        // S00bootcustom runs before S02resize, which is what mounts
+        // /userdata. Anything the hook needs at boot must be somewhere already
+        // mounted — /boot, which is where it reads itself from. Keeping the
+        // blank logo in /userdata meant the hook silently did nothing and the
+        // KNULLI logo was back after every reboot.
+        let paths = Paths::new("/");
+        for needed_at_boot in [paths.blank_logo(), paths.boot_custom()] {
+            assert!(
+                needed_at_boot.starts_with("/boot"),
+                "{} is read by the S00 hook and must be on /boot",
+                needed_at_boot.display()
+            );
+        }
     }
 
     #[test]

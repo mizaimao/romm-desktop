@@ -616,7 +616,12 @@ async fn download_one(
             .rom_with_files(rom_id)
             .await
             .ok()
-            .map(|rom| rom.platform_slug)
+            // `platform_fs_slug`, not `platform_slug`: the first is the
+            // library's folder name and what the cache keys on; the second is
+            // RomM's catalogue slug. They differ — Super Famicom is `sfc` and
+            // `sfam` — and matching against the wrong one is a save that
+            // resolves to no game at all.
+            .and_then(|rom| rom.platform_fs_slug)
             .filter(|s| !s.is_empty()),
     };
     let path = download_path(root, file_name, destination(emulator, platform.as_deref()));

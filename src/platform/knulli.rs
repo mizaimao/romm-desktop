@@ -88,23 +88,52 @@ impl Platform for Knulli {
         ]
     }
 
-    /// Where KNULLI keeps saves for platforms it spells differently, or does
-    /// not separate at all.
+    /// Where KNULLI keeps saves for platforms the server spells differently,
+    /// or does not separate at all.
     ///
-    /// Every one of these was a save that landed in a folder with no system
-    /// behind it. `sfam` is the clearest: RomM keeps Super Famicom apart from
-    /// SNES, and this device has one `snes` folder and nothing else.
+    /// Keyed on RomM's **`platform_fs_slug`** — its library folder name, and
+    /// what the cache keys on — not `platform_slug`, its catalogue slug. Super
+    /// Famicom is `sfc` in one and `sfam` in the other, and picking the wrong
+    /// one files a save under a platform no game is indexed against.
+    ///
+    /// Every left-hand name below is a slug this server actually reports;
+    /// every right-hand one is a directory this device actually has.
     fn save_folder(&self, romm_slug: &str) -> String {
         match romm_slug {
-            "sfam" => "snes",
+            "sfc" => "snes",
             "famicom" => "nes",
             "arcade" => "fbneo",
+            "neogeoaes" => "neogeo",
+            "dc" => "dreamcast",
             "neo-geo-pocket" => "ngp",
             "neo-geo-pocket-color" => "ngpc",
-            "genesis-slash-megadrive" => "megadrive",
+            "wonderswan" => "wswan",
+            "wonderswancolor" => "wswanc",
+            "ngc" => "gamecube",
             other => other,
         }
         .to_string()
+    }
+
+    /// The inverse, kept in step with it by a test: anything a folder collects
+    /// has to be searched when a save is read back out of it.
+    fn platforms_in_folder(&self, folder: &str) -> Vec<String> {
+        let extra: &[&str] = match folder {
+            "snes" => &["sfc"],
+            "nes" => &["famicom"],
+            "fbneo" => &["arcade"],
+            "neogeo" => &["neogeoaes"],
+            "dreamcast" => &["dc"],
+            "ngp" => &["neo-geo-pocket"],
+            "ngpc" => &["neo-geo-pocket-color"],
+            "wswan" => &["wonderswan"],
+            "wswanc" => &["wonderswancolor"],
+            "gamecube" => &["ngc"],
+            _ => &[],
+        };
+        std::iter::once(folder.to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect()
     }
 
     /// What this hardware should actually run, where it differs from the

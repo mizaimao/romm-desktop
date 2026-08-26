@@ -1,10 +1,10 @@
 // The Emulators tab: which emulator runs each console, which shader it gets,
 // which screen the game opens on, and the shape of its window.
-import { invoke } from "../state.js";
+import { invoke, MOBILE } from "../state.js";
 import { toast, escapeHtml } from "../util.js";
 import { wireConfigFields } from "./fields.js";
 
-export const html = `      <h4>Game window</h4>
+export const html = `${MOBILE ? "" : `      <h4>Game window</h4>
       <div class="srow">
         <label>Fit to the game</label>
         <div class="ctl"><button data-field="fit_window">…</button></div>
@@ -24,7 +24,13 @@ export const html = `      <h4>Game window</h4>
       </div>
       <p class="hint sys-screen-hint" hidden>Automatic prefers an external
         screen: plugging a monitor in is a deliberate act, rarely done wanting
-        the game on the laptop panel.</p>
+        the game on the laptop panel.</p>`}
+      <!-- Nothing above this line exists on Android. RetroArch is started by an
+           Intent and takes the whole screen: there is no window to shape, no
+           title bar to remove, and no second display to choose. All three fed
+           window_lines, which the Android launch does not generate at all, so
+           they were three controls that wrote to config.toml and changed
+           nothing. -->
       <div class="sys-motion"></div>
 
       <h4>Arcade rapid fire</h4>
@@ -108,7 +114,7 @@ export async function wire(box) {
     <table class="systbl">
       <thead>
         <tr><th>System</th><th>Games</th><th>Display</th><th>Emulator</th><th>Shader</th>
-            <th title="Aim with the mouse in light gun games">Light gun</th></tr>
+            ${MOBILE ? "" : '<th title="Aim with the mouse in light gun games">Light gun</th>'}</tr>
       </thead>
       <tbody>${rows.map(systemRow).join("")}</tbody>
     </table>`;
@@ -249,6 +255,11 @@ function systemRow(s) {
   // Only for consoles that had a gun, and off by default: on most of them the
   // gun goes in the port a second pad would use, so leaving it on everywhere
   // would quietly break two-player games.
+  //
+  // Absent on Android. The gun is the mouse — the binds this writes are
+  // input_player1_gun_trigger_mbtn and friends — and a handheld has no mouse to
+  // aim with. Switching it on there took the port away from the pad and gave
+  // back nothing that could shoot.
   const gun = s.gun
     ? `<label class="gun" title="${escapeHtml(s.gun)} in place of a pad — aim with the mouse, left button fires">
          <input type="checkbox" data-slug="${s.slug}" data-field="lightgun" ${s.gun_on ? "checked" : ""} />
@@ -262,7 +273,7 @@ function systemRow(s) {
     <td><span class="badge ${s.display === "Handheld" ? "hh" : "crt"}">${escapeHtml(s.display)}</span></td>
     <td>${cores}</td>
     <td>${shaders}</td>
-    <td>${gun}</td>
+    ${MOBILE ? "" : `<td>${gun}</td>`}
   </tr>`;
 }
 

@@ -325,7 +325,9 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
             title: "Hide the loading logo",
             detail: "A black 1280x720 PNG over resources/logo.png, put back at every boot by \
                      /boot/boot-custom.sh because /usr is a tmpfs and is stock again each \
-                     time. EmulationStation draws that file whenever it is loading — every \
+                     time. The blank itself lives on /boot too: that hook runs as S00 and \
+                     S02resize is what mounts /userdata, so a blank kept there is one the \
+                     hook cannot see. EmulationStation draws that file whenever it is loading — every \
                      game launch and every return from one — and there is no setting for it.",
             choices: on_off(
                 "ON",

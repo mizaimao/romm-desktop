@@ -25,7 +25,10 @@ apply_gpu() {
 # resources/logo.png, so the only way to not see it is for that file to have
 # nothing in it. Must happen before S31 starts ES.
 blank_es_logo() {
-  BLANK=/userdata/system/romm/blank-logo.png
+  # On /boot, not /userdata: this runs as S00 and S02resize is what mounts
+  # /userdata. Reading from there at S00 finds nothing, silently, and
+  # EmulationStation comes back with its own logo after every reboot.
+  BLANK=/boot/moose-blank-logo.png
   DEST=/usr/share/emulationstation/resources/logo.png
   [ -s "$BLANK" ] || return 0
   [ -e "$DEST" ] || return 0

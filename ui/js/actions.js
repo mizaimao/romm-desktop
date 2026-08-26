@@ -70,22 +70,43 @@ export function launchInFlight() {
 /// moment to sync saves at — see `android_launch_plan` for the rest of what
 /// that costs. The toast says the game is starting because that is the whole of
 /// what is known.
-async function launchAndroid(id) {
+/// The other half of an Android launch: RetroArch has given the screen back.
+///
+/// Called from Kotlin, which is the only side that can tell — the emulator is
+/// another app and reports nothing when it stops. See `reportGameFinished` in
+/// MainActivity.kt.
+window.__gameFinished = async (id, seconds) => {
+  try {
+    const said = await invoke("android_after_play", { id, seconds });
+    if (said) toast(said, 6000);
+  } catch (e) {
+    toast(`Saves were not uploaded — ${e}`, 8000);
+  }
+};
+
+async function launchAndroid(id, skipSync = false) {
   const bridge = window.RommAndroid;
   if (!bridge?.startEmulator) throw new Error("this build has no way to start an emulator");
   // Two things only Kotlin knows, and the config depends on both: which
   // RetroArch is installed decides where its own files are, and where we may
   // write decides whether it can read what we generate.
+  // Pull what the server has that is newer, before the game opens it. Throws
+  // for a conflict or an unreachable server, which `launch` already knows how
+  // to ask about — the same two questions the desktop asks.
+  const synced = skipSync ? "" : await invoke("android_sync_before", { id });
   const plan = await invoke("android_launch_plan", {
     id,
     retroarchPackage: bridge.retroArchPackage?.() ?? "",
     configDir: bridge.externalFilesDir?.() ?? "",
     pad: state.gamepad,
+    // Decides how many subframes a strobe pass gets, same as on the desktop.
+    refresh: await measureRefresh(),
   });
   const failed = bridge.startEmulator(JSON.stringify(plan));
   if (failed) throw new Error(failed);
   const via = plan.candidates?.[0]?.label;
-  const said = plan.notes?.length ? ` — ${plan.notes.join("; ")}` : "";
+  const notes = [...(plan.notes || []), synced].filter(Boolean);
+  const said = notes.length ? ` — ${notes.join("; ")}` : "";
   return `Starting ${plan.name}${via ? ` in ${via}` : ""}…${said}`;
 }
 
@@ -165,7 +186,7 @@ export async function launch(
     // wait on. Everything above this line still applies — the guard, the pad,
     // the toast — because they are about this window, not about the emulator.
     const result = MOBILE
-      ? await launchAndroid(id)
+      ? await launchAndroid(id, skipSync)
       : await invoke("launch_rom", {
           id,
           pad: state.gamepad,

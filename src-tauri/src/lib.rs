@@ -2231,6 +2231,9 @@ struct AndroidCandidate {
 /// Everything needed to start a game on Android.
 #[derive(serde::Serialize)]
 struct AndroidPlan {
+    /// The game, so the Kotlin side can name it again when the emulator hands
+    /// the screen back — it is the only thing that knows the game has ended.
+    id: i64,
     /// Absolute path to the ROM.
     rom: String,
     name: String,
@@ -2350,6 +2353,7 @@ fn android_launch_plan(
         android_config(&state, &row, &retroarch_package, &config_dir, pad.as_deref(), refresh);
 
     Ok(AndroidPlan {
+        id,
         rom: rom.to_string_lossy().into_owned(),
         name: row.name.clone(),
         config,
@@ -2363,6 +2367,87 @@ fn android_launch_plan(
             })
             .collect(),
     })
+}
+
+/// Pull whatever the server has that is newer, before an Android launch.
+///
+/// The same two-sided sync the desktop does around `plan.run`, split in half
+/// because Android has no such moment: `startActivity` returns when the request
+/// is accepted, not when the game ends. So the pull happens here and the push
+/// happens in [`android_after_play`], which the page calls when RetroArch hands
+/// the screen back.
+///
+/// Returns a note for the toast, or an error the front end turns into the same
+/// "play anyway" question the desktop asks. A conflict refuses, for the reason
+/// it refuses everywhere: playing on top of a save whose ownership is unsettled
+/// is how the loser gets overwritten for good.
+#[tauri::command]
+async fn android_sync_before(state: State<'_, AppState>, id: i64) -> CmdResult<String> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+    let Some(ra) = state.retroarch.as_ref() else {
+        return Ok(String::new());
+    };
+    let pre = auto_sync(&state, ra, &row, savesync::When::BeforeLaunch).await;
+    if !pre.conflicts.is_empty() {
+        *state.pending_conflicts.lock().map_err(err)? = pre.conflicts.clone();
+        return Err(format!(
+            "SAVE_CONFLICT:{}",
+            serde_json::to_string(&pre.conflicts).unwrap_or_default()
+        ));
+    }
+    if let Some(why) = pre.failed {
+        return Err(format!("SAVE_OFFLINE:{why}"));
+    }
+    Ok(pre.note.unwrap_or_default())
+}
+
+/// Push whatever changed, after an Android game has been played.
+///
+/// `seconds` is how long RetroArch held the screen, measured on the Kotlin side
+/// between starting the Intent and the activity coming back — there is nothing
+/// else to measure it with, since the emulator is another app and tells nobody
+/// when it stops.
+///
+/// Nothing here refuses: the game has already been played. A sync that could not
+/// run is a note, not an error, because the alternative is telling someone their
+/// progress is stuck after the fact.
+#[tauri::command]
+async fn android_after_play(
+    state: State<'_, AppState>,
+    id: i64,
+    seconds: i64,
+) -> CmdResult<String> {
+    let row = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache.rom_by_id(id).map_err(err)?
+    }
+    .ok_or_else(|| format!("no rom with id {id}"))?;
+
+    let mut notes = Vec::new();
+    // `record_play` ignores anything under a minute, so a game glanced at and
+    // closed does not become a play.
+    if let Ok(cache) = state.cache.lock()
+        && let Ok(true) = cache.record_play(row.id, &romm_desktop::util::now_iso(), seconds)
+    {
+        notes.push(format!("played for {}", romm_desktop::util::spell_duration(seconds)));
+    }
+    if let Some(ra) = state.retroarch.as_ref() {
+        let post = auto_sync(&state, ra, &row, savesync::When::AfterExit).await;
+        if let Some(note) = post.note {
+            notes.push(note);
+        }
+        if let Some(why) = post.failed {
+            notes.push(format!("saves: NOT uploaded — {why}"));
+        }
+        if !post.conflicts.is_empty() {
+            *state.pending_conflicts.lock().map_err(err)? = post.conflicts;
+        }
+    }
+    Ok(notes.join("; "))
 }
 
 /// Build the config RetroArch will be launched with, and say what is in it.
@@ -2388,8 +2473,8 @@ fn android_config(
     package: &str,
     config_dir: &str,
     pad: Option<&str>,
-    /// The measured display refresh, which decides how many subframes a strobe
-    /// pass gets. `None` is treated as "probably 120Hz or better".
+    // The measured display refresh, which decides how many subframes a strobe
+    // pass gets. `None` is treated as "probably 120Hz or better".
     refresh: Option<f32>,
 ) -> (Option<String>, Vec<String>) {
     let mut notes = Vec::new();
@@ -4391,6 +4476,8 @@ pub fn run() {
             rom_covers,
             launch_rom,
             android_launch_plan,
+            android_sync_before,
+            android_after_play,
             install_theme_logos,
             fetch_icons,
             icon_styles,
