@@ -17,7 +17,8 @@
 #   ./scripts/android.sh doctor     say where every tool is and prove nothing leaked
 #   ./scripts/android.sh devices    list attached devices
 #   ./scripts/android.sh dev        build, install and run on the device, with reload
-#   ./scripts/android.sh build      build an APK
+#   ./scripts/android.sh build      build a release APK (unsigned)
+#   ./scripts/android.sh install    build a debug APK and put it on the device
 #   ./scripts/android.sh logs       follow the app's log on the device
 #   ./scripts/android.sh shell      a shell on the device
 #   ./scripts/android.sh env        print the environment, to eval in your own shell
@@ -81,10 +82,20 @@ android_env() {
   export ANDROID_SDK_ROOT="$KIT/sdk"
 
   # ~/.android — adb's device key, the emulator's config, analytics opt-outs.
-  # ANDROID_SDK_HOME is the same thing for tools too old to read the first one;
-  # it wants the *parent*, and creates `.android` underneath it.
+  #
+  # ANDROID_USER_HOME only, and deliberately not ANDROID_SDK_HOME as well. That
+  # older variable names the *parent* of `.android` rather than `.android`
+  # itself, so setting both to cover old tools pointed them at two different
+  # folders — and the Android Gradle Plugin refuses to start when it finds
+  # disagreeing answers rather than picking one:
+  #
+  #     Several environment variables and/or system properties contain
+  #     different paths to the Android Preferences folder.
+  #
+  # Nothing is lost by dropping it. A tool too old to read ANDROID_USER_HOME
+  # falls back to $HOME/.android, and HOME is redirected below — so it still
+  # lands inside the kit.
   export ANDROID_USER_HOME="$KIT/android-user"
-  export ANDROID_SDK_HOME="$KIT"
   export ANDROID_EMULATOR_HOME="$KIT/android-user/emulator"
   export ANDROID_AVD_HOME="$KIT/android-user/avd"
 
@@ -205,8 +216,27 @@ cmd_toolchain() {
 tauri() {
   # The Tauri CLI from node_modules, which is already inside the project.
   # Not a global npm install, and not `cargo install tauri-cli`.
-  [ -x "$HERE/node_modules/.bin/tauri" ] || die "no tauri CLI — run 'npm install' first"
-  ( cd "$HERE" && "$HERE/node_modules/.bin/tauri" "$@" )
+  #
+  # Through `npm run`, and that is not a style choice.
+  #
+  # `android init` bakes this invocation into the generated Gradle project,
+  # which re-runs it later from `src-tauri/` to build the .so. The CLI does not
+  # record the path it was started from — it reconstructs a package-manager
+  # command — so running the binary directly (either through the
+  # `node_modules/.bin/tauri` symlink or as `node .../tauri.js`) leaves it with
+  # nothing to name but the bare word, and the generated task becomes
+  #
+  #     node tauri android android-studio-script
+  #
+  # run from a directory with no `tauri` in it:
+  #
+  #     Error: Cannot find module '.../src-tauri/tauri'
+  #
+  # Running through npm gives it a package manager to name, so it bakes one
+  # that works from anywhere. That is why package.json carries a `tauri` script
+  # that looks redundant — the Gradle build is its only caller.
+  [ -f "$HERE/node_modules/@tauri-apps/cli/tauri.js" ] || die "no tauri CLI — run 'npm install' first"
+  ( cd "$HERE" && npm run --silent tauri -- "$@" )
 }
 
 cmd_init() {
@@ -218,6 +248,29 @@ cmd_init() {
   say "generating the Gradle project"
   # Output lands in src-tauri/gen/android, which .gitignore already covers.
   tauri android init
+}
+
+cmd_install() {
+  android_env
+  [ -d "$HERE/src-tauri/gen/android" ] || die "run './scripts/android.sh init' first"
+  adb get-state >/dev/null 2>&1 || die "no device — './scripts/android.sh devices' says why"
+
+  # A debug APK, because a release one is unsigned and Android will not install
+  # it. Gradle signs debug builds with a throwaway key it generates itself,
+  # into ANDROID_USER_HOME — so that key lands in the kit like everything else
+  # and there is no keystore to manage.
+  say "building a debug APK"
+  tauri android build --debug --apk --target "$ABI"
+
+  local apk
+  apk="$(find "$HERE/src-tauri/gen/android/app/build/outputs/apk" -name '*debug*.apk' \
+    | sort | tail -1)"
+  [ -n "$apk" ] || die "the build produced no debug APK"
+
+  say "installing $(basename "$apk") ($(du -h "$apk" | cut -f1))"
+  # -r replaces an existing install and keeps its data.
+  adb install -r "$apk"
+  say "installed — start it from the launcher, or './scripts/android.sh logs'"
 }
 
 cmd_dev() {
@@ -268,7 +321,7 @@ cmd_shell() { android_env; adb shell; }
 
 cmd_env() {
   android_env
-  for v in JAVA_HOME ANDROID_HOME ANDROID_SDK_ROOT ANDROID_USER_HOME ANDROID_SDK_HOME \
+  for v in JAVA_HOME ANDROID_HOME ANDROID_SDK_ROOT ANDROID_USER_HOME \
            ANDROID_EMULATOR_HOME ANDROID_AVD_HOME GRADLE_USER_HOME RUSTUP_HOME \
            CARGO_HOME NDK_HOME ANDROID_NDK_ROOT TMPDIR HOME; do
     [ -n "${!v:-}" ] && printf 'export %s=%q\n' "$v" "${!v}"
@@ -341,11 +394,12 @@ case "${1:-}" in
   init)      cmd_init ;;
   doctor)    cmd_doctor ;;
   devices)   cmd_devices ;;
+  install)   cmd_install ;;
   dev|run)   cmd_dev ;;
   build)     cmd_build ;;
   logs)      cmd_logs ;;
   shell)     cmd_shell ;;
   env)       cmd_env ;;
   clean)     cmd_clean ;;
-  *) sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
+  *) sed -n '3,25p' "$0" | sed 's/^# \{0,1\}//' ; exit 1 ;;
 esac
