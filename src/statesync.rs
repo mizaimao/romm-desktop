@@ -231,7 +231,10 @@ pub async fn run(
                         let dest = crate::savesync::download_path(
                             ra_root,
                             &file_name,
-                            c.core.as_deref().or(Some(&c.core_dir)),
+                            crate::savesync::destination(
+                                c.core.as_deref().or(Some(&c.core_dir)),
+                                c.platform(),
+                            ),
                         );
                         if let Some(dir) = dest.parent() {
                             std::fs::create_dir_all(dir).ok();
@@ -337,10 +340,13 @@ pub async fn resolve_one(
                 .save_id
                 .context("the server did not name a state to download")?;
             let bytes = client.state_content(state_id).await?;
+            // A state conflict carries no platform, so this files by core.
+            // Correct on RetroArch's layout; on Batocera's, states are out of
+            // scope for now by decision, not by accident.
             let dest = crate::savesync::download_path(
                 ra_root,
                 &conflict.file_name,
-                conflict.emulator.as_deref(),
+                crate::savesync::destination(conflict.emulator.as_deref(), None),
             );
             if let Some(dir) = dest.parent() {
                 std::fs::create_dir_all(dir).ok();

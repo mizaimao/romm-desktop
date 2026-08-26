@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::{Client, ClientSaveState};
 use crate::cache::Cache;
 use crate::coremap::CoreMap;
+use crate::platform::SaveLayout;
 use crate::saves::{self, Candidate, Resolution};
 
 /// This machine's identity with the server, persisted beside the cache.
@@ -196,18 +197,76 @@ pub fn client_states(candidates: &[Candidate]) -> (Vec<ClientSaveState>, usize) 
 }
 
 /// Where a save the server sent us should land.
+#[derive(Debug, Clone, Copy)]
+pub enum Destination<'a> {
+    /// RetroArch's own layout: `saves/<core folder>/…`, states in `states/`.
+    /// Both spellings are offered because neither is reliable on its own —
+    /// see [`download_path`].
+    Core { core: Option<&'a str> },
+    /// Batocera and KNULLI: `saves/<platform>/…`, with states in that same
+    /// folder rather than a sibling `states/`.
+    System(&'a str),
+}
+
+/// The folder RetroArch itself reads, which is not the name the server uses
+/// and not reliably the name in the core map either.
 ///
-/// Mirrors RetroArch's own layout, which is what the scanner reads back:
-/// `<root>/states/<core>/…` for save states, `<root>/saves/<core>/…` for
-/// game saves. Without the core directory a download would land somewhere
-/// the next scan cannot see.
-pub fn download_path(root: &Path, file_name: &str, emulator: Option<&str>) -> PathBuf {
-    let kind = if saves::is_state_name(file_name) { "states" } else { "saves" };
-    let mut path = root.join(kind);
-    if let Some(core) = emulator.filter(|e| !e.is_empty()) {
-        path = path.join(core);
+/// RetroArch names the folder after the core's own `corename`. The server
+/// stores the core's *stem* — `pcsx_rearmed` — and the shipped map carries
+/// ES-DE's label, which is `PCSX ReARMed` where the real folder is
+/// `PCSX-ReARMed`, and `Snes9x - Current` where it is `Snes9x`. Writing
+/// either of those makes a folder the emulator never looks in, and the save
+/// is silently ignored while our own scanner reports it present.
+///
+/// So the folder that is already there wins. `normalize` ignores case and
+/// punctuation, which is exactly the difference between all three spellings.
+fn core_folder(dir: &Path, core: Option<&str>) -> Option<String> {
+    let core = core.filter(|s| !s.is_empty())?;
+    let wanted = saves::normalize(core);
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if saves::normalize(&name) == wanted {
+                return Some(name);
+            }
+        }
     }
-    path.join(file_name)
+    // Nothing there yet, so the server's own spelling it is. RetroArch will
+    // read from it once it writes a save of its own there.
+    Some(core.to_string())
+}
+
+/// Where this device would file a save for one platform, given the core the
+/// server recorded.
+///
+/// The core is what RetroArch needs and the platform is what Batocera needs;
+/// which one is used depends on the device, not on the save.
+pub fn destination<'a>(core: Option<&'a str>, platform: Option<&'a str>) -> Destination<'a> {
+    match (crate::platform::current().save_layout(), platform) {
+        (SaveLayout::BySystem, Some(slug)) => Destination::System(slug),
+        _ => Destination::Core { core },
+    }
+}
+
+/// Mirrors the device's own layout, which is what the scanner reads back.
+/// Without it a download lands somewhere the emulator never looks.
+pub fn download_path(root: &Path, file_name: &str, dest: Destination<'_>) -> PathBuf {
+    match dest {
+        // One folder per system, states included — configgen points both
+        // `savefile_directory` and `savestate_directory` at it.
+        Destination::System(slug) => root.join("saves").join(slug).join(file_name),
+        Destination::Core { core } => {
+            let kind = if saves::is_state_name(file_name) { "states" } else { "saves" };
+            let dir = root.join(kind);
+            match core_folder(&dir, core) {
+                Some(folder) => dir.join(folder).join(file_name),
+                None => dir.join(file_name),
+            }
+        }
+    }
 }
 
 /// Scan the save tree. Split from [`run`] so a caller holding a lock on the
@@ -497,7 +556,23 @@ async fn download_one(
     slot: Option<&str>,
 ) -> Result<PathBuf> {
     let bytes = client.save_content(save_id, &identity.device_id).await?;
-    let path = download_path(root, file_name, emulator);
+    // The platform, for a device that files by system.
+    //
+    // Asked of the server rather than the local cache: the whole point of a
+    // download is that there may be nothing local for this game yet, and the
+    // cache is behind a mutex that deliberately is not held across an await —
+    // `Cache` is not `Sync`, which is why `scan` was split out of `run` in the
+    // first place. One small GET per downloaded save is the cheaper trade.
+    let platform = match crate::platform::current().save_layout() {
+        SaveLayout::ByCore => None,
+        SaveLayout::BySystem => client
+            .rom_with_files(rom_id)
+            .await
+            .ok()
+            .map(|rom| rom.platform_slug)
+            .filter(|s| !s.is_empty()),
+    };
+    let path = download_path(root, file_name, destination(emulator, platform.as_deref()));
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating {}", dir.display()))?;
@@ -620,6 +695,52 @@ pub async fn run_all(
 mod tests {
     use super::*;
 
+    /// A pull must land in the folder the *emulator* reads.
+    ///
+    /// RetroArch names the folder after the core's own `corename`; the server
+    /// stores the stem. `pcsx_rearmed` and `PCSX-ReARMed` are the same core
+    /// and different directories, and writing the wrong one leaves a save the
+    /// emulator never loads while our own scanner reports it present — which
+    /// is the worst kind of failure, silent and self-confirming.
+    #[test]
+    fn a_download_joins_the_core_folder_that_is_already_there() {
+        let dir = std::env::temp_dir().join("romm-dl-folder");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("saves/PCSX-ReARMed")).unwrap();
+
+        let path = download_path(
+            &dir,
+            "Crash Bandicoot (USA).srm",
+            Destination::Core { core: Some("pcsx_rearmed") },
+        );
+        assert_eq!(path, dir.join("saves/PCSX-ReARMed/Crash Bandicoot (USA).srm"));
+    }
+
+    #[test]
+    fn with_no_folder_yet_the_servers_spelling_is_used() {
+        let dir = std::env::temp_dir().join("romm-dl-fresh");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("saves")).unwrap();
+        let path = download_path(&dir, "Game.srm", Destination::Core { core: Some("mgba") });
+        assert_eq!(path, dir.join("saves/mgba/Game.srm"));
+    }
+
+    /// Batocera files by platform and keeps states in that same folder, so a
+    /// download must not go looking for a `states/` tree that is not there.
+    #[test]
+    fn a_by_system_device_files_everything_under_the_platform() {
+        let root = Path::new("/userdata");
+        assert_eq!(
+            download_path(root, "Crash Bandicoot (USA).srm", Destination::System("psx")),
+            Path::new("/userdata/saves/psx/Crash Bandicoot (USA).srm")
+        );
+        assert_eq!(
+            download_path(root, "Kirby (USA).state1", Destination::System("gba")),
+            Path::new("/userdata/saves/gba/Kirby (USA).state1"),
+            "states share the platform folder on this layout"
+        );
+    }
+
     /// The format the server compares timestamps in. A wrong date here does
     /// not error — it silently makes every local save look older or newer than
     /// it is, which decides who wins a sync.
@@ -639,15 +760,15 @@ mod tests {
     fn downloads_land_where_the_scanner_will_find_them() {
         let root = Path::new("/ra");
         assert_eq!(
-            download_path(root, "Game.state", Some("snes9x")),
+            download_path(root, "Game.state", Destination::Core { core: Some("snes9x") }),
             Path::new("/ra/states/snes9x/Game.state")
         );
         assert_eq!(
-            download_path(root, "Game.state3", Some("snes9x")),
+            download_path(root, "Game.state3", Destination::Core { core: Some("snes9x") }),
             Path::new("/ra/states/snes9x/Game.state3")
         );
         assert_eq!(
-            download_path(root, "Game.srm", Some("snes9x")),
+            download_path(root, "Game.srm", Destination::Core { core: Some("snes9x") }),
             Path::new("/ra/saves/snes9x/Game.srm")
         );
     }
@@ -657,11 +778,11 @@ mod tests {
     #[test]
     fn a_missing_emulator_does_not_produce_a_stray_directory() {
         assert_eq!(
-            download_path(Path::new("/ra"), "Game.srm", None),
+            download_path(Path::new("/ra"), "Game.srm", Destination::Core { core: None }),
             Path::new("/ra/saves/Game.srm")
         );
         assert_eq!(
-            download_path(Path::new("/ra"), "Game.srm", Some("")),
+            download_path(Path::new("/ra"), "Game.srm", Destination::Core { core: Some("") }),
             Path::new("/ra/saves/Game.srm"),
             "an empty core name must not create an unnamed directory"
         );

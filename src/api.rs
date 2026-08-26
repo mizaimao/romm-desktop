@@ -107,6 +107,10 @@ pub struct Platform {
 #[derive(Debug, Deserialize)]
 pub struct Rom {
     pub id: i64,
+    /// Which platform the server files it under — the slug a save's folder
+    /// needs on a device that files by system rather than by core.
+    #[serde(default)]
+    pub platform_slug: String,
     /// Per-user state the server keeps, including when this was last played.
     #[serde(default)]
     pub rom_user: Option<RomUser>,

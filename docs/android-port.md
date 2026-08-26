@@ -126,14 +126,45 @@ and the other 8 are platforms `data/esde-core-map.json` has no entry for —
 `easyrpg`, `g-and-w`, `new-nintendo-3ds`, `pico8`, `ps2`, `switch`, `wii`,
 `wiiu` — which is a gap in the table, not in the launcher.
 
-**The other half — the config — is untouched, and the rest of this section is
-still the plan for it.** Nothing per-launch is applied on Android: no shader,
-no override, no autofire, no light gun, no save-state-on-exit. RetroArch runs
-on its own configuration. Nor is there a way back: `startActivity` returns when
-the request is accepted, not when the game ends, so no save sync runs and no
-play time is recorded. Standalone emulators are not started at all — this app's
-manifest can only see the two RetroArch packages, so `getPackageInfo` answers
-"not installed" for every other one whether it is or not.
+**The config half is done too, and the finding below about `--appendconfig` is
+answered rather than worked around.** The Intent has no equivalent, but it does
+not need one: `CONFIGFILE` takes a whole config, so the app folds its per-launch
+fragment onto the user's own `retroarch.cfg` and hands over the result.
+`retroarch::merge_config` does the fold — their keys keep their place and their
+comments, ours replace theirs, anything of ours they have never had is appended.
+Their file is only ever read, and `config_save_on_exit = "false"` stops
+RetroArch writing back over even our copy.
+
+Two things only Kotlin can answer, so it does: which RetroArch is installed
+(its files live under its own package name) and where we may write something
+RetroArch can read. The answer to the second is our *external* files directory —
+`Android/data/<us>/files`. RetroArch reads it because it targets **SDK 28** and
+is still on legacy storage; we read *its* directory because we hold
+MANAGE_EXTERNAL_STORAGE. Both halves of that asymmetry are needed and both were
+measured.
+
+Hotkeys come from `padprofile::android()`. On Android the numbers are not
+per-controller: the input driver takes raw `KeyEvent` codes and the OS fixes
+them, so `BUTTON_A` is 96 everywhere. `RetroArch::pad_profile` switches on the
+configured `input_driver` rather than a `cfg`, so the same code path serves
+both. The d-pad is deliberately left unbound — Android reports it as a hat on
+most pads and as keycodes on some, and a wrong index there fires hotkeys during
+play.
+
+Verified on the Thor: the merged file is the same 3,365 lines as the user's,
+`video_driver = "vulkan"` and their own binds intact, our hotkeys and save
+directories in place, RetroArch logging `[ENV] Config file: …/launch.cfg`, and
+Select+Y opening its menu.
+
+**What is still not done.** No shader actually applies, because RetroArch on
+Android ships no shader pack — its `files/` holds a config and nothing else. The
+config lines are generated correctly and the launch says so in a note; fetching
+the pack into RetroArch's own directory is a decision, not an oversight. There
+is also no way back: `startActivity` returns when the request is accepted, not
+when the game ends, so no save sync runs and no play time is recorded. And
+standalone emulators are not started at all — this app's manifest can only see
+the two RetroArch packages, so `getPackageInfo` answers "not installed" for
+every other one whether it is or not.
 
 `retroarch.rs` is 1,950 lines and its job is to build a `Command`, spawn
 RetroArch, and write the config that shapes the session. On Android none of

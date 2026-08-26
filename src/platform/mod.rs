@@ -77,6 +77,25 @@ pub struct Battery {
 /// Everything has a default that means "this device has nothing to say about
 /// it", so a new scheme starts as a handful of lines rather than a wall of
 /// stubs.
+/// Where a save sits under the RetroArch root, and what the folder name means.
+///
+/// The two shapes are not a preference; they are what the two kinds of device
+/// actually do, and a scanner that assumes one finds nothing on the other.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum SaveLayout {
+    /// RetroArch's own, and every desktop and Android install:
+    /// `saves/<core display name>/Game.srm`, states in a sibling `states/`.
+    /// The folder is the *core*, spelled the way RetroArch spells it —
+    /// `PCSX-ReARMed`, not `pcsx_rearmed`.
+    ByCore,
+    /// Batocera and KNULLI: `saves/<system>/Game.srm`, where the folder is the
+    /// **platform** and carries no core at all — configgen points
+    /// `savefile_directory` at it per launch. Save states live in that same
+    /// folder rather than a sibling `states/`, so the folder cannot say which
+    /// a file is; the filename has to.
+    BySystem,
+}
+
 pub trait Platform: Sync {
     /// The scheme's name, for diagnostics and for tests that assert which one
     /// a build selected.
@@ -98,6 +117,13 @@ pub trait Platform: Sync {
     /// image does not need asking.
     fn default_library(&self) -> Option<esde::Layout> {
         None
+    }
+
+    /// How this device arranges its save tree.
+    ///
+    /// RetroArch's own layout is the default and needs no override.
+    fn save_layout(&self) -> SaveLayout {
+        SaveLayout::ByCore
     }
 
     /// Install roots to search for RetroArch, in order.

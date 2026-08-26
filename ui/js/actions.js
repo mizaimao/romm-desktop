@@ -73,11 +73,20 @@ export function launchInFlight() {
 async function launchAndroid(id) {
   const bridge = window.RommAndroid;
   if (!bridge?.startEmulator) throw new Error("this build has no way to start an emulator");
-  const plan = await invoke("android_launch_plan", { id });
+  // Two things only Kotlin knows, and the config depends on both: which
+  // RetroArch is installed decides where its own files are, and where we may
+  // write decides whether it can read what we generate.
+  const plan = await invoke("android_launch_plan", {
+    id,
+    retroarchPackage: bridge.retroArchPackage?.() ?? "",
+    configDir: bridge.externalFilesDir?.() ?? "",
+    pad: state.gamepad,
+  });
   const failed = bridge.startEmulator(JSON.stringify(plan));
   if (failed) throw new Error(failed);
   const via = plan.candidates?.[0]?.label;
-  return `Starting ${plan.name}${via ? ` in ${via}` : ""}…`;
+  const said = plan.notes?.length ? ` — ${plan.notes.join("; ")}` : "";
+  return `Starting ${plan.name}${via ? ` in ${via}` : ""}…${said}`;
 }
 
 /// Launch, optionally picking up where the game was left.

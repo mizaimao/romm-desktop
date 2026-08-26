@@ -92,6 +92,21 @@ pub fn default_for(platform: &str) -> Option<&'static str> {
         "nds" => "handheld/lcd1x_nds",
         "psp" => "handheld/lcd1x_psp",
         "gamegear" | "wonderswan" | "wonderswancolor" | "neo-geo-pocket" => "handheld/lcd1x",
+        // Every television console. Which one depends on what is drawing it.
+        //
+        // `crt-guest-advanced` is twelve passes with large intermediate
+        // buffers, and it is the right default on a desktop GPU. On a handheld
+        // it is the wrong shape of expensive: the same frame, several times
+        // over, on a chip also running the emulator.
+        //
+        // `crt-lottes` is one pass and was written to get the same idea — a
+        // phosphor mask, scanline bloom, optional curvature — out of a single
+        // draw. It is the closest thing to the look at a fraction of the cost,
+        // which is exactly the trade a handheld wants.
+        //
+        // A default, not a rule: Settings -> Emulators sets the shader per
+        // system and that choice wins over this everywhere.
+        _ if cfg!(target_os = "android") => "crt/crt-lottes",
         _ => "crt/crt-guest-advanced",
     })
 }

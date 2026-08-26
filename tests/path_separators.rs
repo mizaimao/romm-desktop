@@ -194,7 +194,7 @@ fn generated_paths_are_asserted_by_component_not_by_string() {
 #[test]
 fn downloads_land_by_component_on_any_host() {
     let root = Path::new("/ra");
-    let state = romm_desktop::savesync::download_path(root, "Game.state1", Some("snes9x"));
+    let state = romm_desktop::savesync::download_path(root, "Game.state1", romm_desktop::savesync::Destination::Core { core: Some("snes9x") });
     let parts: Vec<String> = state
         .components()
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -202,7 +202,7 @@ fn downloads_land_by_component_on_any_host() {
     assert!(parts.iter().any(|p| p == "states"), "a state goes in states/: {parts:?}");
     assert!(parts.iter().any(|p| p == "snes9x"), "nested by core: {parts:?}");
 
-    let save = romm_desktop::savesync::download_path(root, "Game.srm", Some("snes9x"));
+    let save = romm_desktop::savesync::download_path(root, "Game.srm", romm_desktop::savesync::Destination::Core { core: Some("snes9x") });
     let parts: Vec<String> = save
         .components()
         .map(|c| c.as_os_str().to_string_lossy().into_owned())

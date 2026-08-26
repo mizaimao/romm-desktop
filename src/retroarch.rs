@@ -90,6 +90,79 @@ pub struct RetroArch {
 // root, or Android, where RetroArch is a separate app reached by Intent rather
 // than a binary on a path at all.
 
+/// Fold a per-launch override fragment into a complete RetroArch config.
+///
+/// Android needs this because its Intent has no `--appendconfig`. All it takes
+/// is `CONFIGFILE`, and that is the *whole* config: whatever the file does not
+/// mention falls back to RetroArch's built-in defaults, not to the user's
+/// settings. Handing it our fragment alone would silently reset the video
+/// driver, the directories and every binding the user has ever set.
+///
+/// So the user's own `retroarch.cfg` is the base and our fragment is laid over
+/// it. Keys we set replace theirs in place; keys we do not set are left exactly
+/// as they were, comments and order included, so the file we hand over is
+/// theirs with our changes in it. Anything of ours the base has never heard of
+/// is appended at the end under a heading.
+///
+/// Their file is only ever read. The result is written somewhere else, and
+/// `config_save_on_exit = "false"` in the fragment stops RetroArch writing back
+/// over even that copy.
+///
+/// Only `key = value` lines are taken from the fragment; its comments explain
+/// the desktop arrangement and would be misleading in a merged file.
+pub fn merge_config(base: &str, overlay: &str) -> String {
+    let mut ours: Vec<(String, String)> = Vec::new();
+    for line in overlay.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let key = key.trim();
+        // A key with a space in it is not a key; skip rather than corrupt.
+        if key.is_empty() || key.contains(char::is_whitespace) {
+            continue;
+        }
+        ours.push((key.to_owned(), value.trim().to_owned()));
+    }
+
+    let mut used = vec![false; ours.len()];
+    let mut out = String::with_capacity(base.len() + overlay.len());
+    for line in base.lines() {
+        let key = line.split_once('=').map(|(k, _)| k.trim());
+        // Last one wins, matching how RetroArch reads a file with a repeated
+        // key — so a fragment that sets something twice behaves the same here.
+        let hit = key.and_then(|k| ours.iter().rposition(|(ok, _)| ok == k));
+        match hit {
+            Some(i) => {
+                used[i] = true;
+                out.push_str(&format!("{} = {}
+", ours[i].0, ours[i].1));
+            }
+            None => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+
+    let mut first = true;
+    for (i, (key, value)) in ours.iter().enumerate() {
+        if used[i] {
+            continue;
+        }
+        if first {
+            out.push_str("
+# ---- Added by romm-desktop for this launch ----
+");
+            first = false;
+        }
+        out.push_str(&format!("{key} = {value}
+"));
+    }
+    out
+}
+
 /// Executable name for the host, and where it sits under the install root.
 ///
 /// Returns `(subpath of the binary, subpath of the "root" we should record)`.
@@ -354,6 +427,55 @@ pub fn window_lines(
 
 impl RetroArch {
     /// Locate an install. `configured` wins; otherwise probe known roots.
+    /// RetroArch as it exists on Android: another app, not an install we found.
+    ///
+    /// There is no binary to run — launching is an Intent — but everything else
+    /// this type does is about *files*, and those are all real: `retroarch.cfg`,
+    /// `config/<Core>/`, `shaders/`. They live in RetroArch's own external
+    /// files directory, which this app can read because it holds
+    /// MANAGE_EXTERNAL_STORAGE and RetroArch targets SDK 28 and so is still on
+    /// legacy storage.
+    ///
+    /// `portable` so `data_dir()` is the root: on Android there is no second
+    /// location the way a desktop install has one beside the bundle.
+    ///
+    /// `binary` is empty on purpose. Nothing here spawns a process, and an
+    /// invented path would be a thing that looks runnable and is not.
+    pub fn android_app(files_dir: &Path) -> Self {
+        Self {
+            system_override: None,
+            root: files_dir.to_path_buf(),
+            binary: PathBuf::new(),
+            portable: true,
+        }
+    }
+
+    /// Find RetroArch on an Android device.
+    ///
+    /// Not a path search: there is no binary to find. What identifies an
+    /// install here is its config, and that sits in its external files
+    /// directory under its own package name — readable because this app holds
+    /// MANAGE_EXTERNAL_STORAGE and RetroArch targets SDK 28.
+    ///
+    /// Both spellings, `aarch64` first, because a device may carry either
+    /// build. Probing the filesystem rather than asking the package manager
+    /// keeps this in Rust: Tauri does not hand the Android context to Rust
+    /// (tauri-apps/tauri#13267), and every caller of this type is Rust.
+    ///
+    /// Without this `state.retroarch` was `None` on Android, and everything
+    /// derived from it went quietly empty — the shader list in
+    /// Settings → Emulators said "no RetroArch" on a device with 2,037 presets
+    /// on the card.
+    pub fn locate_android() -> Option<Self> {
+        for package in ["com.retroarch.aarch64", "com.retroarch"] {
+            let files = PathBuf::from(format!("/storage/emulated/0/Android/data/{package}/files"));
+            if files.join("retroarch.cfg").is_file() {
+                return Some(Self::android_app(&files));
+            }
+        }
+        None
+    }
+
     pub fn locate(configured: Option<&str>) -> Result<Self> {
         Self::locate_in(&configured.map(str::to_owned).into_iter().collect::<Vec<_>>())
     }
@@ -431,13 +553,40 @@ impl RetroArch {
         crate::platform::current().retroarch_data_dir(&self.root)
     }
 
+    /// One value out of RetroArch's own `retroarch.cfg`.
+    ///
+    /// Its settings are the truth about where its files are; anything derived
+    /// from the install root is a guess that happens to be right on a desktop.
+    fn config_value(&self, key: &str) -> Option<String> {
+        let text = std::fs::read_to_string(self.data_dir().join("retroarch.cfg"))
+            .or_else(|_| std::fs::read_to_string(self.root.join("retroarch.cfg")))
+            .ok()?;
+        text.lines().find_map(|line| {
+            let (k, v) = line.split_once('=')?;
+            (k.trim() == key).then(|| v.trim().trim_matches('"').to_owned())
+        })
+    }
+
     /// Where per-core settings live: `<config>/<Core>/<Core>.opt`.
     pub fn config_dir(&self) -> PathBuf {
         self.data_dir().join("config")
     }
 
     /// Root of the shader trees (`shaders_slang`, `shaders_glsl`).
+    ///
+    /// RetroArch's own `video_shader_dir` is asked first, because it is the
+    /// only answer that is always right: the pack does not have to live inside
+    /// the install and on a handheld it usually does not. On the Thor it is on
+    /// the card — `/storage/A2FC-A9FB/Saves/shaders` — with 2,037 presets in
+    /// it, while `files/shaders` does not exist at all, so guessing from the
+    /// install root reported no shader pack on a device that has one.
     pub fn shaders_dir(&self) -> PathBuf {
+        if let Some(dir) = self.config_value("video_shader_dir").filter(|d| !d.is_empty()) {
+            let dir = PathBuf::from(dir);
+            if dir.is_dir() {
+                return dir;
+            }
+        }
         first_existing(
             &[self.data_dir().join("shaders"), self.root.join("shaders")],
             &[
@@ -653,6 +802,38 @@ input_player2_gun_start_mbtn = \"3\"
         Ok(path)
     }
 
+    /// The pad profile these settings should be generated from.
+    ///
+    /// One place, because the three callers below each did this lookup and each
+    /// was a chance for them to disagree about which pad they were describing —
+    /// a config whose hotkeys come from one profile and whose rapid fire comes
+    /// from another.
+    ///
+    /// The driver is asked for rather than assumed: the same controller is
+    /// numbered differently under each, so a profile from the wrong directory
+    /// is valid, plausible and completely wrong.
+    fn pad_profile(&self, device: Option<&str>) -> Option<padprofile::PadProfile> {
+        let driver = padprofile::configured_driver(&[
+            self.data_dir().join("retroarch.cfg"),
+            self.root.join("retroarch.cfg"),
+        ]);
+        // Android has no per-pad profile to find, and that is not a gap. Its
+        // input driver takes raw `KeyEvent` codes, which the operating system
+        // fixes — `BUTTON_A` is 96 on every device ever shipped — so the
+        // numbers are the same for every controller and RetroArch writes no
+        // autoconfig file to read.
+        //
+        // Keyed off the driver rather than a `cfg`, so it can be exercised on
+        // any host and so what decides it is the same thing RetroArch itself
+        // decided.
+        if driver.as_deref() == Some("android") {
+            return Some(padprofile::android());
+        }
+        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
+        padprofile::find_with_driver(&roots, device, driver.as_deref())
+            .or_else(|| padprofile::known(device))
+    }
+
     /// The controller hotkey block for `device` (the connected pad's reported
     /// name, if the frontend knows it).
     ///
@@ -674,20 +855,12 @@ input_player2_gun_start_mbtn = \"3\"
         // is where anything it learned about the connected pad ends up, so
         // searching only the first found shipped defaults and missed the
         // profile that is actually in use.
-        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
-        // Ask RetroArch which driver the pad is on rather than guessing an
-        // order. The same controller is numbered differently under each, so a
-        // profile from the wrong directory is valid, plausible and completely
-        // wrong — which is exactly how the modifier ended up on a stick.
-        let driver = padprofile::configured_driver(&[
-            self.data_dir().join("retroarch.cfg"),
-            self.root.join("retroarch.cfg"),
-        ]);
-        match padprofile::find_with_driver(&roots, device, driver.as_deref())
-            .or_else(|| padprofile::known(device))
-        {
+        match self.pad_profile(device) {
             Some(profile) => padprofile::hotkey_block(&profile),
-            None => padprofile::no_profile_note(&roots, device),
+            None => padprofile::no_profile_note(
+                &[self.root.join("autoconfig"), self.data_dir().join("autoconfig")],
+                device,
+            ),
         }
     }
 
@@ -715,14 +888,7 @@ input_player2_gun_start_mbtn = \"3\"
         if on == AutoFire::Off {
             return String::new();
         }
-        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
-        let driver = padprofile::configured_driver(&[
-            self.data_dir().join("retroarch.cfg"),
-            self.root.join("retroarch.cfg"),
-        ]);
-        let Some(profile) = padprofile::find_with_driver(&roots, device, driver.as_deref())
-            .or_else(|| padprofile::known(device))
-        else {
+        let Some(profile) = self.pad_profile(device) else {
             // Nothing known about the pad means nothing written, and rapid
             // fire silently not happening looks exactly like rapid fire not
             // working — which is a different problem with a different fix.
@@ -820,14 +986,7 @@ input_player2_gun_start_mbtn = \"3\"
     /// route, because mirroring is only meaningful against the pad the
     /// frontend can actually see.
     pub fn players(&self, device: Option<&str>, mirror: bool) -> String {
-        let roots = [self.root.join("autoconfig"), self.data_dir().join("autoconfig")];
-        let driver = padprofile::configured_driver(&[
-            self.data_dir().join("retroarch.cfg"),
-            self.root.join("retroarch.cfg"),
-        ]);
-        let profile = padprofile::find_with_driver(&roots, device, driver.as_deref())
-            .or_else(|| padprofile::known(device));
-        crate::players::config_lines(profile.as_ref(), mirror)
+        crate::players::config_lines(self.pad_profile(device).as_ref(), mirror)
     }
 
     /// Which of the keys we just wrote a core's own override file also sets.
@@ -1140,6 +1299,39 @@ pub fn render(cmd: &Command) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The merge exists because `CONFIGFILE` replaces the whole config, so
+    /// anything the file omits reverts to RetroArch's defaults rather than to
+    /// the user's settings. Everything not ours has to survive untouched.
+    #[test]
+    fn merging_replaces_our_keys_and_keeps_every_other_line() {
+        let base = "# their comment\n\
+                    video_driver = \"vulkan\"\n\
+                    fps_show = \"false\"\n\
+                    input_player1_a_btn = \"97\"\n";
+        let overlay = "# ours, and this comment must not travel\n\
+                       fps_show = \"true\"\n\
+                       savefile_directory = \"/card/Saves/saves\"\n";
+
+        let out = super::merge_config(base, overlay);
+        assert!(out.contains("# their comment"), "their comments stay");
+        assert!(out.contains("video_driver = \"vulkan\""), "untouched settings stay");
+        assert!(out.contains("input_player1_a_btn = \"97\""), "their binds stay");
+        assert!(out.contains("fps_show = \"true\""), "ours wins");
+        assert!(!out.contains("fps_show = \"false\""), "and theirs is gone, not duplicated");
+        assert!(out.contains("savefile_directory = \"/card/Saves/saves\""), "new keys appended");
+        assert!(!out.contains("must not travel"), "our comments are not carried over");
+    }
+
+    /// A replaced key keeps its position, so the merged file still reads like
+    /// the user's own — and a key is replaced, never added twice.
+    #[test]
+    fn merging_replaces_in_place_rather_than_appending_a_second_copy() {
+        let base = "a = \"1\"\nb = \"2\"\nc = \"3\"\n";
+        let out = super::merge_config(base, "b = \"changed\"\n");
+        assert_eq!(out, "a = \"1\"\nb = \"changed\"\nc = \"3\"\n");
+        assert_eq!(out.matches("b = ").count(), 1, "one b, not two");
+    }
 
     /// The saves folder chosen in settings has to reach RetroArch.
     ///

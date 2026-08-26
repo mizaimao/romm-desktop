@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Battery, Brightness, Platform, Wifi};
+use super::{SaveLayout, Battery, Brightness, Platform, Wifi};
 use crate::esde;
 
 pub struct Knulli;
@@ -32,6 +32,14 @@ impl Platform for Knulli {
 
     /// One root, because there is exactly one RetroArch and it is part of the
     /// image: `/usr/bin/retroarch`, 15.7 MB, confirmed on device.
+    /// `/userdata/saves/<system>/Game.srm`, and save states in there too.
+    ///
+    /// Read off the device: configgen sets both `savefile_directory` and
+    /// `savestate_directory` to the same per-system folder at every launch.
+    fn save_layout(&self) -> SaveLayout {
+        SaveLayout::BySystem
+    }
+
     fn retroarch_roots(&self) -> &'static [&'static str] {
         &["/usr"]
     }

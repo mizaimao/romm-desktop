@@ -24,6 +24,7 @@ use anyhow::Result;
 
 use crate::cache::Cache;
 use crate::coremap::CoreMap;
+use crate::platform::SaveLayout;
 use crate::savehash;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -57,6 +58,16 @@ pub struct Candidate {
     pub superseded_by: Option<String>,
 }
 
+impl Candidate {
+    /// The RomM platform this resolved to, when it resolved at all.
+    pub fn platform(&self) -> Option<&str> {
+        match &self.resolution {
+            Resolution::Resolved { platform, .. } => Some(platform),
+            _ => None,
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Resolution {
@@ -74,7 +85,7 @@ pub enum Resolution {
 /// RetroArch's desktop display names differ from ES-DE's labels — `"MAME"` vs
 /// `"MAME - Current"`, `"melonDS DS"` vs `melondsds` — so compare on a reduced
 /// form rather than exact strings.
-fn normalize(s: &str) -> String {
+pub fn normalize(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
@@ -165,6 +176,38 @@ fn platforms_for_core(map: &CoreMap, core: &str) -> Vec<String> {
     out
 }
 
+/// A `saves/<system>/` folder, on a device that files by platform.
+///
+/// Returns the core to record and the platforms to resolve against. The core
+/// is **not in the path** on this layout — configgen aims RetroArch at a
+/// per-system folder and the core it picked is nowhere on disk. So the answer
+/// is the core this device would run for that system, which is right unless a
+/// single game has been given a different core by hand in EmulationStation.
+/// That case is undetectable from the filesystem; it is a known limit, not an
+/// oversight.
+fn system_folder(map: &CoreMap, folder: &str) -> (Option<String>, Vec<String>) {
+    // Device spellings first: Batocera calls the whole arcade library `fbneo`,
+    // and RomM calls it `arcade`.
+    let device = crate::platform::current();
+    let slug = device
+        .system_aliases()
+        .iter()
+        .find(|(dir, _)| dir.eq_ignore_ascii_case(folder))
+        .map(|(_, romm)| (*romm).to_string())
+        .unwrap_or_else(|| folder.to_string());
+
+    // What this hardware runs, where it differs from the shipped default —
+    // the Flip runs pcsx_rearmed for PSX, not SwanStation.
+    let core = device
+        .default_cores()
+        .iter()
+        .find(|(platform, _)| platform.eq_ignore_ascii_case(&slug))
+        .map(|(_, core)| (*core).to_string())
+        .or_else(|| map.default_core(&slug).map(str::to_string));
+
+    (core, vec![slug])
+}
+
 fn resolve(cache: &Cache, platforms: &[String], rom_base: &str) -> Result<Resolution> {
     let mut hits: Vec<(i64, String, String)> = Vec::new();
     for platform in platforms {
@@ -193,6 +236,11 @@ pub fn scan(root: &Path, cache: &Cache, map: &CoreMap) -> Result<Vec<Candidate>>
     scan_matching(root, cache, map, &|_| true)
 }
 
+/// The device's own layout, unless a caller says otherwise.
+fn layout_here() -> SaveLayout {
+    crate::platform::current().save_layout()
+}
+
 /// As [`scan`], considering only saves whose ROM basename passes `keep`.
 ///
 /// Automatic sync runs either side of every launch, and a full scan hashes the
@@ -209,13 +257,27 @@ pub fn scan_matching(
     map: &CoreMap,
     keep: &dyn Fn(&str) -> bool,
 ) -> Result<Vec<Candidate>> {
+    scan_matching_with(root, cache, map, keep, layout_here())
+}
+
+/// As [`scan_matching`], against a stated layout rather than this machine's.
+///
+/// Both shapes exist on real devices and a scanner that only knows one finds
+/// nothing on the other, so both are exercised by the tests.
+pub fn scan_matching_with(
+    root: &Path,
+    cache: &Cache,
+    map: &CoreMap,
+    keep: &dyn Fn(&str) -> bool,
+    layout: SaveLayout,
+) -> Result<Vec<Candidate>> {
     let mut out = Vec::new();
     for (sub, kind) in [("saves", Kind::Save), ("states", Kind::State)] {
         let base = root.join(sub);
         if !base.is_dir() {
             continue;
         }
-        collect(&base, &base, kind, cache, map, keep, &mut out)?;
+        collect(&base, &base, kind, cache, map, keep, layout, &mut out)?;
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     mark_canonical(&mut out, map);
@@ -286,16 +348,17 @@ fn mark_canonical(candidates: &mut [Candidate], map: &CoreMap) {
 fn collect(
     base: &Path,
     dir: &Path,
-    kind: Kind,
+    dir_kind: Kind,
     cache: &Cache,
     map: &CoreMap,
     keep: &dyn Fn(&str) -> bool,
+    layout: SaveLayout,
     out: &mut Vec<Candidate>,
 ) -> Result<()> {
     for entry in std::fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect(base, &path, kind, cache, map, keep, out)?;
+            collect(base, &path, dir_kind, cache, map, keep, layout, out)?;
             continue;
         }
         let file_name = entry.file_name().to_string_lossy().to_string();
@@ -311,26 +374,49 @@ fn collect(
             continue;
         }
 
-        // First path component under saves/ or states/ is the core directory.
-        let core_dir = rel
+        // What the first component under saves/ or states/ actually means
+        // depends on the device — see `SaveLayout`.
+        let first = rel
             .components()
             .next()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .unwrap_or_default();
-        let core = map.core_by_display_name(&core_dir, normalize);
 
-        let resolution = match &core {
-            None => Resolution::UnknownCore,
-            Some(c) => {
-                let platforms = platforms_for_core(map, c);
-                if platforms.is_empty() {
-                    Resolution::Unmatched
+        // And so does what kind of file this is. RetroArch keeps states in
+        // their own tree, so the folder settles it; Batocera puts both in one
+        // folder, so only the name can.
+        let kind = match layout {
+            SaveLayout::ByCore => dir_kind,
+            SaveLayout::BySystem => {
+                if is_state_name(&file_name) {
+                    Kind::State
                 } else {
-                    resolve(cache, &platforms, &rom_base)?
+                    Kind::Save
                 }
             }
         };
 
+        let (core, platforms) = match layout {
+            SaveLayout::ByCore => {
+                let core = map.core_by_display_name(&first, normalize);
+                let platforms = core
+                    .as_deref()
+                    .map(|c| platforms_for_core(map, c))
+                    .unwrap_or_default();
+                (core, platforms)
+            }
+            SaveLayout::BySystem => system_folder(map, &first),
+        };
+
+        let resolution = if core.is_none() {
+            Resolution::UnknownCore
+        } else if platforms.is_empty() {
+            Resolution::Unmatched
+        } else {
+            resolve(cache, &platforms, &rom_base)?
+        };
+
+        let core_dir = first;
         out.push(Candidate {
             size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
             content_hash: savehash::compute(&path)?,

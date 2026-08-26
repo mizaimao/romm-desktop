@@ -169,6 +169,22 @@ class MainActivity : TauriActivity() {
          * Returns an empty string when the game is on its way, and something to
          * show the user when it is not.
          */
+        /**
+         * Where to put files RetroArch has to read.
+         *
+         * This app's *private* directory is the natural place and the wrong
+         * one: nothing else on the device can open it. This is the external
+         * one — `Android/data/<us>/files` — which RetroArch reads because it
+         * targets SDK 28 and is still on legacy storage. Measured, not assumed:
+         * a config written here was accepted, and the launch logged
+         * `[ENV] Config file: ...` pointing back at it.
+         *
+         * Asked of the framework rather than spelled out, because the path
+         * differs on a device with the app on a card.
+         */
+        @JavascriptInterface
+        fun externalFilesDir(): String = getExternalFilesDir(null)?.absolutePath ?: ""
+
         @JavascriptInterface
         fun startEmulator(planJson: String): String {
             val plan =
@@ -202,9 +218,17 @@ class MainActivity : TauriActivity() {
                 val core = c.optString("core_file")
                 if (core.isNotEmpty()) {
                     intent.putExtra("LIBRETRO", "/data/data/$pkg/cores/$core")
+                    // Ours when the backend managed to build one, RetroArch's
+                    // own when it did not. `CONFIGFILE` is the *whole* config —
+                    // anything it omits falls back to RetroArch's defaults
+                    // rather than to the user's settings — so the generated one
+                    // is their file with our changes merged into it, never a
+                    // fragment on its own. See `android_config` in lib.rs.
+                    val ours = plan.optString("config")
                     intent.putExtra(
                         "CONFIGFILE",
-                        "/storage/emulated/0/Android/data/$pkg/files/retroarch.cfg",
+                        if (ours.isNotEmpty()) ours
+                        else "/storage/emulated/0/Android/data/$pkg/files/retroarch.cfg",
                     )
                 }
 

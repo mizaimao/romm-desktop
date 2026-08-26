@@ -484,6 +484,51 @@ pub const HOTKEYS: &[(&str, Physical, &str)] = &[
     ("state_slot_increase", Physical::Right, "next save slot"),
 ];
 
+/// The pad every Android device has, as an autoconfig profile.
+///
+/// On Android the numbers are not per-controller. RetroArch's `android` input
+/// driver takes raw `KeyEvent` codes, and those are fixed by the operating
+/// system — `BUTTON_A` is 96 on every device that has ever shipped, whatever
+/// pad is attached. That is the opposite of every other platform, where an
+/// index is meaningless without knowing which controller and which driver
+/// produced it, and it is why this can be a table at all.
+///
+/// Checked against Frank's Thor, which had three hotkeys already set by hand:
+/// `input_enable_hotkey_btn = "109"` (SELECT), `input_exit_emulator_btn = "96"`
+/// (BUTTON_A) and `input_menu_toggle_btn = "100"` (BUTTON_Y) — and against its
+/// four saved face binds, which agree with all four rows below.
+///
+/// Written as an autoconfig file and parsed rather than built by hand, so it
+/// goes through exactly the same path as a profile read off disk. RetroPad
+/// names the face buttons after a SNES pad, so `b` is the *bottom* one.
+///
+/// **No d-pad.** Android reports it as a hat axis on most pads and as
+/// `DPAD_UP`-style keycodes on some, and the two are not interchangeable.
+/// Guessing would put a hotkey on a direction used constantly in play, which
+/// is the one failure this module exists to avoid — so the four directional
+/// hotkeys are simply not bound here, and [`hotkey_block`] says so in the file.
+const ANDROID_PAD: &str = "\
+input_device = \"Android gamepad\"
+input_driver = \"android\"
+input_b_btn = \"96\"
+input_a_btn = \"97\"
+input_y_btn = \"99\"
+input_x_btn = \"100\"
+input_l_btn = \"102\"
+input_r_btn = \"103\"
+input_l2_btn = \"104\"
+input_r2_btn = \"105\"
+input_l3_btn = \"106\"
+input_r3_btn = \"107\"
+input_start_btn = \"108\"
+input_select_btn = \"109\"
+";
+
+/// The Android pad profile. See [`ANDROID_PAD`].
+pub fn android() -> PadProfile {
+    PadProfile::parse(ANDROID_PAD)
+}
+
 /// Render the hotkey block for `profile`.
 ///
 /// Buttons the pad does not report are skipped with a note rather than emitted
@@ -576,6 +621,34 @@ pub fn no_profile_note(roots: &[std::path::PathBuf], device: Option<&str>) -> St
 
 #[cfg(test)]
 mod tests {
+
+    /// The Android table has to agree with what RetroArch itself wrote on a
+    /// real device — these three were already in Frank's config, set by hand
+    /// through RetroArch's own menu, and they are the check that the keycodes
+    /// below are the ones the driver actually sees.
+    #[test]
+    fn the_android_pad_matches_what_the_device_reports() {
+        let p = android();
+        assert_eq!(p.get(Physical::Select).unwrap().value, "109", "SELECT");
+        assert_eq!(p.get(Physical::A).unwrap().value, "96", "bottom face, BUTTON_A");
+        assert_eq!(p.get(Physical::Y).unwrap().value, "100", "top face, BUTTON_Y");
+        // RetroPad names the faces after a SNES pad, so these are crossed over.
+        assert_eq!(p.get(Physical::B).unwrap().value, "97", "right face, BUTTON_B");
+        assert_eq!(p.get(Physical::X).unwrap().value, "99", "left face, BUTTON_X");
+    }
+
+    /// Not guessed at, on purpose: a direction is held constantly in play, so a
+    /// wrong index there fires hotkeys during a game.
+    #[test]
+    fn the_android_pad_leaves_the_dpad_unbound() {
+        let p = android();
+        for d in [Physical::Up, Physical::Down, Physical::Left, Physical::Right] {
+            assert!(p.get(d).is_none(), "{d:?} must not be guessed");
+        }
+        let block = hotkey_block(&p);
+        assert!(block.contains("input_exit_emulator_btn = \"96\""), "face hotkeys still bound");
+        assert!(block.contains("no Up on this pad"), "and the gap is stated");
+    }
     use super::*;
 
     /// RetroArch's real mfi profile — the one macOS uses for every pad.

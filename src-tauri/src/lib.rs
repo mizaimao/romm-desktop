@@ -2234,6 +2234,10 @@ struct AndroidPlan {
     /// Absolute path to the ROM.
     rom: String,
     name: String,
+    /// The generated config, or `None` to let RetroArch use its own.
+    config: Option<String>,
+    /// Anything worth telling the user about what is and is not applied.
+    notes: Vec<String>,
     /// Best first; the first one whose component is actually installed wins.
     candidates: Vec<AndroidCandidate>,
 }
@@ -2268,13 +2272,25 @@ fn core_file_is(file: Option<&str>, core: &str) -> bool {
 /// the game ends. RetroArch uses its own configuration, which on this device
 /// already points at the card.
 ///
+/// `retroarch_package` comes from `Bridge.retroArchPackage` and `config_dir`
+/// from `Bridge.externalFilesDir`, because only the Kotlin side knows either:
+/// which RetroArch is installed decides where its files are, and the generated
+/// config has to be written somewhere RetroArch can read — this app's private
+/// directory is not it.
+///
 /// RetroArch only. `android_launches` also offers standalone emulators, and
 /// they are dropped here: this app's manifest can only see the two RetroArch
 /// packages, so `getPackageInfo` on any other one answers "not installed"
 /// whether it is or not, and offering a choice that always fails is worse than
 /// not offering it.
 #[tauri::command]
-fn android_launch_plan(state: State<'_, AppState>, id: i64) -> CmdResult<AndroidPlan> {
+fn android_launch_plan(
+    state: State<'_, AppState>,
+    id: i64,
+    retroarch_package: String,
+    config_dir: String,
+    pad: Option<String>,
+) -> CmdResult<AndroidPlan> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
         cache.rom_by_id(id).map_err(err)?
@@ -2329,9 +2345,13 @@ fn android_launch_plan(state: State<'_, AppState>, id: i64) -> CmdResult<Android
         found.sort_by_key(|l| !core_file_is(l.core_file.as_deref(), core));
     }
 
+    let (config, notes) = android_config(&state, &row, &retroarch_package, &config_dir, pad.as_deref());
+
     Ok(AndroidPlan {
         rom: rom.to_string_lossy().into_owned(),
         name: row.name.clone(),
+        config,
+        notes,
         candidates: found
             .into_iter()
             .map(|l| AndroidCandidate {
@@ -2341,6 +2361,142 @@ fn android_launch_plan(state: State<'_, AppState>, id: i64) -> CmdResult<Android
             })
             .collect(),
     })
+}
+
+/// Build the config RetroArch will be launched with, and say what is in it.
+///
+/// The whole of this app's per-launch settings — hotkeys, shader, saves, rapid
+/// fire, achievements, light gun, core options — folded onto the user's own
+/// `retroarch.cfg` and written somewhere RetroArch can read.
+///
+/// Merged rather than replaced, and that is the crux. The Intent takes
+/// `CONFIGFILE` and nothing else, and that is the *complete* config: anything
+/// the file leaves out falls back to RetroArch's built-in defaults, not to the
+/// user's settings. Handing it our fragment alone would quietly reset their
+/// video driver, their directories and every binding they have ever set. So
+/// their file is the base, ours is laid over it, and their file is only ever
+/// read — see `retroarch::merge_config`.
+///
+/// Never fatal. A config that could not be written means a launch with
+/// RetroArch's own settings, which is exactly what every launch did before this
+/// existed; refusing to start the game instead would be a worse trade.
+fn android_config(
+    state: &State<'_, AppState>,
+    row: &cache::RomRow,
+    package: &str,
+    config_dir: &str,
+    pad: Option<&str>,
+) -> (Option<String>, Vec<String>) {
+    let mut notes = Vec::new();
+    let out_dir = PathBuf::from(config_dir);
+    // RetroArch's own files, by the name of the build that is installed. It
+    // targets SDK 28, so it is still on legacy storage and reads these itself;
+    // this app reaches them because it holds MANAGE_EXTERNAL_STORAGE.
+    let ra = romm_desktop::retroarch::RetroArch::android_app(&PathBuf::from(format!(
+        "/storage/emulated/0/Android/data/{package}/files"
+    )));
+    let base = match std::fs::read_to_string(ra.data_dir().join("retroarch.cfg")) {
+        Ok(text) => text,
+        Err(e) => {
+            notes.push(format!("using RetroArch's own settings — could not read its config: {e}"));
+            return (None, notes);
+        }
+    };
+
+    let cfg = Config::load().unwrap_or_default();
+    let platform = row.platform_slug.as_str();
+    let core = {
+        let overrides = state.core_overrides.lock().ok();
+        let per_game = state.core_per_game.lock().ok();
+        match (overrides, per_game) {
+            (Some(o), Some(g)) => {
+                coremap::resolve_core_for(&state.map, &o, &g, platform, Some(&row.fs_name), |_| true)
+            }
+            _ => None,
+        }
+    }
+    .unwrap_or_default();
+
+    // The shader for this platform, if the pack is installed. `config_lines`
+    // only ever emits a preset it has checked exists, so a device without the
+    // pack gets no shader rather than a black screen.
+    let preset = state
+        .shaders_enabled
+        .then(|| {
+            let over = state.shader_overrides.lock().ok()?;
+            romm_desktop::shaders::preset_for(&over, platform)
+        })
+        .flatten();
+    let shader_lines = romm_desktop::shaders::config_lines(&ra, preset.as_deref());
+    // `config_lines` answers with an explicit `video_shader_enable = "false"`
+    // when it cannot find the preset, which is the right thing to write and
+    // says nothing to the user. RetroArch on Android ships no shader pack —
+    // its `files/` holds a config and nothing else — so this is the ordinary
+    // case here rather than an odd one, and silently getting no shader is
+    // indistinguishable from the setting not working.
+    if preset.is_some() && !shader_lines.contains("video_shader = ") {
+        notes.push(format!(
+            "no shader: RetroArch on this device has no shader pack, so {} could not be applied",
+            romm_desktop::shaders::label_of(preset.as_deref().unwrap_or_default())
+        ));
+    }
+
+    let gun = state
+        .lightgun
+        .lock()
+        .ok()
+        .map(|g| g.get(platform).map(String::as_str) == Some("on"))
+        .unwrap_or(false);
+
+    // Tweaks write core options and remaps into `<root>/retroarch/` and point
+    // RetroArch at them. On Android that root has to be shared storage: our own
+    // files directory is private and RetroArch cannot read a word of it.
+    let extra = format!(
+        "{}{}{}{}{}",
+        shader_lines,
+        ra.system_dir_line(),
+        ra.prepare_tweaks(&out_dir, platform, &core, state_autofire()),
+        romm_desktop::achievements::config_lines(&state.achievements),
+        romm_desktop::lightgun::config_lines(platform, gun),
+    );
+
+    let saves_root = romm_desktop::util::expand_tilde(&cfg.saves.root);
+    let overlay = match ra.write_overrides_full(
+        &out_dir,
+        None,
+        &extra,
+        romm_desktop::retroarch::Input {
+            pad,
+            mirror_players: state.mirror_players,
+            autofire: state_autofire(),
+            autofire_hz: autofire_hz(state),
+            save_state_on_exit: cfg.retroarch.save_state_on_exit,
+            saves_root: (!saves_root.as_os_str().is_empty()).then_some(saves_root.as_path()),
+        },
+    ) {
+        Ok(path) => std::fs::read_to_string(path).unwrap_or_default(),
+        Err(e) => {
+            notes.push(format!("using RetroArch's own settings — {e}"));
+            return (None, notes);
+        }
+    };
+
+    let merged = romm_desktop::retroarch::merge_config(&base, &overlay);
+    let path = out_dir.join("launch.cfg");
+    match std::fs::write(&path, merged) {
+        Ok(()) => (Some(path.to_string_lossy().into_owned()), notes),
+        Err(e) => {
+            notes.push(format!("using RetroArch's own settings — could not write the config: {e}"));
+            (None, notes)
+        }
+    }
+}
+
+/// Rapid fire as configured, or off.
+fn state_autofire() -> romm_desktop::tweaks::AutoFire {
+    Config::load()
+        .map(|c| romm_desktop::tweaks::AutoFire::parse(&c.retroarch.autofire))
+        .unwrap_or_default()
 }
 
 /// What one half of the automatic sync produced.
@@ -4071,9 +4227,16 @@ pub fn run() {
     let client = cfg.server.client()
         .ok()
         .map(Arc::new);
-    let retroarch = RetroArch::locate_in(&cfg.retroarch.ordered_paths())
-        .ok()
-        .map(|ra| ra.with_system_dir(Some(cfg.system_dir())));
+    // On Android RetroArch is another app, so there is no path to search — it
+    // is found by its config instead. Everything downstream of `state.retroarch`
+    // depends on this: without it the shader list in Settings → Emulators was
+    // empty and the tab said "no RetroArch" on a device that has it installed.
+    let retroarch = if cfg!(target_os = "android") {
+        RetroArch::locate_android()
+    } else {
+        RetroArch::locate_in(&cfg.retroarch.ordered_paths()).ok()
+    }
+    .map(|ra| ra.with_system_dir(Some(cfg.system_dir())));
     let roms_dir = cfg.local_roms_dir();
     let media_dir = PathBuf::from(&cfg.library.local_root).join("downloaded_media");
 
