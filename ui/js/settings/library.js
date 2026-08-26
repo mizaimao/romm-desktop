@@ -15,6 +15,18 @@ export const html = `      <h4>Library</h4>
       </div>
       <p class="hint">Everything downloaded lives here — games, artwork, save
         backups. Deleting this folder reclaims all of it.</p>
+      <div class="srow set-fileaccess-row" hidden>
+        <label>File access</label>
+        <div class="ctl">
+          <button class="set-fileaccess">Allow access to files…</button>
+          <span class="set-fileaccess-state"></span>
+        </div>
+      </div>
+      <p class="hint set-fileaccess-row" hidden>Android will not let an app read
+        the folders below until you turn this on, and it is a switch in system
+        settings rather than something this app can ask for. The button opens
+        that screen.</p>
+
       <div class="srow">
         <label>ES-DE folder</label>
         <div class="ctl"><input class="cf-text" data-field="esde_root"
@@ -188,6 +200,48 @@ export function wire(box) {
   box.querySelector(".set-libsync-full")?.addEventListener("click", (e) =>
     runLibSync(e.currentTarget, true)
   );
+
+  // All files access, on Android only.
+  //
+  // The row is hidden unless the bridge is there, so desktop never sees a
+  // control for a permission it does not have. `RommAndroid` is the
+  // JavaScript interface MainActivity attaches — see Bridge there for why this
+  // is not a Tauri command.
+  //
+  // A button rather than only the prompt at launch: that prompt fires once per
+  // start and dismissing it left no way back to the switch, which made the
+  // permission unreachable for anyone who did not want it at that exact moment.
+  const bridge = window.RommAndroid;
+  if (bridge) {
+    const rows = box.querySelectorAll(".set-fileaccess-row");
+    rows.forEach((r) => (r.hidden = false));
+    const state = box.querySelector(".set-fileaccess-state");
+    const btn = box.querySelector(".set-fileaccess");
+    const paint = () => {
+      let ok = false;
+      try {
+        ok = bridge.hasAllFilesAccess();
+      } catch {
+        ok = false;
+      }
+      state.textContent = ok ? "Allowed" : "Not allowed yet";
+      btn.textContent = ok ? "Review in settings…" : "Allow access to files…";
+    };
+    paint();
+    btn?.addEventListener("click", () => {
+      try {
+        bridge.openAllFilesAccess();
+      } catch (e) {
+        toast(`Could not open that screen — ${e}`, 6000);
+      }
+    });
+    // Coming back from system settings is a resume, not a reload, so the
+    // answer is asked for again rather than remembered.
+    window.addEventListener("focus", paint);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) paint();
+    });
+  }
 
   // The text fields: the library folder and the two ES-DE paths.
   //

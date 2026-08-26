@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
@@ -43,6 +44,42 @@ class MainActivity : TauriActivity() {
 
     override fun onWebViewCreate(webView: WebView) {
         webViews.add(webView)
+        // The page's only way to reach Android. See Bridge.
+        webView.addJavascriptInterface(Bridge(), "RommAndroid")
+    }
+
+    /**
+     * The handful of Android things the settings page needs to reach.
+     *
+     * A JavaScript interface rather than a Tauri command, because a Tauri
+     * command runs in Rust and Rust has no way to get at the Android context —
+     * Tauri does not expose it (tauri-apps/tauri#13267). Kotlin has it for
+     * free, so the shortest honest path from a button in the page to an Intent
+     * is this.
+     *
+     * Only this app's own local pages run in this webview, so there is no third
+     * party to expose it to.
+     */
+    private inner class Bridge {
+        /** Whether the app can read the ES-DE folders. */
+        @JavascriptInterface
+        fun hasAllFilesAccess(): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                Environment.isExternalStorageManager()
+
+        /**
+         * Show the system switch for All files access.
+         *
+         * There is no dialog an app can raise for this one and no way to grant
+         * it in-process; the switch lives in system settings and the most any
+         * app can do is open that screen. Without a button for it, dismissing
+         * the prompt at launch left no way back — which is exactly what
+         * happened.
+         */
+        @JavascriptInterface
+        fun openAllFilesAccess() {
+            runOnUiThread { openAllFilesScreen() }
+        }
     }
 
     /**
@@ -120,10 +157,17 @@ class MainActivity : TauriActivity() {
     private fun askForFilesOnce() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         if (Environment.isExternalStorageManager()) return
+        openAllFilesScreen()
+    }
 
-        // Wrapped: the per-app screen is missing on some builds, and a crash on
-        // first launch would be a far worse trade than a permission nobody was
-        // offered. The generic list is the fallback, and giving up is fine.
+    /**
+     * Open the All files access screen, from launch or from the settings page.
+     *
+     * Wrapped: the per-app screen is missing on some builds, and a crash would
+     * be a far worse trade than a permission nobody was offered. The generic
+     * list is the fallback, and giving up is fine.
+     */
+    private fun openAllFilesScreen() {
         try {
             startActivity(
                 Intent(
