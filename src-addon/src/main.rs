@@ -157,6 +157,7 @@ fn main() -> Result<()> {
         Some("--plan") => return sync_cli(false),
         Some("--sync") => return sync_cli(true),
         Some("--pull-all") => return pull_all_cli(),
+        Some("--refresh") => return refresh_cli(),
         Some("--save") => {
             profile::save(&paths, &patches)?;
             println!("wrote {}", paths.profile().display());
@@ -164,7 +165,8 @@ fn main() -> Result<()> {
         }
         Some(other) if other.starts_with("--") => {
             eprintln!(
-                "moose-patch [--status | --plan | --sync | --pull-all | --restore | --save]"
+                "moose-patch [--status | --plan | --sync | --refresh | --pull-all \
+                 | --restore | --save]"
             );
             std::process::exit(2);
         }
@@ -179,6 +181,13 @@ fn main() -> Result<()> {
 /// frame — so this exercises the real path over ssh, on the device, without a
 /// window. Every sync bug so far has been found by looking rather than by
 /// reasoning, and this is the cheapest way to look.
+/// Rebuild the game list. Everything else depends on it being current.
+fn refresh_cli() -> Result<()> {
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    drain_to_end(worker::refresh_index(&cfg, &app_dir))
+}
+
 /// Take everything the server holds. For a device being set up, or one whose
 /// card was wiped — `negotiate` will not re-offer a save this device already
 /// took, which is the same rule that stops a deleted save coming back.
@@ -401,6 +410,9 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
                     Request::CarryOut => {
                         job = Some(worker::carry_out(&cfg, &ra_root, &app_dir, &library_root));
                     }
+                    Request::Refresh => {
+                        job = Some(worker::refresh_index(&cfg, &app_dir));
+                    }
                 }
             }
         }
@@ -454,6 +466,8 @@ enum Request {
     Negotiate,
     /// Do it. Only reachable from a plan that has been shown and accepted.
     CarryOut,
+    /// Rebuild the list of games. Everything else is matched through it.
+    Refresh,
 }
 
 /// One press. Split out so the whole of the app's behaviour can be exercised
@@ -482,6 +496,13 @@ fn act(
             Press::Accept => {
                 let id = app.page().selected().map(|r| r.id.clone()).unwrap_or_default();
                 app.overlay = Overlay::None;
+                if id == "refresh" {
+                    if app.stage.is_busy() {
+                        return None;
+                    }
+                    app.stage = Stage::Asking { note: "starting".into() };
+                    return Some(Request::Refresh);
+                }
                 if id == "check" {
                     // Refusing while one is already in flight: two syncs would
                     // race on the same files.
@@ -643,6 +664,7 @@ mod tests {
         assert_eq!(f.0.queue().len(), 1);
 
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past refresh, onto "see what would sync"
         assert_eq!(f.0.tab, Tab::Sync);
         press(&mut f, Press::Accept);
         match &f.0.overlay {
@@ -663,6 +685,7 @@ mod tests {
         // Nothing is transferred, and the patches queue is untouched.
         let mut f = fixture("sync-start");
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past the refresh row, onto "see what would sync"
         assert_eq!(press(&mut f, Press::Accept), None, "the prompt comes first");
         assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
         assert!(f.0.stage.is_busy());
@@ -686,6 +709,7 @@ mod tests {
             agreed: 0,
         });
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past refresh, onto "see what would sync"
         press(&mut f, Press::Accept);
         assert_eq!(press(&mut f, Press::Accept), Some(Request::CarryOut));
     }
@@ -696,8 +720,25 @@ mod tests {
         let mut f = fixture("sync-empty-plan");
         f.0.stage = Stage::Ready(Review { lines: vec![], agreed: 380 });
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past refresh, onto "see what would sync"
         press(&mut f, Press::Accept);
         assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
+    }
+
+    #[test]
+    fn the_game_list_can_be_rebuilt_from_its_own_row() {
+        // The row that unblocks everything else: saves are matched to games by
+        // the server's id, and a rescan there renumbers them all.
+        let mut f = fixture("refresh");
+        press(&mut f, Press::TabLeft);
+        assert_eq!(
+            f.0.page().selected().map(|r| r.id.as_str()),
+            Some("refresh"),
+            "refresh is the first thing to do on a device, so it is where the cursor lands"
+        );
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Refresh));
+        assert!(f.0.stage.is_busy());
     }
 
     #[test]
@@ -706,6 +747,7 @@ mod tests {
         // overwrite what the first had just written.
         let mut f = fixture("sync-twice");
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past the refresh row, onto "see what would sync"
         press(&mut f, Press::Accept);
         assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
         press(&mut f, Press::Accept);
@@ -716,6 +758,7 @@ mod tests {
     fn cancelling_the_sync_prompt_asks_for_nothing() {
         let mut f = fixture("sync-cancel");
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past the refresh row, onto "see what would sync"
         press(&mut f, Press::Accept);
         assert_eq!(press(&mut f, Press::Back), None);
         assert_eq!(f.0.overlay, Overlay::None);
@@ -805,6 +848,7 @@ mod tests {
         let mut f = fixture("tabs");
         press(&mut f, Press::Right);
         press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down); // past refresh, onto "see what would sync"
         assert_eq!(f.0.tab, Tab::Sync);
         assert_eq!(f.0.queue().len(), 1);
     }

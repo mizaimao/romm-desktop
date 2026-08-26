@@ -8,7 +8,8 @@ import { openFilterMenu } from "./filter.js";
 import { installPageFilter } from "./pagefilter.js";
 import { chooseMode, storedMode, shellMode, installColumnResizer } from "./shell.js";
 import { human, toast, escapeHtml } from "./util.js";
-import { showPlatforms, runSearch, setLayout, setZoom, renderRows, randomGame } from "./library.js";
+import { showPlatforms, runSearch, setLayout, setZoom, renderRows, randomGame,
+  applyLayoutForView, layoutKeyForView } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
 import { installKeys, installAndroidBack } from "./keys.js";
@@ -46,6 +47,17 @@ listen("art-changed", () => {
 // skips the console grid because game artwork is not what changed there. This
 // is the one that redraws it.
 // Chosen in the settings window, which cannot reach this document.
+// The console screen and the inside of a console keep separate layouts, and
+// Settings can set either. Applied only when it is the one on screen; the other
+// is stored and takes effect when you go there.
+listen("layout-view", async ({ payload }) => {
+  const { view, value } = payload || {};
+  const key = view === "platforms" ? "layoutPlatforms" : "layoutGames";
+  state[key] = value;
+  if (layoutKeyForView() !== key) return;
+  setLayout(value);
+});
+
 listen("shell-mode", async ({ payload }) => {
   chooseMode(String(payload), { announce: false });
   // Redrawn from scratch: the console list has moved to a different element,
@@ -330,7 +342,9 @@ function statusCard(s) {
     .catch(() => {});
   applyStoredGlassTint();
   setZoom(state.zoom);
-  setLayout(state.layout);
+  // Not `setLayout`: nothing has been chosen yet, this only points the state
+  // and the button at the setting the opening view uses.
+  applyLayoutForView();
   setSidebar(state.sidebar);
   installTabs();
   // The interface tables, before anything that reads them: the sort and filter

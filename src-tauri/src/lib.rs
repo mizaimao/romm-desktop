@@ -2290,6 +2290,7 @@ fn android_launch_plan(
     retroarch_package: String,
     config_dir: String,
     pad: Option<String>,
+    refresh: Option<f32>,
 ) -> CmdResult<AndroidPlan> {
     let row = {
         let cache = state.cache.lock().map_err(err)?;
@@ -2345,7 +2346,8 @@ fn android_launch_plan(
         found.sort_by_key(|l| !core_file_is(l.core_file.as_deref(), core));
     }
 
-    let (config, notes) = android_config(&state, &row, &retroarch_package, &config_dir, pad.as_deref());
+    let (config, notes) =
+        android_config(&state, &row, &retroarch_package, &config_dir, pad.as_deref(), refresh);
 
     Ok(AndroidPlan {
         rom: rom.to_string_lossy().into_owned(),
@@ -2386,6 +2388,9 @@ fn android_config(
     package: &str,
     config_dir: &str,
     pad: Option<&str>,
+    /// The measured display refresh, which decides how many subframes a strobe
+    /// pass gets. `None` is treated as "probably 120Hz or better".
+    refresh: Option<f32>,
 ) -> (Option<String>, Vec<String>) {
     let mut notes = Vec::new();
     let out_dir = PathBuf::from(config_dir);
@@ -2427,14 +2432,37 @@ fn android_config(
             romm_desktop::shaders::preset_for(&over, platform)
         })
         .flatten();
-    let shader_lines = romm_desktop::shaders::config_lines(&ra, preset.as_deref());
+    // A strobe pass has to be chained onto the platform's shader, because
+    // RetroArch loads exactly one preset. The generated chain lands in the same
+    // directory as the config, which is the one RetroArch can read.
+    let motion = cfg
+        .shaders
+        .motion
+        .as_deref()
+        .filter(|m| !m.is_empty() && *m != "none")
+        .filter(|_| romm_desktop::shaders::display_of(platform) == romm_desktop::shaders::Display::Crt);
+    let chained =
+        motion.and_then(|m| romm_desktop::shaders::write_chained(&ra, &out_dir, preset.as_deref(), m));
+    if motion.is_some() && chained.is_none() {
+        notes.push("motion shader not installed — using the base shader alone".to_owned());
+    }
+    let shader_lines = match &chained {
+        Some(p) => format!(
+            "\n# Base shader with a motion pass chained on.\n\
+             video_shader_enable = \"true\"\nvideo_shader = \"{}\"\n\
+             video_shader_subframes = \"{}\"\n",
+            p.display(),
+            romm_desktop::shaders::subframes_for(refresh)
+        ),
+        None => romm_desktop::shaders::config_lines(&ra, preset.as_deref()),
+    };
     // `config_lines` answers with an explicit `video_shader_enable = "false"`
     // when it cannot find the preset, which is the right thing to write and
     // says nothing to the user. RetroArch on Android ships no shader pack —
     // its `files/` holds a config and nothing else — so this is the ordinary
     // case here rather than an odd one, and silently getting no shader is
     // indistinguishable from the setting not working.
-    if preset.is_some() && !shader_lines.contains("video_shader = ") {
+    if preset.is_some() && chained.is_none() && !shader_lines.contains("video_shader = ") {
         notes.push(format!(
             "no shader: RetroArch on this device has no shader pack, so {} could not be applied",
             romm_desktop::shaders::label_of(preset.as_deref().unwrap_or_default())

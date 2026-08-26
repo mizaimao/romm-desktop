@@ -25,6 +25,29 @@ export const html = `      <h4>Layout</h4>
       <p class="hint set-window-layout">One pane at a time, with Back. Or three
         columns — consoles, games, preview — where nothing is ever replaced.</p>
 
+      <div class="srow">
+        <label>Consoles</label>
+        <div class="ctl">
+          <select class="view-layout" data-view="platforms">
+            <option value="grid">Grid</option>
+            <option value="list">List</option>
+          </select>
+        </div>
+      </div>
+      <div class="srow">
+        <label>Games</label>
+        <div class="ctl">
+          <select class="view-layout" data-view="games">
+            <option value="grid">Grid</option>
+            <option value="list">List</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Two settings, because they are two different questions. A
+        dozen consoles are big pictures and read well as a grid; a console
+        holding two thousand games reads better as a list. The button in the
+        library changes whichever of the two you are looking at.</p>
+
       <h4>Artwork</h4>
       <div class="srow">
         <label>Game list shows<span class="padmark" data-action="pictures"></span></label>
@@ -170,6 +193,7 @@ export function wire(box) {
 
   markPadControls(box);
   wireShellMode(box);
+  wireViewLayouts(box);
   wireIconStyles(box);
   wireAppIcons(box);
 
@@ -453,6 +477,24 @@ function wireShellMode(box) {
     window.__TAURI__?.event?.emit?.("shell-mode", sel.value);
     toast(sel.value === "columns" ? "Three columns" : "One pane");
   });
+}
+
+/// Grid or list, separately for the console screen and for a console's games.
+///
+/// Stored under the same keys the library window uses and announced with an
+/// event, which is how every other setting here reaches that window — it has
+/// the list, this one does not.
+function wireViewLayouts(box) {
+  for (const sel of box.querySelectorAll(".view-layout")) {
+    const view = sel.dataset.view;
+    const key = view === "platforms" ? "layout.platforms" : "layout";
+    sel.value = localStorage.getItem(key) === "list" ? "list" : "grid";
+    sel.addEventListener("change", () => {
+      localStorage.setItem(key, sel.value);
+      window.__TAURI__?.event?.emit?.("layout-view", { view, value: sel.value });
+      toast(`${view === "platforms" ? "Consoles" : "Games"}: ${sel.value}`);
+    });
+  }
 }
 
 /// Which picture the app itself wears.

@@ -19,6 +19,7 @@ import { windowRows, stopWindowing, worthWindowing, windowedList } from "./visib
 
 export async function showPlatforms() {
   state.view = "platforms";
+  applyLayoutForView("platforms");
   trail.length = 0;
   state.platform = null;
   state.selected = null;
@@ -158,6 +159,7 @@ async function showRecent() {
 /// Everything you have played, as a page rather than a strip.
 export async function showAllRecent() {
   state.view = "search";
+  applyLayoutForView("search");
   restoreSidebar();
   state.platform = null;
   trail.length = 0;
@@ -357,6 +359,7 @@ function restorePlatformCursor() {
 
 export async function showRoms(slug) {
   state.view = "roms";
+  applyLayoutForView("roms");
   restoreSidebar();
   // The console list is a column of its own here and stays where it is; only
   // the middle changes. In one pane it has already been replaced by the time
@@ -389,6 +392,7 @@ export async function runSearch(term) {
     return state.platform ? showRoms(state.platform) : showPlatforms();
   }
   state.view = "search";
+  applyLayoutForView("search");
   restoreSidebar();
   state.rows = await invoke("search", { term, list: listRef() });
   await arrangeCurrentList();
@@ -792,12 +796,48 @@ export function setZoom(px) {
   primeNav();
 }
 
+/// Which stored layout the view on screen is using.
+///
+/// The console screen and the inside of a console are separate settings; search
+/// results are a list of games, so they follow the games one.
+export function layoutKeyForView(view = state.view) {
+  return view === "platforms" ? "layoutPlatforms" : "layoutGames";
+}
+
+/// Point `state.layout` at the setting for the view being entered.
+///
+/// Called wherever `state.view` changes. Without it the console screen would
+/// draw with whatever the last console used, which is exactly the coupling this
+/// pair of settings exists to remove.
+export function applyLayoutForView(view = state.view) {
+  const next = state[layoutKeyForView(view)];
+  if (state.layout !== next) state.layout = next;
+  paintLayoutButton(next);
+  showZoom(next === "grid");
+}
+
+/// The toggle in the header, showing what pressing it will do next.
+function paintLayoutButton(now) {
+  if (!el.layoutBtn) return;
+  const label = el.layoutBtn.querySelector("span:not(.icon)");
+  if (label) label.textContent = now === "grid" ? "List" : "Grid";
+  const icon = el.layoutBtn.querySelector(".icon");
+  if (icon) icon.className = `icon icon-${now === "grid" ? "list" : "grid"}`;
+  el.layoutBtn.title = now === "grid" ? "Switch to list view" : "Switch to grid view";
+}
+
+/// Set the layout of the view currently on screen.
+///
+/// The button and the pad shortcut both come here, so which of the two settings
+/// they change is decided by where you are rather than by the caller — press it
+/// on the console screen and the console screen changes, press it inside a
+/// console and that changes.
 export function setLayout(next) {
+  const key = layoutKeyForView();
+  state[key] = next;
   state.layout = next;
-  localStorage.setItem("layout", next);
-  el.layoutBtn.querySelector("span:not(.icon)").textContent = next === "grid" ? "List" : "Grid";
-  el.layoutBtn.querySelector(".icon").className = `icon icon-${next === "grid" ? "list" : "grid"}`;
-  el.layoutBtn.title = next === "grid" ? "Switch to list view" : "Switch to grid view";
+  localStorage.setItem(key === "layoutPlatforms" ? "layout.platforms" : "layout", next);
+  paintLayoutButton(next);
   // Only a grid has anything to resize, on the consoles screen as much as
   // anywhere else.
   showZoom(next === "grid");

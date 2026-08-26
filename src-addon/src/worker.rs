@@ -174,6 +174,71 @@ pub fn carry_out(cfg: &Config, ra_root: &Path, app_dir: &Path, library_root: &Pa
     Job { rx }
 }
 
+/// Rebuild this device's list of games from the server.
+///
+/// Matching a save to a server save is done by rom id, and ids are the
+/// server's to change: a rescan there renumbers everything. The index this
+/// device inherited from the archived front end had Chrono Trigger as 6985
+/// where the server now says 9272, so every save the Flip described was a
+/// game the server did not recognise and every one came back "upload this,
+/// it is new".
+///
+/// A **full** pull, into our own file. An incremental one keys on id, so the
+/// stale rows would survive alongside the new ones and a save could match
+/// either — which is worse than not matching at all.
+pub fn refresh_index(cfg: &Config, app_dir: &Path) -> Job {
+    let (tx, rx) = channel();
+    let server = cfg.server.url.clone();
+    let username = cfg.server.username.clone();
+    let password = cfg.server.password.clone();
+    let token = cfg.server.token.clone();
+    let path = app_dir.join("cache.sqlite3");
+
+    std::thread::spawn(move || {
+        let say = move |m: Message| {
+            let _ = tx.send(m);
+        };
+        if server.trim().is_empty() {
+            return say(Message::Failed("no server in config.toml".into()));
+        }
+        // Start clean. Anything left from a previous index is by definition
+        // numbered the old way.
+        let _ = std::fs::remove_file(&path);
+        say(Message::Note("rebuilding the game list".into()));
+
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(r) => r,
+            Err(e) => return say(Message::Failed(format!("starting the network: {e}"))),
+        };
+        // `Cache::sync` answers (platforms, roms, was-incremental) — not
+        // (upserted, removed), which is how the first run reported "36 games
+        // listed, 9371 dropped" for a refresh that had in fact pulled 9,371
+        // games across 36 platforms.
+        let result: anyhow::Result<(usize, usize)> = runtime.block_on(async {
+            let client = romm_desktop::api::Client::with_auth(
+                &server,
+                &username,
+                &password,
+                token.as_deref(),
+            )?;
+            let mut cache = Cache::open(&path)?;
+            let (platforms, roms, _) = cache.sync(&client, true).await?;
+            Ok((platforms, roms))
+        });
+
+        match result {
+            Ok((platforms, roms)) => say(Message::Finished {
+                moved: roms,
+                note: format!("{roms} games across {platforms} systems"),
+                conflicts: Vec::new(),
+            }),
+            Err(e) => say(Message::Failed(format!("{e:#}"))),
+        }
+    });
+
+    Job { rx }
+}
+
 /// Take everything the server holds, whatever it thinks this device has.
 ///
 /// `negotiate` will not offer a save this device already took — correctly, and
@@ -238,6 +303,15 @@ pub fn pull_all(cfg: &Config, ra_root: &Path, app_dir: &Path, library_root: &Pat
                 let slot = save.slot.as_deref().unwrap_or("unslotted");
                 let _ = romm_desktop::savebackup::keep(&library_root, save.rom_id, slot, &dest);
                 std::fs::write(&dest, bytes)?;
+                // Tell the server it landed.
+                //
+                // Without this its per-device bookkeeping still says this
+                // device does not hold the save, and the very next negotiate
+                // offers to *push* all of them back — which is exactly what
+                // happened the first time this ran.
+                if let Err(e) = client.confirm_download(save.id).await {
+                    eprintln!("could not confirm {}: {e:#}", save.file_name);
+                }
                 done += 1;
                 say(Message::Note(format!("{done} of {total}")));
             }

@@ -25,7 +25,24 @@ export const state = {
   /// collection puts the cursor where you left it rather than at the top, which
   /// otherwise means re-finding your place on every single trip in and out.
   lastRom: JSON.parse(localStorage.getItem("lastRom") || "{}"),
+  /// The layout of whatever is on screen *now*.
+  ///
+  /// Derived, not stored: the two lines below are what persist, and this is
+  /// whichever of them the current view uses. Kept as one field because the
+  /// twenty-odd places that draw a list ask "grid or not" about the thing they
+  /// are drawing, and none of them should have to know which view it belongs
+  /// to. `applyLayoutForView` in library.js keeps it in step.
   layout: localStorage.getItem("layout") || "grid",
+  /// The console screen, and the games inside a console: two settings, because
+  /// they are two different questions. Consoles are a short list of big
+  /// pictures and read well as a grid; a console holding two thousand games
+  /// reads better as a list, and having one control both meant choosing which
+  /// of the two to have wrong.
+  ///
+  /// `layout` is the older key and stays the games one, so nobody's existing
+  /// choice is reset by this gaining a second half.
+  layoutGames: localStorage.getItem("layout") || "grid",
+  layoutPlatforms: localStorage.getItem("layout.platforms") || "grid",
   // Per level; see `sidebarScope` in detail.js. Seeded from the console
   // screen because that is what opens first.
   sidebar: (localStorage.getItem("sidebar.platforms")

@@ -21,6 +21,15 @@ pub fn sync(server: Option<&str>, status: &str) -> Page {
         // person can sensibly make up front. Asking what *would* happen is,
         // and it moves nothing.
         Row::action(
+            "refresh",
+            "Refresh the game list",
+            "Rebuilds this device's list of your games from the server. Saves are matched to \
+             games by the server's own id, and a rescan there renumbers everything — so a \
+             stale list makes every save look like a game the server has never heard of. \
+             Do this first on a new device, and again if syncing claims everything is new.",
+            "—",
+        ),
+        Row::action(
             "check",
             "See what would sync",
             "Scans the saves on this card, hands the list to the server, and shows what it \

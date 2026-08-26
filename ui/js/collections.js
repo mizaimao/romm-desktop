@@ -13,7 +13,7 @@ import { arrangeCurrentList, listRef } from "./arrange.js";
 import {
   setPageFilterLabel, setPageFilterExtra, refreshPageFilter,
 } from "./pagefilter.js";
-import { renderRows } from "./library.js";
+import { renderRows, applyLayoutForView } from "./library.js";
 import { restoreSidebar } from "./detail.js";
 import { collectionArt } from "./collection-art.js";
 import { shellMode } from "./shell.js";
@@ -38,6 +38,7 @@ function markOpen(grid, cid) {
 /// are not a list anybody needs to search.
 function topBar(title, { filter = true } = {}) {
   state.view = "collections";
+  applyLayoutForView("collections");
   restoreSidebar();
   state.platform = null;
   state.selected = null;
@@ -205,6 +206,7 @@ export async function showCollectionsIn(group, label, { into = "picker" } = {}) 
 
 export async function showCollectionRoms(id, name) {
   state.view = "collection-roms";
+  applyLayoutForView("collection-roms");
   restoreSidebar();
   state.collection = id;
   // The collection's own name, kept apart from the rendered title. Restoring a
