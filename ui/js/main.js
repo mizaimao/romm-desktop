@@ -11,7 +11,7 @@ import { human, toast, escapeHtml } from "./util.js";
 import { showPlatforms, runSearch, setLayout, setZoom, renderRows, randomGame } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
-import { installKeys } from "./keys.js";
+import { installKeys, installAndroidBack } from "./keys.js";
 import { installGamepad } from "./gamepad.js";
 import { loadBindings } from "./bindings.js";
 import { loadListControls } from "./sort.js";
@@ -315,6 +315,8 @@ function statusCard(s) {
   installDetailResizer();
   installColumnResizer();
   installKeys();
+  // Answers the Android Back button. Inert everywhere else.
+  installAndroidBack();
   installGamepad();
   // Measure the display now. It costs 24 animation frames, and taken on demand
   // that wait landed between pressing play and the game being asked for.

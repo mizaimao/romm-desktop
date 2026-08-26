@@ -395,6 +395,32 @@ export function runAction(id) {
   if (handler) handler();
 }
 
+/// Answer Android's Back button.
+///
+/// `MainActivity` asks this before it quits, and takes `true` to mean the press
+/// was consumed. Everything else — including this function not existing yet,
+/// because the page is still loading — means there was nowhere to go and the
+/// app should close, which is what Back at the top of an Android app does.
+///
+/// The press is delivered as an Escape rather than by calling `goBack`
+/// directly. Escape already picks its way through the lightbox, then the help
+/// panel, then an open text field, then the view stack, in that order, and a
+/// second implementation of that order would drift from this one.
+///
+/// Installed on every platform. Nothing but the Android activity ever calls it.
+export function installAndroidBack() {
+  window.__androidBack = () => {
+    const somewhereToGo =
+      isLightboxOpen() ||
+      settingsOpen() ||
+      document.getElementById("shortcuts") !== null ||
+      state.view !== "platforms";
+    if (!somewhereToGo) return false;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return true;
+  };
+}
+
 export function installKeys() {
   el.settingsBtn?.addEventListener("click", toggleSettings);
 
