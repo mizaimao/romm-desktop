@@ -297,6 +297,55 @@ describe("the shapes", () => {
     assert.match(body, /cell \+ o/, "the neighbouring cell is not being hashed");
   });
 
+  /// Cubes and Towers are the two halves of the same boot sequence and two
+  /// separate styles. Towers was the one that was meant to be it and landed as
+  /// something else; it is kept as what it became, and this is the scene it was
+  /// aiming at.
+  test("Cubes and Towers are both there and are not each other", () => {
+    const ids = backdrop.BACKDROPS.map((b) => b.id);
+    assert.ok(ids.includes("cubes"), "Cubes is gone");
+    assert.ok(ids.includes("towers"), "Towers was replaced rather than kept");
+    assert.notEqual(
+      backdrop.backdropStyle("cubes").body,
+      backdrop.backdropStyle("towers").body
+    );
+  });
+
+  /// Cubes: noise sampled on `atan` steps across the cut at the negative x
+  /// axis, and what drew was a hard horizontal seam running left out of the
+  /// middle of the glow — through the brightest part of the picture. The
+  /// direction vector carries the same information with no cut in it.
+  test("Cubes lays its haze out along the ray, not along the angle", () => {
+    const body = backdrop.backdropStyle("cubes").body;
+    const code = body.replace(/\/\/[^\n]*/g, "");
+    assert.doesNotMatch(code, /atan/, "the angle is being sampled again");
+    assert.match(code, /eye \/ rad/, "the direction vector is gone");
+  });
+
+  /// Cubes: a derivative asked for inside the hit branch is a derivative under
+  /// non-uniform control flow, which is undefined rather than slow — the pixel
+  /// next door may not have taken that branch at all. The pixel width is taken
+  /// once, before the loop.
+  test("Cubes takes its derivative outside the loop", () => {
+    const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
+    const declared = code.indexOf("fwidth(");
+    const loop = code.indexOf("for (int i");
+    assert.ok(declared > 0, "the pixel width is gone; the silhouettes are hard again");
+    assert.ok(declared < loop, "fwidth moved inside the loop, where it is undefined");
+  });
+
+  /// Cubes: the ramp is built for backdrops, so its lower half is nearly black.
+  /// A block shaded over the whole of it drew as a wireframe — the edges were
+  /// the only part of it with anything in them.
+  test("Cubes shades its blocks in the lit half of the ramp", () => {
+    const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
+    assert.match(
+      code,
+      /ramp\(clamp\(0\.5 \+ value \* 0\.5/,
+      "the blocks are being shaded across the whole ramp again"
+    );
+  });
+
   /// Grid: `max(p.y, 0.04)` froze the perspective divide across the bottom of
   /// the screen, so the lines stopped converging at a fixed height and ran
   /// straight down from it — and `fwidth` of a frozen coordinate is zero, so

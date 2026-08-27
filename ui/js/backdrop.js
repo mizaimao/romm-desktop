@@ -260,10 +260,221 @@ export const BACKDROPS = [
       }`,
   },
   {
+    id: "cubes",
+    label: "Cubes",
+    hint: "Glass blocks turning in a blue haze. The PlayStation 2's opening "
+      + "scene — Towers is the one that comes after it.",
+    // Slower than Towers. This scene has no cycle in it to hurry: the blocks
+    // drift out and wrap round, and at anything brisker it stops being a room
+    // you are floating in and becomes something being thrown at you.
+    pace: 0.25,
+    defaults: { strength: 0.75 },
+    body: `
+      // The PlayStation 2's opening scene: glass blocks turning slowly in a
+      // blue haze. Towers is the scene *after* this one — the field of pillars,
+      // one per save — and this is what plays before it.
+      //
+      // The blocks are real boxes, intersected rather than marched. A ray
+      // against three slabs is a dozen operations and answers exactly: where it
+      // went in, where it came out again, and which face it hit. A distance
+      // field would be sixty steps a pixel for the same three numbers, which is
+      // what ruled boxes out of Towers — here it is what makes seven of them
+      // cost less than the haze behind them.
+      vec2 q = (uv - 0.5) * aspect;
+
+      // The haze, sampled in polar rather than in xy.
+      //
+      // Noise laid out in x and y gives puffs. The same noise laid out in angle
+      // and log-radius stretches along rays out of the middle instead, and that
+      // grain is most of what reads as light coming through smoke rather than
+      // as cloud sitting in front of it.
+      vec2 eye = q - vec2(-0.05 + sin(t * 0.05) * 0.04, 0.01 + cos(t * 0.043) * 0.03);
+      float rad = max(length(eye), 0.02);
+      // Along the ray direction, not along the angle.
+      //
+      // atan() has a cut at the negative x axis, and noise sampled on the angle
+      // steps across it: what showed was a hard horizontal seam running left out
+      // of the middle of the glow, through the brightest part of the picture.
+      // normalize() carries the same information with no cut in it — a
+      // continuous function of direction — so the grain still runs along the
+      // rays and closes up all the way round.
+      vec2 dir = eye / rad;
+      // Two layers, and the radial one is the smaller of them.
+      //
+      // On its own the ray term is a starburst: it is constant along a ray, so
+      // every streak converges on the same pixel and what draws is a lens flare
+      // with a hard point in the middle of it. So the scale opens out with
+      // distance, the middle is faded out of it, and an ordinary cloud carries
+      // most of the weight — the streaks are grain in the cloud rather than the
+      // shape of it.
+      float rays = fbm(dir * (2.0 + rad * 4.0) + vec2(t * 0.03, log(rad) * 0.7));
+      float cloud = fbm(eye * 2.4 + vec2(t * 0.035, -t * 0.025))
+                  + fbm(eye * 5.1 - vec2(t * 0.02, t * 0.03)) * 0.5;
+      // Faded towards the middle of its own range near the centre, not towards
+      // zero. Fading it out left a dark hole exactly where the streaks converge,
+      // which is the one place on this screen that has to be the brightest.
+      float body = cloud * 0.62 + mix(0.5, rays, smoothstep(0.0, 0.16, rad)) * 0.55;
+      // A gaussian, not a disc: the original has no edge to it anywhere, it
+      // simply stops being there. Plus a much tighter one for the core, so the
+      // haze has a source in it rather than being evenly lit throughout.
+      float haze = exp(-rad * rad * 4.2) * (0.30 + 1.25 * body)
+                 + exp(-rad * rad * 38.0) * 0.45;
+
+      // The blocks. Nearest hit wins.
+      //
+      // Sorting seven translucent boxes per pixel is not affordable, and the
+      // one in front is the one that should be seen. Additive would have been
+      // order-free too — it is what Towers does — and it would have lost the
+      // block crossing the haze as a silhouette, which is the shot.
+      vec3 rd = normalize(vec3(q, 1.2));
+      // How wide a pixel is, taken out here on purpose. A derivative inside the
+      // loop below would be asked for inside a branch that not every pixel
+      // takes, and a derivative under non-uniform control flow is undefined —
+      // it is not slower there, it is wrong there.
+      float qpx = max(fwidth(q.x), 1e-5);
+      float front = 1e9;
+      vec3 lit = vec3(0.0);
+      float cover = 0.0;
+
+      for (int i = 0; i < 7; i++) {
+        float f = float(i);
+        // Around a ring and drifting outwards, wrapping once it passes the
+        // camera: the scene is a slow explosion that never finishes.
+        float turn = fract(t * 0.017 + f / 7.0);
+        float ring = f * 0.8975 + hash(vec2(f, 5.0)) * 0.45 + t * 0.02;
+        float spread = 0.30 + turn * 1.25;
+        vec3 cen = vec3(cos(ring) * spread * 1.15, sin(ring) * spread, mix(3.6, 1.1, turn));
+
+        // Its own tumble, on two angles whose rates do not share a period, so
+        // no two blocks ever fall into step.
+        float ax = t * 0.09 + hash(vec2(f, 11.0)) * 6.3;
+        float ay = t * 0.07 + hash(vec2(f, 13.0)) * 6.3;
+        float sx = sin(ax), cx = cos(ax), sy = sin(ay), cy = cos(ay);
+        // World to block, written out rather than multiplied: this is a Y turn
+        // times an X turn, and forming it as two mat3 products is twenty-seven
+        // multiplies per block per pixel to arrive at these four.
+        //
+        // Orthonormal, so the transpose is the inverse — which is why the
+        // normal comes back out below with a multiply on the other side and no
+        // second matrix.
+        mat3 rot = mat3(cy, 0.0, -sy, sy * sx, cx, cy * sx, sy * cx, -sx, cy * cx);
+
+        float h = 0.10 + hash(vec2(f, 17.0)) * 0.06;
+        vec3 ro = rot * (-cen);
+        vec3 rl = rot * rd;
+        // Guarded rather than left to infinities. A ray exactly parallel to a
+        // slab divides by zero and then subtracts one infinity from another,
+        // which is a NaN, and a NaN inside min() takes the whole block with it.
+        // sign() of zero is zero, so such a ray simply misses instead — a set
+        // of rays with no area to it.
+        vec3 inv = sign(rl) / max(abs(rl), 1e-6);
+        vec3 mid = -inv * ro;
+        vec3 ext = abs(inv) * h;
+        vec3 t1 = mid - ext;
+        vec3 t2 = mid + ext;
+        float tn = max(max(t1.x, t1.y), t1.z);
+        float tf = min(min(t2.x, t2.y), t2.z);
+
+        if (tf > max(tn, 0.0) && tn < front) {
+          front = tn;
+          vec3 pl = ro + rl * tn;
+          vec3 nl = -sign(rl) * step(t1.yzx, t1.xyz) * step(t1.zxy, t1.xyz);
+          vec3 nor = nl * rot;
+
+          // How far through it the ray went: thin at the silhouette, thick
+          // through the middle. That difference is the whole of what makes a
+          // block look like glass rather than like a painted hexagon.
+          float chord = tf - max(tn, 0.0);
+          float thru = clamp(chord / (h * 2.0), 0.0, 1.0);
+          float rim = 1.0 - thru;
+
+          // Softened across one pixel at the silhouette.
+          //
+          // The ray grazes there, so the chord through the block goes to zero,
+          // and the width of block that one pixel covers is that pixel's width
+          // in world units at this depth. Drawn hard it was the one place a
+          // half-resolution canvas shows — and it is what made this the
+          // jumpiest style on the list by a distance: the worst pixel moved 106
+          // levels in a second, against Towers' 62.
+          float soft = smoothstep(0.0, qpx * cen.z / 1.2, chord);
+
+          // The edges. On the face that was hit one of these three is zero —
+          // that is the face — so the middle one is the distance to the nearest
+          // edge of it, and no sorting is needed to find it.
+          vec3 e = h - abs(pl);
+          float edge = max(min(e.x, e.y), min(max(e.x, e.y), e.z));
+          edge = 1.0 - smoothstep(0.0, h * 0.30, edge);
+
+          // Which face, so the three you can see are three different values.
+          // Flat blocks read as hexagons; this is what makes them solid.
+          float face = 0.45 + 0.55 * abs(dot(nor, vec3(-0.37, 0.55, -0.75)));
+
+          // Further away is dimmer, so the ring reads as depth rather than as a
+          // circle of decals.
+          float nearness = smoothstep(3.6, 1.1, cen.z);
+          // Weighted towards the face rather than towards the edge. The first
+          // pass put most of the light in the edge term and most of the opacity
+          // in the rim, and what drew was seven wireframes: the edges were the
+          // only part of a block with anything in it. A block is a solid you can
+          // see a little way into, so the face carries it and the edge is a
+          // highlight on top.
+          // Shaded across the top half of the ramp, not across the whole of it.
+          //
+          // The ramp is built for backdrops, so its lower half is nearly black,
+          // and a block shaded over all of it drew as a wireframe — the edges
+          // were the only part with anything in them. A face is a solid you can
+          // see a little way into, so it sits in the lit half and carries a grey
+          // lift on top of that. It is also what makes a block crossing the
+          // bright middle read as a silhouette rather than as a hole in it.
+          float value = face * (0.62 + 0.28 * rim) + edge * 0.34 + pow(rim, 3.0) * 0.32;
+          lit = ramp(clamp(0.5 + value * 0.5, 0.0, 1.0)) + vec3(value * 0.34 + edge * 0.22);
+          cover = clamp(0.40 + 0.26 * rim + edge * 0.28, 0.0, 0.94)
+                * (0.32 + 0.68 * nearness) * soft;
+        }
+      }
+
+      // The coloured sparks, and the one place in here that does not take its
+      // colour from the scheme.
+      //
+      // In the original they are red, green and violet against the blue, and a
+      // spark tinted to match the haze is not a spark — it is a bright patch of
+      // haze. Five of them, two or three pixels across, so what is being
+      // disobeyed is about fifteen pixels.
+      vec3 sparks = vec3(0.0);
+      for (int i = 0; i < 5; i++) {
+        float f = float(i);
+        float sa = t * 0.032 * (0.6 + hash(vec2(f, 23.0))) + hash(vec2(f, 29.0)) * 6.3;
+        float sr = 0.14 + hash(vec2(f, 31.0)) * 0.40;
+        vec2 sp = vec2(cos(sa) * 1.2, sin(sa * 1.3)) * sr;
+        float sd = length(q - sp);
+        // Spread round the wheel by index, jittered by a hash rather than
+        // chosen by one. Five hashes are five draws from the same hat and they
+        // came out blue, blue, cyan, green, green — no red anywhere, which is
+        // the first colour anybody remembers about this scene. The index spaces
+        // them; the hash only stops them being evenly spaced.
+        float tone = f / 5.0 + hash(vec2(f, 37.0)) * 0.12;
+        vec3 hue = 0.5 + 0.5 * cos(6.28318 * (tone + vec3(0.0, 0.33, 0.67)));
+        // A core and a wide, faint halo. The core alone is a dead pixel at this
+        // size; the halo is what makes it a light rather than a dot.
+        //
+        // Both the width and the drift rate are held back on purpose. A bright
+        // four-pixel core crossing the screen is the largest step any pixel in
+        // this style takes, by a distance: measured, the sparks alone took the
+        // worst-pixel figure from 57 a second to 106, which on the handheld is
+        // the difference between redrawing ten times a second and eighteen.
+        sparks += hue * (exp(-sd * 155.0) + exp(-sd * 28.0) * 0.11);
+      }
+
+      base = ramp(clamp(haze, 0.0, 1.0));
+      base = mix(base, lit, cover);
+      base += sparks * 0.72;`,
+  },
+  {
     id: "towers",
     label: "Towers",
     hint: "Columns of light standing on a dark plane that reflects them. The "
-      + "PlayStation 2 boot screen, which drew one for every save you had.",
+      + "second half of the PlayStation 2 boot, which drew one for every save "
+      + "you had.",
     // Six rows of billboards, not a ray march. A distance field of boxes is
     // sixty-odd steps per pixel, and this is drawn behind cover art on a
     // machine that may also be running an emulator — the perspective divide is

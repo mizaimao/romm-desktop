@@ -133,6 +133,7 @@ fn main() {
     a_coverage_texture_is_not_a_solid_block();
     an_image_keeps_its_own_colours();
     an_odd_width_is_not_sheared();
+    every_style_compiles();
     the_backdrop_covers_the_frame();
     the_backdrop_moves_over_time();
     the_backdrop_does_not_depend_on_how_many_pixels_it_has();
@@ -235,6 +236,62 @@ fn an_odd_width_is_not_sheared() {
     for y in [20, 60, 100] {
         assert_eq!(pixel(&frame, 20, y).0, 255, "row {y} lost its first column");
         assert_eq!(pixel(&frame, 100, y).0, 0, "row {y} is sheared");
+    }
+}
+
+/// Every style compiles, and every style draws something.
+///
+/// Only two of them were ever built here — blobs and plasma — so a GLSL mistake
+/// anywhere else reached the device untouched. It is not a small class of
+/// mistake: `programFor` returns null on a failed compile and the style simply
+/// never switches, with nothing on screen to say why, which is how Sweep and
+/// Starfield both shipped broken. There is no GLSL compiler on a developer
+/// machine to check against; this hidden context is the one there is.
+///
+/// It also dumps a frame per style when ROMM_SDL_DUMP names a directory, which
+/// is how a new style gets looked at without opening the app: raw RGBA at the
+/// size below, top row first.
+fn every_style_compiles() {
+    let Some(screen) = screen() else {
+        eprintln!("no display here; skipping");
+        return;
+    };
+    let mut gfx = unsafe { romm_sdl::gfx::Gfx::new(&screen.video) }.expect("a renderer");
+    gfx.resize(WIDTH as f32, HEIGHT as f32);
+    let dump = std::env::var("ROMM_SDL_DUMP").ok();
+
+    for (id, label) in romm_sdl::backdrop::STYLE_LIST {
+        let backdrop = unsafe { romm_sdl::backdrop::Backdrop::build(&screen.video, id) }
+            .unwrap_or_else(|e| panic!("{label} ({id}) does not compile: {e}"));
+
+        gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+        // Not at time zero. Several of these start from a symmetry they leave
+        // within a second, and a style judged at its first frame is judged on
+        // the one frame that is not representative of it.
+        unsafe { backdrop.draw(WIDTH as f32, HEIGHT as f32, 9.0) };
+        let frame = read_pixels();
+        screen.window.gl_swap_window();
+
+        let lit = frame.chunks(4).filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0).count();
+        assert!(
+            lit > (WIDTH * HEIGHT) as usize / 8,
+            "{label} ({id}) lit {lit} pixels of {}; it compiled and drew nothing",
+            WIDTH * HEIGHT
+        );
+
+        if let Some(dir) = &dump {
+            // Several moments, not one. These drift, wrap and tumble on periods
+            // of tens of seconds, and a style judged on a single frame is judged
+            // on whichever arrangement that second happened to hold.
+            for (n, at) in [9.0f32, 40.0, 90.0, 150.0].iter().enumerate() {
+                gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+                unsafe { backdrop.draw(WIDTH as f32, HEIGHT as f32, *at) };
+                let shot = read_pixels();
+                screen.window.gl_swap_window();
+                let path = std::path::Path::new(dir).join(format!("{id}-{n}.rgba"));
+                std::fs::write(&path, &shot).expect("the dump directory should be writable");
+            }
+        }
     }
 }
 

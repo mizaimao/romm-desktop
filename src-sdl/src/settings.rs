@@ -1497,31 +1497,53 @@ mod tests {
     /// webview's eleven and nine, which is most of what "the gap is still huge"
     /// meant. The shader bodies are identical text in both, so there is no
     /// reason for the lists to differ.
+    ///
+    /// Read out of `ui/js/backdrop.js` rather than counted here. This asserted
+    /// a literal eleven and named eight ids, so adding a style to the webview
+    /// failed it with "the webview has eleven backdrop styles" — a message
+    /// about the number this test was written with, pointing at neither the
+    /// style that was added nor the file it was added to.
     #[test]
     fn the_backdrops_and_schemes_match_the_webviews() {
-        assert_eq!(
-            crate::backdrop::STYLE_LIST.len(),
-            11,
-            "the webview has eleven backdrop styles"
+        let js = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/js/backdrop.js");
+        let Ok(text) = std::fs::read_to_string(js) else {
+            // The SDL frontend is built on the handheld from this crate alone.
+            // No webview to compare against is not a failure.
+            return;
+        };
+        // Everything between BACKDROPS and its closing bracket, so the schemes
+        // further down the file are not read as styles.
+        let list = text
+            .split_once("export const BACKDROPS = [")
+            .and_then(|(_, rest)| rest.split_once("\n];"))
+            .map(|(inner, _)| inner)
+            .unwrap_or_default();
+        let webview: Vec<&str> = list
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("id: \""))
+            .filter_map(|l| l.split_once('"'))
+            .map(|(id, _)| id)
+            .collect();
+        assert!(
+            webview.len() >= 8,
+            "only found {} styles in ui/js/backdrop.js; the parsing above has gone stale",
+            webview.len()
         );
         assert_eq!(
             crate::backdrop::SCHEMES.len(),
             9,
             "the webview has nine named schemes, plus a custom one the pad drops"
         );
-        for id in [
-            "towers",
-            "starfield",
-            "tunnel",
-            "waves",
-            "sweep",
-            "static",
-            "grid",
-            "stars",
-        ] {
+        for id in &webview {
             assert!(
-                crate::backdrop::STYLE_LIST.iter().any(|(s, _)| *s == id),
+                crate::backdrop::STYLE_LIST.iter().any(|(s, _)| s == id),
                 "{id} is in the webview and not here"
+            );
+        }
+        for (id, _) in crate::backdrop::STYLE_LIST {
+            assert!(
+                webview.contains(id),
+                "{id} is here and not in the webview"
             );
         }
         for id in [
