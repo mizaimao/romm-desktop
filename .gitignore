@@ -19,6 +19,9 @@
 # Metadata cache — regenerate with `cargo run -- sync`.
 /romm-sdl.toml
 /cache.sqlite3
+# What the last favourites sync agreed on. Written beside whatever the addon
+# was started from, which is this directory when it is run from the checkout.
+favorites-baseline.json
 /cache.sqlite3-*
 
 # Python

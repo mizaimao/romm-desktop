@@ -258,10 +258,11 @@ export async function launch(
 /// the worst outcome: it lies here and is invisible everywhere else.
 export async function toggleFavorite(id) {
   if (!id) return;
-  const row = document.querySelector(`[data-id="${id}"]`);
-  const was = row?.classList.contains("fav") || row?.dataset.fav === "1";
   try {
-    const now = await invoke("set_favorite", { id, starred: !was });
+    // Which way to turn it is decided in Rust, from the cache. What this page
+    // last drew can be older than what another device has since done, so the
+    // row is not the thing to ask.
+    const now = await invoke("toggle_favorite", { id });
     paintStar(id, now);
     toast(now ? "Starred" : "Star removed");
   } catch (e) {

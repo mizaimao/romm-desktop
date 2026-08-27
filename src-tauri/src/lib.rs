@@ -1642,34 +1642,44 @@ async fn rom_covers(
     Ok(out)
 }
 
-/// Star a game, or take the star off. Returns what it now is.
+/// Turn the star on this game the other way. Returns what it now is.
 ///
 /// The star is a *collection* on the server, not a flag on the game, so this
 /// reaches the handheld and the phone as well — see `romm_desktop::favorites`.
+///
+/// Which way to turn it is decided here, from the cache, rather than passed in
+/// by the page: the page knows what it last drew, and what it last drew can be
+/// older than what another device has since done.
+///
 /// Three steps, because the cache is behind a lock this must not hold while it
-/// waits on the network: work out where the star goes, do it on the server,
-/// then write it down.
+/// waits on the network — `Cache` is not `Sync` and the future would not
+/// compile. Work out where the star goes, do it on the server, write it down.
 #[tauri::command]
-async fn set_favorite(state: State<'_, AppState>, id: i64, starred: bool) -> CmdResult<bool> {
+async fn toggle_favorite(state: State<'_, AppState>, id: i64) -> CmdResult<bool> {
     let client = state
         .client
         .clone()
         .ok_or("no server connection — check config.toml")?;
 
-    let target = {
+    let (target, starred) = {
         let cache = state.cache.lock().map_err(err)?;
         let row = cache
             .rom_by_id(id)
             .map_err(err)?
             .ok_or_else(|| format!("no rom with id {id}"))?;
-        romm_desktop::favorites::target(&cache, &row.platform_slug).map_err(err)?
+        let now = romm_desktop::favorites::is_starred(&cache, id).map_err(err)?;
+        (
+            romm_desktop::favorites::target(&cache, &row.platform_slug).map_err(err)?,
+            !now,
+        )
     };
 
     let landed = romm_desktop::favorites::on_server(&client, target, id, starred)
         .await
         .map_err(err)?;
     let Some(landed) = landed else {
-        // Unstarring something that was never in a list. Nothing failed.
+        // Unstarring something that was never in a list. Nothing failed, and
+        // it is already what was wanted.
         return Ok(false);
     };
 
@@ -4608,7 +4618,7 @@ pub fn run() {
             collection_roms,
             rom_detail,
             download_rom,
-            set_favorite,
+            toggle_favorite,
             rom_covers,
             launch_rom,
             android_launch_plan,

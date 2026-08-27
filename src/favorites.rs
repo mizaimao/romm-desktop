@@ -108,37 +108,6 @@ pub fn record(cache: &mut Cache, landed: &Landed, rom_id: i64, starred: bool) ->
     cache.set_membership(&landed.id, rom_id, starred)
 }
 
-/// The three steps together, for callers that hold the cache outright.
-///
-/// The windowed app cannot use this — its cache is behind a lock it has to
-/// drop before awaiting — so the steps above are the real interface and this
-/// is the convenience.
-pub async fn set(
-    client: &Client,
-    cache: &mut Cache,
-    rom_id: i64,
-    platform: &str,
-    starred: bool,
-) -> Result<bool> {
-    let target = target(cache, platform)?;
-    let Some(landed) = on_server(client, target, rom_id, starred).await? else {
-        return Ok(false);
-    };
-    record(cache, &landed, rom_id, starred)?;
-    Ok(starred)
-}
-
-/// Star it if it isn't, unstar it if it is. Returns what it now is.
-pub async fn toggle(
-    client: &Client,
-    cache: &mut Cache,
-    rom_id: i64,
-    platform: &str,
-) -> Result<bool> {
-    let now = is_starred(cache, rom_id)?;
-    set(client, cache, rom_id, platform, !now).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
