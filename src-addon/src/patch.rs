@@ -99,8 +99,19 @@ impl Paths {
         self.at("usr/share/emulationstation/resources/logo.png")
     }
 
+    /// Which Mali blob the boot hook should install, **on /boot**.
+    ///
+    /// Same reason as the blank logo: the hook runs as `S00bootcustom` and
+    /// `S02resize` is what mounts /userdata, so a marker kept there is one the
+    /// hook cannot read. This switcher had never once worked at boot.
     pub fn gpu_choice(&self) -> PathBuf {
-        self.at("userdata/system/gpu/selected")
+        self.at("boot/moose-gpu")
+    }
+
+    /// Where the hook expects to find a driver blob. Too big to compile in —
+    /// 43 MB and 56 MB — so they are placed once and referred to by name.
+    pub fn gpu_blob(&self, which: &str) -> PathBuf {
+        self.at(&format!("boot/moose-libmali-{which}.so"))
     }
 
     /// KNULLI's own trigger file, which the one in /userdata replaces.
@@ -254,6 +265,25 @@ fn write_through(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Remove, even if the filesystem says no.
+///
+/// The mirror of [`write_through`], and it was missing: turning the graphics
+/// driver back to stock means deleting the marker on /boot, `fs::remove_file`
+/// returned `EROFS`, and the switch silently stayed where it was.
+fn remove_through(path: &Path) -> std::io::Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::ReadOnlyFilesystem => {}
+        other => return other,
+    }
+    let Some(point) = mount_point_of(path) else {
+        return fs::remove_file(path);
+    };
+    let _ = remount(&point, "rw");
+    let result = fs::remove_file(path);
+    let _ = remount(&point, "ro");
+    result
+}
+
 fn remount(point: &str, how: &str) -> std::io::Result<()> {
     std::process::Command::new("mount")
         .args(["-o", &format!("remount,{how}"), point])
@@ -330,11 +360,11 @@ impl Step {
                 }
                 None => {
                     if backup.exists() {
-                        fs::copy(backup, path)
+                        write_through(path, &fs::read(backup)?)
                             .with_context(|| format!("restoring {}", path.display()))?;
                         fs::remove_file(backup).ok();
                     } else if path.exists() {
-                        fs::remove_file(path)
+                        remove_through(path)
                             .with_context(|| format!("removing {}", path.display()))?;
                     }
                     Ok(())
@@ -425,7 +455,12 @@ mod tests {
         // blank logo in /userdata meant the hook silently did nothing and the
         // KNULLI logo was back after every reboot.
         let paths = Paths::new("/");
-        for needed_at_boot in [paths.blank_logo(), paths.boot_custom()] {
+        for needed_at_boot in [
+            paths.blank_logo(),
+            paths.boot_custom(),
+            paths.gpu_choice(),
+            paths.gpu_blob("wayland"),
+        ] {
             assert!(
                 needed_at_boot.starts_with("/boot"),
                 "{} is read by the S00 hook and must be on /boot",
@@ -554,6 +589,18 @@ mod tests {
         // And the original is still recoverable from wherever it went.
         placed(&dir, preset.clone(), None).apply().unwrap();
         assert_eq!(fs::read(&preset).unwrap(), b"the old one");
+    }
+
+    #[test]
+    fn taking_a_patch_off_goes_through_the_same_door_as_putting_it_on() {
+        // Both directions have to cope with a read-only mount. Only the write
+        // side did, so "graphics driver: back to stock" deleted nothing on
+        // /boot and the device came back on the other driver, twice.
+        let dir = scratch("remove-through");
+        let path = dir.join("marker");
+        fs::write(&path, b"wayland").unwrap();
+        placed(&dir, path.clone(), None).apply().unwrap();
+        assert!(!path.exists());
     }
 
     #[test]

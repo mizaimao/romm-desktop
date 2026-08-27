@@ -381,17 +381,18 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
         Patch {
             id: "gpu",
             title: "Graphics driver",
-            detail: "Writes which Mali blob /boot/boot-custom.sh should copy into \
-                     /usr/lib at boot. The blobs themselves live in /userdata/system/gpu and \
-                     are far too big to carry in here — without them this setting is \
-                     remembered but does nothing. The stock one has no Wayland support; the \
-                     g24p0 one does, and the emulators behave identically on both.",
+            detail: "Writes which Mali blob /boot/boot-custom.sh installs at boot. Marker and \
+                     blobs both live on /boot because that hook runs as S00 and /userdata is \
+                     not mounted until S02 — which is why this switch never once worked. The \
+                     blobs are 43 and 56 MB, too big to carry in here, so they are placed on \
+                     /boot once; without them this setting is remembered and does nothing. \
+                     The stock one has no Wayland support, the g24p0 one does, and the \
+                     emulators behave identically on both.",
             choices: vec![
                 Choice {
-                    // No marker file at all, rather than one saying "stock".
-                    // The hook does nothing without it, so this is what a
-                    // device that has never been touched looks like — and a
-                    // fresh install must not read as "changed".
+                    // No marker at all: the hook does nothing without one and
+                    // /usr is the stock image at every boot, so this is what
+                    // an untouched device looks like.
                     name: "stock".into(),
                     steps: vec![place(paths, paths.gpu_choice(), None)],
                 },

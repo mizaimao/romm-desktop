@@ -2,21 +2,28 @@
 # Things that have to be put back at every boot.
 #
 # The writable layer of / is a tmpfs, so everything under /usr is the stock
-# image again on every start. Whatever we want instead lives in /userdata,
-# which is real storage. This runs as S00bootcustom, before the splash (S03)
-# and before EmulationStation (S31).
+# image again on every start. This puts back what we want instead.
+#
+# Everything it reads is on **/boot**, and that is not a preference. This runs
+# as S00bootcustom; /userdata is not mounted until S02resize. Anything kept
+# there is invisible from here, and a hook that cannot see its own inputs
+# fails by doing nothing at all — which both halves of this file did, silently,
+# at every boot, until a reboot was actually checked.
 
 # The chosen Mali driver.
+#
+# Marker and blobs both on /boot, and that is the whole point: this runs as
+# S00bootcustom, and S02resize is what mounts /userdata. Everything this
+# switcher needed used to live in /userdata, so it read nothing and did
+# nothing, at every boot, silently.
 apply_gpu() {
-  GPU=/userdata/system/gpu
-  [ -s "$GPU/selected" ] || return 0
-  case "$(tr -d '\r\n' <"$GPU/selected" 2>/dev/null)" in
-    wayland) WANT=$GPU/libmali-g24p0-wayland.so ;;
-    stock)   WANT=$GPU/libmali-g13p0-stock.so ;;
+  WANT=$(tr -d "\r\n" </boot/moose-gpu 2>/dev/null)
+  case "$WANT" in
+    wayland|stock) BLOB="/boot/moose-libmali-$WANT.so" ;;
     *) return 0 ;;
   esac
-  [ -s "$WANT" ] || return 0
-  cp "$WANT" /usr/lib/libmali.so.1.new 2>/dev/null && \
+  [ -s "$BLOB" ] || return 0
+  cp "$BLOB" /usr/lib/libmali.so.1.new 2>/dev/null &&
     mv /usr/lib/libmali.so.1.new /usr/lib/libmali.so.1 2>/dev/null
 }
 
