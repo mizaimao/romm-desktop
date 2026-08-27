@@ -93,12 +93,33 @@ list and are off.
 
 Cores aligned with romm-desktop (written 2026-08-23):
 
-    dreamcast=flycastvl  fbneo=fbneo    gb=gambatte   gba=mgba    gbc=gambatte
+    dreamcast=flycastvl  fbneo=fbneo    gb=gambatte   gba=vba-m   gbc=gambatte
     megadrive=genesisplusgx             n64=mupen64plus/rice
     neogeo=geolith       nes=fceumm     psx=pcsx_rearmed          snes=snes9x
 
 **`neogeo=geolith` is deliberate** — the ROMs are geolith-specific. Do not
 switch it to fbneo.
+
+**`gba=vba-m` is deliberate too** (changed 2026-08-27, was `mgba`). mGBA is the
+better emulator, but its cheats are broken under RetroArch: enable one and the
+core keeps running while the frontend stops taking input. mGBA reports
+non-linear memory segments through `RETRO_ENVIRONMENT_SET_MEMORY_MAPS` and
+RetroArch's cheat manager cannot follow them — [RetroArch#7387][ra7387], open
+since 2018, with core and frontend each saying it is the other's fix. vba-m
+handles CodeBreaker and GameShark codes itself and does not go through that
+path. Verified working on Castlevania - Circle of the Moon.
+
+Battery saves survive the switch: RetroArch owns the filename, not the core, so
+both write `<rom>.srm` into `/userdata/saves/gba/`, and
+`sort_savefiles_enable` is false so there are no per-core subfolders. The
+mGBA-era saves are backed up on the card at `/userdata/saves/gba-backup-mgba/`.
+Save states do not survive, and never do across cores.
+
+The one thing to watch is EEPROM games — the two cores can disagree on layout
+where they cannot on flat SRAM. In this library that is Shantae Advance and
+TOCA World Touring Cars. Everything else is SRAM or flash.
+
+[ra7387]: https://github.com/libretro/RetroArch/issues/7387
 
 ## 2. `/boot` — the things that must survive the tmpfs
 
