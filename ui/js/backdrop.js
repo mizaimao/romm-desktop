@@ -408,16 +408,16 @@ export const BACKDROPS = [
 
         if (tf > max(tn, 0.0) && tn < front) {
           front = tn;
-          vec3 pl = ro + rl * tn;
+          float t0 = max(tn, 0.0);
+          // Where the ray went in, and where it came out. Both, because glass
+          // is mostly the far side of itself.
+          vec3 pin = ro + rl * t0;
+          vec3 pout = ro + rl * tf;
           vec3 nl = -sign(rl) * step(t1.yzx, t1.xyz) * step(t1.zxy, t1.xyz);
           vec3 nor = nl * rot;
 
-          // How far through it the ray went: thin at the silhouette, thick
-          // through the middle. That difference is the whole of what makes a
-          // block look like glass rather than like a painted hexagon.
-          float chord = tf - max(tn, 0.0);
+          float chord = tf - t0;
           float thru = clamp(chord / (h * 2.0), 0.0, 1.0);
-          float rim = 1.0 - thru;
 
           // Softened across one pixel at the silhouette.
           //
@@ -425,60 +425,67 @@ export const BACKDROPS = [
           // and the width of block that one pixel covers is that pixel's width
           // in world units at this depth. Drawn hard it is the one place a
           // half-resolution canvas shows, and it was also most of what this
-          // style cost to animate: the blocks alone took the worst pixel from
-          // 106 levels a second to 32, which is calmer than Towers.
+          // style cost to animate: softening it took the blocks from 106 levels
+          // a second to 32, which is calmer than Towers.
           float soft = smoothstep(0.0, qpx * cen.z / 1.2, chord);
 
-          // The edges. On the face that was hit one of these three is zero —
-          // that is the face — so the middle one is the distance to the nearest
-          // edge of it, and no sorting is needed to find it.
-          vec3 e = h - abs(pl);
-          float edge = max(min(e.x, e.y), min(max(e.x, e.y), e.z));
-          edge = 1.0 - smoothstep(0.0, h * 0.30, edge);
-
-          // Which face, and signed.
+          // Both sets of edges, and this is the difference between glass and
+          // moulded plastic.
           //
-          // abs() lit the face turned away from the light exactly as brightly as
-          // the one turned towards it, so all three faces of a block came out
-          // the same value and it read as a flat hexagon with an outline. The
-          // original's blocks have one bright face, one middling and one nearly
-          // black, and that contrast is the whole of what makes them solid.
-          float face = 0.12 + 0.88 * (0.5 + 0.5 * dot(nor, vec3(-0.37, 0.55, -0.75)));
+          // Only the near face was drawn, so a block was an opaque shell with a
+          // line round it — six flat panels, which is what a cheap plastic box
+          // is. In the original you see the far edges *through* the near face:
+          // a cube head-on shows a smaller square inside it, and a cube at an
+          // angle shows the back corner crossing the front ones. That reading
+          // through is the whole of what says there is a solid transparent
+          // thing here rather than a painted hexagon.
+          //
+          // On whichever face was hit one of the three distances is zero — that
+          // is the face — so the middle one is the distance to that face's
+          // nearest edge, and it costs a median rather than a sort.
+          vec3 ein = h - abs(pin);
+          vec3 eout = h - abs(pout);
+          float din = max(min(ein.x, ein.y), min(max(ein.x, ein.y), ein.z));
+          float dout = max(min(eout.x, eout.y), min(max(eout.x, eout.y), eout.z));
+          float lip = h * 0.26;
+          float nearEdge = 1.0 - smoothstep(0.0, lip, din);
+          // Dimmer, because it is being seen through the thickness of the
+          // block. Equal weight and the near and far edges read as one flat
+          // wireframe with no inside to it.
+          float farEdge = (1.0 - smoothstep(0.0, lip, dout)) * 0.5;
+          float edge = min(nearEdge + farEdge, 1.4);
+
+          // Brighter where the surface turns away, which is what glass does and
+          // paint does not. It is also most of the soft outline the original has
+          // — a rim that comes from the geometry rather than from a drawn line.
+          float fres = pow(1.0 - abs(dot(nor, rd)), 3.5);
+
+          // How much light survives the crossing. Thin at the rim, dark through
+          // the middle: smoked glass, not white perspex, and the reason a block
+          // over the bright middle darkens it instead of covering it.
+          float lets = exp(-thru * 1.4);
+
+          // A little diffuse, signed so the three faces you can see are three
+          // values rather than one. Small on purpose — carrying the block on
+          // this term is exactly what made it look moulded.
+          float sheen = (0.10 + 0.90 * (0.5 + 0.5 * dot(nor, vec3(-0.37, 0.55, -0.75)))) * 0.34;
 
           // Further away is dimmer, so the ring reads as depth rather than as a
           // circle of decals.
           float nearness = smoothstep(3.6, 1.1, cen.z);
-          // Weighted towards the face rather than towards the edge. The first
-          // pass put most of the light in the edge term and most of the opacity
-          // in the rim, and what drew was seven wireframes: the edges were the
-          // only part of a block with anything in it. A block is a solid you can
-          // see a little way into, so the face carries it and the edge is a
-          // highlight on top.
-          // Shaded across the top half of the ramp, not across the whole of it.
-          //
-          // The ramp is built for backdrops, so its lower half is nearly black,
-          // and a block shaded over all of it drew as a wireframe — the edges
-          // were the only part with anything in them. A face is a solid you can
-          // see a little way into, so it sits in the lit half and carries a grey
-          // lift on top of that. It is also what makes a block crossing the
-          // bright middle read as a silhouette rather than as a hole in it.
-          // Grey glass, with only a cast of the scheme in it.
-          //
-          // The blocks took their colour from the ramp, whose lit end is a navy
-          // on this scheme — so they came out navy, and on a green scheme they
-          // would have come out green. Glass does not do that. In the original
-          // they are neutral and the haze is the thing that is blue, so the
-          // scheme belongs over them rather than being the whole of them.
-          //
-          // Opacity and whiteness pull against each other and both were wrong in
-          // both directions in turn: first pale and closed up, then so sheer
-          // that a block was an outline with nothing inside it. What settles it
-          // is the face contrast above — with one face bright and one nearly
-          // black a block reads as a solid at well under half opaque, which is
-          // what leaves the haze showing through the one crossing the middle.
-          float value = face * (0.74 + 0.26 * rim) + edge * 0.20 + pow(rim, 3.0) * 0.22;
-          lit = vec3(0.04 + value * 0.66) + u_high * 0.45 + vec3(edge * 0.14);
-          cover = clamp(0.42 + 0.22 * rim + edge * 0.20, 0.0, 0.92)
+
+          // Grey, with the scheme as a cast rather than as the colour. Taking
+          // it from the ramp made the blocks navy here and would make them green
+          // on Moss; in the original they are neutral and the haze is the thing
+          // that is blue.
+          float value = edge * 0.44 + fres * 0.30 + lets * 0.22 + sheen;
+          lit = vec3(0.02 + value * 0.52) + u_high * 0.45;
+          // Thin across a face and gathering at the edges and the rim, which is
+          // where a pane of glass actually stops light. Not nothing across the
+          // face though: with the far edges carrying it on their own a block was
+          // a wire frame with a hole in the middle, and the original's are
+          // panels you can see through rather than absences.
+          cover = clamp(0.19 + edge * 0.42 + fres * 0.26 + lets * 0.16, 0.0, 0.86)
                 * (0.32 + 0.68 * nearness) * soft;
         }
       }

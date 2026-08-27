@@ -362,13 +362,26 @@ describe("the shapes", () => {
 
   /// Cubes: abs() lit the face turned away from the light exactly as brightly
   /// as the one turned towards it, so all three faces of a block came out the
-  /// same value and it read as a flat hexagon with an outline. One bright face,
-  /// one middling and one nearly black is what makes a block look solid.
+  /// same value and it read as a flat hexagon. One bright face, one middling
+  /// and one nearly black is what stops it looking moulded.
   test("Cubes lights its faces from one side", () => {
     const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
-    const face = /float face = ([^;]+);/.exec(code)?.[1] ?? "";
-    assert.ok(face, "the face term is gone");
-    assert.doesNotMatch(face, /abs\(/, "the faces are being lit from both sides again");
+    const sheen = /float sheen = ([^;]+);/.exec(code)?.[1] ?? "";
+    assert.ok(sheen, "the diffuse term is gone");
+    assert.doesNotMatch(sheen, /abs\(/, "the faces are being lit from both sides again");
+  });
+
+  /// Cubes: the far edges seen through the near face are the whole difference
+  /// between glass and a moulded plastic box. Shading only the entry face drew
+  /// six flat panels with a line round them; a cube head-on has to show a
+  /// smaller square inside it, and one at an angle the back corner crossing the
+  /// front ones. Both intersections are already paid for — the exit distance is
+  /// what the slab test answers — so dropping this saves nothing.
+  test("Cubes shows the far edges through the near face", () => {
+    const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
+    assert.match(code, /vec3 pout = ro \+ rl \* tf;/, "the exit point is gone");
+    assert.match(code, /float dout =/, "the far face's edges are no longer measured");
+    assert.match(code, /float farEdge =/, "the far edges are not being drawn");
   });
 
   /// Grid: `max(p.y, 0.04)` froze the perspective divide across the bottom of
