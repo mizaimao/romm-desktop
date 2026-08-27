@@ -260,64 +260,6 @@ export const BACKDROPS = [
       }`,
   },
   {
-    id: "ribbon",
-    label: "Ribbon",
-    hint: "A wave folding under a wireframe sheet. The PlayStation 3's menu "
-      + "background, which is what RetroArch draws behind its own.",
-    pace: 0.4,
-    // Brighter than the rest by default. Every other style here has hot spots —
-    // a star, a column, a spark — and has to be held down so text stays
-    // readable over the brightest pixel it can make. This one is a gradient
-    // with soft bands on it and its brightest pixel is its average, so the same
-    // number that suits Starfield leaves it looking switched off.
-    defaults: { strength: 0.68 },
-    body: `
-      // The wave behind RetroArch's XMB, which it took from the PlayStation 3.
-      //
-      // Smooth bands of light crossing a gradient, and that is all it is. The
-      // first version of this drew a wireframe grid in perspective running to a
-      // horizon, which is a different picture entirely: theirs has no lines in
-      // it anywhere, no mesh, and no depth. Reading the shader's name and
-      // building what the word suggested cost a whole style.
-      //
-      // Which also makes it the cheapest thing on this list. There is no
-      // surface to intersect — a ribbon is a line across the screen with a soft
-      // falloff either side of it.
-      vec2 p = vec2((uv.x - 0.5) * aspect.x, uv.y - 0.5);
-
-      // The ground is a diagonal gradient, not a flat colour, and that alone is
-      // half of what the picture is: theirs runs bright at one corner into deep
-      // at the other, and the bands are only legible against it.
-      float sweep = clamp(0.5 + p.x * 0.40 + p.y * 0.66, 0.0, 1.0);
-      float lit = 0.16 + sweep * 0.36;
-
-      for (int i = 0; i < 4; i++) {
-        float f = float(i);
-        float phase = f * 1.7 + hash(vec2(f, 3.0)) * 6.3;
-        // Three sines along the band, so what travels is a fold in the ribbon
-        // rather than the whole thing sliding up and down the screen.
-        float mid = sin(p.x * 1.10 + t * 0.30 + phase) * 0.13
-                  + sin(p.x * 2.05 - t * 0.21 + phase * 1.7) * 0.06
-                  + sin(p.x * 0.55 + t * 0.13 + phase * 0.6) * 0.10;
-        // Spread about the middle. Theirs are gathered across the centre of the
-        // screen rather than spaced evenly down it.
-        mid += (f - 1.5) * 0.05;
-
-        // Broad. Theirs are sheets of light with most of the screen's width in
-        // them, not streaks — narrow bands read as contrails, and four of them
-        // read as a scribble.
-        float halfw = 0.09 + hash(vec2(f, 9.0)) * 0.10;
-        float band = 1.0 - smoothstep(0.0, halfw, abs(p.y - mid));
-        // Squared for a soft core instead of a flat top, and added rather than
-        // blended: where two ribbons cross, the overlap is brighter than either,
-        // which is the whole of the effect.
-        lit += band * band * (0.13 + hash(vec2(f, 11.0)) * 0.10);
-      }
-
-      base = ramp(clamp(lit, 0.0, 1.0));
-`,
-  },
-  {
     id: "cubes",
     label: "Cubes",
     hint: "Glass blocks turning in a blue haze. The PlayStation 2's opening "
@@ -538,7 +480,7 @@ export const BACKDROPS = [
           // that is blue.
           float value = edge * 0.44 + fres * 0.30 + lets * 0.22 + sheen;
           lit = vec3(0.02 + value * 0.40) + u_high * 0.32;
-          // A tenth opaque at the very most: mostly transparent, a suggestion
+          // A fifth opaque at the very most: mostly transparent, a suggestion
           // over the haze rather than an object in front of it.
           //
           // Scaled down to a tenth rather than clipped at one, which is the
@@ -547,7 +489,7 @@ export const BACKDROPS = [
           // uniform grey tile. Thin across a face and gathering at the edges and
           // the rim is still where a pane of glass actually stops light.
           cover = clamp(0.16 + edge * 0.46 + fres * 0.28 + lets * 0.14, 0.0, 1.0)
-                * 0.10 * (0.32 + 0.68 * nearness) * soft;
+                * 0.20 * (0.32 + 0.68 * nearness) * soft;
         }
       }
 
@@ -725,19 +667,62 @@ export const BACKDROPS = [
       base = ramp(rings * 0.7 * (0.55 + spokes * 0.45) * smoothstep(0.0, 0.35, r));`,
   },
   {
-    id: "waves",
-    label: "Waves",
-    hint: "Ridges seen at a low angle, rolling towards you.",
-    pace: 0.5,
-    defaults: { strength: 0.7 },
+    id: "ribbon",
+    label: "Ribbon",
+    hint: "A wave folding under a wireframe sheet. The PlayStation 3's menu "
+      + "background, which is what RetroArch draws behind its own.",
+    pace: 0.4,
+    // Brighter than the rest by default. Every other style here has hot spots —
+    // a star, a column, a spark — and has to be held down so text stays
+    // readable over the brightest pixel it can make. This one is a gradient
+    // with soft bands on it and its brightest pixel is its average, so the same
+    // number that suits Starfield leaves it looking switched off.
+    defaults: { strength: 0.68 },
     body: `
-      vec2 q = (uv - vec2(0.5, 0.35)) * aspect;
-      float depth = max(0.75 - uv.y, 0.05);
-      float w = sin(q.x * 4.0 + t * 0.4) * 0.5
-              + sin(q.x * 7.3 - t * 0.27) * 0.3
-              + sin(q.x * 2.1 + t * 0.13) * 0.2;
-      float ridge = smoothstep(0.05, 0.0, abs(fract((uv.y + w * 0.06) * 9.0) - 0.5) * depth);
-      base = ramp(ridge * 0.8 * smoothstep(0.95, 0.25, uv.y));`,
+      // The wave behind RetroArch's XMB, which it took from the PlayStation 3.
+      //
+      // Smooth bands of light crossing a gradient, and that is all it is. The
+      // first version of this drew a wireframe grid in perspective running to a
+      // horizon, which is a different picture entirely: theirs has no lines in
+      // it anywhere, no mesh, and no depth. Reading the shader's name and
+      // building what the word suggested cost a whole style.
+      //
+      // Which also makes it the cheapest thing on this list. There is no
+      // surface to intersect — a ribbon is a line across the screen with a soft
+      // falloff either side of it.
+      vec2 p = vec2((uv.x - 0.5) * aspect.x, uv.y - 0.5);
+
+      // The ground is a diagonal gradient, not a flat colour, and that alone is
+      // half of what the picture is: theirs runs bright at one corner into deep
+      // at the other, and the bands are only legible against it.
+      float sweep = clamp(0.5 + p.x * 0.40 + p.y * 0.66, 0.0, 1.0);
+      float lit = 0.16 + sweep * 0.36;
+
+      for (int i = 0; i < 4; i++) {
+        float f = float(i);
+        float phase = f * 1.7 + hash(vec2(f, 3.0)) * 6.3;
+        // Three sines along the band, so what travels is a fold in the ribbon
+        // rather than the whole thing sliding up and down the screen.
+        float mid = sin(p.x * 1.10 + t * 0.30 + phase) * 0.13
+                  + sin(p.x * 2.05 - t * 0.21 + phase * 1.7) * 0.06
+                  + sin(p.x * 0.55 + t * 0.13 + phase * 0.6) * 0.10;
+        // Spread about the middle. Theirs are gathered across the centre of the
+        // screen rather than spaced evenly down it.
+        mid += (f - 1.5) * 0.05;
+
+        // Broad. Theirs are sheets of light with most of the screen's width in
+        // them, not streaks — narrow bands read as contrails, and four of them
+        // read as a scribble.
+        float halfw = 0.09 + hash(vec2(f, 9.0)) * 0.10;
+        float band = 1.0 - smoothstep(0.0, halfw, abs(p.y - mid));
+        // Squared for a soft core instead of a flat top, and added rather than
+        // blended: where two ribbons cross, the overlap is brighter than either,
+        // which is the whole of the effect.
+        lit += band * band * (0.13 + hash(vec2(f, 11.0)) * 0.10);
+      }
+
+      base = ramp(clamp(lit, 0.0, 1.0));
+`,
   },
   {
     id: "sweep",

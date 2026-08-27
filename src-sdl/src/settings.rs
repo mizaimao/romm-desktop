@@ -1491,6 +1491,49 @@ mod tests {
         assert_eq!(now.glass, 0, "glass zero must reach the blur");
     }
 
+    /// And they are the same shaders, character for character.
+    ///
+    /// The lists matching is not the same as the pictures matching. Towers was
+    /// fixed on the web side — a step() at the horizon left the floor at 0.13
+    /// on one side and 0 on the other, with a dark band sitting on a bright
+    /// line between them — and the fix never reached here, so the handheld drew
+    /// the bug for as long as the two files have existed. Nothing said a word:
+    /// both compiled, both ran, and the test below only ever compared names.
+    ///
+    /// Compares the compiled-in bodies against the text of `ui/js/backdrop.js`,
+    /// so there is no second parser of this crate's own source to keep right.
+    #[test]
+    fn the_shader_bodies_are_the_same_text_in_both_front_ends() {
+        let js = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/js/backdrop.js");
+        let Ok(text) = std::fs::read_to_string(js) else {
+            return;
+        };
+        let mut checked = 0;
+        for style in crate::backdrop::STYLES {
+            let head = format!("id: \"{}\",", style.id);
+            let Some(at) = text.find(&head) else {
+                panic!("{} is not in ui/js/backdrop.js", style.id);
+            };
+            let open = "body: `\n";
+            let from = text[at..].find(open).expect("that style has no body") + at + open.len();
+            let to = from + text[from..].find("`,\n").expect("that body never ends");
+            // Trimmed at both ends, and only there. A Rust raw string is
+            // closed on its own line and a JS template literal is closed on the
+            // last line of the shader, so every body here ends with a newline
+            // that its twin does not have — a difference in how the two
+            // languages end a string, not in what the GPU is given. Everything
+            // between the ends is compared exactly.
+            assert_eq!(
+                text[from..to].trim(),
+                style.body.trim(),
+                "the {} shader has drifted between the two front ends",
+                style.id
+            );
+            checked += 1;
+        }
+        assert!(checked >= 8, "only {checked} bodies were compared");
+    }
+
     /// Both front ends offer the same backdrops and the same color schemes.
     ///
     /// The SDL renderer shipped with three styles and no schemes against the

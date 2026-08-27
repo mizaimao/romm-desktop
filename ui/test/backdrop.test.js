@@ -392,16 +392,24 @@ describe("the shapes", () => {
     assert.doesNotMatch(sheen, /abs\(/, "the faces are being lit from both sides again");
   });
 
-  /// Cubes: a tenth opaque at most, and scaled to a tenth rather than clamped
-  /// at one. A clamp flattens the edges and the rim into the faces and leaves a
-  /// uniform tile; scaling keeps the shape and only turns it down. Asked for
-  /// directly — the blocks are meant to be a suggestion over the haze.
+  /// Cubes: mostly transparent, and scaled down rather than clamped down. A
+  /// clamp flattens the edges and the rim into the faces and leaves a uniform
+  /// tile — it changes the shape, where scaling only turns it down.
+  ///
+  /// The factor itself is read rather than named. What it should be is a
+  /// judgement that has been asked for twice and changed twice; what must not
+  /// change is that there is one, that it is small, and that the clamp above it
+  /// still opens all the way to one.
   test("Cubes' blocks are scaled down to mostly transparent, not clipped", () => {
     const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
     const cover = /^\s+cover = ([\s\S]*?);/m.exec(code)?.[1] ?? "";
     assert.ok(cover, "the block opacity is gone");
-    assert.match(cover, /\* 0\.10/, "the blocks are no longer held to a tenth");
     assert.match(cover, /clamp\([^)]*, 0\.0, 1\.0\)/, "the opacity is being clipped, not scaled");
+    const scale = Number(/\*\s*(0\.\d+)\s*\*\s*\(0\.32/.exec(cover)?.[1]);
+    assert.ok(
+      scale > 0 && scale < 0.5,
+      `the blocks are ${scale} opaque at most, which is not "mostly transparent"`
+    );
   });
 
   /// Cubes: the far edges seen through the near face are the whole difference
