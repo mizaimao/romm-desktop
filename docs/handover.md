@@ -229,6 +229,13 @@ The next things worth doing, in the order I would take them. The top two:
    editing the user's RetroArch directory breaks the promise the README makes.
    A prompt is the honest version, and it is not built.
 
+Work that has been **scoped but not built** gets its own file per subject rather
+than one shared list, and each is indexed in [README.md](README.md) with "not
+built" in its line. Today that is [attract-mode.md](attract-mode.md) and
+[cartridge-shelf.md](cartridge-shelf.md). If Frank defers something, write it
+down that way — in his words — rather than leaving it in a chat summary he
+cannot search.
+
 ## One last thing
 
 Frank reports symptoms precisely and is not interested in theories. When
