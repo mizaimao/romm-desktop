@@ -494,10 +494,11 @@ export const BACKDROPS = [
           // The neutral part is a third of what it was, which is the other half
           // of the same change: there is less grey to wash the hue out.
           float value = edge * 0.44 + fres * 0.30 + lets * 0.22 + sheen;
-          // Halved, and both halves of it, so the hue and the shading are
-          // exactly what they were and only the level moved.
+          // Down by 30 per cent, not 50: halving it put the blocks under the
+          // haze almost everywhere. Both halves in the same proportion, so the
+          // hue and the shading are what they were and only the level moved.
           lit = (vec3(0.02 + value * 0.40) * 0.30
-               + u_high * (0.30 + value * 0.85)) * 0.5;
+               + u_high * (0.30 + value * 0.85)) * 0.7;
           // Two fifths opaque at the very most: still see-through, but present
           // enough to be a thing in the haze rather than a suggestion of one.
           //
