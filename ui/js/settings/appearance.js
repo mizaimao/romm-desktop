@@ -129,19 +129,6 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><button class="bd-reset-style">Reset this backdrop</button>
           <span class="bd-style-state dim"></span></div>
       </div>
-      <h4>Attract mode</h4>
-      <div class="srow">
-        <label>After</label>
-        <div class="ctl">
-          <input class="at-idle" type="number" min="0" max="3600" step="30" />
-          <span class="dim">seconds idle</span>
-          <button class="at-preview">Show it now</button>
-        </div>
-      </div>
-      <p class="hint">Left alone this long, the app starts showing artwork from
-        your library, and a press starts whatever is on screen. <b>0 turns it
-        off.</b></p>
-
       <div class="srow">
         <label>Frame rate</label>
         <div class="ctl">
@@ -180,7 +167,21 @@ export const html = `      <h4>Layout</h4>
       </div>
       <p class="hint">Drawn on the GPU behind the library — not behind this
         window. Motion at 0 holds it still.</p>
-      <p class="hint set-backdrop-status"></p>`;
+      <p class="hint set-backdrop-status"></p>
+
+      <h4>Attract mode</h4>
+      <div class="srow">
+        <label>After</label>
+        <div class="ctl">
+          <input class="at-idle" type="number" min="0" max="3600" step="30" />
+          <span class="dim">seconds idle</span>
+          <button class="at-preview">Show it now</button>
+        </div>
+      </div>
+      <p class="hint">Left alone this long, the app starts showing artwork from
+        your library, and a press starts whatever is on screen. <b>0 turns it
+        off.</b></p>
+`;
 
 /// Say which settings the controller can change without opening this window.
 ///
