@@ -311,6 +311,18 @@ describe("the shapes", () => {
     );
   });
 
+  /// Cubes: two sparks the same colour is the failure that keeps coming back.
+  /// Hashing the hue outright was five draws from one hat — blue, blue, cyan,
+  /// green, green. Jittering an even spacing kept the same failure in
+  /// miniature: two of them could close to twenty-nine degrees apart, which is
+  /// two greens. An even fifth of the wheel is seventy-two degrees, always, and
+  /// the guarantee is that there is nothing added to it.
+  test("no two of Cubes' sparks can be the same colour", () => {
+    const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
+    const tone = /float tone = ([^;]+);/.exec(code)?.[1]?.trim();
+    assert.equal(tone, "f / 5.0", "the spark hue is not an even fifth of the wheel any more");
+  });
+
   /// Cubes: noise sampled on `atan` steps across the cut at the negative x
   /// axis, and what drew was a hard horizontal seam running left out of the
   /// middle of the glow — through the brightest part of the picture. The

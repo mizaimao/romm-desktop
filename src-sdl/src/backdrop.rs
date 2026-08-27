@@ -320,10 +320,10 @@ pub const STYLES: &[Style] = &[
           //
           // The ray grazes there, so the chord through the block goes to zero,
           // and the width of block that one pixel covers is that pixel's width
-          // in world units at this depth. Drawn hard it was the one place a
-          // half-resolution canvas shows — and it is what made this the
-          // jumpiest style on the list by a distance: the worst pixel moved 106
-          // levels in a second, against Towers' 62.
+          // in world units at this depth. Drawn hard it is the one place a
+          // half-resolution canvas shows, and it was also most of what this
+          // style cost to animate: the blocks alone took the worst pixel from
+          // 106 levels a second to 32, which is calmer than Towers.
           float soft = smoothstep(0.0, qpx * cen.z / 1.2, chord);
 
           // The edges. On the face that was hit one of these three is zero —
@@ -354,9 +354,21 @@ pub const STYLES: &[Style] = &[
           // see a little way into, so it sits in the lit half and carries a grey
           // lift on top of that. It is also what makes a block crossing the
           // bright middle read as a silhouette rather than as a hole in it.
+          // Glass, not frosted glass.
+          //
+          // Two numbers decide that and they pull in opposite directions: the
+          // grey lift on top of the ramp is how white a face goes, and the
+          // cover is how much of the haze behind it survives. Both started high
+          // because the first pass drew seven wireframes and the fix for that
+          // overshot — the faces went pale and closed up, and a block in front
+          // of the glow hid it rather than being lit through by it.
+          //
+          // So the lift now sits mostly on the edges, where a highlight belongs,
+          // and a face is about a quarter opaque rather than getting on for
+          // half. What is behind a block still reads through it.
           float value = face * (0.62 + 0.28 * rim) + edge * 0.34 + pow(rim, 3.0) * 0.32;
-          lit = ramp(clamp(0.5 + value * 0.5, 0.0, 1.0)) + vec3(value * 0.34 + edge * 0.22);
-          cover = clamp(0.40 + 0.26 * rim + edge * 0.28, 0.0, 0.94)
+          lit = ramp(clamp(0.5 + value * 0.5, 0.0, 1.0)) + vec3(value * 0.15 + edge * 0.20);
+          cover = clamp(0.24 + 0.24 * rim + edge * 0.30, 0.0, 0.90)
                 * (0.32 + 0.68 * nearness) * soft;
         }
       }
@@ -375,21 +387,28 @@ pub const STYLES: &[Style] = &[
         float sr = 0.14 + hash(vec2(f, 31.0)) * 0.40;
         vec2 sp = vec2(cos(sa) * 1.2, sin(sa * 1.3)) * sr;
         float sd = length(q - sp);
-        // Spread round the wheel by index, jittered by a hash rather than
-        // chosen by one. Five hashes are five draws from the same hat and they
-        // came out blue, blue, cyan, green, green — no red anywhere, which is
-        // the first colour anybody remembers about this scene. The index spaces
-        // them; the hash only stops them being evenly spaced.
-        float tone = f / 5.0 + hash(vec2(f, 37.0)) * 0.12;
+        // Evenly round the wheel, and nothing else. No two of them are ever
+        // the same colour, and that is arithmetic rather than luck: five tones
+        // at a fifth of the wheel apart are seventy-two degrees apart, always.
+        //
+        // Hashing the hue outright came out blue, blue, cyan, green, green —
+        // five draws from one hat, with no red anywhere, which is the first
+        // colour anybody remembers about this scene. Jittering an even spacing
+        // by a hash fixed that and kept the failure in miniature: the gap
+        // between two of them could close to twenty-nine degrees, which is two
+        // greens. There is nothing for the jitter to buy here.
+        float tone = f / 5.0;
         vec3 hue = 0.5 + 0.5 * cos(6.28318 * (tone + vec3(0.0, 0.33, 0.67)));
         // A core and a wide, faint halo. The core alone is a dead pixel at this
         // size; the halo is what makes it a light rather than a dot.
         //
-        // Both the width and the drift rate are held back on purpose. A bright
-        // four-pixel core crossing the screen is the largest step any pixel in
-        // this style takes, by a distance: measured, the sparks alone took the
-        // worst-pixel figure from 57 a second to 106, which on the handheld is
-        // the difference between redrawing ten times a second and eighteen.
+        // Both the width and the drift rate are held back on purpose, and they
+        // are still what this style costs. A bright four-pixel core crossing a
+        // dark field is the largest step any pixel here takes, by a distance:
+        // measured, the blocks and the haze together move 32 levels a second
+        // and these five dots take that to 126 — the difference on the handheld
+        // between redrawing five times a second and twenty-one. It is the same
+        // reason Starfield scores as it does.
         sparks += hue * (exp(-sd * 155.0) + exp(-sd * 28.0) * 0.11);
       }
 
@@ -575,7 +594,9 @@ pub const STYLE_LIST: &[(&str, &str)] = &[
 
 /// The most any one pixel of each style moves in a second, at its own pace.
 ///
-/// Measured, not estimated — `ROMM_SDL_BENCH=motion` prints this table. It is
+/// Measured, not estimated. `ROMM_SDL_JITTER=1 cargo test -p romm-sdl --test
+/// rendering` prints this table on a hidden context; `ROMM_SDL_BENCH=motion`
+/// prints the same thing from the running app, with a window on screen. It is
 /// what decides how often each style has to be redrawn, and it has to be the
 /// *worst* pixel rather than the average: a handful of stars crossing a dark
 /// screen shift almost no average level and are the most obvious thing on it.
@@ -593,7 +614,7 @@ pub const STYLE_JITTER: &[(&str, f32)] = &[
     ("stars", 34.0),
     ("starfield", 39.0),
     ("towers", 62.0),
-    ("cubes", 120.0),
+    ("cubes", 126.0),
 ];
 
 /// The biggest step a pixel may take between two frames without the motion
@@ -995,7 +1016,7 @@ mod pacing {
         for (id, label) in STYLE_LIST {
             assert!(
                 STYLE_JITTER.iter().any(|(m, _)| m == id),
-                "{label} ({id}) is not in STYLE_JITTER; run ROMM_SDL_BENCH=motion"
+                "{label} ({id}) is not in STYLE_JITTER; run it with ROMM_SDL_JITTER=1"
             );
         }
     }

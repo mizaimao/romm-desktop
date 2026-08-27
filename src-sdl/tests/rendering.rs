@@ -134,6 +134,7 @@ fn main() {
     an_image_keeps_its_own_colours();
     an_odd_width_is_not_sheared();
     every_style_compiles();
+    the_jitter_table_can_be_remeasured();
     the_backdrop_covers_the_frame();
     the_backdrop_moves_over_time();
     the_backdrop_does_not_depend_on_how_many_pixels_it_has();
@@ -280,6 +281,10 @@ fn every_style_compiles() {
         );
 
         if let Some(dir) = &dump {
+            // Made rather than required to exist: this is a debugging aid, and
+            // failing the whole rendering suite because a scratch directory was
+            // cleaned up is not what it is for.
+            std::fs::create_dir_all(dir).expect("the dump directory should be creatable");
             // Several moments, not one. These drift, wrap and tumble on periods
             // of tens of seconds, and a style judged on a single frame is judged
             // on whichever arrangement that second happened to hold.
@@ -292,6 +297,74 @@ fn every_style_compiles() {
                 std::fs::write(&path, &shot).expect("the dump directory should be writable");
             }
         }
+    }
+}
+
+/// Print what STYLE_JITTER should say, when ROMM_SDL_JITTER is set.
+///
+/// The table decides how often each style is redrawn on the handheld and it has
+/// to be measured rather than guessed. The measurement already existed as
+/// ROMM_SDL_BENCH=motion, which needs the app running and a window on screen —
+/// so in practice the table went stale whenever a style was tuned, and a style
+/// whose worst pixel halved went on costing twice the frames it needed.
+///
+/// The same arithmetic, on the hidden context this file already has: the worst
+/// level any one pixel moves between two frames drawn a second apart, at the
+/// style's own pace and the scheme the handheld opens on. Mean is printed too
+/// and is not what the table holds — a handful of bright points crossing a dark
+/// field shift almost no average and are the most obvious thing on screen.
+///
+/// Silent unless asked. It is a measurement, not a check: what the numbers
+/// should be is a judgement about frame rates, and asserting last week's
+/// reading would fail every time a style was legitimately made calmer.
+fn the_jitter_table_can_be_remeasured() {
+    if std::env::var("ROMM_SDL_JITTER").is_err() {
+        return;
+    }
+    let Some(screen) = screen() else { return };
+    let mut gfx = unsafe { romm_sdl::gfx::Gfx::new(&screen.video) }.expect("a renderer");
+    // The panel's size, not this file's: a thin fast edge can cross a pixel at
+    // 640x480 and fall between two at 200x120.
+    let (w, h) = (640u32, 480u32);
+    let target = unsafe { romm_sdl::gfx::Offscreen::new(w, h) }.expect("an offscreen target");
+
+    println!("{:<12} {:>9} {:>9}", "style", "mean/s", "worst/s");
+    for (id, _) in romm_sdl::backdrop::STYLE_LIST {
+        let Ok(mut art) = (unsafe { romm_sdl::backdrop::Backdrop::build(&screen.video, id) })
+        else {
+            continue;
+        };
+        art.scheme = *romm_sdl::backdrop::scheme("midnight");
+        let shot = |gfx: &mut romm_sdl::gfx::Gfx, at: f32| -> Vec<u8> {
+            unsafe {
+                gfx.draw_onto(&target, |g| {
+                    g.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+                    art.draw(w as f32, h as f32, at);
+                });
+                let mut raw = vec![0u8; (w * h * 4) as usize];
+                gl::BindFramebuffer(gl::FRAMEBUFFER, target.frame_id());
+                gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+                gl::ReadPixels(
+                    0, 0, w as i32, h as i32,
+                    gl::RGBA, gl::UNSIGNED_BYTE,
+                    raw.as_mut_ptr() as *mut _,
+                );
+                gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+                raw
+            }
+        };
+        let a = shot(&mut gfx, 10.0);
+        let b = shot(&mut gfx, 11.0);
+        let (mut sum, mut worst) = (0u64, 0u64);
+        for (p, q) in a.chunks(4).zip(b.chunks(4)) {
+            for i in 0..3 {
+                let step = (p[i] as i32 - q[i] as i32).unsigned_abs() as u64;
+                sum += step;
+                worst = worst.max(step);
+            }
+        }
+        let n = (a.len() / 4 * 3) as f64;
+        println!("{id:<12} {:>9.2} {worst:>9}", sum as f64 / n);
     }
 }
 
