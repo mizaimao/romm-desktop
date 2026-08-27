@@ -50,14 +50,6 @@ export const html = `      <h4>RetroArch</h4>
         places. Nothing is transferred until you accept it.</p>
       <p class="hint set-savesync-status"></p>
 
-      <h4>Save states</h4>
-      <div class="srow">
-        <label>Ask before deleting</label>
-        <div class="ctl"><button data-field="confirm_delete_state">…</button></div>
-      </div>
-      <p class="hint">Off by default — clearing old states is done several at a time. A copy
-      always goes to the backups folder, so deleting one is undoable by hand.</p>
-
       <h4>Server</h4>
       <div class="srow">
         <label>RomM server</label>
@@ -98,6 +90,14 @@ export const html = `      <h4>RetroArch</h4>
       </div>
       <p class="hint">Hardcore disables save states, fast-forward and rewind —
         four of the hotkeys this app binds.</p>
+
+      <h4>Save states</h4>
+      <div class="srow">
+        <label>Ask before deleting</label>
+        <div class="ctl"><button data-field="confirm_delete_state">…</button></div>
+      </div>
+      <p class="hint">Off by default — clearing old states is done several at a time. A copy
+      always goes to the backups folder, so deleting one is undoable by hand.</p>
 
       <h4>ScreenScraper</h4>
       <div class="srow">
