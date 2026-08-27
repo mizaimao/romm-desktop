@@ -182,9 +182,80 @@ pub fn read_block(text: &str, id: &str) -> Option<String> {
     None
 }
 
+/// What a block wrote over, kept on the line that displaced it.
+///
+/// Distinct from the opening marker — `read_block` and `clear_block` compare a
+/// trimmed line for equality with `## moose-patch: <id>`, and this is longer,
+/// so it can never be mistaken for one.
+fn hidden_marker(id: &str) -> String {
+    format!("## moose-patch: {id} hid: ")
+}
+
+/// The `key` of a `key=value` line, ignoring comments and blanks.
+fn key_of(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let key = line.split_once('=')?.0.trim();
+    (!key.is_empty()).then_some(key)
+}
+
+/// Comment out any earlier line setting a key this block also sets.
+///
+/// **`knulli.conf` is first-wins, not last-wins.** `knulli-settings-get` scans
+/// from the top and returns the first match, so a block appended at the end of
+/// the file that repeats a key already up there is read by nothing. That is
+/// not a theory: `never-sleep` wrote `system.batterysaver.extendedmode=none`
+/// for weeks under a `=suspend` on line 319, the app said it was on, and the
+/// handheld went on suspending after fifteen minutes.
+///
+/// The displaced line is kept verbatim on its marker so `unhide` can put it
+/// back exactly, which is what makes turning a patch off a real undo rather
+/// than a guess at what KNULLI's default was.
+fn hide_keys(text: &str, id: &str, keys: &[&str]) -> String {
+    if keys.is_empty() {
+        return text.to_owned();
+    }
+    let marker = hidden_marker(id);
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        match key_of(line) {
+            Some(key) if keys.contains(&key) => out.push(format!("{marker}{line}")),
+            _ => out.push(line.to_owned()),
+        }
+    }
+    let mut text = out.join("\n");
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
+/// Put back every line this block hid.
+fn unhide(text: &str, id: &str) -> String {
+    let marker = hidden_marker(id);
+    let mut out: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        match line.trim_start().strip_prefix(marker.as_str()) {
+            Some(original) => out.push(original),
+            None => out.push(line),
+        }
+    }
+    let mut text = out.join("\n");
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
 /// Put a block in, replacing any previous one. Appends when there was none.
 pub fn set_block(text: &str, id: &str, body: &str) -> String {
     let cleared = clear_block(text, id);
+    // Hidden before the block is appended, so the block's own lines — which
+    // set the very keys being hidden — are not swept up by it.
+    let keys: Vec<&str> = body.lines().filter_map(key_of).collect();
+    let cleared = hide_keys(&cleared, id, &keys);
     let mut out = cleared.trim_end().to_string();
     if !out.is_empty() {
         out.push_str("\n\n");
@@ -200,6 +271,9 @@ pub fn set_block(text: &str, id: &str, body: &str) -> String {
 
 /// Take a block out, markers and all, leaving the rest of the file alone.
 pub fn clear_block(text: &str, id: &str) -> String {
+    // Whatever this block wrote over comes back first. Turning a patch off has
+    // to leave the file as KNULLI had it, not merely without our lines.
+    let text = &unhide(text, id);
     let open = open_marker(id);
     let close = close_marker(id);
     let mut out: Vec<&str> = Vec::new();
@@ -478,6 +552,98 @@ mod tests {
         let without = clear_block(&with, "hotkeys");
         assert_eq!(read_block(&without, "hotkeys"), None);
         assert!(without.contains("keep=1"));
+    }
+
+    /// The lines a settings reader would actually act on: not blank, not
+    /// commented out.
+    fn live(text: &str) -> Vec<&str> {
+        text.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect()
+    }
+
+    #[test]
+    fn a_key_already_in_the_file_is_the_one_that_wins() {
+        // knulli.conf is FIRST-wins. `knulli-settings-get` scans from the top
+        // and stops. A block appended at the end repeating a key from line 319
+        // is read by nothing — which is exactly what `never-sleep` did, while
+        // the app cheerfully reported it as on.
+        let before = "system.batterysaver.mode=dim\n\
+                      system.batterysaver.extendedmode=suspend\n\
+                      system.power.led=1\n";
+        let after = set_block(before, "power", "system.batterysaver.extendedmode=none\n");
+
+        // The old line is no longer a setting…
+        let set: Vec<&str> = live(&after).into_iter().filter(|l| l.contains("extendedmode")).collect();
+        assert_eq!(set, vec!["system.batterysaver.extendedmode=none"]);
+        // …and the keys we did not touch are untouched.
+        assert!(live(&after).contains(&"system.batterysaver.mode=dim"));
+        assert!(live(&after).contains(&"system.power.led=1"));
+    }
+
+    #[test]
+    fn turning_it_off_puts_the_original_line_back_exactly() {
+        // Not "delete our lines" — restore what KNULLI had. Guessing the
+        // default is how a device ends up in a state its owner never chose.
+        let before = "system.batterysaver.extendedmode=suspend\n\
+                      system.batterysaver.chargingbypass=0\n";
+        let on = set_block(before, "power", "system.batterysaver.extendedmode=none\n");
+        let off = clear_block(&on, "power");
+        assert_eq!(off, before, "did not come back to what it was");
+    }
+
+    #[test]
+    fn hiding_survives_being_applied_over_and_over() {
+        // Every apply runs set_block again. If each one hid the line it had
+        // already hidden, the markers would nest and the original would be
+        // unrecoverable.
+        let before = "system.batterysaver.extendedmode=suspend\n";
+        let mut text = before.to_owned();
+        for _ in 0..3 {
+            text = set_block(&text, "power", "system.batterysaver.extendedmode=none\n");
+        }
+        assert_eq!(text.matches("hid:").count(), 1, "stacked its own markers");
+        assert_eq!(clear_block(&text, "power"), before);
+    }
+
+    #[test]
+    fn a_hidden_line_is_not_mistaken_for_the_blocks_own_marker() {
+        // `read_block` matches a trimmed line against "## moose-patch: power".
+        // If the hiding marker could equal that, a block would swallow the
+        // line it hid and lose it.
+        let text = set_block(
+            "system.batterysaver.extendedmode=suspend\n",
+            "power",
+            "system.batterysaver.extendedmode=none\n",
+        );
+        assert_eq!(
+            read_block(&text, "power").as_deref(),
+            Some("system.batterysaver.extendedmode=none")
+        );
+    }
+
+    #[test]
+    fn one_block_does_not_disturb_what_another_hid() {
+        let before = "system.batterysaver.extendedmode=suspend\n\
+                      system.batterysaver.chargingbypass=0\n";
+        let a = set_block(before, "power", "system.batterysaver.extendedmode=none\n");
+        let b = set_block(&a, "charge", "system.batterysaver.chargingbypass=1\n");
+        // Taking one off leaves the other's work standing.
+        let off = clear_block(&b, "power");
+        assert!(off.contains("system.batterysaver.extendedmode=suspend"), "did not restore");
+        let set: Vec<&str> =
+            live(&off).into_iter().filter(|l| l.contains("chargingbypass")).collect();
+        assert_eq!(set, vec!["system.batterysaver.chargingbypass=1"], "clobbered the other");
+    }
+
+    #[test]
+    fn a_block_that_sets_nothing_hides_nothing() {
+        // Comments and blanks are not settings. A body of pure commentary must
+        // not silently disable a line somewhere above it.
+        let before = "system.power.led=1\n";
+        let after = set_block(before, "note", "# just a comment\n\n");
+        assert!(live(&after).contains(&"system.power.led=1"), "hid a key it never set");
     }
 
     #[test]

@@ -159,6 +159,7 @@ fn main() -> Result<()> {
         Some("--pull-all") => return pull_all_cli(),
         Some("--refresh") => return refresh_cli(),
         Some("--saves") => return saves_cli(),
+        Some("--apply") => return apply_cli(&patches, std::env::args().nth(2)),
         Some("--stars") => return stars_cli(false),
         Some("--stars-apply") => return stars_cli(true),
         Some("--save") => {
@@ -168,8 +169,8 @@ fn main() -> Result<()> {
         }
         Some(other) if other.starts_with("--") => {
             eprintln!(
-                "moose-patch [--status | --plan | --sync | --refresh | --pull-all \
-                 | --stars | --stars-apply | --restore | --save]"
+                "moose-patch [--status | --apply <id>=<option> | --plan | --sync \
+                 | --refresh | --pull-all | --stars | --stars-apply | --restore | --save]"
             );
             std::process::exit(2);
         }
@@ -242,6 +243,39 @@ fn sync_cli(carry_out: bool) -> Result<()> {
         worker::negotiate(&cfg, &ra_root, &app_dir)
     };
     drain_to_end(job)
+}
+
+/// Turn one patch to one of its options, from a shell.
+///
+/// The window is the way a person does this. This is how it gets *checked* on
+/// the device — over ssh, against the real /userdata, without a screen. Every
+/// patch bug so far has been found by applying one and then reading the file
+/// it claimed to write, and doing that needed a controller in hand until now.
+fn apply_cli(patches: &[Patch], arg: Option<String>) -> Result<()> {
+    let Some(arg) = arg else {
+        anyhow::bail!("--apply needs <id>=<option>, e.g. --apply charge-awake=ON");
+    };
+    let (id, wanted) = arg
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("--apply needs <id>=<option>, not {arg:?}"))?;
+    let Some(patch) = patches.iter().find(|p| p.id == id) else {
+        anyhow::bail!(
+            "no patch called {id:?} — try one of: {}",
+            patches.iter().map(|p| p.id).collect::<Vec<_>>().join(", ")
+        );
+    };
+    let options = patch.option_names();
+    let Some(index) = options.iter().position(|o| o.eq_ignore_ascii_case(wanted)) else {
+        anyhow::bail!("{id} has no option {wanted:?} — it has: {}", options.join(", "));
+    };
+    patch.apply(index)?;
+    // Read back, rather than reporting what was asked for. The two disagreeing
+    // is the whole class of bug this exists to catch.
+    println!("{id} -> {}", match patch.state() {
+        State::At(i) => options[i].clone(),
+        State::Changed => "changed (does not match any option)".into(),
+    });
+    Ok(())
 }
 
 /// Favourites and collections: what the card and the server disagree about.

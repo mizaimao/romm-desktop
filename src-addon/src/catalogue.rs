@@ -17,6 +17,7 @@ const SHADERS_LCD: &str = include_str!("../assets/shaders.conf");
 const SHADERS_PLAIN: &str = include_str!("../assets/shaders-plain.conf");
 const SHADERS_ZFAST: &str = include_str!("../assets/shaders-zfast.conf");
 const POWER: &str = include_str!("../assets/power.conf");
+const CHARGE_AWAKE: &str = include_str!("../assets/charge-awake.conf");
 const WIFI_AWAKE: &str = include_str!("../assets/wifi-awake.sh");
 
 const SHADER_1: &[u8] = include_bytes!("../../device/retroarch-shaders/1-sharp-shimmerless.glslp");
@@ -358,13 +359,31 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
         Patch {
             id: "never-sleep",
             title: "Never sleep",
-            detail: "system.batterysaver.extendedmode in knulli.conf. Suspending after 15 \
-                     minutes idle drops the network and reads as a dead device. Dimming stays \
-                     either way, so the battery is still looked after.",
+            detail: "system.batterysaver.extendedmode in knulli.conf. Never suspends, on \
+                     battery or plugged in — suspending after 15 minutes idle drops the network \
+                     and reads as a dead device. Dimming stays either way. If you only want \
+                     this while it is charging, use \"Awake while charging\" instead and leave \
+                     this off.",
             choices: on_off(
                 "ON",
                 vec![block(paths, "power", Some(POWER))],
                 vec![block(paths, "power", None)],
+            ),
+        },
+        Patch {
+            id: "charge-awake",
+            title: "Awake while charging",
+            detail: "system.batterysaver.chargingbypass in knulli.conf. Plugged in, it stops \
+                     dimming and stops suspending — KNULLI drops a pause file whenever the \
+                     battery is not discharging, and both idle hooks check for it. On battery \
+                     nothing changes, so it still looks after itself in your bag. Closing the \
+                     lid and pressing power both still suspend: neither goes anywhere near \
+                     that file. No script and no service — the OS already does this, it is \
+                     just turned off.",
+            choices: on_off(
+                "ON",
+                vec![block(paths, "charge-awake", Some(CHARGE_AWAKE))],
+                vec![block(paths, "charge-awake", None)],
             ),
         },
         Patch {
@@ -632,6 +651,9 @@ mod tests {
 
         get("hotkeys").apply(1).unwrap();
         get("never-sleep").apply(1).unwrap();
+        get("charge-awake").apply(1).unwrap();
+        assert_eq!(get("never-sleep").state(), State::At(1), "charging clobbered sleep");
+        assert_eq!(get("charge-awake").state(), State::At(1));
         assert_eq!(get("hotkeys").state(), State::At(1), "sleep clobbered hotkeys");
 
         get("boot-splash").apply(1).unwrap();
@@ -641,5 +663,51 @@ mod tests {
         // And taking one away leaves the other.
         get("never-sleep").apply(0).unwrap();
         assert_eq!(get("hotkeys").state(), State::At(1));
+    }
+
+    /// What the settings reader would act on, in file order.
+    fn live(text: &str) -> Vec<&str> {
+        text.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect()
+    }
+
+    #[test]
+    fn the_power_patches_beat_the_values_knulli_ships_with() {
+        // The whole failure was here, not in the block: a stock knulli.conf
+        // already sets both of these near the top, and the reader takes the
+        // first one it meets. A patch appended underneath changed nothing
+        // while reporting itself as on.
+        let paths = scratch("power-stock");
+        // A stock file has to exist for there to be anything to shadow.
+        std::fs::create_dir_all(paths.knulli_conf().parent().unwrap()).unwrap();
+        std::fs::write(
+            paths.knulli_conf(),
+            "system.power.led=1\n\
+             system.batterysaver.mode=dim\n\
+             system.batterysaver.extendedmode=suspend\n\
+             system.batterysaver.chargingbypass=0\n",
+        )
+        .unwrap();
+        let patches = all(&paths);
+        let get = |id: &str| patches.iter().find(|p| p.id == id).unwrap();
+
+        get("charge-awake").apply(1).unwrap();
+        let text = std::fs::read_to_string(paths.knulli_conf()).unwrap();
+        let set: Vec<&str> =
+            live(&text).into_iter().filter(|l| l.contains("chargingbypass")).collect();
+        assert_eq!(
+            set,
+            vec!["system.batterysaver.chargingbypass=1"],
+            "the shipped =0 is still the one the reader would find first"
+        );
+        // Suspending on battery is untouched — that is the point of this one.
+        assert!(live(&text).contains(&"system.batterysaver.extendedmode=suspend"));
+
+        // And off puts KNULLI's own value back, rather than deleting the line.
+        get("charge-awake").apply(0).unwrap();
+        let text = std::fs::read_to_string(paths.knulli_conf()).unwrap();
+        assert!(live(&text).contains(&"system.batterysaver.chargingbypass=0"));
     }
 }

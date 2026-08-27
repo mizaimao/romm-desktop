@@ -254,3 +254,55 @@ handheld does not carry.
 
 Print the counts even when everything agrees. A matcher that finds nothing on
 either side reports agreement exactly as loudly as one that works.
+
+
+## knulli.conf is first-wins
+
+`knulli-settings-get` scans from the top of the file and returns the **first**
+match. A block appended at the end that repeats a key already set further up is
+read by nothing.
+
+This is not hypothetical. `never-sleep` wrote
+
+    system.batterysaver.extendedmode=none
+
+underneath the `=suspend` that KNULLI ships on line 319. The app reported the
+patch as on, the file contained exactly what the patch said it should, and the
+handheld went on suspending after fifteen minutes idle. Nothing looked wrong
+anywhere except on the device.
+
+So `set_block` now comments out any earlier line setting a key the block also
+sets, keeping the original verbatim on the marker that displaced it:
+
+    ## moose-patch: power hid: system.batterysaver.extendedmode=suspend
+
+`clear_block` puts it back exactly. That is what makes turning a patch off a
+real undo rather than a guess at what KNULLI's default was — deleting our line
+and walking away would leave the key unset, which is not the same as the value
+it shipped with.
+
+Check a patch on the device, not by reading the file it wrote:
+
+    moose-patch --apply charge-awake=ON
+    knulli-settings-get system.batterysaver.chargingbypass   # the reader's answer
+
+## Sleep
+
+Three separate mechanisms, and only one of them is automatic:
+
+| What | Where it is decided | Auto? |
+| --- | --- | --- |
+| Idle dim, then idle suspend | `idlewatcher` → `/etc/idlewatcher/*.d/` hooks | yes |
+| Closing the lid | `lid-control`, reading `system.lid` | no |
+| Power button | `power-button` → `knulli-suspend` | no |
+
+Only the first checks `/var/run/battery-saver/*.pause`. That is why
+**Awake while charging** — `system.batterysaver.chargingbypass=1` — stops the
+handheld dozing off on its own while plugged in without taking away either way
+of asking it to sleep. KNULLI already ships the whole mechanism; it is off by
+default, so no script and no service were needed.
+
+One trap: those idle hooks are `#!/bin/bash` and `check_pause` uses `compgen`.
+Run one with `sh` to see what it would do and `compgen` is not found,
+`check_pause` fails open, and the hook suspends the device — which is a fine
+way to lose the machine you are testing on mid-session.
