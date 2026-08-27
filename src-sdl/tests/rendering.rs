@@ -29,6 +29,9 @@ struct Screen {
 unsafe impl Sync for Screen {}
 unsafe impl Send for Screen {}
 
+/// The size ROMM_SDL_DUMP renders at: the handheld's panel, so what is looked
+/// at is what will be seen.
+const DUMP: (u32, u32) = (640, 480);
 const WIDTH: u32 = 200;
 const HEIGHT: u32 = 120;
 
@@ -90,6 +93,34 @@ fn read_pixels() -> Vec<u8> {
     let mut out = vec![0u8; flipped.len()];
     for y in 0..HEIGHT as usize {
         let from = (HEIGHT as usize - 1 - y) * row;
+        out[y * row..(y + 1) * row].copy_from_slice(&flipped[from..from + row]);
+    }
+    out
+}
+
+/// The same read as `read_pixels`, off an offscreen target rather than the
+/// window, and flipped the same way: GL hands rows back bottom-up.
+///
+/// # Safety
+///
+/// A context must be current and `target` must belong to it.
+unsafe fn read_target(target: &romm_sdl::gfx::Offscreen) -> Vec<u8> {
+    let (w, h) = (DUMP.0 as usize, DUMP.1 as usize);
+    let mut flipped = vec![0u8; w * h * 4];
+    unsafe {
+        gl::BindFramebuffer(gl::FRAMEBUFFER, target.frame_id());
+        gl::PixelStorei(gl::PACK_ALIGNMENT, 1);
+        gl::ReadPixels(
+            0, 0, w as i32, h as i32,
+            gl::RGBA, gl::UNSIGNED_BYTE,
+            flipped.as_mut_ptr() as *mut _,
+        );
+        gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+    }
+    let row = w * 4;
+    let mut out = vec![0u8; flipped.len()];
+    for y in 0..h {
+        let from = (h - 1 - y) * row;
         out[y * row..(y + 1) * row].copy_from_slice(&flipped[from..from + row]);
     }
     out
@@ -285,14 +316,24 @@ fn every_style_compiles() {
             // failing the whole rendering suite because a scratch directory was
             // cleaned up is not what it is for.
             std::fs::create_dir_all(dir).expect("the dump directory should be creatable");
+            // Onto an offscreen target at the panel's size, not into this
+            // file's 200x120 window. The checks above only need enough pixels
+            // to count lit ones; a person looking at a backdrop to decide
+            // whether the fog has enough structure in it needs the size it will
+            // actually be seen at, and at 200 across every wisp is one pixel.
+            let target =
+                unsafe { romm_sdl::gfx::Offscreen::new(DUMP.0, DUMP.1) }.expect("a target");
             // Several moments, not one. These drift, wrap and tumble on periods
             // of tens of seconds, and a style judged on a single frame is judged
             // on whichever arrangement that second happened to hold.
             for (n, at) in [9.0f32, 40.0, 90.0, 150.0].iter().enumerate() {
-                gfx.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
-                unsafe { backdrop.draw(WIDTH as f32, HEIGHT as f32, *at) };
-                let shot = read_pixels();
-                screen.window.gl_swap_window();
+                let shot = unsafe {
+                    gfx.draw_onto(&target, |g| {
+                        g.clear(romm_sdl::gfx::Rgba::rgb(0, 0, 0));
+                        backdrop.draw(DUMP.0 as f32, DUMP.1 as f32, *at);
+                    });
+                    read_target(&target)
+                };
                 let path = std::path::Path::new(dir).join(format!("{id}-{n}.rgba"));
                 std::fs::write(&path, &shot).expect("the dump directory should be writable");
             }

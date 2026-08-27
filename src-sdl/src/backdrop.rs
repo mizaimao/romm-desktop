@@ -227,26 +227,57 @@ pub const STYLES: &[Style] = &[
       // continuous function of direction — so the grain still runs along the
       // rays and closes up all the way round.
       vec2 dir = eye / rad;
-      // Two layers, and the radial one is the smaller of them.
+
+      // Sampled at a place another cloud decides.
       //
-      // On its own the ray term is a starburst: it is constant along a ray, so
-      // every streak converges on the same pixel and what draws is a lens flare
-      // with a hard point in the middle of it. So the scale opens out with
-      // distance, the middle is faded out of it, and an ordinary cloud carries
-      // most of the weight — the streaks are grain in the cloud rather than the
-      // shape of it.
-      float rays = fbm(dir * (2.0 + rad * 4.0) + vec2(t * 0.03, log(rad) * 0.7));
-      float cloud = fbm(eye * 2.4 + vec2(t * 0.035, -t * 0.025))
-                  + fbm(eye * 5.1 - vec2(t * 0.02, t * 0.03)) * 0.5;
-      // Faded towards the middle of its own range near the centre, not towards
-      // zero. Fading it out left a dark hole exactly where the streaks converge,
-      // which is the one place on this screen that has to be the brightest.
-      float body = cloud * 0.62 + mix(0.5, rays, smoothstep(0.0, 0.16, rad)) * 0.55;
+      // Two octaves of plain noise is an even wash. Looked at full size against
+      // the original, the middle of the screen was one flat field with no shape
+      // in it at all, where the original is wisps and lanes. Offsetting the
+      // sample point by a second, coarser noise is what turns bands into wisps,
+      // and it costs one more pair of lookups rather than the several more
+      // octaves it would otherwise take to get the same detail.
+      // Warped twice: folded sideways, and stretched outwards.
+      //
+      // A separate radial term was tried twice and is a mistake either way. A
+      // value constant along a ray converges every streak on one pixel — coarse
+      // it drew five fan-shaped brush strokes, fine it drew a lens flare — and
+      // no weight worth having avoids both. Pushing the sample point along the
+      // ray instead stretches the cloud's own features outwards, which is a
+      // lobe rather than a streak, and it is the same two noise values already
+      // fetched for the sideways fold.
+      //
+      // Two octaves of unwarped noise is an even wash: looked at full size
+      // against the original, the middle of the screen was one flat field with
+      // no shape in it where the original is wisps and lanes. This is what turns
+      // bands into wisps, and it costs one pair of lookups rather than the
+      // several more octaves it would take to get the same detail.
+      vec2 warp = vec2(fbm(eye * 2.2 + vec2(t * 0.02, 0.0)),
+                       fbm(eye * 2.2 + vec2(5.2, t * 0.017))) - 0.5;
+      // The radial half fades out towards the middle, because dir flips sign
+      // across the centre — the sample point jumped from one side of the cloud
+      // to the other over a pixel, and what drew was a dark hole in the one
+      // place on this screen that has to be the brightest.
+      vec2 wq = eye + warp * 0.30 + dir * warp.y * 0.34 * smoothstep(0.0, 0.20, rad);
+
+      // Three octaves, an octave and a bit apart. Two ran from scale 2.5 to 12
+      // and the finest thing on screen was forty pixels across; the original has
+      // structure in it down to a handful.
+      float cloud = fbm(wq * 3.0 + vec2(t * 0.03, -t * 0.02)) * 0.50
+                  + fbm(wq * 7.4 - vec2(t * 0.018, t * 0.026)) * 0.32
+                  + fbm(wq * 17.0 + vec2(t * 0.012, t * 0.02)) * 0.18;
+
+      // Stretched across the ramp rather than sitting near the top of it.
+      //
+      // This was 0.30 plus the cloud, which reached about 0.92 over the whole
+      // middle of the screen — the top of the ramp everywhere, so one colour,
+      // no lanes and no filaments however much structure the noise had in it.
+      // The dark parts have to be dark for the bright parts to read as light.
+      //
       // A gaussian, not a disc: the original has no edge to it anywhere, it
       // simply stops being there. Plus a much tighter one for the core, so the
       // haze has a source in it rather than being evenly lit throughout.
-      float haze = exp(-rad * rad * 4.2) * (0.30 + 1.25 * body)
-                 + exp(-rad * rad * 38.0) * 0.45;
+      float haze = exp(-rad * rad * 3.6) * smoothstep(0.14, 0.66, cloud) * 1.25
+                 + exp(-rad * rad * 16.0) * 0.5;
 
       // The blocks. Nearest hit wins.
       //
@@ -333,9 +364,14 @@ pub const STYLES: &[Style] = &[
           float edge = max(min(e.x, e.y), min(max(e.x, e.y), e.z));
           edge = 1.0 - smoothstep(0.0, h * 0.30, edge);
 
-          // Which face, so the three you can see are three different values.
-          // Flat blocks read as hexagons; this is what makes them solid.
-          float face = 0.45 + 0.55 * abs(dot(nor, vec3(-0.37, 0.55, -0.75)));
+          // Which face, and signed.
+          //
+          // abs() lit the face turned away from the light exactly as brightly as
+          // the one turned towards it, so all three faces of a block came out
+          // the same value and it read as a flat hexagon with an outline. The
+          // original's blocks have one bright face, one middling and one nearly
+          // black, and that contrast is the whole of what makes them solid.
+          float face = 0.12 + 0.88 * (0.5 + 0.5 * dot(nor, vec3(-0.37, 0.55, -0.75)));
 
           // Further away is dimmer, so the ring reads as depth rather than as a
           // circle of decals.
@@ -354,21 +390,23 @@ pub const STYLES: &[Style] = &[
           // see a little way into, so it sits in the lit half and carries a grey
           // lift on top of that. It is also what makes a block crossing the
           // bright middle read as a silhouette rather than as a hole in it.
-          // Glass, not frosted glass.
+          // Grey glass, with only a cast of the scheme in it.
           //
-          // Two numbers decide that and they pull in opposite directions: the
-          // grey lift on top of the ramp is how white a face goes, and the
-          // cover is how much of the haze behind it survives. Both started high
-          // because the first pass drew seven wireframes and the fix for that
-          // overshot — the faces went pale and closed up, and a block in front
-          // of the glow hid it rather than being lit through by it.
+          // The blocks took their colour from the ramp, whose lit end is a navy
+          // on this scheme — so they came out navy, and on a green scheme they
+          // would have come out green. Glass does not do that. In the original
+          // they are neutral and the haze is the thing that is blue, so the
+          // scheme belongs over them rather than being the whole of them.
           //
-          // So the lift now sits mostly on the edges, where a highlight belongs,
-          // and a face is about a quarter opaque rather than getting on for
-          // half. What is behind a block still reads through it.
-          float value = face * (0.62 + 0.28 * rim) + edge * 0.34 + pow(rim, 3.0) * 0.32;
-          lit = ramp(clamp(0.5 + value * 0.5, 0.0, 1.0)) + vec3(value * 0.15 + edge * 0.20);
-          cover = clamp(0.24 + 0.24 * rim + edge * 0.30, 0.0, 0.90)
+          // Opacity and whiteness pull against each other and both were wrong in
+          // both directions in turn: first pale and closed up, then so sheer
+          // that a block was an outline with nothing inside it. What settles it
+          // is the face contrast above — with one face bright and one nearly
+          // black a block reads as a solid at well under half opaque, which is
+          // what leaves the haze showing through the one crossing the middle.
+          float value = face * (0.74 + 0.26 * rim) + edge * 0.20 + pow(rim, 3.0) * 0.22;
+          lit = vec3(0.04 + value * 0.66) + u_high * 0.45 + vec3(edge * 0.14);
+          cover = clamp(0.42 + 0.22 * rim + edge * 0.20, 0.0, 0.92)
                 * (0.32 + 0.68 * nearness) * soft;
         }
       }

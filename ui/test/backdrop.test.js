@@ -346,16 +346,29 @@ describe("the shapes", () => {
     assert.ok(declared < loop, "fwidth moved inside the loop, where it is undefined");
   });
 
-  /// Cubes: the ramp is built for backdrops, so its lower half is nearly black.
-  /// A block shaded over the whole of it drew as a wireframe — the edges were
-  /// the only part of it with anything in them.
-  test("Cubes shades its blocks in the lit half of the ramp", () => {
+  /// Cubes: the blocks are grey glass with a cast of the scheme over them, not
+  /// the scheme's own colour. Shaded through the ramp they came out navy on
+  /// Midnight, and would come out green on Moss; glass does not do that. The
+  /// haze is the thing that carries the scheme.
+  test("Cubes shades its blocks in grey, not in the scheme", () => {
     const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
-    assert.match(
-      code,
-      /ramp\(clamp\(0\.5 \+ value \* 0\.5/,
-      "the blocks are being shaded across the whole ramp again"
-    );
+    // The assignment, not the declaration above the loop: `vec3 lit = vec3(0.0)`
+    // is where the colour starts, and matching it tests nothing.
+    const block = /^\s+lit = ([^;]+);/m.exec(code)?.[1] ?? "";
+    assert.ok(block, "the block colour is gone");
+    assert.doesNotMatch(block, /ramp\(/, "the blocks take the ramp's colour again");
+    assert.match(block, /u_high/, "the scheme no longer reaches the blocks at all");
+  });
+
+  /// Cubes: abs() lit the face turned away from the light exactly as brightly
+  /// as the one turned towards it, so all three faces of a block came out the
+  /// same value and it read as a flat hexagon with an outline. One bright face,
+  /// one middling and one nearly black is what makes a block look solid.
+  test("Cubes lights its faces from one side", () => {
+    const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
+    const face = /float face = ([^;]+);/.exec(code)?.[1] ?? "";
+    assert.ok(face, "the face term is gone");
+    assert.doesNotMatch(face, /abs\(/, "the faces are being lit from both sides again");
   });
 
   /// Grid: `max(p.y, 0.04)` froze the perspective divide across the bottom of
