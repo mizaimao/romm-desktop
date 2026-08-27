@@ -9,6 +9,12 @@ Read this, then `docs/parked.md`, then start.
 
 ---
 
+## The handheld
+
+Everything that has been changed on the Flip, and why, is in
+[flip-knulli-changes.md](flip-knulli-changes.md) — read back off the device
+rather than written from memory. Read it before changing anything on there.
+
 ## Read this before you touch a button mapping
 
 **Handhelds do not agree on where A is.** Android handhelds tend to be Xbox
