@@ -297,36 +297,25 @@ describe("the shapes", () => {
     assert.match(body, /cell \+ o/, "the neighbouring cell is not being hashed");
   });
 
-  /// Ribbon: the sheet has to sit deeper than its own wave is tall. At 0.42
-  /// down with a wave reaching 0.68 it passed through the eye — the corrected
-  /// hit came out behind the camera, the distance fade ran backwards and went
-  /// above one, and what drew was a field of white speckles standing in the sky
-  /// above the horizon. Read off the source because there is no GPU here to
-  /// draw it on.
-  test("Ribbon's sheet is deeper than its wave is tall", () => {
+  /// Ribbon is bands, not a mesh, and that distinction cost a whole style.
+  ///
+  /// The first build of it read the shader's name, built what the word
+  /// suggested, and drew a wireframe grid in perspective running to a horizon.
+  /// RetroArch's has no lines in it anywhere, no mesh and no depth — it is soft
+  /// sheets of light over a gradient. A lattice term reappearing here means
+  /// somebody has made that same reading again.
+  test("Ribbon draws bands rather than a mesh", () => {
     const code = backdrop.backdropStyle("ribbon").body.replace(/\/\/[^\n]*/g, "");
-    const depth = Math.abs(Number(/float below = (-?[\d.]+);/.exec(code)?.[1]));
-    // Anchored at the start of a line so this is the assignment inside the
-    // loop and not `float wob = 0.0` above it. Second time that has caught me
-    // out in this file: a declaration and its assignment both read as "x = ",
-    // and the declaration is always the one a lazy regex finds first.
-    const wave = /^\s+wob = ([^;]+);/m.exec(code)?.[1] ?? "";
-    const peaks = [...wave.matchAll(/\* ([\d.]+)/g)].map((m) => Number(m[1]));
-    assert.ok(depth > 0, "the sheet has no depth");
-    assert.equal(peaks.length, 3, "the wave is not three sines any more");
-    const tallest = peaks.reduce((a, b) => a + b, 0);
-    assert.ok(
-      tallest < depth,
-      `the wave reaches ${tallest} and the sheet is only ${depth} below the eye`
-    );
+    assert.doesNotMatch(code, /fract\(/, "there is a lattice in Ribbon again");
+    assert.doesNotMatch(code, /fwidth\(/, "Ribbon is measuring pixels, which only a grid needs");
   });
 
-  /// Ribbon: a ray a hair under the horizon meets the sheet thousands of units
-  /// out, where the sines are past what the arithmetic can resolve and the grid
-  /// is far finer than a pixel. Bounding the hit is what stops that being drawn.
-  test("Ribbon bounds how far it will look", () => {
+  /// Ribbon: the bands are added, so where two cross the overlap is brighter
+  /// than either. That is the whole of the effect — blended or maxed instead,
+  /// four ribbons draw as four ribbons rather than as woven light.
+  test("Ribbon's bands add where they cross", () => {
     const code = backdrop.backdropStyle("ribbon").body.replace(/\/\/[^\n]*/g, "");
-    assert.match(code, /hit = clamp\(/, "the intersection distance is unbounded again");
+    assert.match(code, /lit \+= band \* band/, "the bands no longer accumulate");
   });
 
   /// Cubes and Towers are the two halves of the same boot sequence and two
@@ -401,6 +390,18 @@ describe("the shapes", () => {
     const sheen = /float sheen = ([^;]+);/.exec(code)?.[1] ?? "";
     assert.ok(sheen, "the diffuse term is gone");
     assert.doesNotMatch(sheen, /abs\(/, "the faces are being lit from both sides again");
+  });
+
+  /// Cubes: a tenth opaque at most, and scaled to a tenth rather than clamped
+  /// at one. A clamp flattens the edges and the rim into the faces and leaves a
+  /// uniform tile; scaling keeps the shape and only turns it down. Asked for
+  /// directly — the blocks are meant to be a suggestion over the haze.
+  test("Cubes' blocks are scaled down to mostly transparent, not clipped", () => {
+    const code = backdrop.backdropStyle("cubes").body.replace(/\/\/[^\n]*/g, "");
+    const cover = /^\s+cover = ([\s\S]*?);/m.exec(code)?.[1] ?? "";
+    assert.ok(cover, "the block opacity is gone");
+    assert.match(cover, /\* 0\.10/, "the blocks are no longer held to a tenth");
+    assert.match(cover, /clamp\([^)]*, 0\.0, 1\.0\)/, "the opacity is being clipped, not scaled");
   });
 
   /// Cubes: the far edges seen through the near face are the whole difference

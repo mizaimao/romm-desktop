@@ -265,98 +265,57 @@ export const BACKDROPS = [
     hint: "A wave folding under a wireframe sheet. The PlayStation 3's menu "
       + "background, which is what RetroArch draws behind its own.",
     pace: 0.4,
-    defaults: { strength: 0.55 },
+    // Brighter than the rest by default. Every other style here has hot spots —
+    // a star, a column, a spark — and has to be held down so text stays
+    // readable over the brightest pixel it can make. This one is a gradient
+    // with soft bands on it and its brightest pixel is its average, so the same
+    // number that suits Starfield leaves it looking switched off.
+    defaults: { strength: 0.68 },
     body: `
-      // The wave behind the PlayStation 3's menu, which RetroArch draws as its
-      // XMB background and calls Ribbon.
+      // The wave behind RetroArch's XMB, which it took from the PlayStation 3.
       //
-      // Theirs is a mesh: a grid of vertices displaced in a vertex shader and
-      // drawn as geometry. There is no geometry here — this whole file is one
-      // full-screen quad — so the surface is intersected instead, which gets to
-      // the same picture from the other side and costs about the same.
+      // Smooth bands of light crossing a gradient, and that is all it is. The
+      // first version of this drew a wireframe grid in perspective running to a
+      // horizon, which is a different picture entirely: theirs has no lines in
+      // it anywhere, no mesh, and no depth. Reading the shader's name and
+      // building what the word suggested cost a whole style.
       //
-      // A displaced plane has no closed-form intersection, but it barely needs
-      // one. Hit the flat plane, read the height there, move the hit to that
-      // height and read again: two rounds of that lands within a pixel for a
-      // surface this gentle, and unlike a ray march the cost is fixed and the
-      // same for every pixel on the screen — which matters more on the handheld
-      // than the average does.
-      // The horizon sits just off the top of the frame, so the sheet is the
-      // whole picture. RetroArch's has no horizon in it — it is a mesh filling
-      // the screen, not a landscape — and drawn with one, half the frame was
-      // empty sky and the wave was a strip along the bottom.
-      //
-      // Only the x of the aspect pair does anything here: its y is 1, so the
-      // downward tilt is the same on any shape of screen and every ray meets
-      // the sheet whatever the window is doing.
-      vec2 sc = (uv - vec2(0.5, 1.06)) * aspect;
-      vec3 rd = normalize(vec3(sc.x, sc.y, 1.0));
-      // Looking down at a sheet below the eye.
-      // Deeper than the wave is tall, and that is a requirement rather than a
-      // preference. At 0.42 down with a wave reaching 0.68 the sheet passed
-      // through the eye: the corrected hit came out behind the camera, the
-      // distance fade ran backwards and went above one, and what drew was a
-      // field of white speckles standing in the sky above the horizon.
-      float below = -0.85;
-      float aim = min(rd.y, -1e-3);
+      // Which also makes it the cheapest thing on this list. There is no
+      // surface to intersect — a ribbon is a line across the screen with a soft
+      // falloff either side of it.
+      vec2 p = vec2((uv.x - 0.5) * aspect.x, uv.y - 0.5);
 
-      float hit = below / aim;
-      vec2 pw = rd.xz * hit;
-      float wob = 0.0;
-      float slopeX = 0.0;
-      float slopeZ = 0.0;
-      for (int k = 0; k < 3; k++) {
-        // Three sines across two axes, which is what gives it a fold that
-        // travels rather than a corrugation that slides. Their derivatives are
-        // free — the normal below is read off these rather than sampled again.
-        float a = pw.x * 0.85 + t * 0.55;
-        float b = pw.y * 0.62 - t * 0.40;
-        float c = (pw.x + pw.y) * 0.44 + t * 0.28;
-        wob = sin(a) * 0.22 + sin(b) * 0.16 + sin(c) * 0.12;
-        slopeX = cos(a) * 0.85 * 0.22 + cos(c) * 0.44 * 0.12;
-        slopeZ = cos(b) * 0.62 * 0.16 + cos(c) * 0.44 * 0.12;
-        // Only the first two rounds move the hit; the third leaves the values
-        // above matching the point that is actually kept.
-        if (k < 2) {
-          // Bounded as well as corrected. A ray a hair under the horizon meets
-          // the sheet thousands of units out, where the sines are being asked
-          // for a value they cannot resolve and the grid is far finer than a
-          // pixel — nothing out there is worth drawing and the arithmetic that
-          // draws it is noise.
-          hit = clamp((below + wob) / aim, 0.0, 140.0);
-          pw = rd.xz * hit;
-        }
+      // The ground is a diagonal gradient, not a flat colour, and that alone is
+      // half of what the picture is: theirs runs bright at one corner into deep
+      // at the other, and the bands are only legible against it.
+      float sweep = clamp(0.5 + p.x * 0.40 + p.y * 0.66, 0.0, 1.0);
+      float lit = 0.16 + sweep * 0.36;
+
+      for (int i = 0; i < 4; i++) {
+        float f = float(i);
+        float phase = f * 1.7 + hash(vec2(f, 3.0)) * 6.3;
+        // Three sines along the band, so what travels is a fold in the ribbon
+        // rather than the whole thing sliding up and down the screen.
+        float mid = sin(p.x * 1.10 + t * 0.30 + phase) * 0.13
+                  + sin(p.x * 2.05 - t * 0.21 + phase * 1.7) * 0.06
+                  + sin(p.x * 0.55 + t * 0.13 + phase * 0.6) * 0.10;
+        // Spread about the middle. Theirs are gathered across the centre of the
+        // screen rather than spaced evenly down it.
+        mid += (f - 1.5) * 0.05;
+
+        // Broad. Theirs are sheets of light with most of the screen's width in
+        // them, not streaks — narrow bands read as contrails, and four of them
+        // read as a scribble.
+        float halfw = 0.09 + hash(vec2(f, 9.0)) * 0.10;
+        float band = 1.0 - smoothstep(0.0, halfw, abs(p.y - mid));
+        // Squared for a soft core instead of a flat top, and added rather than
+        // blended: where two ribbons cross, the overlap is brighter than either,
+        // which is the whole of the effect.
+        lit += band * band * (0.13 + hash(vec2(f, 11.0)) * 0.10);
       }
 
-      vec3 nrm = normalize(vec3(-slopeX, 1.0, -slopeZ));
-
-      // The mesh, drawn where it actually is rather than on a flat grid. Width
-      // measured in pixels so the far end thins out instead of turning into a
-      // moire of half-lit cells — the same reason Grid fades its lines in.
-      vec2 cell = pw * 2.1;
-      vec2 step2 = max(fwidth(cell), 1e-4);
-      vec2 near = abs(fract(cell) - 0.5) / step2;
-      float mesh = 1.0 - min(min(near.x, near.y), 1.0);
-      // Faded out where a cell is finer than a pixel. Drawn anyway the grid
-      // stops being a grid and becomes a moire that crawls, which is the same
-      // reason Grid fades its lines in towards the vanishing line.
-      mesh *= smoothstep(1.6, 0.35, max(step2.x, step2.y));
-
-      // Lit from the side, so a fold reads as a fold. The sheen is what the
-      // menu wave actually is — a highlight travelling along a crest, not a
-      // lit surface.
-      float lambert = 0.35 + 0.65 * max(dot(nrm, normalize(vec3(-0.5, 0.72, -0.48))), 0.0);
-      float sheen = pow(max(dot(nrm, normalize(vec3(-0.2, 0.55, -0.81))), 0.0), 22.0);
-
-      // Away is dimmer. On the distance rather than on the screen position, so
-      // tilting the view does not move it.
-      float away = exp(-hit * 0.075);
-
-      float lit = (0.46 * lambert + 0.95 * mesh * lambert + 1.1 * sheen) * away;
       base = ramp(clamp(lit, 0.0, 1.0));
-      // The crests go past the top of the ramp, towards white. A highlight that
-      // never gets brighter than the surface behind it is not a highlight.
-      base += smoothstep(0.5, 1.0, sheen * away) * 0.35;`,
+`,
   },
   {
     id: "cubes",
@@ -578,14 +537,17 @@ export const BACKDROPS = [
           // on Moss; in the original they are neutral and the haze is the thing
           // that is blue.
           float value = edge * 0.44 + fres * 0.30 + lets * 0.22 + sheen;
-          lit = vec3(0.02 + value * 0.52) + u_high * 0.45;
-          // Thin across a face and gathering at the edges and the rim, which is
-          // where a pane of glass actually stops light. Not nothing across the
-          // face though: with the far edges carrying it on their own a block was
-          // a wire frame with a hole in the middle, and the original's are
-          // panels you can see through rather than absences.
-          cover = clamp(0.19 + edge * 0.42 + fres * 0.26 + lets * 0.16, 0.0, 0.86)
-                * (0.32 + 0.68 * nearness) * soft;
+          lit = vec3(0.02 + value * 0.40) + u_high * 0.32;
+          // A tenth opaque at the very most: mostly transparent, a suggestion
+          // over the haze rather than an object in front of it.
+          //
+          // Scaled down to a tenth rather than clipped at one, which is the
+          // difference between keeping the shape and losing it — a clamp would
+          // have flattened the edges and the rim into the faces and left a
+          // uniform grey tile. Thin across a face and gathering at the edges and
+          // the rim is still where a pane of glass actually stops light.
+          cover = clamp(0.16 + edge * 0.46 + fres * 0.28 + lets * 0.14, 0.0, 1.0)
+                * 0.10 * (0.32 + 0.68 * nearness) * soft;
         }
       }
 
