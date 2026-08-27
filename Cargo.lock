@@ -2687,7 +2687,7 @@ dependencies = [
 
 [[package]]
 name = "moose-patch"
-version = "0.3.319"
+version = "0.3.321"
 dependencies = [
  "anyhow",
  "romm-desktop",
@@ -3786,7 +3786,7 @@ dependencies = [
 
 [[package]]
 name = "romm-desktop"
-version = "0.3.319"
+version = "0.3.321"
 dependencies = [
  "anyhow",
  "base64 0.23.0",
@@ -3812,7 +3812,7 @@ dependencies = [
 
 [[package]]
 name = "romm-gui"
-version = "0.3.319"
+version = "0.3.321"
 dependencies = [
  "romm-desktop",
  "serde",
@@ -3825,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "romm-sdl"
-version = "0.3.319"
+version = "0.3.321"
 dependencies = [
  "anyhow",
  "cosmic-text",

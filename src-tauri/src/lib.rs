@@ -3401,6 +3401,85 @@ async fn sync_saves_plan(state: State<'_, AppState>) -> CmdResult<syncplan::Revi
     Ok(syncplan::Review::from_plan(&plan))
 }
 
+/// One game attract mode could show, and where its media is.
+#[derive(Serialize)]
+struct AttractPick {
+    id: i64,
+    name: String,
+    platform: String,
+    /// A still, following the same chain the grid uses.
+    image: Option<String>,
+    video: Option<String>,
+}
+
+/// Every game with media, for attract mode to draw from.
+///
+/// Built once and handed over whole. The alternative — asking each game whether
+/// it has media as it comes up — is the thing ES-DE went out of its way to warn
+/// about, in `generateImageList()`:
+///
+/// > To instead list all files recursively is much faster as this avoids
+/// > `stat()` function calls which are very expensive on such problematic
+/// > platforms.
+///
+/// It applies here harder than it does to them, because the Thor is one of
+/// those platforms and this library is large. What makes it cheap is already
+/// built: `media::find_local` goes through a per-directory index that is read
+/// once and kept until that directory changes, so a lookup is a hash of a
+/// lowercased stem rather than a trip to the card.
+///
+/// The lock is taken to copy the rows out and dropped before any of the media
+/// work, and the walk itself runs on a worker. On Android an IPC call blocks
+/// the page for as long as the command runs, so a command that reads a few
+/// dozen directories has to not hold the interface while it does.
+#[tauri::command]
+async fn attract_pool(state: State<'_, AppState>) -> CmdResult<Vec<AttractPick>> {
+    // The cache is not Sync, so what the media work needs is copied out and the
+    // connection released before anything is awaited.
+    let wanted: Vec<(i64, String, String, String, PathBuf, String)> = {
+        let cache = state.cache.lock().map_err(err)?;
+        cache
+            .all_roms()
+            .map_err(err)?
+            .into_iter()
+            .map(|row| {
+                let (dir, key) = media_scope(&state, &row);
+                let (dir, key) = (dir.to_path_buf(), key.to_owned());
+                (row.id, row.name, row.platform_slug, row.fs_name, dir, key)
+            })
+            .collect()
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let mut pool = Vec::new();
+        for (id, name, platform, fs_name, dir, key) in wanted {
+            let stem = Path::new(&fs_name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| fs_name.clone());
+            let image = media::ART_CHAIN
+                .iter()
+                .find_map(|kind| media::find_local(&dir, &key, &stem, kind));
+            let video = media::find_local(&dir, &key, &stem, "videos");
+            // A game with neither is a game attract mode has nothing to show
+            // for, and carrying it would mean the sampler drawing blanks.
+            if image.is_none() && video.is_none() {
+                continue;
+            }
+            pool.push(AttractPick {
+                id,
+                name,
+                platform,
+                image: image.map(|p| romm_desktop::util::webview_path(&p)),
+                video: video.map(|p| romm_desktop::util::webview_path(&p)),
+            });
+        }
+        pool
+    })
+    .await
+    .map_err(err)
+}
+
 /// What a finished sync did, and what it refused to guess about.
 ///
 /// `sync_saves` used to answer with a string, which meant the conflicts it
@@ -4758,6 +4837,7 @@ pub fn run() {
             systems,
             sync_saves,
             sync_saves_plan,
+            attract_pool,
             sync_library,
             sync_bios,
             resolve_save_conflict,
