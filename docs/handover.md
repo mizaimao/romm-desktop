@@ -5,7 +5,7 @@ run it and `PLAN.md` says why it is shaped the way it is; this is the part that
 is neither — how the work is done here, and what has already been learned the
 expensive way.
 
-Read this, then `docs/parked.md`, then start.
+Read this, then start.
 
 ---
 
@@ -78,7 +78,7 @@ Three front ends over one core library, and that is the point:
     ui/             the front end: static modules and one stylesheet
     ui/test/        jsdom suites, run against the real index.html and CSS
     data/           generated reference data (core map, arcade names, icon sets)
-    docs/           coverage reports, and parked.md — what is deliberately not built
+    docs/           coverage reports, device notes, and design records
 
 Adding an emulator quirk in the library fixes it in all three. Putting one in
 `src-tauri` fixes it in none of the others, so do not.
@@ -218,8 +218,7 @@ Released through CI for Linux, Windows and Apple silicon macOS.
 Least covered by tests: `settings-window.js` and `settings.js` (the window
 frame itself, as opposed to the panes, which are tested), and `src/tui.rs`.
 
-The next things worth doing are in `docs/parked.md`, in the order I would take
-them. The top two:
+The next things worth doing, in the order I would take them. The top two:
 
 1. **Windowing the middle column.** 2,506 rows are still inserted on every
    platform switch. It is the only thing in the app that is *slow* rather than

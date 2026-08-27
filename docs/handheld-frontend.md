@@ -181,8 +181,8 @@ The original brief follows.
 
 ## Task 2 — window the middle column
 
-Already `docs/parked.md` item #1, described there as *"the only thing in the app
-that is slow rather than missing"*: 2,506 rows are inserted on every platform
+The only thing in the app that is slow rather than missing: 2,506 rows are
+inserted on every platform
 switch, and the cursor, remembered scroll position, pad navigation and the lazy
 cover observer all assume every row exists.
 

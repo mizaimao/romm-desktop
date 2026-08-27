@@ -7,7 +7,7 @@ scope. Two SDL apps one was romm, archived, and now we need a new patcher one."
 
 So there are two, and only one of them is being built:
 
-- `src-sdl` — the RomM front end. Archived twice, see `docs/parked.md`. It is
+- `src-sdl` — the RomM front end. Archived twice. It is
   still in the workspace and still cross-compiles; it is not the thing below.
 - the addon — new. A patcher for a stock KNULLI install, with an SDL interface
   because that is the only kind this device can show outside EmulationStation.

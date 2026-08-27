@@ -75,7 +75,7 @@ the wordmark recoloured to the console's metallic silver.
 It lives under `/userdata` because `/` is an overlay whose writable layer is a
 256 MB tmpfs: anything written to `/usr` is gone at the next boot.
 
-Choosing bezels per system, from a GUI, is parked — see `docs/parked.md`.
+Choosing bezels per system, from a GUI, is parked.
 
 ## `hotkey/`
 

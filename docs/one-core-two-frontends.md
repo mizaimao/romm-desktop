@@ -80,9 +80,8 @@ pub trait Platform {
 ```
 
 `launch.rs` (474 lines) already plans without spawning, which is exactly the
-shape this needs — it stays untouched and only the executor changes. That was
-already noted in `parked.md` §4 and it is the single best piece of luck in this
-whole port.
+shape this needs — it stays untouched and only the executor changes. It is the
+single best piece of luck in this whole port.
 
 Implementations: `MacOs`, `Windows`, `Knulli`, `Android`. On KNULLI most of the
 hardware methods shell out to `knulli-brightness`, `knulli-battery-check` and

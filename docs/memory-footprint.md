@@ -512,8 +512,8 @@ succeed, every time.
 `flushCovers` sets up to forty `src`s in a single pass. That is very likely
 the same burst, and very likely why three attempts to open the arcade console
 from a script froze the page — and worth holding against "it feels slow and
-laggy when browsing platform games", which has been an open complaint since
-`docs/parked.md` §14 and was never explained.
+laggy when browsing platform games", which has been an open complaint for a
+long time and was never explained.
 
 This is a real bug and it outranks anything about memory.
 

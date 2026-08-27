@@ -7,10 +7,10 @@ The short version: **this is a Tauri port, not an SDL one, and the browsing
 half is nearly free.** The launch half is a second implementation and that is
 where the whole cost is.
 
-## The route changed, and `parked.md` §4 should be read with that in mind
+## The route changed
 
-That entry asked "if we have this SDL build, how far are we from an Android
-build?" and answered it down the SDL road — cargo-ndk, a Gradle project
+The earlier plan asked "if we have this SDL build, how far are we from an
+Android build?" and answered it down the SDL road — cargo-ndk, a Gradle project
 carrying `SDLActivity.java`, cosmic-text reading `/system/fonts`. A fortnight,
 roughly.
 
@@ -24,8 +24,8 @@ the SDL front end is the right answer for the Flip and the wrong answer for the
 Thor — they are two devices with opposite constraints, and one build cannot be
 justified by the other.
 
-**The memory objection is dead on this device.** `parked.md` §3 parks the SDL
-work partly against "Tauri's memory turning out to be unfixable on a 2 GB
+**The memory objection is dead on this device.** The SDL work was parked
+partly against "Tauri's memory turning out to be unfixable on a 2 GB
 Android device". The Thor is not a 2 GB device, and the number is not what this
 file used to think it was. Measured 2026-08-24 (see `memory-footprint.md`), the page
 process is `44 MB + 24 MB per device megapixel`. Applying that:
@@ -55,8 +55,8 @@ pixels, not library size) and worth ±50% on the absolutes.
 * **`launch.rs` plans and does not spawn.** 474 lines that decide core, shader,
   overrides and save-state slot, and hand back a `Plan`. That half survives an
   Intent rewrite untouched; it is `retroarch.rs` that does not.
-* **The focus ring exists** (0.2.78x, `src/focusring.rs`). `parked.md` §0 asks
-  for full controller navigation "for Android" and that work has started.
+* **The focus ring exists** (0.2.78x, `src/focusring.rs`). Full controller
+  navigation "for Android" is wanted, and that work has started.
 * **Every `cfg` chain has a fallback.** `not(any(target_os = "macos",
   target_os = "windows"))` throughout, so an Android build *compiles*.
 
@@ -216,8 +216,8 @@ Kotlin, which is exactly the piece being written.
 
 ## Step 5 — the two screens
 
-`parked.md` §0 already wants this: the small screen showing a list while the
-big one stays a grid. Android exposes a second display and a webview can be put
+This is already wanted: the small screen showing a list while the big one
+stays a grid. Android exposes a second display and a webview can be put
 on it.
 
 Worth noting from the memory table above that two webviews cost meaningfully
@@ -246,11 +246,11 @@ one page's state or synchronise two.
 | storage decided and working | 1–2 weeks |
 | launching by Intent, config path rewritten | **the rest of it** |
 
-The old fortnight estimate in `parked.md` was for the SDL road and covered
+The old fortnight estimate was for the SDL road and covered
 browsing only. Browsing is now cheaper than that and launching is dearer, and
 launching was always the half that was a second project rather than a port.
 
-**The decision that gates everything** is still the one `parked.md` §4 ends on:
-if Android is the handheld target, the RK3566 work in `handheld-device.md` and
+**The decision that gates everything** is still this: if Android is the
+handheld target, the RK3566 work in `handheld-device.md` and
 `handheld-frontend.md` task 3 is replaced rather than joined. That is worth
 settling before any of the above is started.

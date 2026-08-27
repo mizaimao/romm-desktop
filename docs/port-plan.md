@@ -478,8 +478,8 @@ save written on the device syncs back.
 
 ## Step 8 — the Thor's second screen
 
-**Optional, and last.** `parked.md` §0 wants the small screen a list and the big
-one a grid. Two webviews cost more than one spanning both (255 vs 211 MB in list
+**Optional, and last.** The small screen should be a list and the big one a
+grid. Two webviews cost more than one spanning both (255 vs 211 MB in list
 view) — irrelevant on this hardware, but it decides whether the screens share
 one page's state or synchronise two, which is an architecture choice rather than
 a performance one.

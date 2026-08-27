@@ -1,8 +1,7 @@
 # Features wanted
 
-Things a retro frontend normally has that this one does not, kept apart from
-`parked.md` — that file is work already scoped and deferred; this one is a menu
-to choose from and order. Nothing here is committed to.
+Things a retro frontend normally has that this one does not. A menu to choose
+from and order. Nothing here is committed to.
 
 Written 2026-08-20 after a survey of what the app already does. Several
 candidates were struck out on the spot and are recorded at the bottom, because
@@ -72,7 +71,7 @@ its own screen. It is at seven.
 
 ## Elsewhere
 
-**Cheats** — scoped and parked; see `parked.md`. Not dropped, just not now.
+**Cheats** — deliberately deferred. Not dropped, just not now.
 
 **Statistics** — already built. `ui/js/history.js` has hours by console, most
 played, and the games picked up and put down. It was listed here in error.

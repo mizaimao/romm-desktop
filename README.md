@@ -184,7 +184,7 @@ ui/test/        jsdom suites, run against the real index.html and stylesheet
 ui/test/backend.js  a stand-in for the backend, for tests about the page
 tools/          one-shot Python for DAT analysis, BIOS sets, server sync
 data/           generated reference data (core map, arcade names, icon sets)
-docs/           arcade and BIOS coverage, handheld card builds, and docs/parked.md
+docs/           arcade and BIOS coverage, handheld card builds, device notes
 ```
 
 The interface logic is in the core, not in the front end that happened to be
