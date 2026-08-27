@@ -81,7 +81,7 @@ the webview in the first place.
 
 The two reasons to come back: an ARM-Linux handheld he actually likes, or
 Tauri's memory turning out to be unfixable on a 2 GB Android device. See
-`memory.md` for where that stands.
+`memory-footprint.md` for where that stands.
 
 ## 4. An Android build
 

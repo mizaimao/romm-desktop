@@ -206,7 +206,7 @@ describe("covers well away from it", () => {
   /// a desktop window and eight on a 720-tall handheld — so the machine with
   /// the least memory held the most pictures. A decoded cover is four bytes a
   /// pixel whatever size it is drawn at, so the count of cards inside this
-  /// margin *is* the memory. See `docs/memory.md`.
+  /// margin *is* the memory. See `docs/memory-footprint.md`.
   test("the margins are a fraction of the screen, not a fixed distance", () => {
     const list = dom.window.document.getElementById("list");
     const height = (n) =>

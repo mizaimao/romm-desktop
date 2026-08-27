@@ -1,6 +1,6 @@
 // The sidebar: artwork, metadata, and the play/download actions.
 
-import { el, state, invoke, convertFileSrc, rememberRom } from "./state.js";
+import { el, state, invoke, convertFileSrc, rememberRom, MOBILE } from "./state.js";
 import { fitted, boxSize } from "./fitpicture.js";
 import { tintFor } from "./tint.js";
 import { human, escapeHtml, row, starBar, toast } from "./util.js";
@@ -10,6 +10,57 @@ import { shellMode } from "./shell.js";
 import { deleteState } from "./states.js";
 import { launch, download } from "./actions.js";
 import { askDownload } from "./bulk.js";
+
+/// A video source the webview will actually play.
+///
+/// Everywhere but Android that is the file itself. There, a `<video>` pointed at
+/// the asset protocol never starts: it sits at `readyState 0` with the network
+/// still "loading" and fires neither `loadeddata` nor `error`, so the player
+/// opens on a black rectangle for ever. `fetch` on the very same URL answers
+/// 206 with the right bytes and the right content type — Chromium's media
+/// loader simply does not go through the same path for a custom scheme.
+///
+/// So the bytes are fetched and handed over as a blob. These are ES-DE preview
+/// clips, a few megabytes each, which is a reasonable thing to hold for as long
+/// as the player is open — and the alternative, sending it out to another app,
+/// takes you out of the library to watch it.
+///
+/// The URL is revoked when the player closes; see `releaseVideo`.
+let heldVideo = null;
+async function playableVideo(path) {
+  releaseVideo();
+  if (!MOBILE) return path;
+  try {
+    const res = await fetch(convertFileSrc(path));
+    if (!res.ok) return path;
+    heldVideo = URL.createObjectURL(await res.blob());
+    return heldVideo;
+  } catch {
+    // Fall back to the path: on a build where this works, it works.
+    return path;
+  }
+}
+
+/// Let go of the bytes held for the player.
+export function releaseVideo() {
+  if (!heldVideo) return;
+  URL.revokeObjectURL(heldVideo);
+  heldVideo = null;
+}
+
+/// Hand something to another app on the device, on Android.
+///
+/// Returns true when it was taken, so the caller can fall through to the
+/// in-window behaviour everywhere else. Three things need this and each fails
+/// in the webview for its own reason — see `openExternal` in MainActivity.kt.
+function handedToAndroid(target, mime) {
+  const bridge = window.RommAndroid;
+  if (!MOBILE || !bridge?.openExternal || !target) return false;
+  const failed = bridge.openExternal(target, mime);
+  if (failed) toast(failed, 6000);
+  return true;
+}
+
 
 let slideTimer;
 setOpenHook(() => clearInterval(slideTimer));
@@ -249,7 +300,16 @@ export async function selectRom(id) {
            <span class="icon icon-external"></span><span>Trailer</span></button>`
       : "",
   ].join("");
+  // Beside the title on Android rather than on a row of their own.
+  //
+  // Three buttons carrying a word each cost a whole line of a 426-point column
+  // for three things you press occasionally. As icons they fit in the space the
+  // title was not using, and the title is clamped to two lines anyway. The
+  // words stay in the `title` attribute, which is what a long press shows.
   const video = badges ? `<div class="badges">${badges}</div>` : "";
+  const titleRow = MOBILE
+    ? `<div class="titlerow"><h2>${escapeHtml(d.name)}</h2>${video}</div>`
+    : `<h2>${escapeHtml(d.name)}</h2>`;
 
   el.detail.hidden = !state.sidebar;
   // The glow around the selection takes the cover's own color. Started here
@@ -261,11 +321,11 @@ export async function selectRom(id) {
   await withTransition(() => {
     el.detail.innerHTML = `
     <div class="scroll">
-      <h2>${escapeHtml(d.name)}</h2>
+      ${titleRow}
       <div class="sub">${escapeHtml(d.fs_name)}</div>
       ${top}
       ${cover}
-      ${video}
+      ${MOBILE ? "" : video}
       ${d.rating ? starBar(d.rating) : ""}
       ${d.summary ? `<p class="summary">${escapeHtml(d.summary)}</p>` : ""}
       <dl>
@@ -584,7 +644,7 @@ export async function playVideo() {
     if (state.selected !== id) return;
     // The whole reel, not just the video: the arrows are meant to walk from a
     // video into the artwork and back, which they cannot do in a set of one.
-    const media = mediaSet(currentDetail ?? {}, path);
+    const media = mediaSet(currentDetail ?? {}, await playableVideo(path));
     const at = media.findIndex((m) => m.id === "video");
     openLightbox(media, at < 0 ? 0 : at);
   } catch (e) {
@@ -614,7 +674,10 @@ function mediaSet(d, videoSrc = null) {
   // be last, so "one more right" from the end of a dozen pictures was the
   // video and there was no way to reach it from the left at all.
   if (videoSrc) {
-    items.push({ src: convertFileSrc(videoSrc), kind: "video", caption: "Gameplay", id: "video" });
+    // Already a URL when it is a blob — see `playableVideo`. `convertFileSrc`
+    // on a `blob:` string would make a path out of it.
+    const src = videoSrc.startsWith("blob:") ? videoSrc : convertFileSrc(videoSrc);
+    items.push({ src, kind: "video", caption: "Gameplay", id: "video" });
   }
   for (const [kind, label] of ART_ORDER) {
     if (d.art?.[kind]) {
@@ -661,17 +724,23 @@ function wireArtwork(d) {
       fig.dataset.art === "video" ? playVideo : openAt((m) => m.id === fig.dataset.art)
     )
   );
-  document.getElementById("manual")?.addEventListener("click", () =>
-    openLightbox([{ src: convertFileSrc(d.manual), kind: "pdf", caption: "Manual" }], 0)
-  );
+  document.getElementById("manual")?.addEventListener("click", () => {
+    // No PDF viewer in Android's webview, so the lightbox would open on a blank
+    // sheet. Out to whatever reads PDFs on the device instead.
+    if (handedToAndroid(d.manual, "application/pdf")) return;
+    openLightbox([{ src: convertFileSrc(d.manual), kind: "pdf", caption: "Manual" }], 0);
+  });
   // Out to the browser rather than into this window. It was an <a target=
   // "_blank">, which in a webview is a navigation: YouTube would have replaced
   // the library, with no address bar and no way back.
   document.getElementById("trailer")?.addEventListener("click", (ev) => {
     const yt = ev.currentTarget.dataset.yt;
-    invoke("open_link", { url: `https://www.youtube.com/watch?v=${encodeURIComponent(yt)}` }).catch(
-      (e) => toast(`Could not open the trailer — ${e}`)
-    );
+    const url = `https://www.youtube.com/watch?v=${encodeURIComponent(yt)}`;
+    // `open_link` runs a desktop command and there is not one here: on Android
+    // it fails with "No such file or directory (os error 2)", which is it
+    // looking for `xdg-open`.
+    if (handedToAndroid(url, "")) return;
+    invoke("open_link", { url }).catch((e) => toast(`Could not open the trailer — ${e}`));
   });
 }
 

@@ -27,7 +27,7 @@ justified by the other.
 **The memory objection is dead on this device.** `parked.md` §3 parks the SDL
 work partly against "Tauri's memory turning out to be unfixable on a 2 GB
 Android device". The Thor is not a 2 GB device, and the number is not what this
-file used to think it was. Measured 2026-08-24 (see `memory.md`), the page
+file used to think it was. Measured 2026-08-24 (see `memory-footprint.md`), the page
 process is `44 MB + 24 MB per device megapixel`. Applying that:
 
 | | device px | Mpx | list view | grid view |

@@ -6,7 +6,7 @@
 // 10.9 MB each — against 2.6 MB each for the same boxes filled from 325x600
 // files. Same tiles, same layout, four times the memory, and the only thing
 // that differed was the file. Ninety cards of that is around 980 MB, which is
-// the arcade screen and the whole problem. See `docs/memory.md`.
+// the arcade screen and the whole problem. See `docs/memory-footprint.md`.
 //
 // So: fetch the bytes, decode them once, draw the result into a canvas the
 // size of the box, and close the decoded copy. What stays in memory is the

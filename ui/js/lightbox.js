@@ -50,6 +50,12 @@ export function closeLightbox() {
   el.lb.hidden = true;
   // Clear the stage so a playing video does not keep its audio going.
   el.lb.querySelector(".lb-stage").innerHTML = "";
+  // And let go of the bytes, when the video was one this window is holding.
+  // Android cannot play the file directly, so it is fetched into a blob; a blob
+  // that is never revoked is a few megabytes kept for the life of the window,
+  // once per video watched. Imported lazily because detail.js already imports
+  // this module, and a static pair would be a cycle.
+  import("./detail.js").then((d) => d.releaseVideo?.()).catch(() => {});
 }
 
 function step(delta) {

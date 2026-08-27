@@ -1,6 +1,6 @@
 # What everyone else builds these frontends with
 
-Asked on 2026-08-24, after the measurement in `memory.md` put 106 MB of our
+Asked on 2026-08-24, after the measurement in `memory-footprint.md` put 106 MB of our
 192 MB floor inside WebKit and none of it inside our own interface.
 
 ## Nobody uses a webview

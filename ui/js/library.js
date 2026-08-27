@@ -887,7 +887,7 @@ let coverTimer;
 /// The numbers matter more than they look. Every card inside the release
 /// margin is holding a decoded picture, and a decoded picture is four bytes a
 /// pixel however small it is drawn — 4.9 MB apiece for a 1280x960 miximage.
-/// At 1,600px that was around a hundred and thirty of them. See `memory.md`.
+/// At 1,600px that was around a hundred and thirty of them. See `memory-footprint.md`.
 ///
 /// The gap between the two is the hysteresis: a card just off the top is one
 /// flick from being looked at again, and dropping its cover there means

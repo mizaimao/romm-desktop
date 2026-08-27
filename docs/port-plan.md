@@ -447,7 +447,7 @@ driven entirely by the pad.
 
 **Size:** ~1 week. The cheap part, because the interface already exists.
 
-**Memory sanity check** (`memory.md`: `44 MB + 24 MB per device megapixel`):
+**Memory sanity check** (`memory-footprint.md`: `44 MB + 24 MB per device megapixel`):
 Thor top panel ~206 MB, bottom ~189 MB, against 8–16 GB. Add Chromium's heavier
 floor (1.3–1.6x) and it is 2–5% of the device. **Not a constraint on either
 Android target.**
