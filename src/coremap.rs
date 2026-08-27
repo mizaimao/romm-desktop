@@ -472,6 +472,96 @@ mod android_tests {
     /// `opera_libretro.so` does not exist on a device — there it is
     /// `opera_libretro_android.so`, and RetroArch has wanted the full path to
     /// it rather than a bare name since the 2025-01-17 nightly.
+    /// The emulator table is regenerated from ES-DE's `es_find_rules.xml`, and
+    /// a bad regeneration is invisible: every entry still parses, the launch
+    /// just silently finds nothing installed and falls back to RetroArch. That
+    /// is exactly what the previous table did — eighteen emulators, not one of
+    /// which matched what was actually on the device.
+    #[test]
+    fn every_android_component_is_a_package_and_an_activity() {
+        let m = map();
+        assert!(
+            m.android_packages.len() > 100,
+            "the table should carry ES-DE's full list, not the old eighteen: {}",
+            m.android_packages.len()
+        );
+        for (emulator, components) in &m.android_packages {
+            assert!(!components.is_empty(), "{emulator} has no component");
+            for c in components {
+                let (pkg, activity) =
+                    c.split_once('/').unwrap_or_else(|| panic!("{emulator}: {c} is not package/Activity"));
+                assert!(pkg.contains('.'), "{emulator}: {pkg} is not a package name");
+                assert!(!activity.is_empty(), "{emulator}: {c} names no activity");
+                assert!(!pkg.contains(' ') && !activity.contains(' '), "{emulator}: {c} has a space");
+            }
+        }
+    }
+
+    /// Every emulator in the table has to be declared in the Android manifest.
+    ///
+    /// These two are one fact kept in two files, and when they drift nothing
+    /// says so. Since Android 11 a package the manifest does not declare cannot
+    /// be seen at all — `getPackageInfo` throws for an app that is plainly
+    /// installed — so an emulator in the table but not in `<queries>` is
+    /// offered, reported as missing, and quietly skipped. That is the whole
+    /// reason this app could only ever start RetroArch.
+    ///
+    /// Reads the manifest as text rather than parsing it: the assertion is
+    /// about a name being present, and a parser here would be a second thing to
+    /// keep right.
+    #[test]
+    fn every_emulator_in_the_table_is_visible_to_the_android_build() {
+        let manifest = std::path::Path::new(
+            "src-tauri/gen/android/app/src/main/AndroidManifest.xml",
+        );
+        let Ok(text) = std::fs::read_to_string(manifest) else {
+            // A checkout without the generated Android project is not a failure;
+            // `android init` has simply not been run.
+            return;
+        };
+        let m = map();
+        let mut undeclared: Vec<String> = Vec::new();
+        for components in m.android_packages.values() {
+            for c in components {
+                let pkg = c.split('/').next().unwrap_or_default();
+                if !text.contains(&format!("android:name=\"{pkg}\"")) {
+                    undeclared.push(pkg.to_owned());
+                }
+            }
+        }
+        undeclared.sort();
+        undeclared.dedup();
+        assert!(
+            undeclared.is_empty(),
+            "these emulators are in the core map but invisible to Android — add them to \
+             <queries> in AndroidManifest.xml: {undeclared:?}"
+        );
+    }
+
+    /// The emulators actually installed on Frank's Thor, by the package name it
+    /// reports. Each was missing from the old table, which is why standalone
+    /// emulators could never be started.
+    #[test]
+    fn the_emulators_on_the_device_are_in_the_table() {
+        let m = map();
+        let all: Vec<&str> =
+            m.android_packages.values().flatten().map(String::as_str).collect();
+        for pkg in [
+            "com.flycast.emulator",
+            "com.github.stenzek.duckstation",
+            "io.recompiled.redream",
+            "me.magnum.melondualds",
+            "org.azahar_emu.azahar",
+            "info.cemu.cemu",
+            "dev.eden.eden_emulator",
+        ] {
+            assert!(
+                all.iter().any(|c| c.starts_with(&format!("{pkg}/"))),
+                "{pkg} is installed on the device and the table does not know it"
+            );
+        }
+    }
+
     /// "Nothing can run it" and "the table has never heard of it" are
     /// different answers, and only one of them is a gap worth filing. Both
     /// produce an empty `android_launches`, so the caller needs this to tell

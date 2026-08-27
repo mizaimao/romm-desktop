@@ -3881,17 +3881,64 @@
     }
   },
   "android_packages": {
+    "2600-EMU": [
+      "com.explusalpha.A2600Emu/com.imagine.BaseActivity"
+    ],
     "AETHERSX2-TURNIP": [
       "xyz.aethersx2.custom/xyz.aethersx2.android.EmulationActivity"
+    ],
+    "APS3E": [
+      "aenu.aps3e.premium/aenu.aps3e.EmulatorActivity",
+      "aenu.aps3e/aenu.aps3e.EmulatorActivity"
+    ],
+    "ARMSX1": [
+      "com.nanodata.armsx/com.armsx2.Main"
+    ],
+    "ARMSX2": [
+      "com.armsx2/.MainActivity",
+      "come.nanodata.armsx2/kr.co.iefriends.pcsx2.MainActivity",
+      "come.nanodata.armsx2.debug/kr.co.iefriends.pcsx2.MainActivity"
+    ],
+    "ARMSX3": [
+      "com.armsx3/com.armsx2.Main"
+    ],
+    "AX360E": [
+      "aenu.ax360e/aenu.ax360e.EmulatorActivity",
+      "aenu.ax360e.free/aenu.ax360e.EmulatorActivity"
+    ],
+    "AZAHAR": [
+      "org.azahar_emu.azahar/org.citra.citra_emu.activities.EmulationActivity",
+      "io.github.lime3ds.android/org.citra.citra_emu.activities.EmulationActivity"
     ],
     "AZAHARPLUS": [
       "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity"
     ],
+    "BACHATAS4": [
+      "com.bachatas4.android/.DirectLaunchActivity"
+    ],
     "BORKED3DS": [
       "io.github.borked3ds.android/.activities.EmulationActivity"
     ],
+    "C64-EMU": [
+      "com.explusalpha.C64Emu/com.imagine.BaseActivity"
+    ],
+    "CEMU": [
+      "info.cemu.cemu/info.cemu.cemu.emulation.EmulationActivity",
+      "info.cemu.Cemu/info.cemu.Cemu.emulation.EmulationActivity"
+    ],
+    "CITRA": [
+      "org.citra.citra_emu/.activities.EmulationActivity",
+      "org.citra.citra_emu/.ui.main.MainActivity"
+    ],
+    "CITRA-CANARY": [
+      "org.citra.citra_emu.canary/org.citra.citra_emu.activities.EmulationActivity"
+    ],
     "CITRA-ENHANCED": [
       "org.gamerytb.citra.canary/org.citra.citra_emu.ui.main.MainActivity"
+    ],
+    "CITRA-MMJ": [
+      "org.citra.emu/.ui.EmulationActivity",
+      "com.antutu.ABenchMark/org.citra.emu.ui.EmulationActivity"
     ],
     "CITRON": [
       "org.citron.citron_emu/.activities.EmulationActivity",
@@ -3899,32 +3946,291 @@
       "com.antutu.ABenchMark/org.citron.citron_emu.activities.EmulationActivity",
       "com.miHoYo.Yuanshen/org.citron.citron_emu.activities.EmulationActivity"
     ],
+    "COLEM": [
+      "com.fms.colem.deluxe/com.fms.emulib.TVActivity",
+      "com.fms.colem/com.fms.emulib.TVActivity"
+    ],
     "CYTRUS": [
       "org.cytrus.cytrus_emu/.activities.EmulationActivity"
+    ],
+    "DOLPHIN": [
+      "org.dolphinemu.dolphinemu/.ui.main.TvMainActivity"
     ],
     "DOLPHIN-ENHANCED": [
       "org.mm.j/org.dolphinemu.dolphinemu.ui.main.MainActivity"
     ],
+    "DOLPHIN-MMJR": [
+      "org.mm.jr/org.dolphinemu.dolphinemu.ui.main.MainActivity"
+    ],
+    "DOLPHIN-MMJR2": [
+      "org.dolphinemu.mmjr/org.dolphinemu.dolphinemu.ui.main.MainActivity"
+    ],
     "DOLPHIN-PRIMEHACK": [
       "org.shiiion.primehack/org.dolphinemu.dolphinemu.ui.main.MainActivity"
     ],
+    "DRASTIC": [
+      "com.dsemu.drastic/.DraSticActivity"
+    ],
+    "DROIDARCADIA": [
+      "com.amigan.droidarcadia/.MainActivity"
+    ],
+    "DSMILE": [
+      "com.dsmile.emulator/.ui.EmuActivity"
+    ],
+    "DUCKSTATION": [
+      "com.github.stenzek.duckstation/.EmulationActivity"
+    ],
     "EDEN": [
-      "com.antutu.ABenchMark/org.yuzu.yuzu_emu.activities.EmulationActivity"
+      "com.antutu.ABenchMark/org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "dev.legacy.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "com.miHoYo.Yuanshen/org.yuzu.yuzu_emu.activities.EmulationActivity"
+    ],
+    "EDEN-NIGHTLY": [
+      "dev.eden.eden_emulator.nightly/org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "dev.legacy.eden_emulator.nightly/org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "com.miHoYo.Yuanshen.nightly/org.yuzu.yuzu_emu.activities.EmulationActivity"
+    ],
+    "EKA2L1": [
+      "com.github.eka2l1/.emu.EmulatorActivity"
+    ],
+    "EMUCOREC": [
+      "com.sbro.emucorec/.core.ps3.Emulator"
+    ],
+    "EMUCOREV": [
+      "com.sbro.emucorev/.core.vita.Emulator"
+    ],
+    "EMUCOREX": [
+      "com.sbro.emucorex/.MainActivity"
+    ],
+    "EPSXE": [
+      "com.epsxe.ePSXe/.ePSXe"
+    ],
+    "FLYCAST": [
+      "com.flycast.emulator/com.flycast.emulator.MainActivity",
+      "com.flycast.emulator/com.reicast.emulator.MainActivity"
+    ],
+    "FMSX": [
+      "com.fms.fmsx.deluxe/com.fms.emulib.TVActivity",
+      "com.fms.fmsx/com.fms.emulib.TVActivity"
+    ],
+    "FPSE": [
+      "com.emulator.fpse/.Main"
+    ],
+    "FPSE-NG": [
+      "com.emulator.fpse64/.Main"
+    ],
+    "GAMEHUB-LITE": [
+      "emuready.gamehub.lite/com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity",
+      "gamehub.lite/com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity",
+      "com.antutu.ABenchMark/com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity",
+      "com.tencent.ig/com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity",
+      "com.ludashi.aibench/com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity",
+      "com.antutu.benchmark.full/com.xj.landscape.launcher.ui.gamedetail.GameDetailActivity"
+    ],
+    "GAMENATIVE": [
+      "app.gamenative/.MainActivity"
+    ],
+    "GBA-EMU": [
+      "com.explusalpha.GbaEmu/com.imagine.BaseActivity"
+    ],
+    "GBC-EMU": [
+      "com.explusalpha.GbcEmu/com.imagine.BaseActivity"
+    ],
+    "HAKUX": [
+      "com.rfandango.haku_x/.LauncherActivity"
+    ],
+    "IDTECH4A++": [
+      "com.karin.idTech4Amm/com.n0n3m4.q3e.Q3EMain"
+    ],
+    "INES": [
+      "com.fms.ines.free/com.fms.emulib.TVActivity"
+    ],
+    "INFINITY": [
+      "me.dt2dev.infinity/.SchemeActivity"
+    ],
+    "IRATAJAGUAR": [
+      "ru.vastness.altmer.iratajaguar/.EmulatorActivity"
+    ],
+    "J2ME-LOADER": [
+      "ru.playsoftware.j2meloader/.MainActivity"
+    ],
+    "JL-MOD": [
+      "ru.woesss.j2meloader/ru.playsoftware.j2meloader.MainActivity"
+    ],
+    "KENJI-NX": [
+      "org.kenjinx.android/.MainActivity"
+    ],
+    "LIME3DS": [
+      "io.github.lime3ds.android/.activities.EmulationActivity"
+    ],
+    "LINKBOY": [
+      "com.pixelrespawn.linkboy/.EmulatorActivity"
+    ],
+    "LYNX-EMU": [
+      "com.explusalpha.LynxEmu/com.imagine.BaseActivity"
+    ],
+    "M64PLUS-FZ": [
+      "org.mupen64plusae.v3.fzurita.amazon/paulscode.android.mupen64plusae.SplashActivity",
+      "org.mupen64plusae.v3.fzurita.pro/paulscode.android.mupen64plusae.SplashActivity",
+      "org.mupen64plusae.v3.fzurita/paulscode.android.mupen64plusae.SplashActivity"
+    ],
+    "MAME4DROID": [
+      "com.seleuco.mame4droid/.MAME4droid"
+    ],
+    "MAME4DROID-2024": [
+      "com.seleuco.mame4d2024/com.seleuco.mame4droid.MAME4droid"
+    ],
+    "MAME4DROID-CURRENT": [
+      "com.seleuco.mame4d2024/com.seleuco.mame4droid.MAME4droid"
+    ],
+    "MANDARINE": [
+      "io.github.mandarine3ds.mandarine/.activities.EmulationActivity"
+    ],
+    "MASTERGEAR": [
+      "com.fms.mg/com.fms.emulib.TVActivity"
+    ],
+    "MD-EMU": [
+      "com.explusalpha.MdEmu/com.imagine.BaseActivity"
+    ],
+    "MELONDS": [
+      "me.magnum.melonds/.ui.emulator.EmulatorActivity",
+      "me.magnum.melondualds/me.magnum.melonds.ui.emulator.EmulatorActivity"
+    ],
+    "MELONDS-NIGHTLY": [
+      "me.magnum.melonds.nightly/me.magnum.melonds.ui.emulator.EmulatorActivity"
+    ],
+    "MSX-EMU": [
+      "com.explusalpha.MsxEmu/com.imagine.BaseActivity"
+    ],
+    "MUPEN64PLUS-AE": [
+      "org.mupen64plusae.v3.alpha/paulscode.android.mupen64plusae.SplashActivity"
+    ],
+    "MY-BOY": [
+      "com.fastemulator.gba/.EmulatorActivity"
+    ],
+    "MY-OLDBOY": [
+      "com.fastemulator.gbc/.EmulatorActivity"
+    ],
+    "NEO-EMU": [
+      "com.explusalpha.NeoEmu/com.imagine.BaseActivity"
+    ],
+    "NES-EMU": [
+      "com.explusalpha.NesEmu/com.imagine.BaseActivity"
+    ],
+    "NESOID": [
+      "com.androidemu.nes/.EmulatorActivity"
+    ],
+    "NETHERSX2": [
+      "xyz.aethersx2.android/.EmulationActivity"
+    ],
+    "NETHERSX2-TURNIP": [
+      "xyz.aethersx2.tturnip/xyz.aethersx2.android.EmulationActivity"
+    ],
+    "NETHERSX2-TURNIP-CLASSIC": [
+      "xyz.aethersx2.cturnip/xyz.aethersx2.android.EmulationActivity"
+    ],
+    "NGP-EMU": [
+      "com.explusalpha.NgpEmu/com.imagine.BaseActivity"
+    ],
+    "NOODS": [
+      "com.hydra.noods/.FileBrowser"
     ],
     "NYUSHU": [
       "com.andromeda.androbench2/org.suyu.suyu_emu.activities.EmulationActivity"
     ],
+    "OPENBOR": [
+      "org.openbor.engine/.GameActivity"
+    ],
+    "PANDA3DS": [
+      "com.panda3ds.pandroid/.app.MainActivity"
+    ],
+    "PCE-EMU": [
+      "com.PceEmu/com.imagine.BaseActivity"
+    ],
+    "PICO-8": [
+      "io.wip.pico8/com.godot.game.GodotAppLauncher"
+    ],
+    "PIZZA-BOY-GBA": [
+      "it.dbtecno.pizzaboygbapro/it.dbtecno.pizzaboygbapro.MainActivity",
+      "it.dbtecno.pizzaboygba/it.dbtecno.pizzaboygba.MainActivity"
+    ],
+    "PIZZA-BOY-GBC": [
+      "it.dbtecno.pizzaboypro/it.dbtecno.pizzaboypro.MainActivity",
+      "it.dbtecno.pizzaboy/it.dbtecno.pizzaboy.MainActivity"
+    ],
+    "PIZZA-BOY-SC": [
+      "it.dbtecno.pizzaboyscpro/.MainActivity",
+      "it.dbtecno.pizzaboyscbasic/.MainActivity"
+    ],
+    "PLAY!": [
+      "com.virtualapplications.play/.MainActivity"
+    ],
+    "PPSSPP": [
+      "org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity",
+      "org.ppsspp.ppsspp/.PpssppActivity"
+    ],
+    "REAL3DOPLAYER": [
+      "ru.vastness.altmer.real3doplayer/.EmulatorActivity"
+    ],
+    "REDREAM": [
+      "io.recompiled.redream/.MainActivity"
+    ],
+    "RETROARCH": [
+      "com.retroarch.aarch64/com.retroarch.browser.retroactivity.RetroActivityFuture",
+      "com.retroarch.ra32/com.retroarch.browser.retroactivity.RetroActivityFuture",
+      "com.retroarch/com.retroarch.browser.retroactivity.RetroActivityFuture"
+    ],
     "RPCSX": [
       "net.rpcsx/.MainActivity"
+    ],
+    "RUFFLE": [
+      "rs.ruffle/.PlayerActivity"
+    ],
+    "SATURN-EMU": [
+      "com.explusalpha.SaturnEmu/com.imagine.BaseActivity"
+    ],
+    "SCUMMVM": [
+      "org.scummvm.scummvm.debug/org.scummvm.scummvm.SplashActivity",
+      "org.scummvm.scummvm/org.scummvm.scummvm.SplashActivity"
+    ],
+    "SEEDLESSDS": [
+      "com.seedlessds.app/.LaunchGame"
+    ],
+    "SKYEMU": [
+      "com.sky.SkyEmu/.EnhancedNativeActivity"
+    ],
+    "SKYLINE": [
+      "skyline.emu/emu.skyline.EmulationActivity"
+    ],
+    "SNES9X-EXPLUS": [
+      "com.explusalpha.Snes9xPlus/com.imagine.BaseActivity"
+    ],
+    "SPECCY": [
+      "com.fms.speccy.deluxe/com.fms.emulib.TVActivity",
+      "com.fms.speccy/com.fms.emulib.TVActivity"
+    ],
+    "STARBOARD": [
+      "org.force9.starboard/.ui.game.GameActivity"
     ],
     "SUDACHI": [
       "org.sudachi.sudachi_emu/org.sudachi.sudachi_emu.activities.EmulationActivity",
       "org.sudachi.sudachi_emu.ea/org.sudachi.sudachi_emu.activities.EmulationActivity"
     ],
+    "SUPER3": [
+      "com.izzy2lost.super3/com.izzy2lost.super3.MainActivity"
+    ],
     "SUYU": [
       "org.suyu.suyu_emu/org.suyu.suyu_emu.activities.EmulationActivity",
       "dev.suyu.suyu_emu.relWithDebInfo/dev.suyu.suyu_emu.activities.EmulationActivity",
       "dev.suyu.suyu_emu/dev.suyu.suyu_emu.activities.EmulationActivity"
+    ],
+    "SWAN-EMU": [
+      "com.explusalpha.SwanEmu/com.imagine.BaseActivity"
+    ],
+    "SWF-PLAYER": [
+      "com.issess.flashplayerpro/com.issess.flashplayer.player.FlashPlayerActivity",
+      "com.issess.flashplayer/.player.FlashPlayerActivity"
     ],
     "UZUY": [
       "org.uzuy.uzuy_emu/.activities.EmulationActivity",
@@ -3933,8 +4239,46 @@
       "com.antutu.ABenchMark.ea/org.uzuy.uzuy_emu.activities.EmulationActivity",
       "com.antutu.ABenchMark/org.uzuy.uzuy_emu.activities.EmulationActivity"
     ],
+    "VIRTUAL-VIRTUAL-BOY": [
+      "com.simongellis.vvb/.MainActivity"
+    ],
+    "VISUAL-PINBALL": [
+      "org.vpinball.vpinball_bgfx/org.vpinball.app.VPinballActivity",
+      "org.vpinball.app/.VpxLauncherActivity",
+      "org.vpinball.app.gl/org.vpinball.app.VPinballActivity"
+    ],
+    "VITA3K": [
+      "org.vita3k.emulator/.Emulator",
+      "org.vita3k.emulator.ikhoeyZX/org.vita3k.emulator.Emulator"
+    ],
     "VITA3KZX": [
       "org.vita3k.emulator.ikhoeyZX/org.vita3k.emulator.Emulator"
+    ],
+    "WATERMELONDS": [
+      "me.magnum.melondualds/me.magnum.melonds.ui.emulator.EmulatorActivity"
+    ],
+    "WINLATOR-CMOD": [
+      "com.winlator.cmod/.XServerDisplayActivity"
+    ],
+    "WINLATOR-GLIBC": [
+      "com.winlator/.XServerDisplayActivity"
+    ],
+    "WINLATOR-PROOT": [
+      "com.cmodded.winlator/com.winlator.XServerDisplayActivity"
+    ],
+    "X1-BOX": [
+      "com.izzy2lost.x1box/.LauncherActivity"
+    ],
+    "XENDROID": [
+      "xendroid.compose/.EmulatorHostActivity"
+    ],
+    "XENRA": [
+      "Ali.Xanite.green/Ali.Xanite.LauncherActivity",
+      "Ali.Xanite/Ali.Xanite.LauncherActivity"
+    ],
+    "YABASANSHIRO-2": [
+      "org.devmiyax.yabasanshioro2.pro/org.uoyabause.android.Yabause",
+      "org.devmiyax.yabasanshioro2/org.uoyabause.android.Yabause"
     ],
     "YUZU": [
       "org.yuzu.yuzu_emu/org.yuzu.yuzu_emu.activities.EmulationActivity"

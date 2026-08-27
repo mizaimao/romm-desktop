@@ -13,12 +13,43 @@
 //! The template is compiled in; `config.toml` is *read from disk* instead. It
 //! holds a server token, and `include_str!` would bake that into every binary.
 
+/// The documented template, compiled in.
+///
+/// Embedded rather than read from beside the app because on Android there is no
+/// "beside the app": the binary is inside an APK and the data directory is
+/// private, so a user cannot put a file there and the release notes' "copy
+/// config.example.toml to config.toml" is advice nobody can follow. See
+/// [`seed_config`].
+///
+/// Only the *template* is compiled in. `config.toml` is still read from disk,
+/// because it holds a server token and `include_str!` would bake that into
+/// every binary.
+pub const TEMPLATE: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config.example.toml"));
+
+/// Write the template to `path` when nothing is there yet.
+///
+/// Returns whether it wrote one. A device with no config showed an empty
+/// library, an empty screen and a message telling the user to copy a file into
+/// a directory they cannot reach — measured on a fresh Retroid Pocket Mini V2,
+/// where the whole app was a tab bar and nothing else.
+///
+/// Never overwrites: a config that exists is the user's, whatever is in it.
+pub fn seed_config(path: &std::path::Path) -> bool {
+    if path.exists() {
+        return false;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(path, TEMPLATE).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    const EXAMPLE: &str =
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config.example.toml"));
+    const EXAMPLE: &str = super::TEMPLATE;
 
     /// The developer's own config.toml, when there is one. Absent in CI and in
     /// a fresh clone, which is why every test that uses it tolerates `None`
@@ -64,6 +95,28 @@ mod tests {
             v.push(("config.toml", c));
         }
         v
+    }
+
+    /// A device with no config has to become a device with one.
+    ///
+    /// On Android nobody can copy a file into the app's private directory, so
+    /// "copy config.example.toml to config.toml" is not a thing a user can do —
+    /// and without it the app is a tab bar over an empty screen.
+    #[test]
+    fn a_missing_config_is_seeded_from_the_template_and_never_overwritten() {
+        let dir = std::env::temp_dir().join("romm-seed-config");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.toml");
+
+        assert!(super::seed_config(&path), "a missing config is written");
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(written, super::TEMPLATE);
+        // And it is a config the app can actually load.
+        assert!(crate::config::Config::load_from(&path).is_ok());
+
+        std::fs::write(&path, "# mine\n").unwrap();
+        assert!(!super::seed_config(&path), "an existing config is left alone");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# mine\n");
     }
 
     #[test]

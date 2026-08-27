@@ -603,9 +603,17 @@ body.has-pad #tabbar .bumper { display: inline; }
 
 .gcard { cursor: pointer; user-select: none; }
 .gcard .art {
-  /* Shaped to the platform's actual box art: PSP UMD cases are 0.58,
-     SNES boxes 1.37. A single ratio cropped most systems. */
-  aspect-ratio: var(--ar, 0.75);
+  /* Square, deliberately, and no longer per-platform.
+     
+     This was `var(--ar, 0.75)` — the platform's real box shape, 0.58 for a PSP
+     UMD case and 1.37 for a SNES box. It is more faithful and it makes a grid
+     of mixed systems a ragged thing: every row a different height, and the row
+     below it starting somewhere new. A square is one shape for everything, so
+     the grid is a grid.
+     
+     Nothing is cropped by it: the picture inside is `object-fit: contain`, so a
+     tall box and a wide one both sit whole inside the same square. */
+  aspect-ratio: 1;
   background: color-mix(in srgb, var(--glass) calc(var(--tint) * 0.4), rgba(0, 0, 0, 0.28));
   backdrop-filter: blur(10px) saturate(150%);
   -webkit-backdrop-filter: blur(10px) saturate(150%);
@@ -693,10 +701,42 @@ body.has-pad #tabbar .bumper { display: inline; }
 #detail[hidden] { display: none; }
 
 #detail {
-  /* Wider by default — 360px cropped cover art and wrapped every metadata line
-     to two. Overridden by --detail-w once the divider has been dragged. */
-  width: var(--detail-w, 460px);
-  min-width: 300px;
+  /* ES-DE's proportions, taken from slate-es-de's gamelist view.
+     
+     That theme frames the screen as: 2% margin, list 0.40, 2% gap, preview
+     0.54, 2% margin — and it uses the same numbers at 16:9 and at 4:3. Diffing
+     its `aspect-ratio-16-9.xml` against `aspect-ratio-4-3.xml` turns up three
+     text elements and nothing else, because every position is normalised
+     against the screen rather than written in pixels. That is the whole trick,
+     and it is why one theme covers 640x480 and 4K without a breakpoint.
+     
+     Of the space our `main` actually has — no outer margins — that would be 57%
+     to the preview. It is 43% here, which is ES-DE's proportion the other way
+     round, because Frank tried theirs and read it as reversed. Their split is
+     not a mistake and it is recorded above so nobody "corrects" this back: the
+     theme is drawn for a television across a room, where the artwork is the
+     point and the list is a means of getting to it. A handheld held at arm's
+     length is the opposite — the list is what you are looking at.
+     
+     Clamped at the top, which ES-DE has no need to do: it is always the whole
+     screen, while this is a window that can be 2900 points wide, and 57% of
+     that is a preview pane wider than most displays. Overridden outright by
+     `--detail-w` once the divider has been dragged. */
+  /* `min`, not `clamp`. A clamp's lower bound is a floor in pixels and it wins
+     over the proportion — `clamp(300px, 43%, 760px)` is 300px on any screen
+     under ~700 wide, which is how the Retroid ended up at 48% when it was asked
+     for 43%. The upper bound is the only one that has to be absolute, because a
+     desktop window can be 2,900 points across and 43% of that is a preview pane
+     wider than most monitors. */
+  width: var(--detail-w, min(43%, 760px));
+  /* The floor is a proportion too, below a certain width.
+     
+     A flat 300px floor is fine on a desktop and wrong on a handheld: the Retroid
+     Pocket Mini is 620 points across, 43% of it is 266, and the floor won — so
+     the pane took 48% of the screen and the list was left with 320. A pixel
+     minimum is the same kind of thing as a pixel breakpoint, and it fails the
+     same way on the small screen nobody measured on. */
+  min-width: min(300px, 43%);
   max-width: 70vw;
   flex-shrink: 0;
   border-left: 1px solid var(--line);
@@ -3081,21 +3121,174 @@ body.mobile #tabbar .stab:focus-visible { text-decoration: none; }
 body.mobile #tabbar .bumper { display: none !important; }
 
 /* A narrower info pane, and smaller artwork with it.
-   460 points of a 833-point screen is more than half the width for the
-   preview, which leaves the list it is previewing too narrow to read. Tied to
-   the viewport rather than to Android, because the number is about the screen
-   and any window this size has the same problem. */
+   The pane's width is now a proportion rather than a pixel count — see
+   `--detail-w` — so these breakpoints only carry the artwork sizes. */
 @media (max-width: 1100px) {
-  :root { --detail-w: 300px; }
   #detail .artstrip img,
   #detail .artstrip .vidtile { max-height: 132px; }
   #detail h2 { font-size: 15px; }
 }
 @media (max-width: 900px) {
-  :root { --detail-w: 260px; }
   #detail .artstrip img,
   #detail .artstrip .vidtile { max-height: 108px; }
 }
+
+/* ES-DE's type scale, on the one screen where its model actually holds.
+   
+   Slate sizes every string as a fraction of the screen: the game list is
+   0.025 of the height, the description and the metadata 0.0195. Nothing is in
+   points, which is why the same theme is legible on a 640x480 panel and on a
+   4K television without a single breakpoint.
+   
+   Android only, and that is not a hedge — it is the condition ES-DE works
+   under. It owns the whole screen, so "a fraction of the height" is a fixed
+   physical size. A desktop window is not the screen: the same rule there makes
+   a maximised window's text twice the size of a small one's, which is not what
+   anybody means by consistent.
+   
+   The numbers come out the same physically. 0.025 of this device's 469 points
+   is 11.7, which at its 2.31x scale is 27 device pixels — what Slate draws at
+   1080p. The rows this app drew at a flat 14 points were 32, and eleven of
+   them fitted where ES-DE fits sixteen. */
+/* The artwork takes a fixed share of the *height*, not of the pane's width.
+   
+   An aspect-ratio box grows with the pane, so widening the pane to ES-DE's
+   proportions took the picture from 200 points tall to 332 — 78% of the pane,
+   with the description squeezed underneath. ES-DE places its media by
+   normalised screen coordinates, which is a fixed fraction of the height
+   whatever the pane is doing, so that is what this does too.
+   
+   The picture still centres inside and keeps its own shape; only the box is
+   fixed, which is what stops the text below moving between games. */
+/* The filename goes to the bottom of the pane on Android.
+   
+   It is the least-read line in the pane and it was sitting between the title
+   and the artwork, taking a line of a 426-point column and pushing the picture
+   down. It is still worth having — it is what the emulator is handed and what a
+   save is named after — so it moves rather than goes.
+   
+   `order` rather than moving it in the markup, because the desktop pane wants
+   it where it is and one arrangement should not have to fork the other. */
+body.mobile #detail .scroll { display: flex; flex-direction: column; }
+/* `flex: 0 0 auto` on every child, and it is not decoration.
+   A flex column shrinks its children to fit, and the two with a fixed height —
+   the title, which is clamped to two lines, and the artwork box — were the ones
+   it could shrink. Both measured 0 tall: the title and the picture had simply
+   vanished from the pane, which is exactly what it looked like. */
+body.mobile #detail .scroll > * { order: 1; flex: 0 0 auto; }
+body.mobile #detail .sub {
+  order: 99;
+  /* Readable rather than a hairline: this is the smallest text in the pane and
+     ES-DE's 0.0195 is meant for a paragraph, not for one line at the bottom. */
+  font-size: 2.2vh;
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  opacity: 0.7;
+}
+
+/* Title and the three actions on one line, icons only.
+   The buttons keep their `title` text; only the label is dropped. */
+/* The selection moves rather than jumps.
+   
+   Driven by a stick or a d-pad the cursor steps one item at a time and the only
+   thing that changes is which card is lit — with nothing in between, a fast
+   press reads as the screen flickering rather than as moving through a list.
+   
+   Short and on the highlight only: the transform and the glow ease, the layout
+   never does. Anything that animated position would fight the scroll, which is
+   the browser's and has its own smoothing below. */
+.gcard .art,
+.card,
+.row {
+  transition:
+    transform .13s cubic-bezier(.2, .7, .3, 1),
+    box-shadow .18s ease,
+    border-color .14s ease,
+    background .14s ease;
+}
+.gcard.sel .art,
+.card.sel { transform: scale(1.035); }
+.row.sel { transform: translateX(3px); }
+
+/* And the scroll that carries it. `scroll-behavior: smooth` on the container
+   the cursor scrolls, so stepping off the bottom glides instead of snapping.
+   Honoured by `scrollIntoView` and by assignments to `scrollTop` alike. */
+#list,
+#consoles { scroll-behavior: smooth; }
+
+/* Except when the whole list is replaced. Opening a console and landing on its
+   first game must not animate a scroll from wherever the last list was. */
+#list.jump { scroll-behavior: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gcard .art, .card, .row { transition: none; }
+  .gcard.sel .art, .card.sel, .row.sel { transform: none; }
+  #list, #consoles { scroll-behavior: auto; }
+}
+
+/* No filter box in the tab row on Android.
+   It is a text field, and reaching it means summoning the on-screen keyboard
+   over a 469-point screen to narrow a list the d-pad already walks. It also
+   took the width three tab names needed. Search is still on its own binding. */
+body.mobile #tabbar #page-filter { display: none !important; }
+
+/* Take offline, and the info toggle: the icon alone.
+   Both live in the tab row on this screen, where a word each is most of a tab.
+   The words stay in `title`, which is what a long press shows. */
+body.mobile #grab-btn span:not(.icon),
+body.mobile #sidebar-btn span:not(.icon) { display: none; }
+body.mobile #grab-btn,
+body.mobile #sidebar-btn { padding: 4px 7px; }
+/* Both at the right-hand end, past the tabs.
+   `installTabs` moves them into the tab row, where they landed in the middle of
+   the names. An auto margin on the first pushes the pair to the edge, which
+   also puts them where a thumb already is. */
+body.mobile #tabbar #grab-btn { margin-left: auto; }
+body.mobile #tabbar #sidebar-btn { margin-left: 4px; }
+body.mobile #tabbar #grab-btn,
+body.mobile #tabbar #sidebar-btn { order: 99; flex: 0 0 auto; }
+
+/* A fifth larger across the pane and the list.
+   ES-DE's own fractions are its "medium"; this is nearer its "large", which it
+   offers for exactly this reason — the same layout, read from further away or
+   by someone who wants it bigger. */
+body.mobile .row { font-size: 3vh; }
+body.mobile #detail .meta,
+body.mobile #detail .desc { font-size: 2.35vh; }
+body.mobile #detail .sub { font-size: 2.65vh; }
+body.mobile #detail h2 { font-size: 3.1vh; }
+
+body.mobile #detail .titlerow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+body.mobile #detail .titlerow h2 { flex: 1 1 auto; min-width: 0; }
+body.mobile #detail .titlerow .badges {
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 0;
+}
+body.mobile #detail .titlerow .badge { padding: 4px 6px; }
+body.mobile #detail .titlerow .badge span:not(.icon) { display: none; }
+
+body.mobile #detail .coverbox {
+  aspect-ratio: auto;
+  height: 40vh;
+}
+
+body.mobile .row {
+  font-size: 2.5vh;
+  padding: 0.7vh 10px;
+  gap: 1.2vh;
+}
+body.mobile #detail .meta,
+body.mobile #detail .desc,
+body.mobile #detail .sub {
+  font-size: 1.95vh;
+}
+body.mobile #detail h2 { font-size: 2.6vh; }
 
 /* Nothing above the artwork may change height.
    The pane is redrawn for every game the cursor touches, so a title that wraps

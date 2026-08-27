@@ -1575,9 +1575,18 @@ async fn rom_covers(
                     .file_stem()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| row.fs_name.clone());
+                // Through `media_scope`, the same as `rom_detail`. This asked
+                // `state.media_dir` and `platform_slug` directly, which is this
+                // app's own download folder keyed by RomM's slug — and on a
+                // device whose library is an ES-DE folder the artwork is not
+                // there and is not keyed that way. Every cover came back null:
+                // measured, the four samples behind each collection in My
+                // Collections resolved to nothing, so every card in the tab drew
+                // the two-letter placeholder.
+                let (dir, key) = media_scope(&state, row);
                 CoverView {
                     id: row.id,
-                    cover: media::local_art(&state.media_dir, &row.platform_slug, &stem, &list_art)
+                    cover: media::local_art(dir, key, &stem, &list_art)
                         .map(|p| romm_desktop::util::webview_path(&p)),
                 }
             })
@@ -1603,9 +1612,12 @@ async fn rom_covers(
         while set.len() < CONCURRENCY {
             let Some(row) = queue.next() else { break };
             let client = state.client.clone();
-            let media_root = state.media_dir.clone();
+            // The same scope the fast pass above uses, so a cover found by one
+            // is the cover fetched by the other.
+            let (scope_dir, scope_key) = media_scope(&state, row);
+            let media_root = scope_dir.to_path_buf();
             let (id, platform, fs_name) =
-                (row.id, row.platform_slug.clone(), row.fs_name.clone());
+                (row.id, scope_key.to_owned(), row.fs_name.clone());
             let art = list_art.clone();
             set.spawn(async move {
                 let stem = Path::new(&fs_name)
@@ -2331,11 +2343,13 @@ fn core_file_is(file: Option<&str>, core: &str) -> bool {
 /// config has to be written somewhere RetroArch can read — this app's private
 /// directory is not it.
 ///
-/// RetroArch only. `android_launches` also offers standalone emulators, and
-/// they are dropped here: this app's manifest can only see the two RetroArch
-/// packages, so `getPackageInfo` on any other one answers "not installed"
-/// whether it is or not, and offering a choice that always fails is worse than
-/// not offering it.
+/// Standalone emulators are offered as well as RetroArch, in ES-DE's own order.
+///
+/// They used to be dropped, because the manifest declared only the two
+/// RetroArch packages and Android 11 makes anything undeclared invisible —
+/// `getPackageInfo` throws for a package that is plainly installed. The
+/// manifest now declares every package ES-DE knows, so the answer is real and
+/// the Kotlin side picks the first that is actually here.
 #[tauri::command]
 fn android_launch_plan(
     state: State<'_, AppState>,
@@ -2373,7 +2387,6 @@ fn android_launch_plan(
     };
 
     let mut found = state.map.android_launches(&row.platform_slug);
-    found.retain(|l| l.libretro);
     if found.is_empty() {
         // Two different problems, and saying the wrong one sends whoever reads
         // it to the wrong place. An unmapped platform is a gap in
@@ -2418,6 +2431,43 @@ fn android_launch_plan(
             })
             .collect(),
     })
+}
+
+/// Read this system's artwork directories now, so the first game does not.
+///
+/// The index behind `media::find_local` is built the first time a directory is
+/// asked for, and building it means reading a folder of several hundred files
+/// off a memory card. That cost lands on whichever game the cursor touches
+/// first — and on Android an IPC call blocks the page for as long as the command
+/// runs, so it is not a slow pane, it is a frozen app. Measured on a Retroid
+/// Pocket Mini: 809ms for the first game in a list, then 67, 29, 26.
+///
+/// Spawned and not awaited on either side. The reply goes back immediately, so
+/// the page never waits on it; the reading happens on a worker while the list is
+/// being drawn and the user has not yet moved.
+#[tauri::command]
+async fn warm_media(state: State<'_, AppState>, platform: String) -> CmdResult<()> {
+    let (dir, key) = {
+        let cache = state.cache.lock().map_err(err)?;
+        let row = cache
+            .roms_for(&platform)
+            .ok()
+            .and_then(|mut v| v.pop());
+        match row {
+            // Through the same scope a real lookup uses, or the wrong tree is warmed.
+            Some(row) => {
+                let (d, k) = media_scope(&state, &row);
+                (d.to_path_buf(), k.to_owned())
+            }
+            None => (state.media_dir.clone(), platform.clone()),
+        }
+    };
+    tokio::task::spawn_blocking(move || {
+        for (kind, _) in media::ESDE_TYPES {
+            let _ = media::dir_index(&dir.join(&key).join(kind));
+        }
+    });
+    Ok(())
 }
 
 /// Pull whatever the server has that is newer, before an Android launch.
@@ -4517,6 +4567,21 @@ pub fn run() {
     let client = cfg.server.client()
         .ok()
         .map(Arc::new);
+    // A first run on Android has to end with a config, not with advice.
+    //
+    // Everywhere else the release notes say "copy config.example.toml to
+    // config.toml" and that works. On Android the data directory is private:
+    // the user cannot put a file in it, and the app showed a tab bar over an
+    // empty screen with a message naming a file nobody could create. Measured
+    // on a fresh Retroid Pocket Mini V2.
+    //
+    // Only when nothing is there. An existing config is the user's.
+    if cfg!(target_os = "android")
+        && romm_desktop::config_files::seed_config(Path::new("config.toml"))
+    {
+        eprintln!("no config.toml — wrote the documented template");
+    }
+
     // On Android RetroArch is another app, so there is no path to search — it
     // is found by its config instead. Everything downstream of `state.retroarch`
     // depends on this: without it the shader list in Settings → Emulators was
@@ -4621,6 +4686,7 @@ pub fn run() {
             toggle_favorite,
             rom_covers,
             launch_rom,
+            warm_media,
             android_launch_plan,
             android_sync_before,
             android_after_play,

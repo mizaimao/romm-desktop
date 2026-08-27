@@ -22,6 +22,7 @@ import { redrawCollections } from "./collections.js";
 import {
   startBackdrop, stopBackdrop, applyBackdropSettings,
   applyStoredGlassTint, setGlassTint, setGlassStrength,
+  setBackdropFps,
 } from "./backdrop.js";
 
 el.back.addEventListener("click", () => {
@@ -131,6 +132,12 @@ listen("glass-strength", ({ payload }) => setGlassStrength(payload, { announce: 
 // console, the cursor — to change a picture.
 listen("collection-art", () => {
   if (state.view === "collections") redrawCollections();
+});
+
+// The draw loop reads the rate every frame, so this only has to store it —
+// there is nothing to restart, including when it was Off.
+listen("backdrop-fps", ({ payload }) => {
+  setBackdropFps(payload, { announce: false });
 });
 
 listen("backdrop-toggle", ({ payload }) => {

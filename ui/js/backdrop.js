@@ -347,7 +347,21 @@ export const BACKDROPS = [
       // The plane itself: not black, and brightest where it meets the horizon,
       // which is what stops the lower half of the screen reading as a hole
       // rather than as a floor.
-      float plane = step(q.y, horizon) * smoothstep(0.0, 0.9, q.y / horizon) * 0.13;
+      //
+      // Across the horizon, not off it. A step() here put the floor at 0.13 on one
+      // side and 0 on the other, while the horizon glow below decays over about
+      // a hundredth of the screen — so the two did not meet, and what was left
+      // between them was a dark band sitting on a bright line. Measured on the
+      // device: the horizon row is the brightest on screen and the four rows
+      // directly above it are the darkest thing around them.
+      //
+      // The mask is one pixel wide, so the floor still ends where it ended; and
+      // above it the same value falls away as haze rather than to nothing, which
+      // is what makes the join continuous.
+      float hpx = max(fwidth(q.y), 1e-5);
+      float floorMask = smoothstep(horizon + hpx, horizon - hpx, q.y);
+      float plane = floorMask * smoothstep(0.0, 0.9, q.y / horizon) * 0.13;
+      plane += (1.0 - floorMask) * 0.13 * exp(-max(q.y - horizon, 0.0) * 7.0);
       plane += exp(-abs(q.y - horizon) * 90.0) * 0.1;
       base = ramp(min(glow * 0.8 + plane, 1.0));
       // The hottest cores go past the top of the ramp, towards white. Most of
@@ -830,12 +844,27 @@ function build() {
   // picture. On a ProMotion display the loop was running four times faster than
   // anything in it changes, which is four times the GPU for no difference —
   // and this thing is on screen the entire time the app is open.
-  const MIN_GAP_MS = 1000 / 30;
+  //
+  // The rate is a setting now; 30 is only the desktop's default. Read every
+  // frame rather than captured, so changing it in Settings takes effect on the
+  // next one rather than on the next restart.
+  //
+  // Zero means a still picture: the shader is drawn once, at its opening state,
+  // and then never again. The frame callback keeps being scheduled — an empty
+  // callback costs nothing next to a GL draw — so turning motion back on does
+  // not need the loop restarting.
+  let drawnOnce = false;
 
   const draw = (now) => {
     if (stopped) return;
     frame = requestAnimationFrame(draw);
-    if (now - lastDraw < MIN_GAP_MS) return;
+    const fps = backdropFps();
+    if (fps <= 0) {
+      if (drawnOnce) return;
+    } else if (now - lastDraw < 1000 / fps) {
+      return;
+    }
+    drawnOnce = true;
     lastDraw = now;
     gl.useProgram(active);
     gl.uniform1f(u.time, (now - start) / 1000);
@@ -998,6 +1027,43 @@ const TINT_KEY = "glassStrength";
 /// `n > 0` kept an unset key from reading as zero, but it also threw away a
 /// deliberate zero, so dragging the glass to clear put it back to 18 on the
 /// next start.
+/// How often the backdrop redraws, in frames a second.
+///
+/// The steps are a ladder rather than a slider: the difference between 28 and
+/// 30 is nothing anybody can see, and the choices that matter are "off",
+/// "barely moving", and a handful of real rates.
+export const BACKDROP_FPS_STEPS = [0, 1, 5, 10, 15, 20, 30, 60];
+
+const FPS_KEY = "backdrop.fps";
+
+/// The default is not the same on both, and that is the point.
+///
+/// A drifting gradient at 30fps and the same gradient at 120 are the same
+/// picture, so 30 was already the cap on the desktop. A handheld is a battery
+/// and a small chip drawing this behind everything for as long as the app is
+/// open, so it starts at 10 — still motion, a third of the work.
+function defaultFps() {
+  return /\bAndroid\b/.test(navigator.userAgent) ? 10 : 30;
+}
+
+export function backdropFps() {
+  const raw = localStorage.getItem(FPS_KEY);
+  if (raw === null) return defaultFps();
+  const n = Number(raw);
+  return BACKDROP_FPS_STEPS.includes(n) ? n : defaultFps();
+}
+
+/// Set the rate, snapping to the nearest step.
+export function setBackdropFps(fps, { announce = true } = {}) {
+  const n = Number(fps);
+  const value = BACKDROP_FPS_STEPS.includes(n)
+    ? n
+    : BACKDROP_FPS_STEPS.reduce((a, b) => (Math.abs(b - n) < Math.abs(a - n) ? b : a));
+  localStorage.setItem(FPS_KEY, String(value));
+  if (announce) window.__TAURI__?.event?.emit?.("backdrop-fps", value);
+  return value;
+}
+
 export function glassStrength() {
   const raw = localStorage.getItem(TINT_KEY);
   if (raw === null) return 18;

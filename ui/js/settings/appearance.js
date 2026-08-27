@@ -8,6 +8,7 @@ import {
   backdropWanted, setBackdropWanted, SCHEMES, ALL_SCHEMES, SCHEME_GROUPS,
   saveStyleSettings, styleSettings, clearStyleSettings, styleDefaults,
   glassTint, setGlassTint, glassStrength, setGlassStrength,
+  backdropFps, setBackdropFps, BACKDROP_FPS_STEPS,
   BACKDROPS,
 } from "../backdrop.js";
 import { COLLECTION_ART, collectionArt, setCollectionArt } from "../collection-art.js";
@@ -129,6 +130,20 @@ export const html = `      <h4>Layout</h4>
           <span class="bd-style-state dim"></span></div>
       </div>
       <div class="srow">
+        <label>Frame rate</label>
+        <div class="ctl">
+          <span class="stepper" role="group" aria-label="Backdrop frame rate">
+            <button class="step-down" type="button" aria-label="Slower">&lsaquo;</button>
+            <output class="bd-fps-val" aria-live="polite"></output>
+            <button class="step-up" type="button" aria-label="Faster">&rsaquo;</button>
+          </span>
+        </div>
+      </div>
+      <p class="hint">How often the backdrop redraws. It is behind everything for
+        as long as the app is open, so this is the setting that costs battery.
+        <b>Off</b> draws it once and leaves it still.</p>
+
+      <div class="srow">
         <label>Motion</label>
         <div class="ctl"><input class="bd-speed" type="range" min="0" max="700" step="5" />
           <input class="bd-speed-num num" type="number" min="0" step="1" />
@@ -194,6 +209,7 @@ export function wire(box) {
   markPadControls(box);
   wireShellMode(box);
   wireViewLayouts(box);
+  wireBackdropFps(box);
   wireIconStyles(box);
   wireAppIcons(box);
 
@@ -477,6 +493,38 @@ function wireShellMode(box) {
     window.__TAURI__?.event?.emit?.("shell-mode", sel.value);
     toast(sel.value === "columns" ? "Three columns" : "One pane");
   });
+}
+
+/// The backdrop's frame rate, as a stepper rather than a slider.
+///
+/// A ladder of eight values, because the useful choices are few and far apart —
+/// between 28 and 30 there is nothing to see, while between 1 and 30 there is
+/// everything. Both ends stop rather than wrap: an arrow that quietly takes 60
+/// to 0 is a trap.
+function wireBackdropFps(box) {
+  const out = box.querySelector(".bd-fps-val");
+  if (!out) return;
+  const down = box.querySelector(".stepper .step-down");
+  const up = box.querySelector(".stepper .step-up");
+
+  const label = (n) => (n === 0 ? "Off" : `${n} fps`);
+  const paint = () => {
+    const now = backdropFps();
+    const i = BACKDROP_FPS_STEPS.indexOf(now);
+    out.textContent = label(now);
+    down.disabled = i <= 0;
+    up.disabled = i >= BACKDROP_FPS_STEPS.length - 1;
+  };
+  const step = (delta) => {
+    const i = BACKDROP_FPS_STEPS.indexOf(backdropFps());
+    const next = BACKDROP_FPS_STEPS[Math.min(BACKDROP_FPS_STEPS.length - 1, Math.max(0, i + delta))];
+    setBackdropFps(next);
+    paint();
+    toast(`Backdrop: ${label(next)}`);
+  };
+  down.addEventListener("click", () => step(-1));
+  up.addEventListener("click", () => step(1));
+  paint();
 }
 
 /// Grid or list, separately for the console screen and for a console's games.

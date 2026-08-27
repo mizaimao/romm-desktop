@@ -1571,6 +1571,74 @@ input_r2_axis = "+5"
 
     /// Each test gets its own directory under the OS temp dir, named for the
     /// test, so a failure leaves inspectable output and runs cannot collide.
+    /// Where RetroArch keeps its shaders and its per-core settings is decided
+    /// by RetroArch, not by where the install happens to be.
+    ///
+    /// This is the bug that made "the shader setting does nothing" on the Thor:
+    /// its pack is on a memory card at `Saves/shaders` with 2,037 presets in it,
+    /// while `<install>/shaders` does not exist — so deriving the path from the
+    /// root reported no shader pack on a device that has one. The config
+    /// directory had the same shape of problem, and there it meant missing the
+    /// per-core presets that silently override ours.
+    #[test]
+    fn the_shader_and_config_directories_follow_retroarchs_own_settings() {
+        let dir = scratch("ra-dirs");
+        let elsewhere = dir.join("card");
+        std::fs::create_dir_all(elsewhere.join("shaders")).unwrap();
+        std::fs::create_dir_all(elsewhere.join("config")).unwrap();
+        std::fs::write(
+            dir.join("retroarch.cfg"),
+            format!(
+                "video_shader_dir = \"{}\"\nrgui_config_directory = \"{}\"\n",
+                elsewhere.join("shaders").display(),
+                elsewhere.join("config").display()
+            ),
+        )
+        .unwrap();
+
+        let ra = fake(&dir);
+        assert_eq!(ra.shaders_dir(), elsewhere.join("shaders"), "its own setting wins");
+        assert_eq!(ra.config_dir(), elsewhere.join("config"));
+    }
+
+    /// A setting naming a directory that is not there is not an answer.
+    #[test]
+    fn a_missing_directory_in_the_config_falls_back_to_the_install() {
+        let dir = scratch("ra-dirs-missing");
+        std::fs::create_dir_all(dir.join("shaders")).unwrap();
+        std::fs::write(
+            dir.join("retroarch.cfg"),
+            "video_shader_dir = \"/nowhere/at/all\"\n",
+        )
+        .unwrap();
+        assert_eq!(fake(&dir).shaders_dir(), dir.join("shaders"));
+    }
+
+    /// RetroArch names a core's directory after its *display* name, and there is
+    /// no table that could be complete — the name comes from the core's own
+    /// `.info` file, which on Android is somewhere this app cannot read. So the
+    /// directories RetroArch has already made are the source, matched loosely.
+    #[test]
+    fn a_cores_config_directory_is_found_across_case_and_punctuation() {
+        let dir = scratch("ra-coredir");
+        let cfg = dir.join("config");
+        for name in ["Genesis Plus GX", "Mupen64Plus-Next", "Snes9x"] {
+            std::fs::create_dir_all(cfg.join(name)).unwrap();
+        }
+        std::fs::write(dir.join("retroarch.cfg"), format!("rgui_config_directory = \"{}\"\n", cfg.display()))
+            .unwrap();
+        let ra = fake(&dir);
+
+        assert_eq!(ra.core_config_dir("genesis_plus_gx"), Some(cfg.join("Genesis Plus GX")));
+        assert_eq!(ra.core_config_dir("mupen64plus_next"), Some(cfg.join("Mupen64Plus-Next")));
+        assert_eq!(ra.core_config_dir("snes9x"), Some(cfg.join("Snes9x")));
+        // Nothing there and nothing curated: better to say so than to invent a
+        // directory and write a preset RetroArch will never look at.
+        assert_eq!(ra.core_config_dir("nothing_like_this"), None);
+        // The curated list wins where a display name is not a respelling at all.
+        assert_eq!(ra.core_config_dir("fbneo"), Some(cfg.join("FinalBurn Neo")));
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("romm-desktop-test-{name}"));
         std::fs::remove_dir_all(&dir).ok();

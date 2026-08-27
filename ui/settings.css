@@ -544,3 +544,44 @@ body.settings-window {
 #pane .gun-help[open] summary { opacity: 1; }
 #pane .gun-help > div { padding: 0 12px 4px; }
 #pane .gun-help p { margin: 0 0 10px; opacity: 0.72; line-height: 1.5; max-width: 68ch; }
+
+/* A stepper: < value >.
+   Two arrows and the value between them, for a setting whose choices are a
+   short ladder rather than a range. A slider would suggest every number in
+   between is available, and for a frame rate they are not — the useful ones are
+   eight steps apart at the bottom and thirty at the top. */
+.stepper {
+  /* A flex item inside `.ctl`, which is itself a flex row with `min-width: 0`.
+     Without a basis of its own it was shrunk to nothing — measured 2px wide,
+     which is its two borders and no content, while the arrows and the value
+     inside it were still 126px. */
+  flex: 0 0 auto;
+  width: max-content;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.stepper button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.stepper button:hover:not(:disabled) { background: var(--panel); }
+/* Disabled at the ends rather than wrapping: an arrow that takes 60 round to 0
+   is a trap, and the ladder having ends is the useful thing to show. */
+.stepper button:disabled { opacity: 0.3; cursor: default; }
+.stepper output {
+  min-width: 68px;
+  text-align: center;
+  padding: 5px 4px;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}

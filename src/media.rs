@@ -744,6 +744,60 @@ mod tests {
         dir
     }
 
+    /// The artwork index is read once and then trusted — but only until the
+    /// directory changes.
+    ///
+    /// It exists because the info pane asks about ten kinds of artwork per game
+    /// and each ask was a full directory walk: on the Thor, whose media sits on
+    /// a memory card in folders of ~900 files, `rom_detail` took 650-750ms and
+    /// the pane visibly lagged the cursor. A cache fixes that and introduces the
+    /// opposite risk, which is what this pins down: a picture that arrives
+    /// during the session has to be found without a restart.
+    #[test]
+    fn the_artwork_index_is_reused_until_the_directory_changes() {
+        let dir = scratch("dir-index");
+        let art = dir.join("snes").join("covers");
+        std::fs::create_dir_all(&art).unwrap();
+        std::fs::write(art.join("Zelda.png"), b"x").unwrap();
+
+        assert_eq!(
+            find_local(&dir, "snes", "Zelda", "covers"),
+            Some(art.join("Zelda.png").canonicalize().unwrap()),
+            "the file that is there is found"
+        );
+        assert_eq!(find_local(&dir, "snes", "Mario", "covers"), None);
+
+        // Scraped mid-session. The directory's modification time moves, so the
+        // remembered listing is known to be stale without walking it again.
+        std::fs::write(art.join("Mario.png"), b"x").unwrap();
+        assert_eq!(
+            find_local(&dir, "snes", "Mario", "covers"),
+            Some(art.join("Mario.png").canonicalize().unwrap()),
+            "a picture that arrived after the first look is still found"
+        );
+    }
+
+    /// The card is case-insensitive and a gamelist's spelling of a title does
+    /// not always match the file's, so the index is keyed on a lowercased stem.
+    #[test]
+    fn artwork_is_found_whatever_the_case_of_the_name() {
+        let dir = scratch("dir-index-case");
+        let art = dir.join("snes").join("covers");
+        std::fs::create_dir_all(&art).unwrap();
+        std::fs::write(art.join("Chrono Trigger.png"), b"x").unwrap();
+
+        assert!(find_local(&dir, "snes", "chrono trigger", "covers").is_some());
+        assert!(find_local(&dir, "snes", "CHRONO TRIGGER", "covers").is_some());
+    }
+
+    /// A directory that is not there is an empty index, not a panic — most
+    /// systems have no `manuals` folder at all.
+    #[test]
+    fn a_missing_artwork_directory_is_simply_empty() {
+        let dir = scratch("dir-index-absent");
+        assert_eq!(find_local(&dir, "snes", "Zelda", "manuals"), None);
+    }
+
     /// A PNG header only: signature, then the IHDR chunk whose first two fields
     /// are the dimensions. Enough for `image_size`, which never decodes pixels.
     fn png(w: u32, h: u32) -> Vec<u8> {

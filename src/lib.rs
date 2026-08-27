@@ -13,8 +13,9 @@ pub mod bulk;
 pub mod cache;
 pub mod config;
 pub mod configpatch;
-#[cfg(test)]
-mod config_files;
+// No longer test-only: it now carries the template the app seeds a first run
+// with, which on Android is the only way a config can appear at all.
+pub mod config_files;
 pub mod coremap;
 pub mod coverage;
 pub mod cores;

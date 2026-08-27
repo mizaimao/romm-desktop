@@ -201,6 +201,70 @@ class MainActivity : TauriActivity() {
         @JavascriptInterface
         fun externalFilesDir(): String = getExternalFilesDir(null)?.absolutePath ?: ""
 
+        /**
+         * Hand a file or a link to whatever app on the device handles it.
+         *
+         * Three things in the info pane could not work in this webview and all
+         * three fail differently, which is why they end up in one place:
+         *
+         * * **A manual is a PDF**, and Android's webview has no PDF viewer —
+         *   `navigator.pdfViewerEnabled` is false, where every desktop engine
+         *   this app runs on says true.
+         * * **A video hangs.** The bytes are served: `fetch` on the same URL
+         *   answers 206 with a byte range and the right content type. But a
+         *   `<video>` element sits at `readyState 0` and `networkState 2`
+         *   forever, because Chromium's media loader does not go through the
+         *   same path as `fetch` for a custom scheme.
+         * * **A trailer is an ordinary link**, and Tauri's opener tries to run
+         *   a desktop command for it — the error is `No such file or directory
+         *   (os error 2)`, which is it failing to find `xdg-open`.
+         *
+         * A `content://` URI rather than a `file://` one: passing the latter to
+         * another app has thrown `FileUriExposedException` since Android 7.
+         * The grant is per URI and read-only, and it lasts as long as the
+         * activity it was given to.
+         *
+         * Returns an empty string when something took it, and a reason when
+         * nothing did — a device with no PDF reader is a real answer, not a
+         * crash.
+         */
+        @JavascriptInterface
+        fun openExternal(target: String, mime: String): String {
+            if (target.isEmpty()) return "nothing to open"
+            val intent = Intent(Intent.ACTION_VIEW)
+            if (target.startsWith("http://") || target.startsWith("https://")) {
+                intent.data = Uri.parse(target)
+            } else {
+                val file = java.io.File(target)
+                if (!file.isFile) return "that file is not on this device any more"
+                val uri =
+                    try {
+                        androidx.core.content.FileProvider.getUriForFile(
+                            this@MainActivity,
+                            "$packageName.fileprovider",
+                            file,
+                        )
+                    } catch (e: Exception) {
+                        return "could not share that file: $e"
+                    }
+                intent.setDataAndType(uri, mime.ifEmpty { "*/*" })
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            // Its own task, so coming back lands here rather than inside a
+            // video player showing this app's last screen.
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (packageManager.resolveActivity(intent, 0) == null) {
+                return "nothing on this device opens that"
+            }
+            runOnUiThread {
+                try {
+                    startActivity(intent)
+                } catch (e: Exception) {
+                }
+            }
+            return ""
+        }
+
         @JavascriptInterface
         fun startEmulator(planJson: String): String {
             val plan =

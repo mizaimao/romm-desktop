@@ -360,6 +360,17 @@ function restorePlatformCursor() {
 export async function showRoms(slug) {
   state.view = "roms";
   applyLayoutForView("roms");
+  // Read this system's artwork folders while the list is being drawn.
+  //
+  // Building that index means walking directories of several hundred files off
+  // a card, and it used to land on whichever game the cursor touched first: on
+  // the Retroid the first selection took 809ms and every one after it 30-60.
+  // On Android an IPC call blocks the page while it runs, so that first press
+  // was not a slow pane, it was a frozen app.
+  //
+  // Not awaited, and the backend spawns rather than blocking, so this costs the
+  // list nothing.
+  invoke("warm_media", { platform: slug }).catch(() => {});
   restoreSidebar();
   // The console list is a column of its own here and stays where it is; only
   // the middle changes. In one pane it has already been replaced by the time
