@@ -180,6 +180,53 @@ impl Stage {
     }
 }
 
+/// Where the favourites-and-collections sync has got to.
+///
+/// Its own type rather than a second use of [`Stage`]: that one's `Ready`
+/// carries a save review, and the two syncs are independent — you can look at
+/// what the stars would do without touching the saves, and the sync tab draws
+/// both lines at once.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Stars {
+    #[default]
+    Idle,
+    Asking(String),
+    /// A plan, waiting for a person. `moves` is zero when both sides agree.
+    Ready { headline: String, moves: usize },
+    Done(String),
+    Failed(String),
+}
+
+impl Stars {
+    /// What A does next, in words, or `None` while the worker has it.
+    ///
+    /// One place decides this, so the help line and the handler cannot drift
+    /// apart — the mistake that made A do nothing on the patches tab.
+    pub fn next_step(&self) -> Option<&'static str> {
+        match self {
+            Stars::Ready { moves, .. } if *moves > 0 => Some("carry this out"),
+            Stars::Ready { .. } | Stars::Idle | Stars::Done(_) | Stars::Failed(_) => {
+                Some("see what would sync")
+            }
+            Stars::Asking(_) => None,
+        }
+    }
+
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Stars::Asking(_))
+    }
+
+    pub fn note(&self) -> String {
+        match self {
+            Stars::Idle => "not checked yet".into(),
+            Stars::Asking(note) => note.clone(),
+            Stars::Ready { headline, .. } => headline.clone(),
+            Stars::Done(note) => note.clone(),
+            Stars::Failed(why) => format!("failed: {why}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,5 +393,44 @@ mod tests {
             Stage::Failed("no route to host".into()).note(),
             "failed: no route to host"
         );
+    }
+
+    #[test]
+    fn the_stars_stage_offers_to_look_before_it_offers_to_act() {
+        assert_eq!(Stars::Idle.next_step(), Some("see what would sync"));
+        assert_eq!(
+            Stars::Ready { headline: "2 to send".into(), moves: 2 }.next_step(),
+            Some("carry this out")
+        );
+        // A plan with nothing in it is not a thing to carry out.
+        assert_eq!(
+            Stars::Ready { headline: "nothing to do".into(), moves: 0 }.next_step(),
+            Some("see what would sync")
+        );
+        assert_eq!(Stars::Asking("looking".into()).next_step(), None);
+    }
+
+    #[test]
+    fn the_stars_stage_always_has_something_to_say() {
+        for stage in [
+            Stars::Idle,
+            Stars::Asking("reading the card".into()),
+            Stars::Ready { headline: "1 to send".into(), moves: 1 },
+            Stars::Done("1 sent".into()),
+            Stars::Failed("no route to host".into()),
+        ] {
+            assert!(!stage.note().is_empty(), "{stage:?} said nothing");
+        }
+        assert_eq!(
+            Stars::Failed("no route to host".into()).note(),
+            "failed: no route to host"
+        );
+    }
+
+    #[test]
+    fn a_second_press_while_it_is_working_starts_nothing() {
+        assert!(Stars::Asking("looking".into()).is_busy());
+        assert!(!Stars::Idle.is_busy());
+        assert!(!Stars::Ready { headline: "x".into(), moves: 1 }.is_busy());
     }
 }

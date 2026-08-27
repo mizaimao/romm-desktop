@@ -22,6 +22,7 @@ pub mod datadir;
 pub mod diskspace;
 pub mod download;
 pub mod esde;
+pub mod favorites;
 pub mod gamefilter;
 pub mod gamelist;
 pub mod focusring;

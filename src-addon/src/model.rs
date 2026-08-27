@@ -260,6 +260,19 @@ impl Page {
         }
     }
 
+    /// The line under an action row — what it last did, or how it is getting on.
+    ///
+    /// The twin of `set_fact`: facts and actions keep their text in different
+    /// places, and the sync tab has both.
+    pub fn set_note(&mut self, id: &str, note: &str) {
+        if let Some(row) = self.rows.iter_mut().find(|r| r.id == id)
+            && let Kind::Action { note: slot } = &mut row.kind
+            && slot != note
+        {
+            *slot = note.to_string();
+        }
+    }
+
     pub fn pending(&self) -> Vec<&Row> {
         self.rows.iter().filter(|r| r.pending()).collect()
     }
@@ -305,6 +318,12 @@ pub struct App {
     /// they still need a person; held here rather than in the stage so the
     /// stage stays cheap to clone and compare.
     pub conflicts: Vec<romm_desktop::savesync::SaveConflict>,
+    /// Where the favourites-and-collections sync has got to. Its own stage
+    /// because it runs independently of the saves — see `sync::Stars`.
+    pub stars: crate::sync::Stars,
+    /// The favourites plan a person is being shown, held beside the stage for
+    /// the same reason the conflicts are: the stage is compared every frame.
+    pub star_plan: Option<crate::favrun::Plan>,
     pub sync: Page,
     pub patches: Page,
     pub overlay: Overlay,

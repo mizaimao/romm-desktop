@@ -247,6 +247,51 @@ export async function launch(
   }
 }
 
+/// Star a game, or take the star off.
+///
+/// The star is a collection on the server, not a mark on this machine, so
+/// pressing it here is what makes the handheld and the phone agree — see
+/// `romm_desktop::favorites`.
+///
+/// The row is repainted from what the server actually did, not from what was
+/// asked for. A star that lights up locally and never reached the server is
+/// the worst outcome: it lies here and is invisible everywhere else.
+export async function toggleFavorite(id) {
+  if (!id) return;
+  const row = document.querySelector(`[data-id="${id}"]`);
+  const was = row?.classList.contains("fav") || row?.dataset.fav === "1";
+  try {
+    const now = await invoke("set_favorite", { id, starred: !was });
+    paintStar(id, now);
+    toast(now ? "Starred" : "Star removed");
+  } catch (e) {
+    toast(`Could not change the star — ${e}`, 8000);
+  }
+}
+
+/// Put the star on the row, or take it off, without redrawing the list.
+///
+/// Redrawing would lose the scroll position and the cursor, and this changes
+/// one glyph on one row.
+function paintStar(id, starred) {
+  for (const node of document.querySelectorAll(`[data-id="${id}"]`)) {
+    node.classList.toggle("fav", starred);
+    if (starred) node.dataset.fav = "1";
+    else delete node.dataset.fav;
+    const name = node.querySelector(".nm") || node.querySelector(".art");
+    const existing = node.querySelector(".star");
+    if (starred && !existing && name) {
+      const star = document.createElement("span");
+      star.className = "star";
+      star.title = "Starred — in one of your starred collections";
+      star.textContent = "★";
+      name.prepend(star);
+    } else if (!starred && existing) {
+      existing.remove();
+    }
+  }
+}
+
 export async function download(id, thenPlay) {
   const prog = document.getElementById("prog");
   if (prog) prog.hidden = false;

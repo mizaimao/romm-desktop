@@ -30,6 +30,11 @@ romm-desktop = { path = ".." }
 romm-sdl = { path = "../src-sdl" }
 anyhow = "1.0.104"
 
+# The favourites baseline — what the last sync agreed on — is a small JSON
+# file beside the addon's own cache. See `favsync`.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 # The core's API client is async and this app's loop is not, so the worker
 # thread builds a current-thread runtime for the one request it has in flight.
 # Not the multi-threaded one: four slow cores, and nothing to parallelise.
@@ -39,3 +44,7 @@ tokio = { version = "1.53.1", features = ["rt", "net", "time"] }
 version = "0.38"
 default-features = false
 features = ["use-pkgconfig", "image"]
+
+[dev-dependencies]
+# The favourites run is async; its tests drive it without a server.
+tokio = { version = "1.53.1", features = ["rt", "macros"] }

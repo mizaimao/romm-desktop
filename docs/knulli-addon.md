@@ -187,3 +187,70 @@ RomM.
 
 Which half of sync comes first: pushing saves up, pulling saves down, or taking
 games offline.
+
+## Favourites and collections
+
+RomM has no per-game favourite. A favourite there is a **collection**, either
+one the server flags `is_favorite` or one somebody named with a star — which is
+what the nine `★ Best of …` lists on this library are. So "star this game"
+means "put it in that collection", and the star reaches every device for free,
+because the collection lives on the server.
+
+EmulationStation keeps the same two ideas in two different places, neither of
+which is the server:
+
+| Server | On the card |
+| --- | --- |
+| `★ Best of snes` | `<favorite>true</favorite>` in `/userdata/roms/snes/gamelist.xml` |
+| `Arcade Fighting` | `collections/custom-Arcade Fighting.cfg`, one absolute path per line |
+
+`favrun::held_as` decides which by the name. A `custom-*.cfg` is invisible until
+its name is also in `CollectionSystemsCustom` in `es_settings.cfg`, so the sync
+writes that too — it is the step that gets forgotten and makes a correct file
+look like a broken one.
+
+### Why there is a baseline
+
+`/api/sync` is saves only; there is no server-side negotiation for
+collections. So the rule is decided on the device: **remember what the last
+sync agreed on**, in `favorites-baseline.json` beside the addon.
+
+With it, every difference explains itself. A star the baseline has not seen was
+added since, and goes up. A star the baseline has but the card has lost was
+taken off here, and comes off the server too. Without it the only safe move is
+to merge, and unstarring never travels — you take a star off on the handheld
+and the next sync puts it straight back.
+
+Because a star is a **boolean**, a three-way merge has no conflicts. There are
+only two values: if both sides moved away from the baseline they moved to the
+same place, and they already agree. Nothing here ever needs to ask a person.
+
+Lists that already agree are written into the baseline as well, even though
+nothing moves. Otherwise it only ever learns about lists that happened to
+differ, and the first star taken off an agreeing list looks like a list that
+has never been synced.
+
+### Two things that are not the same name
+
+* **Folders.** The server files SNES under `sfc`, the card under `snes`. Same
+  mapping the saves use — `Platform::save_folder`.
+* **Multi-disc games.** RomM holds one rom called `Final Fantasy VII (USA)`.
+  The card has a *hidden* `.Final Fantasy VII (USA)/` of discs and a
+  `Final Fantasy VII (USA).m3u` beside it, and the playlist is what ES shows
+  and therefore what ES stars. Matching the plain name skipped every multi-disc
+  game silently: starred on both sides, read as on neither.
+
+### Looking before moving
+
+    moose-patch --stars          what it would do, and both sides' counts
+    moose-patch --stars-apply    do it
+
+`--stars` prints a line per collection with how many are starred on the card,
+how many on the server, and how many of the server's are on this card at all.
+That last number matters: the card holds a subset of the library, and a star
+for a game that is not here is left alone rather than read as an unstarring —
+otherwise a sync would strip the server of every star for every game the
+handheld does not carry.
+
+Print the counts even when everything agrees. A matcher that finds nothing on
+either side reports agreement exactly as loudly as one that works.

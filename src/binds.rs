@@ -52,6 +52,10 @@ pub const ACTIONS: &[Action] = &[
     action!("search", "Focus search", Some("/")),
     action!("help", "Shortcut list", Some("?")),
     action!("download", "Download without playing", None),
+    // The glyph it draws, so the key and the mark on the row are the same
+    // thing. Every other letter worth having was taken: f is the filter, s
+    // the sort, r random.
+    action!("favorite", "Star this game", Some("*")),
     action!("layout", "Toggle grid / list", None),
     action!("sidebar", "Toggle info pane", None),
     action!("settings", "Open settings", None),

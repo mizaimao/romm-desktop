@@ -742,6 +742,46 @@ body.has-pad #tabbar .bumper { display: inline; }
   display: block;
 }
 
+/* The artwork's own box, so the pane is the same height for every game.
+   Its height comes from the pane's width and nothing else, which is what stops
+   the text below moving when the picture changes — see the note in detail.js. */
+#detail .coverbox {
+  width: 100%;
+  aspect-ratio: var(--cover-aspect, 4 / 3);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+/* The picture itself, however it ends up drawn.
+   `data-fit` swaps the <img> for a <canvas> of the same class once the bitmap
+   has been decoded, so both have to be styled or the swap changes the look. */
+#detail .coverbox img.cover,
+#detail .coverbox canvas.cover {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  margin: 0;
+  /* Transparent, because the artwork is. Miximages, wordmarks and marquees are
+     PNGs with an alpha channel, and a panel colour painted behind them squares
+     them off into tiles — which is not what they look like, and not what the
+     grid does with the same files. */
+  background: transparent;
+  border-radius: 0;
+}
+/* A game with no artwork keeps the gap rather than closing it. */
+#detail .cover-none {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  opacity: 0.35;
+}
+
 /* Screenshot slideshow. Images are stacked and cross-faded rather than laid
    out in a row, so the pane height stays put while cycling. */
 .shots {
@@ -3055,6 +3095,31 @@ body.mobile #tabbar .bumper { display: none !important; }
   :root { --detail-w: 260px; }
   #detail .artstrip img,
   #detail .artstrip .vidtile { max-height: 108px; }
+}
+
+/* Nothing above the artwork may change height.
+   The pane is redrawn for every game the cursor touches, so a title that wraps
+   to two lines where the last one took one moves the picture and everything
+   under it — measured on the Thor, the box top moved between 116 and 134 as the
+   filename wrapped, which is the flicker.
+
+   Both lines are given a fixed number of lines rather than left to the text, so
+   the pane has one shape for every game in the library. */
+body.mobile #detail h2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* Two lines exactly, whether the title needs them or not. */
+  height: calc(2 * 1.45em);
+}
+body.mobile #detail .sub {
+  /* The filename is the secondary line and a long one is no more readable
+     wrapped than clipped. `break-all` is what made it wrap mid-word. */
+  white-space: nowrap;
+  word-break: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* No page background on Android with a backdrop running.

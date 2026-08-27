@@ -627,6 +627,92 @@ impl Client {
         }
         Ok(out)
     }
+
+    // --- Changing a collection ----------------------------------------------
+    //
+    // Only hand-made collections can be changed. Smart ones are a stored
+    // filter and virtual ones are grouped on the fly, so the server has
+    // nowhere to record a membership for either — adding to one is not a thing
+    // that can succeed, and `favorites` refuses before it asks.
+
+    /// Put games into a collection. Already-present ids are not an error.
+    pub async fn add_roms_to_collection(&self, id: &str, rom_ids: &[i64]) -> Result<()> {
+        self.edit_collection_roms(reqwest::Method::POST, id, rom_ids).await
+    }
+
+    /// Take games out of a collection. Absent ids are not an error.
+    pub async fn remove_roms_from_collection(&self, id: &str, rom_ids: &[i64]) -> Result<()> {
+        self.edit_collection_roms(reqwest::Method::DELETE, id, rom_ids).await
+    }
+
+    /// Both membership calls: same path, same body, opposite verbs.
+    ///
+    /// An empty list returns without asking. The server accepts it, but a
+    /// no-op round trip per unchanged game is what makes a sync of two hundred
+    /// games feel broken.
+    async fn edit_collection_roms(
+        &self,
+        method: reqwest::Method,
+        id: &str,
+        rom_ids: &[i64],
+    ) -> Result<()> {
+        if rom_ids.is_empty() {
+            return Ok(());
+        }
+        let url = format!("{}/api/collections/{}/roms", self.base, urlencode(id));
+        let resp = self
+            .http
+            .request(method.clone(), &url)
+            .header("Authorization", &self.auth)
+            .json(&serde_json::json!({ "rom_ids": rom_ids }))
+            .send()
+            .await
+            .with_context(|| format!("{method} {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let hint = if status == reqwest::StatusCode::FORBIDDEN {
+                "\n  403 here usually means the token lacks collections.write."
+            } else {
+                ""
+            };
+            bail!(
+                "{method} {url} -> {status}{hint}\n  {}",
+                body.chars().take(300).collect::<String>()
+            );
+        }
+        Ok(())
+    }
+
+    /// Make a new hand-made collection and return it.
+    ///
+    /// Multipart rather than JSON because that is what the endpoint declares —
+    /// it shares a handler with the one that takes a cover image.
+    pub async fn create_collection(&self, name: &str, is_favorite: bool) -> Result<Collection> {
+        let url = format!(
+            "{}/api/collections?is_favorite={}",
+            self.base,
+            if is_favorite { "true" } else { "false" }
+        );
+        let form = reqwest::multipart::Form::new().text("name", name.to_owned());
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", &self.auth)
+            .multipart(form)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "POST {url} -> {status}\n  {}",
+                body.chars().take(300).collect::<String>()
+            );
+        }
+        resp.json().await.with_context(|| format!("decoding {url}"))
+    }
 }
 
 // --- Saves and sync ---------------------------------------------------------

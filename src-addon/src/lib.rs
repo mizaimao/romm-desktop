@@ -5,6 +5,10 @@
 //! context and is only the drawing.
 
 pub mod catalogue;
+pub mod eslist;
+pub mod favmap;
+pub mod favrun;
+pub mod favsync;
 pub mod model;
 pub mod patch;
 pub mod profile;

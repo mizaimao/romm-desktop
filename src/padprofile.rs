@@ -509,13 +509,15 @@ pub const HOTKEYS: &[(&str, Physical, &str)] = &[
 /// goes through exactly the same path as a profile read off disk. RetroPad
 /// names the face buttons after a SNES pad, so `b` is the *bottom* one.
 ///
-/// The d-pad is here too, as `DPAD_UP` and friends. It was left out at first
-/// because Android reports a d-pad as a hat axis on some pads and as keycodes
-/// on others, and binding the wrong one puts a hotkey on a direction held
-/// constantly in play. The Thor settles it: its pad enumerates with a `DPAD`
-/// source, so the keycodes are what arrive. Anything reporting only a hat gets
-/// no directional hotkeys, which is what [`hotkey_block`] already says in the
-/// file it writes.
+/// The d-pad is a **hat**, and that is not a guess. The Thor's pad lists
+/// `rawAxis=16` and `rawAxis=17` with a range of -1..1 — `ABS_HAT0X` and
+/// `ABS_HAT0Y` — so the directions arrive as axis movement, not as key presses.
+///
+/// Keycodes were tried first, on the strength of the device also advertising a
+/// `DPAD` source. That source is the one Android synthesises for navigation; the
+/// raw events underneath are still the hat, so `input_up_btn = "19"` matched
+/// nothing and the shader hotkeys did nothing at all. RetroArch spells a hat
+/// `h0up` and friends, in the `_btn` field.
 const ANDROID_PAD: &str = "\
 input_device = \"Android gamepad\"
 input_driver = \"android\"
@@ -531,10 +533,10 @@ input_l3_btn = \"106\"
 input_r3_btn = \"107\"
 input_start_btn = \"108\"
 input_select_btn = \"109\"
-input_up_btn = \"19\"
-input_down_btn = \"20\"
-input_left_btn = \"21\"
-input_right_btn = \"22\"
+input_up_btn = \"h0up\"
+input_down_btn = \"h0down\"
+input_left_btn = \"h0left\"
+input_right_btn = \"h0right\"
 ";
 
 /// The Android pad profile. See [`ANDROID_PAD`].
@@ -656,12 +658,17 @@ mod tests {
     #[test]
     fn the_android_pad_binds_the_dpad_and_the_faces_by_position() {
         let p = android();
-        assert_eq!(p.get(Physical::Up).unwrap().value, "19", "DPAD_UP");
-        assert_eq!(p.get(Physical::Down).unwrap().value, "20", "DPAD_DOWN");
+        // A hat, not keycodes: the pad reports ABS_HAT0X/Y, so key 19 never comes.
+        assert_eq!(p.get(Physical::Up).unwrap().value, "h0up");
+        assert_eq!(p.get(Physical::Down).unwrap().value, "h0down");
+        assert_eq!(p.get(Physical::Left).unwrap().value, "h0left");
+        assert_eq!(p.get(Physical::Right).unwrap().value, "h0right");
 
         let block = hotkey_block(&p);
-        assert!(block.contains("input_shader_prev_btn = \"19\""), "up cycles shaders back");
-        assert!(block.contains("input_shader_next_btn = \"20\""), "down cycles shaders on");
+        assert!(block.contains("input_shader_prev_btn = \"h0up\""), "up cycles shaders back");
+        assert!(block.contains("input_shader_next_btn = \"h0down\""), "down cycles shaders on");
+        assert!(block.contains("input_state_slot_decrease_btn = \"h0left\""), "left picks a slot");
+        assert!(block.contains("input_state_slot_increase_btn = \"h0right\""), "right picks a slot");
         // Left face is the shader toggle, right face is the FPS counter.
         assert!(block.contains("input_shader_toggle_btn = \"99\""), "left face, BUTTON_X");
         assert!(block.contains("input_fps_toggle_btn = \"97\""), "right face, BUTTON_B");

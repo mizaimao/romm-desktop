@@ -159,6 +159,8 @@ fn main() -> Result<()> {
         Some("--pull-all") => return pull_all_cli(),
         Some("--refresh") => return refresh_cli(),
         Some("--saves") => return saves_cli(),
+        Some("--stars") => return stars_cli(false),
+        Some("--stars-apply") => return stars_cli(true),
         Some("--save") => {
             profile::save(&paths, &patches)?;
             println!("wrote {}", paths.profile().display());
@@ -167,7 +169,7 @@ fn main() -> Result<()> {
         Some(other) if other.starts_with("--") => {
             eprintln!(
                 "moose-patch [--status | --plan | --sync | --refresh | --pull-all \
-                 | --restore | --save]"
+                 | --stars | --stars-apply | --restore | --save]"
             );
             std::process::exit(2);
         }
@@ -240,6 +242,95 @@ fn sync_cli(carry_out: bool) -> Result<()> {
         worker::negotiate(&cfg, &ra_root, &app_dir)
     };
     drain_to_end(job)
+}
+
+/// Favourites and collections: what the card and the server disagree about.
+///
+/// Without `--stars-apply` this only looks — it reads ES's gamelists and the
+/// server's collections and prints the difference. Deciding by looking is the
+/// point: every difference here is a star somebody set, and a plan that moves
+/// nothing can be checked against what they remember doing.
+fn stars_cli(carry_out: bool) -> Result<()> {
+    let cfg = romm_desktop::config::Config::load().unwrap_or_default();
+    let app_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let Some(cache_path) = worker::find_cache(&worker::cache_search_path(&app_dir)) else {
+        anyhow::bail!("no library index — run --refresh first");
+    };
+    let cache = romm_desktop::cache::Cache::open(&cache_path)?;
+    let platform = romm_desktop::platform::current();
+    let es = moose_patch::favmap::EsPaths::knulli();
+
+    let known = moose_patch::favmap::on_card(&cache, platform, &es.roms)?;
+    println!(
+        "{} of the server's games are on this card, under {}",
+        known.len(),
+        es.roms.display()
+    );
+
+    let baseline_path = app_dir.join("favorites-baseline.json");
+    let mut baseline = moose_patch::favsync::Baseline::load(&baseline_path);
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    runtime.block_on(async {
+        let client = romm_desktop::api::Client::with_auth(
+            &cfg.server.url,
+            &cfg.server.username,
+            &cfg.server.password,
+            cfg.server.token.as_deref().filter(|t| !t.is_empty()),
+        )?;
+        let plan =
+            moose_patch::favrun::plan(&client, &cache, &es, &known, &baseline, platform).await?;
+        println!("{}", plan.headline());
+        // Every collection, agreed or not. "Nothing to do" is only worth
+        // anything if you can see that both sides were actually read.
+        for s in &plan.surveyed {
+            let flag = if s.here == s.reachable { " " } else { "!" };
+            println!(
+                "  {flag} {:<28} card {:>4}   server {:>4} ({} of them on this card)",
+                s.name, s.here, s.server, s.reachable
+            );
+        }
+        for item in &plan.items {
+            let held = match &item.held {
+                moose_patch::favrun::Held::Stars(f) => format!("stars in {}", f.join(", ")),
+                moose_patch::favrun::Held::File => "collection file".into(),
+            };
+            println!("  {} ({held})", item.name);
+            for m in &item.moves {
+                let (what, id) = match m {
+                    moose_patch::favsync::Move::StarHere(i) => ("star here", i),
+                    moose_patch::favsync::Move::UnstarHere(i) => ("unstar here", i),
+                    moose_patch::favsync::Move::StarOnServer(i) => ("star on server", i),
+                    moose_patch::favsync::Move::UnstarOnServer(i) => ("unstar on server", i),
+                };
+                let name = cache
+                    .rom_by_id(*id)
+                    .ok()
+                    .flatten()
+                    .map(|r| r.name)
+                    .unwrap_or_else(|| format!("rom {id}"));
+                println!("    {what:<16} {name}");
+            }
+        }
+        if !carry_out {
+            println!("\nnothing moved — run --stars-apply to carry this out");
+            return Ok(());
+        }
+        let report =
+            moose_patch::favrun::carry_out(&client, &es, &known, &plan, &mut baseline).await?;
+        baseline.save(&baseline_path)?;
+        if moose_patch::favrun::show_all(&es, &plan)? {
+            println!("told EmulationStation to show the collections it was hiding");
+        }
+        println!(
+            "{} applied here ({} files rewritten), {} sent",
+            report.applied_here, report.files_written, report.sent
+        );
+        for failure in &report.failed {
+            println!("  failed: {failure}");
+        }
+        anyhow::Ok(())
+    })
 }
 
 /// Follow one job to its end, printing each new thing it says.
@@ -387,10 +478,13 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     println!("confirm/cancel swapped: {swapped}");
 
     let stage = Stage::default();
+    let stars = moose_patch::sync::Stars::default();
     let mut app = App {
         tab: Tab::Patches,
-        sync: rows::sync(server.as_deref(), &stage.note()),
+        sync: rows::sync(server.as_deref(), &stage.note(), &stars.note()),
         stage,
+        stars,
+        star_plan: None,
         conflicts: Vec::new(),
         patches: rows::patches(patches),
         overlay: Overlay::None,
@@ -398,7 +492,7 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
     };
     let mut view = ui::Ui::default();
     let mut events = sdl.event_pump().map_err(anyhow::Error::msg)?;
-    let mut job: Option<worker::Job> = None;
+    let mut job: Option<Running> = None;
 
     // Where the saves are and where our own files live. Both are wanted only
     // when a sync starts, but reading them once keeps the loop free of it.
@@ -430,32 +524,50 @@ fn window(paths: &Paths, patches: &[Patch]) -> Result<()> {
             // and one line settles that without a second trip to the device.
             eprintln!("press {press:?}");
             if let Some(request) = act(&mut app, &mut view, press, paths, patches) {
-                match request {
+                job = Some(match request {
                     Request::Negotiate => {
-                        job = Some(worker::negotiate(&cfg, &ra_root, &app_dir));
+                        Running::Saves(worker::negotiate(&cfg, &ra_root, &app_dir))
                     }
-                    Request::CarryOut => {
-                        job = Some(worker::carry_out(&cfg, &ra_root, &app_dir, &library_root));
-                    }
-                    Request::Refresh => {
-                        job = Some(worker::refresh_index(&cfg, &app_dir));
-                    }
-                }
+                    Request::CarryOut => Running::Saves(worker::carry_out(
+                        &cfg,
+                        &ra_root,
+                        &app_dir,
+                        &library_root,
+                    )),
+                    Request::Refresh => Running::Saves(worker::refresh_index(&cfg, &app_dir)),
+                    Request::Stars => Running::Stars(worker::stars(&cfg, &app_dir, false)),
+                    Request::StarsApply => Running::Stars(worker::stars(&cfg, &app_dir, true)),
+                });
             }
         }
 
-        // Anything the worker has said since the last frame.
+        // Anything the worker has said since the last frame. Which fold it
+        // goes through is decided by which job is running, not by the message:
+        // the two syncs report the same kinds of thing and only the caller
+        // knows whose news it is.
         if let Some(running) = &job {
-            let messages = running.drain();
+            let messages = running.job().drain();
             if !messages.is_empty() {
-                worker::apply(&mut app.stage, &mut app.conflicts, messages);
-                if !app.stage.is_busy() {
-                    job = None;
+                match running {
+                    Running::Saves(_) => {
+                        worker::apply(&mut app.stage, &mut app.conflicts, messages);
+                        if !app.stage.is_busy() {
+                            job = None;
+                        }
+                    }
+                    Running::Stars(_) => {
+                        worker::apply_stars(&mut app.stars, &mut app.star_plan, messages);
+                        if !app.stars.is_busy() {
+                            job = None;
+                        }
+                    }
                 }
             }
         }
         let note = app.stage.note();
         app.sync.set_fact("status", &note);
+        let stars_note = app.stars.note();
+        app.sync.set_note("stars", &stars_note);
 
         gfx.resize(ui::PANEL.0 as f32, ui::PANEL.1 as f32);
         view.draw(&gfx, &mut painter, &app);
@@ -485,6 +597,24 @@ fn run_queue(app: &mut App, paths: &Paths, patches: &[Patch]) {
     }
 }
 
+/// Which sync the running job belongs to.
+///
+/// Both report through the same channel, and both say "Note" and "Failed", so
+/// nothing in a message identifies whose it is. The caller started it and is
+/// the only one that knows.
+enum Running {
+    Saves(worker::Job),
+    Stars(worker::Job),
+}
+
+impl Running {
+    fn job(&self) -> &worker::Job {
+        match self {
+            Running::Saves(j) | Running::Stars(j) => j,
+        }
+    }
+}
+
 /// Something only the outside world can do. Returned rather than performed,
 /// so every button press stays testable without a network or a window.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -495,6 +625,10 @@ enum Request {
     CarryOut,
     /// Rebuild the list of games. Everything else is matched through it.
     Refresh,
+    /// Ask what the favourites and collections sync would do. Moves nothing.
+    Stars,
+    /// Do it.
+    StarsApply,
 }
 
 /// One press. Split out so the whole of the app's behaviour can be exercised
@@ -547,6 +681,24 @@ fn act(
                         Some(_) => {
                             app.stage = Stage::Asking { note: "starting".into() };
                             Some(Request::Negotiate)
+                        }
+                        None => None,
+                    };
+                }
+                if id == "stars" {
+                    if app.stars.is_busy() {
+                        return None;
+                    }
+                    // Same two-step as the saves, decided in one place so the
+                    // prompt and the handler cannot disagree.
+                    return match app.stars.next_step() {
+                        Some("carry this out") => {
+                            app.stars = moose_patch::sync::Stars::Asking("starting".into());
+                            Some(Request::StarsApply)
+                        }
+                        Some(_) => {
+                            app.stars = moose_patch::sync::Stars::Asking("starting".into());
+                            Some(Request::Stars)
                         }
                         None => None,
                     };
@@ -638,8 +790,10 @@ mod tests {
         let patches = catalogue::all(&paths);
         let app = App {
             tab: Tab::Patches,
-            sync: rows::sync(None, "not synced yet"),
+            sync: rows::sync(None, "not synced yet", "not checked yet"),
             stage: Stage::default(),
+            stars: moose_patch::sync::Stars::default(),
+            star_plan: None,
             conflicts: Vec::new(),
             patches: rows::patches(&patches),
             overlay: Overlay::None,
@@ -779,6 +933,61 @@ mod tests {
         assert_eq!(press(&mut f, Press::Accept), Some(Request::Negotiate));
         press(&mut f, Press::Accept);
         assert_eq!(press(&mut f, Press::Accept), None, "still busy");
+    }
+
+    #[test]
+    fn a_is_wired_to_the_favourites_row() {
+        // The row exists and A does something on it. "A is not wired to
+        // apply" happened once already; a row that draws and does nothing is
+        // indistinguishable from a broken app.
+        let mut f = fixture("stars-wired");
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Down); // onto "Sync favourites and collections"
+        assert_eq!(
+            f.0.page().selected().map(|r| r.id.as_str()),
+            Some("stars"),
+            "the row moved — this test is pressing A on something else"
+        );
+        press(&mut f, Press::Accept); // the confirmation
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Stars));
+        assert!(f.0.stars.is_busy());
+    }
+
+    #[test]
+    fn looking_at_the_stars_comes_before_moving_them() {
+        // First press asks; only a plan with something in it turns the second
+        // press into one that writes.
+        let mut f = fixture("stars-two-step");
+        f.0.stars = moose_patch::sync::Stars::Ready { headline: "2 to send".into(), moves: 2 };
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::StarsApply));
+
+        // and a plan with nothing in it offers to look again, not to run
+        let mut f = fixture("stars-empty-plan");
+        f.0.stars =
+            moose_patch::sync::Stars::Ready { headline: "nothing to do".into(), moves: 0 };
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Stars));
+    }
+
+    #[test]
+    fn the_two_syncs_do_not_block_each_other() {
+        // Separate stages: looking at the saves must not make the favourites
+        // row unpressable, and the other way round.
+        let mut f = fixture("stars-independent");
+        f.0.stage = Stage::Asking { note: "scanning saves".into() };
+        press(&mut f, Press::TabLeft);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Down);
+        press(&mut f, Press::Accept);
+        assert_eq!(press(&mut f, Press::Accept), Some(Request::Stars));
     }
 
     #[test]

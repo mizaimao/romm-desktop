@@ -10,7 +10,7 @@ use crate::patch::{Patch, State};
 
 /// The sync tab: status you can read at the top, then the things you can set
 /// going.
-pub fn sync(server: Option<&str>, status: &str) -> Page {
+pub fn sync(server: Option<&str>, status: &str, stars: &str) -> Page {
     Page::new(vec![
         Row::fact("server", "Server", server.unwrap_or("not configured")),
         Row::fact("status", "Status", status),
@@ -36,6 +36,15 @@ pub fn sync(server: Option<&str>, status: &str) -> Page {
              would do — which way each save would move, and where both sides changed since \
              the last sync. Nothing is transferred until you accept the plan.",
             "—",
+        ),
+        Row::action(
+            "stars",
+            "Sync favourites and collections",
+            "Matches the games you have starred here against the collections on the server, both \
+             ways. A star added on the web arrives here; one added here is sent back. What was \
+             agreed last time is remembered, so taking a star off travels too instead of coming \
+             straight back. Shows what it would do before it does anything.",
+            stars,
         ),
         Row::action(
             "offline",
@@ -81,7 +90,7 @@ mod tests {
         // Opening the app must not propose a single change, whatever it finds.
         let paths = scratch("fresh");
         assert!(patches(&catalogue::all(&paths)).pending().is_empty());
-        assert!(sync(None, "not synced yet").pending().is_empty());
+        assert!(sync(None, "not synced yet", "not checked yet").pending().is_empty());
     }
 
     #[test]
@@ -134,6 +143,10 @@ mod tests {
     #[test]
     fn the_sync_tab_opens_on_something_you_can_press() {
         // Its first two rows are facts; the cursor has to have skipped them.
-        assert!(sync(None, "not synced yet").selected().is_some_and(|r| r.selectable()));
+        assert!(
+            sync(None, "not synced yet", "not checked yet")
+                .selected()
+                .is_some_and(|r| r.selectable())
+        );
     }
 }

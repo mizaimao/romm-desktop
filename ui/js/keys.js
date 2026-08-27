@@ -362,6 +362,10 @@ export const HANDLERS = {
   download: () => {
     if (state.selected) import("./actions.js").then((m) => m.download(state.selected, false));
   },
+  favorite: () => {
+    if (state.selected)
+      import("./actions.js").then((m) => m.toggleFavorite(state.selected));
+  },
   layout: () => {
     // Wherever the button is offered, the binding works too.
     if (el.layoutBtn.hidden) return;

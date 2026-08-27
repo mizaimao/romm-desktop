@@ -16,7 +16,7 @@ use romm_desktop::cache::Cache;
 use romm_desktop::config::Config;
 use romm_desktop::coremap::CoreMap;
 
-use crate::sync::{Review, Stage};
+use crate::sync::{Review, Stage, Stars};
 
 /// Where the library index lives.
 ///
@@ -48,6 +48,8 @@ pub enum Message {
     /// scanning and negotiating have no total until they finish.
     Note(String),
     Plan(Box<Review>),
+    /// A favourites-and-collections plan, shown before anything moves.
+    Stars(Box<crate::favrun::Plan>),
     /// A sync ran. `conflicts` are the saves that changed on both sides:
     /// nothing was written for those and they still need a person.
     Finished {
@@ -113,6 +115,107 @@ fn prepare(
     // across an await.
     drop(cache);
     Ok(Ready { candidates })
+}
+
+/// Favourites and collections, both ways.
+///
+/// One job for looking and for doing, because the looking is the expensive
+/// part — reading nine gamelists off an exFAT card and asking the server for
+/// every collection — and doing it twice to carry out what it just worked out
+/// would double the wait for no gain. `carry_out` decides which.
+///
+/// Unlike the save sync this does *not* re-negotiate before acting. There is
+/// no server-side session to go stale, and re-reading would only widen the
+/// window in which the card changes under us.
+pub fn stars(cfg: &Config, app_dir: &Path, carry_out: bool) -> Job {
+    let (tx, rx) = channel();
+    let server = cfg.server.url.clone();
+    let username = cfg.server.username.clone();
+    let password = cfg.server.password.clone();
+    let token = cfg.server.token.clone();
+    let app_dir = app_dir.to_path_buf();
+
+    std::thread::spawn(move || {
+        let tx2 = tx.clone();
+        let say = move |m: Message| {
+            let _ = tx2.send(m);
+        };
+        let Some(cache_path) = find_cache(&cache_search_path(&app_dir)) else {
+            return say(Message::Failed(
+                "no library index — the stars cannot be matched to the server".into(),
+            ));
+        };
+        let cache = match Cache::open(&cache_path) {
+            Ok(c) => c,
+            Err(e) => return say(Message::Failed(format!("opening the index: {e:#}"))),
+        };
+        let platform = romm_desktop::platform::current();
+        let es = crate::favmap::EsPaths::knulli();
+
+        say(Message::Note("looking at what is on the card".into()));
+        let known = match crate::favmap::on_card(&cache, platform, &es.roms) {
+            Ok(k) => k,
+            Err(e) => return say(Message::Failed(format!("reading the card: {e:#}"))),
+        };
+
+        let baseline_path = app_dir.join("favorites-baseline.json");
+        let mut baseline = crate::favsync::Baseline::load(&baseline_path);
+
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(r) => r,
+            Err(e) => return say(Message::Failed(format!("starting the network: {e}"))),
+        };
+        say(Message::Note("asking the server for its collections".into()));
+        let result: Result<Message, String> = runtime.block_on(async {
+            let client = romm_desktop::api::Client::with_auth(
+                &server,
+                &username,
+                &password,
+                token.as_deref().filter(|t| !t.is_empty()),
+            )
+            .map_err(|e| format!("{e:#}"))?;
+            let plan =
+                crate::favrun::plan(&client, &cache, &es, &known, &baseline, platform)
+                    .await
+                    .map_err(|e| format!("{e:#}"))?;
+            if !carry_out {
+                return Ok(Message::Stars(Box::new(plan)));
+            }
+            say(Message::Note("applying".into()));
+            let report = crate::favrun::carry_out(&client, &es, &known, &plan, &mut baseline)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            // The baseline is saved after the work, never before: a run that
+            // died halfway must be worked out again, not recorded as agreed.
+            if let Err(e) = baseline.save(&baseline_path) {
+                return Err(format!("saving what was agreed: {e:#}"));
+            }
+            let shown = crate::favrun::show_all(&es, &plan).unwrap_or(false);
+            let mut note = match (report.applied_here, report.sent) {
+                (0, 0) => "nothing to change".to_owned(),
+                (0, n) => format!("{n} sent"),
+                (n, 0) => format!("{n} applied here"),
+                (a, b) => format!("{a} applied here, {b} sent"),
+            };
+            if shown {
+                note.push_str(" — EmulationStation told to show them");
+            }
+            if !report.failed.is_empty() {
+                note.push_str(&format!(" ({} failed)", report.failed.len()));
+            }
+            Ok(Message::Finished {
+                moved: report.applied_here + report.sent,
+                note,
+                conflicts: Vec::new(),
+            })
+        });
+        match result {
+            Ok(m) => say(m),
+            Err(e) => say(Message::Failed(e)),
+        }
+    });
+
+    Job { rx }
 }
 
 /// Carry out what the plan said.
@@ -416,6 +519,40 @@ pub fn apply(
                 *held = conflicts;
                 Stage::Done { moved, conflicts: count, note }
             }
+            // Belongs to the other job. The caller knows which job it is
+            // draining and routes it to `apply_stars`; reaching here means a
+            // stars message arrived on the save channel, which nothing sends.
+            Message::Stars(_) => continue,
+        };
+    }
+}
+
+/// The same fold, for the favourites job.
+///
+/// The plan is kept beside the stage rather than inside it, for the reason the
+/// conflicts are: the stage is compared every frame to decide whether anything
+/// changed, and a plan holding every collection on the server is not something
+/// to compare at 60Hz.
+pub fn apply_stars(
+    stars: &mut Stars,
+    held: &mut Option<crate::favrun::Plan>,
+    messages: Vec<Message>,
+) {
+    for message in messages {
+        *stars = match message {
+            Message::Note(note) => Stars::Asking(note),
+            Message::Stars(plan) => {
+                let stage = Stars::Ready { headline: plan.headline(), moves: plan.total() };
+                *held = Some(*plan);
+                stage
+            }
+            Message::Failed(why) => Stars::Failed(why),
+            Message::Finished { note, .. } => {
+                // Carried out: the plan it was made from is spent.
+                *held = None;
+                Stars::Done(note)
+            }
+            Message::Plan(_) => continue,
         };
     }
 }

@@ -203,9 +203,24 @@ export async function selectRom(id) {
 
   // The other half of the morph: same name as the tagged card art, so the
   // browser treats them as one element moving rather than two fading.
-  const cover = d.cover
-    ? `<img class="cover" data-fit="1" style="view-transition-name: cover" src="${convertFileSrc(d.cover)}" alt="" />`
-    : "";
+  // Always the box, with or without a picture in it.
+  //
+  // The pane used to grow to whatever height the artwork happened to be, so
+  // moving the cursor down a list resized the box and shoved every line of text
+  // under it to a new place — once when the old picture went and again when the
+  // new one arrived. On a handheld, where the cursor moves a game at a time,
+  // that reads as the whole pane flickering.
+  //
+  // A fixed box means the text below never moves: the space is reserved before
+  // the image has loaded, and a game with no artwork at all leaves the same gap
+  // rather than closing it up.
+  const cover = `<div class="coverbox">${
+    d.cover
+      ? `<img class="cover" data-fit="1" style="view-transition-name: cover" src="${convertFileSrc(
+          d.cover
+        )}" alt="" />`
+      : `<span class="cover-none" aria-hidden="true"></span>`
+  }</div>`;
 
   // What this game has, as three small tags rather than a button here and two
   // links at the very bottom of the pane.
@@ -822,17 +837,25 @@ async function fitPictures(root) {
     const url = img.currentSrc || img.src;
     if (!url) continue;
     // Measured against the box it is stretched to fill, not its own size.
-    const [boxW] = boxSize(img.parentElement ?? img);
+    const box = img.parentElement ?? img;
+    const [boxW, boxH] = boxSize(box);
     const width = boxW || img.clientWidth;
     if (!width) continue;
-    // Twice the width as the height bound: these are all portrait-ish or
-    // landscape box art, and the width is what actually constrains them.
-    const canvas = await fitted(url, width, width * 2);
+    // Inside a box of its own — the cover — the height is a real bound and has
+    // to be respected, or the picture decides the pane's height and every game
+    // is a different shape. Everywhere else the width is what constrains these,
+    // so twice the width stands in for "no limit".
+    const boxed = box.classList?.contains("coverbox");
+    const canvas = await fitted(url, width, boxed && boxH ? boxH : width * 2);
     if (!canvas || !img.isConnected) continue;
     canvas.className = img.className;
     canvas.style.cssText = img.style.cssText;
-    canvas.style.width = "100%";
-    canvas.style.height = "auto";
+    if (!boxed) {
+      canvas.style.width = "100%";
+      canvas.style.height = "auto";
+    }
+    // In a box, `fitted` has already sized it to fit and the stylesheet centres
+    // it; overriding to 100% x auto here is what stretched it back out.
     img.replaceWith(canvas);
   }
 }

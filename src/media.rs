@@ -11,6 +11,7 @@
 //! <media_root>/<platform>/videos/<rom basename>.mp4
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -206,13 +207,77 @@ pub const MANUALS: &str = "manuals";
 /// Look for an already-present media file, whatever its extension.
 pub fn find_local(media_root: &Path, platform: &str, stem: &str, kind: &str) -> Option<PathBuf> {
     let dir = media_root.join(platform).join(kind);
-    for entry in std::fs::read_dir(dir).ok()?.flatten() {
-        let path = entry.path();
-        if path.file_stem().is_some_and(|s| s == stem) && path.is_file() {
-            return path.canonicalize().ok();
-        }
+    let file = dir_index(&dir).get(&stem.to_lowercase())?.clone();
+    dir.join(file).canonicalize().ok()
+}
+
+type DirIndex = std::sync::Arc<BTreeMap<String, String>>;
+/// The index, and the directory's modification time when it was read.
+type CachedDir = (Option<std::time::SystemTime>, DirIndex);
+static DIR_CACHE: std::sync::OnceLock<std::sync::Mutex<BTreeMap<PathBuf, CachedDir>>> =
+    std::sync::OnceLock::new();
+
+/// When the directory last changed, or `None` if it cannot be asked.
+fn dir_stamp(dir: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(dir).ok()?.modified().ok()
+}
+
+/// One media directory, indexed by lowercased file stem, read once.
+///
+/// The info pane asks about roughly ten kinds of artwork for every game the
+/// cursor lands on, and each ask was a full `read_dir` scanned linearly. On the
+/// Thor the Mega Drive artwork folders hold about nine hundred files each and
+/// sit on a memory card, so that was ten directory walks over FUSE per press:
+/// `rom_detail` measured 650-750ms, which is what "the panel lags behind the
+/// cursor" was.
+///
+/// Read once per directory per session instead. There are a few dozen of them —
+/// one per system per art type — so the whole library costs a few dozen walks
+/// rather than ten per keypress.
+///
+/// Lowercased on both sides because the card is case-insensitive and the
+/// gamelist's spelling of a title does not always match the file's.
+pub fn dir_index(dir: &Path) -> DirIndex {
+    let cache = DIR_CACHE.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()));
+    // One `stat` to decide whether the remembered listing is still true, rather
+    // than walking the directory again. Adding or removing a file changes a
+    // directory's modification time, so this catches a scrape that lands while
+    // the app is running — and it is what stops the cache being a bug.
+    let stamp = dir_stamp(dir);
+    if let Ok(map) = cache.lock()
+        && let Some((seen, hit)) = map.get(dir)
+        && *seen == stamp
+    {
+        return hit.clone();
     }
-    None
+    let mut index = BTreeMap::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let (Some(stem), Some(name)) = (
+            path.file_stem().and_then(|s| s.to_str()),
+            path.file_name().and_then(|s| s.to_str()),
+        ) else {
+            continue;
+        };
+        index.insert(stem.to_lowercase(), name.to_owned());
+    }
+    let index = std::sync::Arc::new(index);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(dir.to_path_buf(), (stamp, index.clone()));
+    }
+    index
+}
+
+/// Forget the indexes, so artwork written during this session is seen.
+///
+/// Without it a picture fetched by a scrape would not appear until a restart,
+/// which is how a cache like this turns into a bug.
+pub fn forget_dir_indexes() {
+    if let Some(cache) = DIR_CACHE.get()
+        && let Ok(mut map) = cache.lock()
+    {
+        map.clear();
+    }
 }
 
 /// Percent-encode a server path, preserving `/` and `?`.

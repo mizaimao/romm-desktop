@@ -147,6 +147,17 @@ const FAVORITE_ROMS: &str = "SELECT cr.rom_id FROM collection_roms cr \
                               JOIN collections c ON c.id = cr.collection_id \
                               WHERE c.is_favorite = 1 OR c.name LIKE '★%'";
 
+/// What a per-system starred collection is called on this library.
+///
+/// The nine "★ Best of …" lists were made by hand on the server and are
+/// already mirrored onto the handheld game-for-game, so a star added here has
+/// to land in the same place rather than start a tenth convention beside them.
+/// The suffix is the RomM platform slug — `megadrive`, `neogeoaes` — because
+/// that is what the existing names use.
+pub fn star_name(platform: &str) -> String {
+    format!("★ Best of {platform}")
+}
+
 const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name), \
                            fs_name, COALESCE(fs_size_bytes, 0), md5_hash, sha1_hash, \
                            cover_path, screenshot_path, screenshots_json, \
@@ -610,6 +621,87 @@ impl Cache {
             .query_map([], |r| r.get::<_, i64>(0))?
             .collect::<Result<std::collections::HashSet<_>, _>>()?;
         Ok(ids)
+    }
+
+    // --- Starring, written straight through --------------------------------
+    //
+    // The star has to light up the moment it is pressed, and a full
+    // `replace_collections` means asking the server for every collection it
+    // has. So the one row that changed is changed here too, and the next sync
+    // overwrites it with the truth. If the server call failed, nothing below
+    // is reached and the cache still says what the server says.
+
+    /// The collection a star lives in, if this library already has one.
+    ///
+    /// Flagged first, named second — `is_favorite` is RomM's own idea of the
+    /// thing, and a name is only how somebody spelt it when the server had no
+    /// flag to offer. `platform` picks between per-system starred lists, which
+    /// is how this library is arranged; a library with one starred collection
+    /// for everything matches it whatever the platform.
+    pub fn starred_collection(&self, platform: &str) -> Result<Option<(String, String)>> {
+        let wanted = star_name(platform);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name FROM collections
+             WHERE grp = 'user' AND (is_favorite = 1 OR name LIKE '★%')
+             ORDER BY (name = ?1) DESC, is_favorite DESC, name COLLATE NOCASE
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![wanted])?;
+        // Only an exact per-platform match, or a library-wide starred list,
+        // will do. "★ Best of nes" must never catch a star on a SNES game.
+        while let Some(r) = rows.next()? {
+            let (id, name): (String, String) = (r.get(0)?, r.get(1)?);
+            if name == wanted || !name.starts_with("★ Best of ") {
+                return Ok(Some((id, name)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Record a collection the server has just made, so the star has somewhere
+    /// to point before the next full sync.
+    pub fn remember_collection(&mut self, c: &api::Collection) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO collections
+             (id, name, grp, description, rom_count, is_favorite)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![c.id, c.name, c.group(), c.description, c.rom_ids.len() as i64, c.is_favorite as i64],
+        )?;
+        Ok(())
+    }
+
+    /// How many games a collection claims, as recorded here.
+    pub fn collection_size(&self, collection_id: &str) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT rom_count FROM collections WHERE id = ?1",
+            params![collection_id],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Put one game in a collection, or take it out, and keep the count right.
+    pub fn set_membership(&mut self, collection_id: &str, rom_id: i64, member: bool) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        if member {
+            tx.execute(
+                "INSERT OR IGNORE INTO collection_roms(collection_id, rom_id) VALUES (?1, ?2)",
+                params![collection_id, rom_id],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM collection_roms WHERE collection_id = ?1 AND rom_id = ?2",
+                params![collection_id, rom_id],
+            )?;
+        }
+        // Counted, not incremented: a repeated star would otherwise inflate it.
+        tx.execute(
+            "UPDATE collections SET rom_count =
+               (SELECT COUNT(*) FROM collection_roms WHERE collection_id = ?1)
+             WHERE id = ?1",
+            params![collection_id],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// The games played most recently, newest first.

@@ -125,6 +125,26 @@ pub fn merge_config(base: &str, overlay: &str) -> String {
         }
         ours.push((key.to_owned(), value.trim().to_owned()));
     }
+    // One entry per key, the last one winning — which is how RetroArch reads a
+    // file with a repeated key, and how the fragment is built: a later block
+    // deliberately overrides an earlier one.
+    //
+    // Deduplicated here rather than at the point of use, because the two halves
+    // of the merge disagreed about it otherwise: the replacement below consumed
+    // only the last, and the append at the end then wrote the *earlier* value
+    // back out — after it. `auto_shaders_enable` came out both "true" and
+    // "false", in that order, and the file ended with the one we did not mean.
+    {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut deduped: Vec<(String, String)> = Vec::with_capacity(ours.len());
+        for (key, value) in ours.into_iter().rev() {
+            if seen.insert(key.clone()) {
+                deduped.push((key, value));
+            }
+        }
+        deduped.reverse();
+        ours = deduped;
+    }
 
     let mut used = vec![false; ours.len()];
     let mut out = String::with_capacity(base.len() + overlay.len());
@@ -1383,6 +1403,22 @@ mod tests {
 
     /// A replaced key keeps its position, so the merged file still reads like
     /// the user's own — and a key is replaced, never added twice.
+    /// A key set twice in the fragment has to leave the file once, with the
+    /// later value. The first version consumed only the last of them and then
+    /// appended the earlier one at the end, so the file finished with the value
+    /// that had been overridden — `auto_shaders_enable` came out "false" after
+    /// something had deliberately set it "true".
+    #[test]
+    fn a_key_set_twice_in_the_fragment_lands_once_with_the_later_value() {
+        let out = super::merge_config(
+            "auto_shaders_enable = \"x\"\nother = \"keep\"\n",
+            "auto_shaders_enable = \"false\"\nauto_shaders_enable = \"true\"\n",
+        );
+        assert_eq!(out.matches("auto_shaders_enable").count(), 1, "once, not twice");
+        assert!(out.contains("auto_shaders_enable = \"true\""), "the later value wins");
+        assert!(out.contains("other = \"keep\""));
+    }
+
     #[test]
     fn merging_replaces_in_place_rather_than_appending_a_second_copy() {
         let base = "a = \"1\"\nb = \"2\"\nc = \"3\"\n";

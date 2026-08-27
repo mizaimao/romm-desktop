@@ -361,9 +361,65 @@ fn dir_size(p: &Path) -> i64 {
 pub fn media_path(layout: &Layout, system: &str, stem: &str, kind: &str) -> Option<PathBuf> {
     const EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "mp4", "webm", "mkv", "pdf"];
     let dir = layout.media.join(system).join(kind);
-    EXTS.iter()
-        .map(|e| dir.join(format!("{stem}.{e}")))
-        .find(|p| p.is_file())
+    let names = media_listing(&dir);
+    EXTS.iter().find_map(|e| {
+        let file = format!("{stem}.{e}");
+        names.contains(&file.to_lowercase()).then(|| dir.join(file))
+    })
+}
+
+type MediaListings = BTreeMap<PathBuf, std::sync::Arc<std::collections::HashSet<String>>>;
+static MEDIA_LISTING_CACHE: std::sync::OnceLock<std::sync::Mutex<MediaListings>> =
+    std::sync::OnceLock::new();
+
+/// Every file in one media directory, lowercased, read once.
+///
+/// This used to be eight `is_file` calls per art type per game — around eighty
+/// for one row of the info pane, each a stat over FUSE on a memory card.
+/// Measured on the Thor: `rom_detail` took 650-750ms, and moving the cursor one
+/// game was that long behind the press.
+///
+/// One `read_dir` per directory instead, kept for the session. The directories
+/// are per system and per art type, so there are a few dozen of them and each
+/// is read the first time a game needs it.
+///
+/// Lowercased because the card is case-insensitive and the gamelist's spelling
+/// of a name does not always match the file's.
+fn media_listing(dir: &Path) -> std::sync::Arc<std::collections::HashSet<String>> {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    let cache = MEDIA_LISTING_CACHE.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()));
+
+    if let Ok(map) = cache.lock()
+        && let Some(hit) = map.get(dir)
+    {
+        return hit.clone();
+    }
+    let names: HashSet<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(|n| n.to_lowercase()))
+        .collect();
+    let names = Arc::new(names);
+    if let Ok(mut map) = cache.lock() {
+        map.insert(dir.to_path_buf(), names.clone());
+    }
+    names
+}
+
+/// Forget the media listings, so newly scraped artwork is seen.
+///
+/// Called after anything writes into the media tree. Without it a picture
+/// downloaded during the session would not appear until a restart, which is the
+/// one way a cache like this becomes a bug rather than a saving.
+pub fn forget_media_listings() {
+    // Rebuilt lazily on the next lookup; clearing is enough.
+    if let Some(cache) = MEDIA_LISTING_CACHE.get()
+        && let Ok(mut map) = cache.lock()
+    {
+        map.clear();
+    }
 }
 
 #[cfg(test)]

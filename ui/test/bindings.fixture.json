@@ -57,6 +57,10 @@
       "label": "Download without playing"
     },
     {
+      "id": "favorite",
+      "label": "Star this game"
+    },
+    {
       "id": "layout",
       "label": "Toggle grid / list"
     },
@@ -123,6 +127,7 @@
     "back2": "⌫",
     "down": "↓",
     "download": "—",
+    "favorite": "*",
     "filterMenu": "F",
     "first": "HOME",
     "help": "?",
@@ -154,6 +159,7 @@
     "back2": "Backspace",
     "down": "ArrowDown",
     "download": null,
+    "favorite": "*",
     "filterMenu": "f",
     "first": "Home",
     "help": "?",
@@ -251,6 +257,7 @@
     "back2": "unset",
     "down": "D-pad down",
     "download": "unset",
+    "favorite": "unset",
     "filterMenu": "unset",
     "first": "unset",
     "help": "Start / Options",

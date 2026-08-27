@@ -1642,6 +1642,42 @@ async fn rom_covers(
     Ok(out)
 }
 
+/// Star a game, or take the star off. Returns what it now is.
+///
+/// The star is a *collection* on the server, not a flag on the game, so this
+/// reaches the handheld and the phone as well — see `romm_desktop::favorites`.
+/// Three steps, because the cache is behind a lock this must not hold while it
+/// waits on the network: work out where the star goes, do it on the server,
+/// then write it down.
+#[tauri::command]
+async fn set_favorite(state: State<'_, AppState>, id: i64, starred: bool) -> CmdResult<bool> {
+    let client = state
+        .client
+        .clone()
+        .ok_or("no server connection — check config.toml")?;
+
+    let target = {
+        let cache = state.cache.lock().map_err(err)?;
+        let row = cache
+            .rom_by_id(id)
+            .map_err(err)?
+            .ok_or_else(|| format!("no rom with id {id}"))?;
+        romm_desktop::favorites::target(&cache, &row.platform_slug).map_err(err)?
+    };
+
+    let landed = romm_desktop::favorites::on_server(&client, target, id, starred)
+        .await
+        .map_err(err)?;
+    let Some(landed) = landed else {
+        // Unstarring something that was never in a list. Nothing failed.
+        return Ok(false);
+    };
+
+    let mut cache = state.cache.lock().map_err(err)?;
+    romm_desktop::favorites::record(&mut cache, &landed, id, starred).map_err(err)?;
+    Ok(starred)
+}
+
 /// Download a ROM, emitting `download-progress` events as it goes.
 #[tauri::command]
 async fn download_rom(
@@ -1749,6 +1785,10 @@ async fn scrape_missing(
     state: State<'_, AppState>,
     platform: Option<String>,
 ) -> CmdResult<String> {
+    // The media listings are cached for the session, so anything written below
+    // is invisible until they are dropped. See `esde::media_listing`.
+    let _drop_media_cache = scopeguard_forget_media();
+
     use romm_desktop::scrape;
 
     let client = state
@@ -2663,9 +2703,16 @@ fn write_game_preset(
     if std::fs::create_dir_all(&dir).is_err() {
         return String::new();
     }
-    let Ok(body) = std::fs::read_to_string(preset) else {
+    // Rewritten, not copied. A `.slangp` names its shaders relative to its own
+    // directory, so the file that works in the shader tree refers to nothing
+    // once it is sitting in RetroArch's config directory — and RetroArch fails
+    // to load it silently, which looks exactly like the shader setting being
+    // ignored. `handheld/ags001.slangp` says `shader0 = shaders/mgba/ags001.slang`
+    // and that is what came out the other end.
+    let Ok(parsed) = romm_desktop::slangp::Preset::load(Path::new(preset)) else {
         return String::new();
     };
+    let body = romm_desktop::slangp::standalone(&parsed);
     let dest = dir.join(format!("{stem}.slangp"));
     if std::fs::write(&dest, body).is_err() {
         return String::new();
@@ -2674,6 +2721,23 @@ fn write_game_preset(
      # only thing that loads a preset with content when there is no command line.\n\
      auto_shaders_enable = \"true\"\n"
         .to_owned()
+}
+
+/// Clear the cached media listings when this value goes out of scope.
+///
+/// A scrape writes new artwork, and the listings are read once per directory
+/// per session — so without this a picture fetched now would not appear until
+/// the app was restarted. Tied to the scope rather than to a line at the end of
+/// the function, because the function has several early returns.
+fn scopeguard_forget_media() -> impl Drop {
+    struct Forget;
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            romm_desktop::esde::forget_media_listings();
+            romm_desktop::media::forget_dir_indexes();
+        }
+    }
+    Forget
 }
 
 /// Rapid fire as configured, or off.
@@ -4544,6 +4608,7 @@ pub fn run() {
             collection_roms,
             rom_detail,
             download_rom,
+            set_favorite,
             rom_covers,
             launch_rom,
             android_launch_plan,
