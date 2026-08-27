@@ -495,8 +495,8 @@ export const BACKDROPS = [
           // of the same change: there is less grey to wash the hue out.
           float value = edge * 0.44 + fres * 0.30 + lets * 0.22 + sheen;
           lit = vec3(0.02 + value * 0.40) * 0.30 + u_high * (0.30 + value * 0.85);
-          // A fifth opaque at the very most: mostly transparent, a suggestion
-          // over the haze rather than an object in front of it.
+          // Two fifths opaque at the very most: still see-through, but present
+          // enough to be a thing in the haze rather than a suggestion of one.
           //
           // Scaled down to a tenth rather than clipped at one, which is the
           // difference between keeping the shape and losing it — a clamp would
@@ -504,7 +504,7 @@ export const BACKDROPS = [
           // uniform grey tile. Thin across a face and gathering at the edges and
           // the rim is still where a pane of glass actually stops light.
           cover = clamp(0.16 + edge * 0.46 + fres * 0.28 + lets * 0.14, 0.0, 1.0)
-                * 0.20 * (0.32 + 0.68 * nearness) * soft;
+                * 0.40 * (0.32 + 0.68 * nearness) * soft;
         }
       }
 
