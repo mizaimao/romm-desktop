@@ -19,6 +19,7 @@ import { loadListControls } from "./sort.js";
 import { setFilters } from "./filter.js";
 import { warmRefresh } from "./actions.js";
 import { redrawCollections } from "./collections.js";
+import { installAttractScreen } from "./attract-screen.js";
 import {
   startBackdrop, stopBackdrop, applyBackdropSettings,
   applyStoredGlassTint, setGlassTint, setGlassStrength,
@@ -377,6 +378,10 @@ function statusCard(s) {
     document.documentElement.classList.add("mobile");
   }
   installKeys();
+  // Last, and above everything it covers. The counter is one number at window
+  // level — no view has to know attract mode exists — so this is the only place
+  // in the app that mentions it.
+  installAttractScreen();
   // Answers the Android Back button. Inert everywhere else.
   installAndroidBack();
   installGamepad();

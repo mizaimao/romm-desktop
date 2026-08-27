@@ -86,6 +86,25 @@ export function makeSampler(pool, random = Math.random) {
   };
 }
 
+/// Which keys mean "start this" rather than "go away".
+///
+/// ES has `ScreenSaverControls`: with it on, input during attract mode launches
+/// the game being shown; with it off, input only dismisses. Both frontends do
+/// the launching, and it is the thing that makes this attract mode rather than
+/// a screensaver.
+///
+/// Here rather than beside the overlay that uses it, because it is a decision
+/// and not presentation — and because this module has no DOM behind it, so it
+/// can be tested without standing up half the app. Getting it wrong the
+/// generous way means Escape launches something, which is the opposite of what
+/// somebody reaching for Escape wants, on a screen that gave them no warning it
+/// was about to run a game.
+const LAUNCH_KEYS = new Set(["Enter", " ", "NumpadEnter"]);
+
+export function launchesOn(key) {
+  return LAUNCH_KEYS.has(key);
+}
+
 /// Everything the counter watches. Movement included: a mouse crossing the
 /// window is somebody at the machine, and a screensaver that ignores that is
 /// the kind people disable rather than fix.
@@ -145,6 +164,13 @@ export function installAttract({ onStart, onStop, now = () => Date.now(),
   // every frame; this is not, and a five-minute timer does not need to be
   // accurate to sixteen milliseconds.
   const timer = setInterval(check, 1000);
+  // Unreferenced where that means anything. In a browser this is a number and
+  // the call does nothing; under Node it is a handle, and an interval that
+  // nobody clears keeps the process alive — which is what happened the moment
+  // this was wired into main.js, because two test files import that and the
+  // whole suite then hung instead of finishing. A timer for a five-minute idle
+  // check has no business deciding when a program may exit.
+  timer?.unref?.();
 
   const stop = () => {
     clearInterval(timer);

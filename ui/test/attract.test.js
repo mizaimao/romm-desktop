@@ -154,3 +154,19 @@ describe("the sampler", () => {
     assert.equal(s.next(), "only", "insisting on a different one would spin for ever");
   });
 });
+
+describe("what a press does", () => {
+  /// Enter starts the game; anything else only dismisses. Getting this wrong
+  /// the generous way means Escape launches something, which is the opposite of
+  /// what somebody reaching for Escape wants — and they are already looking at
+  /// a screen that gave them no warning it was about to run a game.
+  test("only the accepting keys launch", () => {
+    const { launchesOn } = mod;
+    for (const key of ["Enter", " ", "NumpadEnter"]) {
+      assert.equal(launchesOn(key), true, `${key} should start the game`);
+    }
+    for (const key of ["Escape", "a", "ArrowLeft", "Tab", "Backspace", "F5"]) {
+      assert.equal(launchesOn(key), false, `${key} must not start a game`);
+    }
+  });
+});

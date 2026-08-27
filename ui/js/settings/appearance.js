@@ -129,6 +129,19 @@ export const html = `      <h4>Layout</h4>
         <div class="ctl"><button class="bd-reset-style">Reset this backdrop</button>
           <span class="bd-style-state dim"></span></div>
       </div>
+      <h4>Attract mode</h4>
+      <div class="srow">
+        <label>After</label>
+        <div class="ctl">
+          <input class="at-idle" type="number" min="0" max="3600" step="30" />
+          <span class="dim">seconds idle</span>
+          <button class="at-preview">Show it now</button>
+        </div>
+      </div>
+      <p class="hint">Left alone this long, the app starts showing artwork from
+        your library, and a press starts whatever is on screen. <b>0 turns it
+        off.</b></p>
+
       <div class="srow">
         <label>Frame rate</label>
         <div class="ctl">
@@ -210,6 +223,7 @@ export function wire(box) {
   wireShellMode(box);
   wireViewLayouts(box);
   wireBackdropFps(box);
+  wireAttract(box);
   wireIconStyles(box);
   wireAppIcons(box);
 
@@ -674,6 +688,37 @@ async function wireIconStyles(box) {
     } finally {
       stop?.();
       btn.disabled = false;
+    }
+  });
+}
+
+/// How long the app waits before it starts showing artwork, and a way to see it
+/// without waiting.
+///
+/// The preview button is not a convenience. Five minutes is the default and
+/// nobody is going to sit through it to find out whether the thing works, so
+/// without this the feature can only be judged by changing a setting and going
+/// away — which is how a broken screensaver ships.
+function wireAttract(box) {
+  const field = box.querySelector(".at-idle");
+  if (!field) return;
+  import("../attract.js").then(({ attractIdleSeconds, setAttractIdleSeconds }) => {
+    field.value = String(attractIdleSeconds());
+    field.addEventListener("change", () => {
+      field.value = String(setAttractIdleSeconds(field.value));
+      toast(Number(field.value) > 0
+        ? `Attract mode after ${field.value} seconds`
+        : "Attract mode off");
+    });
+  });
+  box.querySelector(".at-preview")?.addEventListener("click", async () => {
+    // Shown in the window that has the library in it, not this one: the
+    // settings page is its own document and covering it would prove nothing.
+    try {
+      await window.__TAURI__.event.emit("attract-now");
+      toast("Showing it in the main window");
+    } catch {
+      toast("Could not reach the main window", 6000);
     }
   });
 }
