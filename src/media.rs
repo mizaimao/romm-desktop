@@ -222,6 +222,33 @@ fn dir_stamp(dir: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(dir).ok()?.modified().ok()
 }
 
+/// How recently a directory has to have changed before its listing is treated
+/// as still moving.
+///
+/// A modification time is only as fine as the filesystem keeps it, and several
+/// keep it to the second. Two writes inside one tick leave the stamp identical,
+/// so "has this directory changed" answers no when it has — and the remembered
+/// listing is served with the new file missing from it. On APFS the timestamps
+/// are fine enough to hide this entirely; on the Linux runner it failed the
+/// first time it ran.
+///
+/// It is not only a test's problem. A scrape landing in the same tick as a
+/// lookup would leave that picture invisible for the rest of the session, which
+/// is exactly the bug the cache was written not to have.
+///
+/// So a directory touched within this window is read rather than remembered.
+/// While art is arriving that means a walk per lookup, which is the cost of
+/// being right during the one second it matters; a directory nobody is writing
+/// to is cached as before, which is every directory almost all of the time.
+const SETTLED_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether `stamp` is old enough for a remembered listing to be trusted.
+fn settled(stamp: Option<std::time::SystemTime>) -> bool {
+    stamp
+        .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+        .is_some_and(|age| age >= SETTLED_AFTER)
+}
+
 /// One media directory, indexed by lowercased file stem, read once.
 ///
 /// The info pane asks about roughly ten kinds of artwork for every game the
@@ -244,7 +271,8 @@ pub fn dir_index(dir: &Path) -> DirIndex {
     // directory's modification time, so this catches a scrape that lands while
     // the app is running — and it is what stops the cache being a bug.
     let stamp = dir_stamp(dir);
-    if let Ok(map) = cache.lock()
+    if settled(stamp)
+        && let Ok(map) = cache.lock()
         && let Some((seen, hit)) = map.get(dir)
         && *seen == stamp
     {
@@ -262,7 +290,11 @@ pub fn dir_index(dir: &Path) -> DirIndex {
         index.insert(stem.to_lowercase(), name.to_owned());
     }
     let index = std::sync::Arc::new(index);
-    if let Ok(mut map) = cache.lock() {
+    // Not remembered while it is still moving: caching a listing read during
+    // the window would pin it there once the window passed.
+    if settled(stamp)
+        && let Ok(mut map) = cache.lock()
+    {
         map.insert(dir.to_path_buf(), (stamp, index.clone()));
     }
     index

@@ -86,13 +86,20 @@ jobs:
 
       # Windows checks everything except the handheld front end. See the SDL
       # step above for why.
+      #
+      # The addon has to be excluded as well as the renderer, and that is not a
+      # second exclusion for tidiness: `moose-patch` depends on `romm-sdl`, so
+      # excluding only the renderer drops it from what is *checked* while cargo
+      # still has to *build* it for the addon — and it builds `sdl2-sys`, which
+      # is what has no SDL to link against on this runner. The failure names
+      # sdl2-sys and looks like the exclusion was ignored.
       - name: Clippy (without the SDL front end)
         if: runner.os == 'Windows'
-        run: cargo clippy --workspace --exclude romm-sdl --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude romm-sdl --exclude moose-patch --all-targets -- -D warnings
 
       - name: Tests (without the SDL front end)
         if: runner.os == 'Windows'
-        run: cargo test --workspace --exclude romm-sdl
+        run: cargo test --workspace --exclude romm-sdl --exclude moose-patch
 
   ui:
     name: ui
