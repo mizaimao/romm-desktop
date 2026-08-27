@@ -792,7 +792,14 @@ export function backdropStyle(id) {
   return BACKDROPS.find((b) => b.id === id) ?? BACKDROPS[0];
 }
 
-function fragmentFor(id) {
+/// The whole fragment shader for one style: the shared frame with that style's
+/// body spliced into it.
+///
+/// Exported for `tools/backdrop-preview.html`, which compiles exactly what the
+/// app compiles rather than a copy of it — a preview that reassembled the
+/// pieces itself would be a second place the frame lives, and the first thing
+/// it would fail to notice is a change to the frame.
+export function fragmentFor(id) {
   return SHADER_HEAD + backdropStyle(id).body + SHADER_TAIL;
 }
 

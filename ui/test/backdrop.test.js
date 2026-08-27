@@ -445,6 +445,23 @@ describe("the shapes", () => {
 /// Read as text, never through an import. The failure this guards against
 /// stops the module loading at all, so a test that imports it cannot run to
 /// report anything — it just dies with the rest.
+/// `tools/backdrop-preview.html` compiles what the app compiles by calling
+/// `fragmentFor`, so that it is not a second copy of the shared frame. An
+/// export nothing in the app itself calls is exactly the kind that gets tidied
+/// away, and the only sign would be a preview window that stopped working.
+describe("the preview tool's way in", () => {
+  test("fragmentFor assembles the frame around a style's body", () => {
+    assert.equal(typeof backdrop.fragmentFor, "function", "the preview has no way in");
+    for (const b of backdrop.BACKDROPS) {
+      const src = backdrop.fragmentFor(b.id);
+      assert.ok(src.startsWith("#version 300 es"), `${b.id} has no version line`);
+      assert.ok(src.includes(b.body), `${b.id}'s body is not in its shader`);
+      assert.ok(src.includes("void main()"), `${b.id} has no main`);
+      assert.ok(src.trimEnd().endsWith("}"), `${b.id} does not close`);
+    }
+  });
+});
+
 describe("the shader source", () => {
   test("has no backtick inside a template literal", () => {
     const src = readFileSync(join(uiDir, "js/backdrop.js"), "utf8");
