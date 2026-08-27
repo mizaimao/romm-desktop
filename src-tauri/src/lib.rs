@@ -2349,8 +2349,9 @@ fn android_launch_plan(
         found.sort_by_key(|l| !core_file_is(l.core_file.as_deref(), core));
     }
 
-    let (config, notes) =
-        android_config(&state, &row, &retroarch_package, &config_dir, pad.as_deref(), refresh);
+    let (config, notes) = android_config(
+        &state, &row, &rom, &retroarch_package, &config_dir, pad.as_deref(), refresh,
+    );
 
     Ok(AndroidPlan {
         id,
@@ -2470,6 +2471,7 @@ async fn android_after_play(
 fn android_config(
     state: &State<'_, AppState>,
     row: &cache::RomRow,
+    rom: &Path,
     package: &str,
     config_dir: &str,
     pad: Option<&str>,
@@ -2564,8 +2566,31 @@ fn android_config(
     // Tweaks write core options and remaps into `<root>/retroarch/` and point
     // RetroArch at them. On Android that root has to be shared storage: our own
     // files directory is private and RetroArch cannot read a word of it.
+    // Make our preset the one RetroArch's own auto-loader finds first.
+    //
+    // `video_shader` does not load a shader. On the desktop `--set-shader` does
+    // that, and there is no such flag in an Intent — so on Android the only
+    // mechanism that applies a preset with content is the automatic one, which
+    // `OVERRIDES` turns off. Measured on the Thor: same game, same config, with
+    // `auto_shaders_enable = "false"` no shader at all and with it `"true"` a
+    // shader appears.
+    //
+    // Turning it on alone is not enough and is worse than nothing, which is the
+    // trap the comment in `OVERRIDES` describes. RetroArch looks for a preset in
+    // four places — game, content directory, core, global — and takes the first.
+    // Frank's device has a `global.slangp` of thirteen passes left behind by a
+    // handheld; with auto-loading on and nothing of ours in a higher slot, that
+    // is what every game came up in, and it looks exactly like our shader
+    // working.
+    //
+    // So the chain is written into the *game* slot, which outranks all three of
+    // his. His files are not touched: the `.opt` files holding his core settings
+    // live in the same tree and are left alone, and the core and global presets
+    // still apply to anything launched outside this app.
+    let auto_shader = write_game_preset(&ra, &shader_lines, &core, rom);
     let extra = format!(
-        "{}{}{}{}{}",
+        "{}{}{}{}{}{}",
+        auto_shader,
         shader_lines,
         ra.system_dir_line(),
         ra.prepare_tweaks(&out_dir, platform, &core, state_autofire()),
@@ -2603,6 +2628,52 @@ fn android_config(
             (None, notes)
         }
     }
+}
+
+/// Put this launch's shader where RetroArch will look for it, and say so.
+///
+/// Returns the config lines that switch the automatic loader on, or an empty
+/// string when there is no shader to place — in which case auto-loading stays
+/// off and his own presets do not creep in.
+///
+/// The preset is copied rather than referenced because RetroArch resolves an
+/// auto preset by name, not by path: it looks for `<config>/<Core>/<game>.slangp`
+/// and nothing else will do.
+fn write_game_preset(
+    ra: &romm_desktop::retroarch::RetroArch,
+    shader_lines: &str,
+    core: &str,
+    rom: &Path,
+) -> String {
+    // No shader for this platform: leave the automatic loader off, so a preset
+    // of his does not arrive in place of the nothing we asked for.
+    let Some(preset) = shader_lines
+        .lines()
+        .find_map(|l| l.strip_prefix("video_shader = "))
+        .map(|v| v.trim().trim_matches('"'))
+        .filter(|v| !v.is_empty())
+    else {
+        return String::new();
+    };
+    let (Some(dir), Some(stem)) =
+        (ra.core_config_dir(core), rom.file_stem().and_then(|s| s.to_str()))
+    else {
+        return String::new();
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return String::new();
+    }
+    let Ok(body) = std::fs::read_to_string(preset) else {
+        return String::new();
+    };
+    let dest = dir.join(format!("{stem}.slangp"));
+    if std::fs::write(&dest, body).is_err() {
+        return String::new();
+    }
+    "\n# The shader for this game is in RetroArch's own game slot, which is the\n\
+     # only thing that loads a preset with content when there is no command line.\n\
+     auto_shaders_enable = \"true\"\n"
+        .to_owned()
 }
 
 /// Rapid fire as configured, or off.

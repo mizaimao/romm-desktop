@@ -472,8 +472,15 @@ pub const MODIFIER: Physical = Physical::Select;
 
 pub const HOTKEYS: &[(&str, Physical, &str)] = &[
     ("exit_emulator", Physical::A, "quit (asks twice)"),
-    ("shader_toggle", Physical::B, "shaders on/off"),
-    ("fps_toggle", Physical::X, "FPS counter"),
+    // Left face toggles the shader, right face shows the FPS.
+    //
+    // By position, not by letter, because the letters move: RetroPad names the
+    // faces after a SNES pad and an Xbox pad crosses them over, so "B" is the
+    // bottom button on one device and the right one on another. Frank's Thor is
+    // Nintendo-labelled — its Y is the left face and its A is the right — and
+    // this is the arrangement he asked for on it.
+    ("shader_toggle", Physical::X, "shaders on/off"),
+    ("fps_toggle", Physical::B, "FPS counter"),
     ("menu_toggle", Physical::Y, "RetroArch menu"),
     ("load_state", Physical::LB, "load state"),
     ("save_state", Physical::RB, "save state"),
@@ -502,11 +509,13 @@ pub const HOTKEYS: &[(&str, Physical, &str)] = &[
 /// goes through exactly the same path as a profile read off disk. RetroPad
 /// names the face buttons after a SNES pad, so `b` is the *bottom* one.
 ///
-/// **No d-pad.** Android reports it as a hat axis on most pads and as
-/// `DPAD_UP`-style keycodes on some, and the two are not interchangeable.
-/// Guessing would put a hotkey on a direction used constantly in play, which
-/// is the one failure this module exists to avoid — so the four directional
-/// hotkeys are simply not bound here, and [`hotkey_block`] says so in the file.
+/// The d-pad is here too, as `DPAD_UP` and friends. It was left out at first
+/// because Android reports a d-pad as a hat axis on some pads and as keycodes
+/// on others, and binding the wrong one puts a hotkey on a direction held
+/// constantly in play. The Thor settles it: its pad enumerates with a `DPAD`
+/// source, so the keycodes are what arrive. Anything reporting only a hat gets
+/// no directional hotkeys, which is what [`hotkey_block`] already says in the
+/// file it writes.
 const ANDROID_PAD: &str = "\
 input_device = \"Android gamepad\"
 input_driver = \"android\"
@@ -522,6 +531,10 @@ input_l3_btn = \"106\"
 input_r3_btn = \"107\"
 input_start_btn = \"108\"
 input_select_btn = \"109\"
+input_up_btn = \"19\"
+input_down_btn = \"20\"
+input_left_btn = \"21\"
+input_right_btn = \"22\"
 ";
 
 /// The Android pad profile. See [`ANDROID_PAD`].
@@ -637,17 +650,24 @@ mod tests {
         assert_eq!(p.get(Physical::X).unwrap().value, "99", "left face, BUTTON_X");
     }
 
-    /// Not guessed at, on purpose: a direction is held constantly in play, so a
-    /// wrong index there fires hotkeys during a game.
+    /// The d-pad carries the shader hotkeys, and the face buttons are arranged
+    /// by position rather than by letter — the Thor is Nintendo-labelled, so its
+    /// Y is the left face and its A is the right one.
     #[test]
-    fn the_android_pad_leaves_the_dpad_unbound() {
+    fn the_android_pad_binds_the_dpad_and_the_faces_by_position() {
         let p = android();
-        for d in [Physical::Up, Physical::Down, Physical::Left, Physical::Right] {
-            assert!(p.get(d).is_none(), "{d:?} must not be guessed");
-        }
+        assert_eq!(p.get(Physical::Up).unwrap().value, "19", "DPAD_UP");
+        assert_eq!(p.get(Physical::Down).unwrap().value, "20", "DPAD_DOWN");
+
         let block = hotkey_block(&p);
-        assert!(block.contains("input_exit_emulator_btn = \"96\""), "face hotkeys still bound");
-        assert!(block.contains("no Up on this pad"), "and the gap is stated");
+        assert!(block.contains("input_shader_prev_btn = \"19\""), "up cycles shaders back");
+        assert!(block.contains("input_shader_next_btn = \"20\""), "down cycles shaders on");
+        // Left face is the shader toggle, right face is the FPS counter.
+        assert!(block.contains("input_shader_toggle_btn = \"99\""), "left face, BUTTON_X");
+        assert!(block.contains("input_fps_toggle_btn = \"97\""), "right face, BUTTON_B");
+        // Unchanged, and confirmed on the device.
+        assert!(block.contains("input_exit_emulator_btn = \"96\""), "bottom face quits");
+        assert!(block.contains("input_menu_toggle_btn = \"100\""), "top face opens the menu");
     }
     use super::*;
 

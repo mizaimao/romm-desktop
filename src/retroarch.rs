@@ -568,8 +568,50 @@ impl RetroArch {
     }
 
     /// Where per-core settings live: `<config>/<Core>/<Core>.opt`.
+    ///
+    /// RetroArch's own `rgui_config_directory` first, for the same reason
+    /// `shaders_dir` asks: it does not have to be inside the install and on a
+    /// handheld it usually is not. On the Thor it is
+    /// `/storage/emulated/0/RetroArch/config` while the install lives under
+    /// `Android/data`, so deriving it from the root looked in an empty place and
+    /// found none of the per-core settings — or the presets that quietly
+    /// override ours.
     pub fn config_dir(&self) -> PathBuf {
+        if let Some(dir) = self.config_value("rgui_config_directory").filter(|d| !d.is_empty()) {
+            let dir = PathBuf::from(dir);
+            if dir.is_dir() {
+                return dir;
+            }
+        }
         self.data_dir().join("config")
+    }
+
+    /// RetroArch's display name for `core`, as its config directory spells it.
+    ///
+    /// There is no table that could be complete: the name comes from the core's
+    /// own `.info` file, which on Android sits in a directory this app cannot
+    /// read. So the directories RetroArch has already made are the source, and
+    /// they are matched loosely — `genesis_plus_gx` against `Genesis Plus GX`,
+    /// `mupen64plus_next` against `Mupen64Plus-Next` — because the only
+    /// difference is punctuation and case.
+    ///
+    /// The curated list in `tweaks` wins where it has an answer: it carries the
+    /// handful whose display name is not a respelling of the core id at all,
+    /// like `fbneo` for "FinalBurn Neo".
+    pub fn core_config_dir(&self, core: &str) -> Option<PathBuf> {
+        let root = self.config_dir();
+        if let Some(known) = crate::tweaks::core_dir_name(core) {
+            return Some(root.join(known));
+        }
+        let squashed = |s: &str| {
+            s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase()
+        };
+        let want = squashed(core);
+        std::fs::read_dir(&root).ok()?.flatten().find_map(|e| {
+            let name = e.file_name();
+            let name = name.to_str()?;
+            (e.path().is_dir() && squashed(name) == want).then(|| root.join(name))
+        })
     }
 
     /// Root of the shader trees (`shaders_slang`, `shaders_glsl`).
@@ -757,9 +799,23 @@ input_player2_gun_start_mbtn = \"3\"
         // Written into the same per-launch file as everything else, so it is
         // one setting rather than a folder in this app's settings that the
         // emulator has never heard of — which is what it would be otherwise.
-        // `sort_by_dir` off: this app addresses saves by core directory, and
-        // RetroArch's per-content subfolders would put them somewhere the save
-        // sync does not look.
+        // `sort_savefiles_enable` **on**, and that is a correction.
+        //
+        // It used to be off, which meant RetroArch read and wrote
+        // `saves/<game>.srm` flat while this app's sync wrote and scanned
+        // `saves/<core>/<game>.srm`. So a save pulled from the server was
+        // never loaded by the game, and a save the game wrote was never seen
+        // by the sync — silently, in both directions, and the symptom was a
+        // title screen offering no save to continue from.
+        //
+        // Per-core is the half that has to win: the core is part of a save's
+        // identity on the server, and a flat tree throws it away with no way
+        // to get it back. It is also what RetroArch does by default.
+        //
+        // `sort_savefiles_by_content_enable` is written off rather than left
+        // alone: it is a subfolder per *game*, a third layout nothing here
+        // reads, and a user's own retroarch.cfg turning it on would break the
+        // agreement above without anything saying so.
         if let Some(root) = saves_root {
             let saves = root.join("saves");
             let states = root.join("states");
@@ -772,8 +828,10 @@ input_player2_gun_start_mbtn = \"3\"
                 "\n# ---- Saves ----\n\
                  savefile_directory = \"{}\"\n\
                  savestate_directory = \"{}\"\n\
-                 sort_savefiles_enable = \"false\"\n\
-                 sort_savestates_enable = \"false\"\n",
+                 sort_savefiles_enable = \"true\"\n\
+                 sort_savestates_enable = \"true\"\n\
+                 sort_savefiles_by_content_enable = \"false\"\n\
+                 sort_savestates_by_content_enable = \"false\"\n",
                 saves.display(),
                 states.display(),
             ));
@@ -1340,6 +1398,47 @@ mod tests {
     /// its own, the saves land somewhere else, and the sync looks in the wrong
     /// place. The only thing that makes it real is these two keys in the file
     /// handed over at launch.
+    /// The launch and the sync have to mean the same thing by "where a save
+    /// lives", and for a long time they did not.
+    ///
+    /// RetroArch was told to write `saves/<game>.srm` flat while
+    /// `savesync::download_path` wrote `saves/<core>/<game>.srm`. A save
+    /// pulled from the server was therefore never loaded by the game and a
+    /// save the game wrote was never seen by the sync — in both directions,
+    /// silently. The symptom was a title screen with nothing to continue from,
+    /// which looks like a corrupt save rather than two halves disagreeing.
+    #[test]
+    fn the_launch_files_saves_the_same_way_the_sync_reads_them() {
+        let dir = std::env::temp_dir().join("romm-ra-sort-test");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let saves = dir.join("MySaves");
+        let path = fake(&dir)
+            .write_overrides_full(
+                &dir,
+                None,
+                "",
+                Input { saves_root: Some(&saves), ..Input::default() },
+            )
+            .unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+
+        assert_eq!(val(&body, "sort_savefiles_enable"), "true");
+        assert_eq!(val(&body, "sort_savestates_enable"), "true");
+        // Per *content* stays off: that is a folder per game, a third layout
+        // nothing in this project reads.
+        assert_eq!(val(&body, "sort_savefiles_by_content_enable"), "false");
+
+        // And the two agree in fact, not just in spirit: where the sync puts a
+        // download is a `saves/<core>/` path under the same root.
+        let landed = crate::savesync::download_path(
+            &saves,
+            "Chrono Trigger (USA).srm",
+            crate::savesync::Destination::Core { core: Some("snes9x") },
+        );
+        assert_eq!(landed, saves.join("saves/snes9x/Chrono Trigger (USA).srm"));
+    }
+
     #[test]
     fn the_chosen_saves_folder_is_written_into_the_launch_config() {
         let dir = std::env::temp_dir().join("romm-ra-saves-test");
