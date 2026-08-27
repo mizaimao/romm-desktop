@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
-# Serve the backdrop preview.
+# Show the backdrop, live. One command, a window opens, edits appear on their own.
 #
-# The page imports ui/js/backdrop.js as an ES module, and a browser refuses a
-# module import over file:// — it is a cross-origin request from a null origin,
-# so opening the html by double-clicking it gets a blank screen and a CORS
-# message. Hence a server. It only ever hands over files; nothing here builds,
-# watches or rewrites anything.
+# The server exists only because a browser refuses an ES module import over
+# file://; you should never have to think about it, so this starts it and opens
+# the page itself.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 port="${1:-8765}"
 while lsof -i ":$port" >/dev/null 2>&1; do port=$((port + 1)); done
 
+python3 -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1 &
+server=$!
+trap 'kill $server 2>/dev/null || true' EXIT
+
+# Wait for it to answer before opening, or the tab loads an error page.
 url="http://localhost:$port/tools/backdrop-preview.html"
-printf '\n  %s\n\n  Leave this running. Editing ui/js/backdrop.js updates the page on\n  its own within a second — no refresh, no build.\n  Ctrl-C to stop.\n\n' "$url"
-exec python3 -m http.server "$port" --bind 127.0.0.1
+for _ in $(seq 1 50); do
+  curl -fsS -o /dev/null "$url" && break
+  sleep 0.1
+done
+
+open "$url"
+echo "Backdrop preview open. Edits to ui/js/backdrop.js appear on their own. Ctrl-C to stop."
+wait $server
