@@ -297,6 +297,38 @@ describe("the shapes", () => {
     assert.match(body, /cell \+ o/, "the neighbouring cell is not being hashed");
   });
 
+  /// Ribbon: the sheet has to sit deeper than its own wave is tall. At 0.42
+  /// down with a wave reaching 0.68 it passed through the eye — the corrected
+  /// hit came out behind the camera, the distance fade ran backwards and went
+  /// above one, and what drew was a field of white speckles standing in the sky
+  /// above the horizon. Read off the source because there is no GPU here to
+  /// draw it on.
+  test("Ribbon's sheet is deeper than its wave is tall", () => {
+    const code = backdrop.backdropStyle("ribbon").body.replace(/\/\/[^\n]*/g, "");
+    const depth = Math.abs(Number(/float below = (-?[\d.]+);/.exec(code)?.[1]));
+    // Anchored at the start of a line so this is the assignment inside the
+    // loop and not `float wob = 0.0` above it. Second time that has caught me
+    // out in this file: a declaration and its assignment both read as "x = ",
+    // and the declaration is always the one a lazy regex finds first.
+    const wave = /^\s+wob = ([^;]+);/m.exec(code)?.[1] ?? "";
+    const peaks = [...wave.matchAll(/\* ([\d.]+)/g)].map((m) => Number(m[1]));
+    assert.ok(depth > 0, "the sheet has no depth");
+    assert.equal(peaks.length, 3, "the wave is not three sines any more");
+    const tallest = peaks.reduce((a, b) => a + b, 0);
+    assert.ok(
+      tallest < depth,
+      `the wave reaches ${tallest} and the sheet is only ${depth} below the eye`
+    );
+  });
+
+  /// Ribbon: a ray a hair under the horizon meets the sheet thousands of units
+  /// out, where the sines are past what the arithmetic can resolve and the grid
+  /// is far finer than a pixel. Bounding the hit is what stops that being drawn.
+  test("Ribbon bounds how far it will look", () => {
+    const code = backdrop.backdropStyle("ribbon").body.replace(/\/\/[^\n]*/g, "");
+    assert.match(code, /hit = clamp\(/, "the intersection distance is unbounded again");
+  });
+
   /// Cubes and Towers are the two halves of the same boot sequence and two
   /// separate styles. Towers was the one that was meant to be it and landed as
   /// something else; it is kept as what it became, and this is the scene it was
