@@ -202,7 +202,11 @@ about one console is not a setting.
 ## Where it stands
 
 Working: browsing, downloading, launching, save sync with conflict resolution,
-save states, play history, four controllers, rapid fire, arcade coverage work.
+save states, play history, four controllers, rapid fire, arcade coverage work,
+and starring — which syncs, because a favourite in RomM is a *collection* and
+collections live on the server. `*` stars the selected game; the handheld syncs
+both ways through moose-patch. See `docs/knulli-addon.md` for why that one has
+a baseline file and the save sync does not.
 Released through CI for Linux, Windows and Apple silicon macOS.
 
 Least covered by tests: `settings-window.js` and `settings.js` (the window
