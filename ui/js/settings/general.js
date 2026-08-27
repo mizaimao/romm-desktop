@@ -2,6 +2,7 @@
 import { invoke } from "../state.js";
 import { toast } from "../util.js";
 import { wireConfigFields } from "./fields.js";
+import { syncSaves } from "../savesync.js";
 
 export const html = `      <h4>RetroArch</h4>
       <div class="srow set-ra-path">
@@ -42,11 +43,11 @@ export const html = `      <h4>RetroArch</h4>
 
       <div class="srow">
         <label>Sync now</label>
-        <div class="ctl"><button class="set-savesync">Sync saves</button></div>
+        <div class="ctl"><button class="set-savesync">See what would sync</button></div>
       </div>
-      <p class="hint">Compares your saves and save states with the server and
-        transfers whatever differs. Anything changed on both sides is reported,
-        not overwritten.</p>
+      <p class="hint">Asks the server what it would do with your saves and shows
+        you the list — which way each one would move, and which changed in both
+        places. Nothing is transferred until you accept it.</p>
       <p class="hint set-savesync-status"></p>
 
       <h4>Server</h4>
@@ -163,15 +164,17 @@ export function wire(box) {
   // Saves. The button disables itself while running: the scan plus a round
   // trip per file takes a few seconds, and a second click would start a
   // concurrent sync over the same files.
+  //
+  // The flow itself lives in savesync.js because the header has the same button
+  // on it now. Reporting is the only part that differs — here there is a line
+  // under the button to write into, which says more than a toast that has gone
+  // by the time the sync finishes.
   const syncBtn = box.querySelector(".set-savesync");
   const syncStatus = box.querySelector(".set-savesync-status");
   syncBtn?.addEventListener("click", async () => {
     syncBtn.disabled = true;
-    syncStatus.textContent = "Scanning saves…";
     try {
-      syncStatus.textContent = await invoke("sync_saves");
-    } catch (e) {
-      syncStatus.textContent = `Sync failed — ${e}`;
+      await syncSaves({ say: (m) => (syncStatus.textContent = m) });
     } finally {
       syncBtn.disabled = false;
     }

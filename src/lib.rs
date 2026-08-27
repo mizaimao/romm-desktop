@@ -61,6 +61,7 @@ pub mod saves;
 pub mod savesync;
 pub mod states;
 pub mod statesync;
+pub mod syncplan;
 pub mod tui;
 pub mod update;
 pub mod util;

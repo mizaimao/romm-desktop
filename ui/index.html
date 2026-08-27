@@ -48,7 +48,15 @@
            sections change, and anything declared inside it would be wiped. -->
       <button id="grab-btn" hidden title="Download this platform or collection for offline use"><span class="icon icon-download"></span><span>Take offline</span></button>
       <button id="sort-btn" hidden title="How this list is ordered (right stick click)"><span class="icon icon-sort"></span><span>Name</span></button>
-      <button id="settings-btn" title="Settings"><span class="icon icon-settings"></span><span>Settings</span></button>
+      <!-- Sync, then Settings, and both glyph-only.
+           They are the two controls here that are about the app rather than
+           about the list in front of you, so they sit together at the end. No
+           labels: every other button in this row earns its word by being
+           ambiguous without it, and these two do not — a gear is a gear.
+           On Android `installTabs` moves both down into the tab row, because
+           this header is not drawn there at all. -->
+      <button id="sync-btn" title="Sync saves with the server" aria-label="Sync saves"><span class="icon icon-sync"></span></button>
+      <button id="settings-btn" title="Settings" aria-label="Settings"><span class="icon icon-settings"></span></button>
       <span id="status"></span>
     </header>
 

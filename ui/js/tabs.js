@@ -259,6 +259,20 @@ export function installTabs() {
   end.className = "tabbar-end";
   if (el.grabBtn) end.appendChild(el.grabBtn);
   if (el.sidebarBtn) end.appendChild(el.sidebarBtn);
+  // Android has no header — it is a desktop object and `body.mobile` hides it
+  // outright — so sync and settings would have no door at all. Settings has
+  // been on Start, which is a thing you have to be told; this row is where you
+  // are already looking.
+  //
+  // Moved into the end holder rather than added to SECTIONS. A section is
+  // something the shoulder buttons cycle through, and on Android opening
+  // settings navigates the whole webview to settings.html: as a section, one
+  // press of RB past the last tab would take the app off the page. Whatever
+  // these two are, they are not somewhere LB and RB should be able to land.
+  if (MOBILE) {
+    if (el.syncBtn) end.appendChild(el.syncBtn);
+    if (el.settingsBtn) end.appendChild(el.settingsBtn);
+  }
   el.tabbar.appendChild(end);
 
   paint();

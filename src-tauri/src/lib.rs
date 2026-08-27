@@ -19,7 +19,7 @@ mod iconsets;
 
 use romm_desktop::{
     api, cache, config::Config, coremap::{self, CoreMap}, download, media, retroarch::RetroArch,
-    savesync, shaders, theme, theme_remote, util,
+    savesync, shaders, syncplan, theme, theme_remote, util,
 };
 
 const CACHE_DB: &str = "cache.sqlite3";
@@ -3367,13 +3367,61 @@ fn saves_root(state: &State<'_, AppState>) -> PathBuf {
         })
 }
 
+/// What a sync would do, without doing any of it.
+///
+/// The first half of the two-step the addon has had all along: ask
+/// `/api/sync/negotiate` what it would move, hand the rows back, and transfer
+/// nothing until a person has looked at them. A save is the only thing in this
+/// app that cannot be fetched again if it goes wrong, and the direction is not
+/// a choice anyone can make up front — the server decides it per save, some one
+/// way and some the other. So "what would happen" is the only question worth
+/// asking first.
+///
+/// Saves only, because `negotiate` is saves only. Save states are compared
+/// against a local ledger by `statesync` and are not in these rows; the page
+/// says so rather than letting a plan reading "nothing to sync" be followed by
+/// four states moving.
+#[tauri::command]
+async fn sync_saves_plan(state: State<'_, AppState>) -> CmdResult<syncplan::Review> {
+    let client = state.client.clone().ok_or("not connected to a server")?;
+    let root = saves_root(&state);
+
+    // Same shape as `sync_saves`: the cache is not Sync, so the scan takes the
+    // lock and gives it back before anything is awaited.
+    let candidates = {
+        let cache = state.cache.lock().map_err(err)?;
+        romm_desktop::savesync::scan(&cache, &state.map, &root).map_err(err)?
+    };
+
+    let (states, _skipped) = romm_desktop::savesync::client_states(&candidates);
+    let identity = romm_desktop::savesync::DeviceIdentity::ensure(&client, Path::new("."))
+        .await
+        .map_err(err)?;
+    let plan = client.negotiate(&identity.device_id, &states).await.map_err(err)?;
+    Ok(syncplan::Review::from_plan(&plan))
+}
+
+/// What a finished sync did, and what it refused to guess about.
+///
+/// `sync_saves` used to answer with a string, which meant the conflicts it
+/// found were flattened into a sentence and could not be acted on: the picker
+/// that chooses between two copies existed and was only ever reached from a
+/// launch. They come back as rows now, and the page hands them to the same
+/// dialog.
+#[derive(Serialize)]
+struct SyncRun {
+    headline: String,
+    notes: Vec<String>,
+    conflicts: Vec<romm_desktop::savesync::SaveConflict>,
+}
+
 /// Sync saves and save states with the server.
 ///
 /// An explicit action rather than something that happens on launch: a save is
 /// the only thing here that cannot be fetched again if it goes wrong, so
 /// overwriting one should be a decision, not a side effect.
 #[tauri::command]
-async fn sync_saves(state: State<'_, AppState>) -> CmdResult<String> {
+async fn sync_saves(state: State<'_, AppState>) -> CmdResult<SyncRun> {
     let client = state.client.clone().ok_or("not connected to a server")?;
     // Not RetroArch's install folder: the saves folder. See `saves_root`.
     let root = saves_root(&state);
@@ -3395,7 +3443,11 @@ async fn sync_saves(state: State<'_, AppState>) -> CmdResult<String> {
     )
         .await
         .map_err(err)?;
-    Ok(format!("{}\n{}", summary.headline(), summary.notes.join("\n")))
+    Ok(SyncRun {
+        headline: summary.headline(),
+        notes: summary.notes,
+        conflicts: summary.conflicts,
+    })
 }
 
 /// The motion (strobe/BFI) layer: what is installed, and what is selected.
@@ -4705,6 +4757,7 @@ pub fn run() {
             set_retroarch_root,
             systems,
             sync_saves,
+            sync_saves_plan,
             sync_library,
             sync_bios,
             resolve_save_conflict,

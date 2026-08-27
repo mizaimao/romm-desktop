@@ -75,6 +75,7 @@ export const el = {
   sidebarBtn: document.getElementById("sidebar-btn"),
   lb: document.getElementById("lightbox"),
   settingsBtn: document.getElementById("settings-btn"),
+  syncBtn: document.getElementById("sync-btn"),
   zoom: document.getElementById("zoom"),
   zoomWrap: document.getElementById("zoom-wrap"),
   viewSwitch: document.getElementById("view-switch"),

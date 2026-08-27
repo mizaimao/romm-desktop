@@ -7,6 +7,9 @@
   --dim: #8b93a1;
   --accent: #5b9dd9;
   --ok: #5fb37a;
+  /* Attention, not danger: a save that changed in two places is a thing to
+     look at, not a thing that has gone wrong. */
+  --warn: #d99b3a;
   color-scheme: dark;
 }
 
@@ -179,7 +182,7 @@ header h1 {
 /* Take offline belongs in this list: left out of it, it kept the generic
    button styling — a filled panel with a border — and sat in the tab row
    next to the preview toggle looking like a different application's. */
-#settings-btn, #sidebar-btn, #layout-btn, #grab-btn {
+#settings-btn, #sync-btn, #sidebar-btn, #layout-btn, #grab-btn {
   background: transparent;
   color: color-mix(in srgb, var(--text) 80%, transparent);
   border: 1px solid transparent;
@@ -195,7 +198,7 @@ header h1 {
 /* Hover lights the label rather than drawing a panel behind it — the same
    signal the tab strip uses, so the two rows behave alike. A fill here was the
    last surface left in the top bar. */
-#settings-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #grab-btn:hover {
+#settings-btn:hover, #sync-btn:hover, #sidebar-btn:hover, #layout-btn:hover, #grab-btn:hover {
   background: transparent;
   color: color-mix(in srgb, var(--glass) 30%, white 70%);
   /* Two shadows: a tight bright core and a wide soft halo. One alone reads as
@@ -204,7 +207,7 @@ header h1 {
     0 0 6px color-mix(in srgb, var(--glass) 90%, transparent),
     0 0 22px color-mix(in srgb, var(--glass) 65%, transparent);
 }
-#settings-btn { padding: 6px 10px; }
+#settings-btn, #sync-btn { padding: 6px 10px; }
 
 #zoom-wrap { display: flex; align-items: center; }
 #zoom {
@@ -1399,9 +1402,12 @@ button:has(> .icon + span) {
 .icon-columns   { --icon: url("icons/columns-2.svg"); }
 .icon-pad       { --icon: url("icons/gamepad-2.svg"); }
 .icon-external  { --icon: url("icons/external-link.svg"); }
+/* Lucide "refresh-cw" — two arrows chasing each other, which is what a sync
+   is: it goes both ways and the server decides which per save. */
+.icon-sync      { --icon: url("icons/refresh-cw.svg"); }
 
 /* Glyph-only buttons were sized for a text character; a mask needs a box. */
-#back, #settings-btn, .lb-close, .lb-nav {
+#back, #settings-btn, #sync-btn, .lb-close, .lb-nav {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1476,6 +1482,60 @@ button:has(> .icon + span) {
   cursor: pointer;
 }
 .conflict-cancel:hover { background: var(--card, #24242b); }
+
+/* ---- The sync plan ------------------------------------------------------
+   The same box as the conflict picker, because it is the same kind of moment:
+   a question with two answers, asked before anything is written. Only the
+   contents differ — a list you read rather than a pair you choose between. */
+.sync-box .sy-list {
+  display: grid;
+  gap: 2px;
+  /* A plan can be four rows or four hundred. Scrolling inside the box keeps
+     the headline and the two buttons where they are, so a long list never
+     pushes the answer off the bottom of the screen. */
+  max-height: min(46vh, 26rem);
+  overflow-y: auto;
+  margin-bottom: 0.4rem;
+}
+.sy-row {
+  display: grid;
+  grid-template-columns: 12.5rem 1fr;
+  gap: 0.1rem 0.8rem;
+  align-items: baseline;
+  padding: 0.45rem 0.7rem;
+  border-radius: 7px;
+  /* `--panel-2` rather than the conflict dialog's `--card`: that one is not a
+     token this stylesheet defines, so it is a dark hex on a light page. */
+  background: var(--panel-2);
+}
+/* Which way it goes, in the left column and in a colour, so the shape of the
+   plan is readable before a single filename is. */
+.sy-what { font-size: 0.82rem; font-weight: 600; opacity: 0.9; }
+.sy-conflict .sy-what { color: var(--warn, #e8b04b); }
+.sy-down .sy-what { color: var(--accent, #7c8cff); }
+.sy-up .sy-what { opacity: 0.6; }
+.sy-title { overflow-wrap: anywhere; }
+/* The server's own words for why. Full width under the pair, because it is a
+   sentence and a sentence in a 12rem column is a column of syllables. */
+.sy-why {
+  grid-column: 1 / -1;
+  font-size: 0.82rem;
+  opacity: 0.62;
+  margin-top: 0.15rem;
+}
+.sy-buttons { display: flex; gap: 0.6rem; }
+/* The one that moves files is the lit one. It is also not the one focus opens
+   on — see savesync.js. */
+.sy-go {
+  border-color: var(--accent, #7c8cff);
+  font-weight: 600;
+}
+.sy-go:hover { background: var(--accent, #7c8cff); color: #12121a; }
+
+/* Android: the box is most of the screen, so the row loses its second column
+   rather than squeezing a filename into 4rem. */
+body.mobile .sy-row { grid-template-columns: 1fr; }
+body.mobile .sync-box .sy-list { max-height: 42vh; }
 
 /* ---- Shader backdrop ----------------------------------------------------
    A WebGL2 canvas behind the whole app. Fixed and non-interactive: it must
@@ -2595,7 +2655,9 @@ code {
   gap: 2px;
 }
 #tabbar #grab-btn,
-#tabbar #sidebar-btn { font-size: 12px; }
+#tabbar #sidebar-btn,
+#tabbar #sync-btn,
+#tabbar #settings-btn { font-size: 12px; }
 
 /* A filtered list looks exactly like a short one, so the button that did it
    stays lit while anything is on. */
@@ -3248,6 +3310,18 @@ body.mobile #tabbar #grab-btn { margin-left: auto; }
 body.mobile #tabbar #sidebar-btn { margin-left: 4px; }
 body.mobile #tabbar #grab-btn,
 body.mobile #tabbar #sidebar-btn { order: 99; flex: 0 0 auto; }
+
+/* Sync and Settings, moved down here by `installTabs` because Android draws no
+   header. Same treatment as the two above: glyph only, and never allowed to
+   push the tabs off the row — on a 620-point screen four words and four icons
+   do not both fit, and the words are the part you can do without when the icon
+   is a gear. `margin-left: auto` is on Take offline alone; these follow it. */
+body.mobile #tabbar #sync-btn,
+body.mobile #tabbar #settings-btn {
+  order: 99;
+  flex: 0 0 auto;
+  padding: 4px 7px;
+}
 
 /* A fifth larger across the pane and the list.
    ES-DE's own fractions are its "medium"; this is nearer its "large", which it

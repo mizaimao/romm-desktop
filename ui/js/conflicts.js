@@ -49,7 +49,15 @@ function escape(s) {
 
 /// Ask about each conflict in turn. Resolves true when every one was answered,
 /// false if the user backed out — in which case the caller must not launch.
-export function askConflicts(conflicts) {
+/// `lead` and `cancelLabel` are the two strings that are about *why* you are
+/// being asked, and the answer is no longer always "a launch is waiting" — a
+/// manual sync from the header reaches the same picker with nothing on hold.
+/// Parameters rather than a second copy of the dialog: the choosing, the
+/// keyboard grammar and the resolve call are the parts worth having once.
+export function askConflicts(conflicts, {
+  lead = "This save changed in two places. Choose which to keep — the launch is on hold until you do.",
+  cancelLabel = "Cancel launch",
+} = {}) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.id = "conflict-overlay";
@@ -59,15 +67,15 @@ export function askConflicts(conflicts) {
         <span class="icon icon-info-on"></span>
         <h2>Save conflict</h2>
       </header>
-      <p class="lead">This save changed in two places. Choose which to keep —
-        the launch is on hold until you do.</p>`;
+      <p class="lead"></p>`;
+    box.querySelector(".lead").textContent = lead;
 
     const list = document.createElement("div");
     box.appendChild(list);
 
     const cancel = document.createElement("button");
     cancel.className = "conflict-cancel";
-    cancel.textContent = "Cancel launch";
+    cancel.textContent = cancelLabel;
     box.appendChild(cancel);
     overlay.appendChild(box);
 

@@ -440,6 +440,13 @@ export function installAndroidBack() {
 
 export function installKeys() {
   el.settingsBtn?.addEventListener("click", toggleSettings);
+  // Loaded on the press rather than at startup: the plan sheet pulls in the
+  // conflict picker behind it, and neither is wanted by a session that never
+  // syncs.
+  el.syncBtn?.addEventListener("click", async () => {
+    const { syncSaves } = await import("./savesync.js");
+    syncSaves();
+  });
 
   window.addEventListener("keydown", (ev) => {
     // Rebinding swallows everything, so any key can be assigned.
