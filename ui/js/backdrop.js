@@ -474,12 +474,27 @@ export const BACKDROPS = [
           // circle of decals.
           float nearness = smoothstep(3.6, 1.1, cen.z);
 
-          // Grey, with the scheme as a cast rather than as the colour. Taking
-          // it from the ramp made the blocks navy here and would make them green
-          // on Moss; in the original they are neutral and the haze is the thing
-          // that is blue.
+          // The scheme's colour, with a neutral lift under it — the other way
+          // round from how this started.
+          //
+          // It was grey plus a flat splash of the scheme, and flat is the word
+          // that mattered: the scheme's share did not vary with the shading at
+          // all, so every part of a block got the same amount of it and all the
+          // contrast — the whole difference between an edge and a face — was
+          // carried by the grey. That is why a lit edge came out at #7e8191,
+          // which is not a colour, it is a shade.
+          //
+          // Now the scheme carries the shading and the grey only lifts it off
+          // black. The edges go bright in the scheme's own hue rather than
+          // towards white, and switching scheme changes the blocks instead of
+          // tinting them: on Midnight an edge is #545c9b where it used to be
+          // #7e8191, and on Moss it is a green rather than the same grey with a
+          // suggestion of green in it.
+          //
+          // The neutral part is a third of what it was, which is the other half
+          // of the same change: there is less grey to wash the hue out.
           float value = edge * 0.44 + fres * 0.30 + lets * 0.22 + sheen;
-          lit = vec3(0.02 + value * 0.40) + u_high * 0.32;
+          lit = vec3(0.02 + value * 0.40) * 0.30 + u_high * (0.30 + value * 0.85);
           // A fifth opaque at the very most: mostly transparent, a suggestion
           // over the haze rather than an object in front of it.
           //
