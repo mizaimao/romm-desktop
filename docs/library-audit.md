@@ -270,9 +270,38 @@ all along under a name the app could not match.
 here under the server's name and were parked; the remaining 20 are the ones the
 server does not have at all, listed above.
 
+## The deletions, propagated
+
+The rename pass moved nothing out of the way, so everything deleted on the
+server was still sitting here. A second pass mirrored the server properly:
+**every file RomM does not list has been moved to `library/replaced-roms/`.**
+976 files, 4.8 GB.
+
+| | files | |
+| --- | --- | --- |
+| `mame/` | 750 | the server has no `mame` platform any more; `tools/romm_sync.py` still carries code for one, so it did once. 638 of these duplicate `arcade/` romsets already here |
+| `neogeoaes/` extras | 131 | arcade romsets filed under Neo Geo AES, which the server keeps in `arcade/` |
+| `arcade/` strays | 86 | of which 53 are the Japanese quiz purge recorded in `data/removed-japanese-quiz.json` — all 49 romsets were still here |
+| cartridges and discs | 9 | mostly the same game in a different wrapper than the server uses |
+
+Before parking anything, each file was checked for whether the game survives:
+every one of those 976 is either a copy of something still present under the
+server's name, or a romset the server no longer has. The single game that left
+the library outright is `psx/Tony Hawks Pro Skater 2 (USA).chd`, which the
+server does not have under any name.
+
+The two folder ROMs that arrived as extension-less zips were unpacked into
+directories the way the server stores them: `psx/Lunar - Silver Star Story
+Complete (USA)` (three discs and a playlist) and `sfc/AdditionalRoms` (209
+unlicensed and homebrew SNES ROMs).
+
+**Nothing under `library/roms` is now unknown to RomM**, and 8,944 of the
+server's 9,238 games are here. The 294 that are not have simply never been
+downloaded — 108 PSP, 69 DS, 55 GameCube.
+
 ## What is left to do
 
-Step 1 below is done, and the duplicate half of step 4. The rest stands.
+Steps 1, 5 and 6 are done, along with the duplicate half of 4. The rest stands.
 
 1. ~~Re-download the wrongly-named files.~~ Done by rename, above.
 2. **Push the five games only this machine still has** back to the server, and
@@ -287,15 +316,16 @@ Step 1 below is done, and the duplicate half of step 4. The rest stands.
    games sitting in the mono folder and `.ws` games in the colour one. The 18
    local copies that duplicated a game already present the other way round have
    been parked; the folders themselves are still crossed.
-5. Delete `neogeoaes/matrim.zip` (0 bytes) and `arcade/midssio.zip` (163 bytes)
-   and fetch them again. Both are outside what the sync touched, because MAME
-   romset names are their own decision.
-6. Unpack the two folder ROMs that arrived as extension-less zips
-   (`psx/Lunar - Silver Star Story Complete (USA)` and `sfc/AdditionalRoms`),
-   and fix the Oddworld playlist.
-7. Decide what to do with the 20 files the server does not have. Five are games
-   RomM has lost, two are the junk dumps, and the rest are here in a different
-   wrapper or under a different platform than the server uses.
+5. ~~The 0-byte `neogeoaes/matrim.zip` and 163-byte `arcade/midssio.zip`.~~
+   RomM lists neither, so both were parked with the rest.
+6. ~~Unpack the two folder ROMs that arrived as extension-less zips.~~ Done.
+   The Oddworld playlist still points at a `MultiDisk/` folder that is not here;
+   RomM lists the playlist but not the discs beside it, which is worth a look on
+   the server.
+7. The five games RomM has lost are still here and still listed by RomM, so the
+   mirror kept them: `Barbie-Game Girl.gb`, `Harvest Moon.gb`, `Home Alone 2.gb`,
+   `Ecco the Dolphin.gg`, `Madden NFL '96.gg`. Upload them and this machine stops
+   being the only copy.
 
 `wrong-names.md` and `md-rename-plan.md` describe step 1 from the server's side
 and are now finished business on both: the renames they ask for were done there,
