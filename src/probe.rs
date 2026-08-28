@@ -169,6 +169,16 @@ const MISSING_FILE_MARKERS: &[&str] = &[
     // FBNeo
     "romsets is missing files",
     "Missing files, aborting",
+    // FBNeo again, and the reason this list is not just the two lines above:
+    // when a romset is incomplete FBNeo often says nothing about "missing
+    // files" at all, and instead names each absent chip one line at a time:
+    //
+    //   [FBNeo] ROM at index 0 with name d8-d15.1m and CRC 0x9121d1b6 is required
+    //
+    // The game still starts, still reports geometry, and still runs frames, so
+    // without this marker the probe calls it a clean pass. `maniacsq` passed
+    // that way and then showed the missing-files screen when launched for real.
+    "[FBNeo] ROM at index",
     // MAME 2003+ and MAME
     "Required files are missing",
     "NOT FOUND",
