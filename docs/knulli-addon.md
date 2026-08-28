@@ -162,10 +162,18 @@ apart instead of guesswork.
 The three sync actions are drawn but not wired. `romm_desktop::savesync` already
 has `SaveConflict`, `Keep` and `Summary`, so this is plumbing rather than design.
 
-`fast-launch` — the preforked configgen daemon, measured at 1241 ms down to
-7.9 ms — is **not** in the catalogue. It is the only one of these that replaces
-the program that starts games, and shipping it untested alongside nine patches
-that only write config would be trading a real risk for a second saved.
+`launch-evmapy` **is** in the catalogue now, and is the one measured launch
+win: 0.93 s, by not restarting a daemon that has nothing to map. It only
+inserts a line into a shell script, so it is closer to the config patches than
+to replacing anything.
+
+Replacing the launcher itself is still outside the catalogue. That old note
+claimed a preforked configgen daemon went from 1241 ms to 7.9 ms; the
+measurement was of import cost alone, not of a launch, and a real launch is
+4.26 s of which imports are 1.08 s. The work is now `moose-fastlaunch` — see
+[fast-launch.md](fast-launch.md) — and it stays out of the catalogue until it
+can generate `retroarchcustom.cfg` and that output has been diffed against
+configgen's across every system.
 
 ### Order
 

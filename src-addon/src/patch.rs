@@ -99,6 +99,15 @@ impl Paths {
         self.at("usr/share/emulationstation/resources/logo.png")
     }
 
+    /// The flag that turns the evmapy guard on, **on /boot**.
+    ///
+    /// Same reason as the blank logo and the GPU marker: the hook runs as
+    /// `S00bootcustom` and `S02resize` is what mounts /userdata, so a flag
+    /// kept there is one the hook cannot read.
+    pub fn evmapy_flag(&self) -> PathBuf {
+        self.at("boot/moose-evmapy-guard")
+    }
+
     /// Which Mali blob the boot hook should install, **on /boot**.
     ///
     /// Same reason as the blank logo: the hook runs as `S00bootcustom` and

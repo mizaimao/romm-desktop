@@ -187,6 +187,38 @@ configgen tells RetroArch to do. The desktop and Android use RetroArch's own
 `Platform::save_folder()` maps the server's slug to the card's folder
 (`sfc`→`snes`, `famicom`→`nes`, `arcade`→`fbneo`, `neogeoaes`→`neogeo`, …).
 
+## 8. Making games start faster
+
+A warm GBA launch was **4.26 s**, measured 2026-08-28. RetroArch is 0.83 s of
+that — core, ROM and ten shader passes. The other 3.43 s is `configgen`.
+
+`launch-evmapy` takes 0.93 s off it. `batocera-evmapy start` kills the daemon,
+touches a flag and blocks on `inotifywait` until it comes back; it is a process
+round trip, not work. configgen writes a per-device `.json` into
+`/var/run/evmapy` *before* calling `start`, and `libretro.keys` asks only for a
+lightgun combo — so a libretro launch with no gun writes nothing at all and
+then waits for a daemon with no job.
+
+The guard is one line inserted into `/usr/bin/batocera-evmapy`:
+
+    ls /var/run/evmapy/*.json >/dev/null 2>&1 || exit 0
+
+It deliberately knows nothing about libretro. No device config means nothing to
+map. **The other 54 `.keys` files all declare real `actions_playerN` mappings**
+— flycast, amiberry, hatari, azahar, gsplus — so every standalone emulator is
+untouched. An unconditional stub, which is what a first A/B of this actually
+did, would have broken all of them.
+
+Measured 3.43 s → 2.50 s, three runs each side, identical to within 0.02 s.
+
+`/usr` is a tmpfs, so `boot-custom.sh` puts the line back at every boot — the
+same mechanism as `es-logo` and `gpu`. It is *inserted* rather than copied over,
+so a KNULLI update to that script keeps its own changes and only gains our
+line, and a marker comment makes it idempotent.
+
+The rest of the 3.43 s is being taken by a native launcher — see
+[fast-launch.md](fast-launch.md).
+
 ## What has cost the most time
 
 Each of these looked like something else first.
@@ -223,6 +255,7 @@ Each of these looked like something else first.
     bezel-gbc        off           never-sleep      ON
     shader-gba/gb/gbc  follow global                charge-awake     ON
     wifi-awake       off           gpu              stock
+    launch-evmapy    ON
 
 Read it back yourself with:
 

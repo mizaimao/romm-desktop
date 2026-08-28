@@ -41,10 +41,11 @@ emulator**, which is what a first A/B of this did.
 
 Measured: 3.43 s → 2.50 s, three runs each side.
 
-**This is not yet persistent.** `/usr` is an overlay on a 256 MB tmpfs, so it
-is the stock file again at every boot. It needs a catalogue entry using the
-same `boot-custom.sh` mechanism as `es-logo` and `gpu`, both of which already
-place files into `/usr` from `/boot` at S00.
+Persistent as `launch-evmapy` in the moose-patch catalogue. `/usr` is an
+overlay on a 256 MB tmpfs, so `boot-custom.sh` reinstalls the line at every
+boot from a flag on `/boot` — the same mechanism as `es-logo` and `gpu`, and
+on `/boot` for the same reason: the hook runs at S00 and `S02resize` is what
+mounts `/userdata`. Turn it off with `./moose-patch --apply launch-evmapy=off`.
 
 ## 2. `moose-fastlaunch` — the launcher, in Rust
 
