@@ -33,8 +33,19 @@ mod resolve;
 use std::os::unix::process::CommandExt as _;
 use std::process::Command;
 
-/// KNULLI's own launcher — where anything we will not handle goes.
-const STOCK_LAUNCHER: &str = "/usr/bin/emulatorlauncher";
+/// Where we are installed. EmulationStation calls this path, from the
+/// `<command>` in `es_systems.cfg`, so it is the one we must occupy.
+const INSTALLED_AS: &str = "/usr/bin/emulatorlauncher";
+
+/// KNULLI's own launcher, moved aside by the installer.
+///
+/// **Not** `/usr/bin/emulatorlauncher`. That is where *we* live, and execing
+/// it would be execing ourselves — an unbounded fork on the only path that
+/// starts games, on a device you would then need working in order to fix it.
+/// The installer renames the Python shim here first; if it is missing we fail
+/// loudly rather than guessing, because a loud failure is one reboot away from
+/// stock and a quiet one is not.
+const STOCK_LAUNCHER: &str = "/usr/bin/emulatorlauncher.stock";
 
 /// `knulli.conf`, the single source of user settings.
 const CONF_PATH: &str = "/userdata/system/knulli.conf";
@@ -91,6 +102,14 @@ fn build_plan(parsed: &args::Args) -> Option<resolve::Plan> {
 /// its signals had to be forwarded correctly. Replacing ourselves means there
 /// is nothing to forward.
 fn fall_back(argv: &[String]) -> std::process::ExitCode {
+    if !std::path::Path::new(STOCK_LAUNCHER).exists() {
+        eprintln!(
+            "moose-fastlaunch: {STOCK_LAUNCHER} is missing — refusing to exec \
+             {INSTALLED_AS}, which is this program. Reboot to get stock back."
+        );
+        return std::process::ExitCode::FAILURE;
+    }
+
     let err = Command::new(STOCK_LAUNCHER)
         .args(argv.iter().filter(|a| *a != "--plan"))
         .exec();
@@ -114,13 +133,19 @@ mod tests {
 
     #[test]
     fn we_never_exec_ourselves() {
-        // A launcher installed *as* emulatorlauncher that then execs
-        // emulatorlauncher is a fork bomb on the launch path. The install
-        // must move the original aside; this pins the expectation that the
-        // fallback target is not this binary's own name.
+        // The collision that matters is not the binary's name, it is the
+        // path it occupies: installed as /usr/bin/emulatorlauncher, a
+        // fallback pointing at /usr/bin/emulatorlauncher is an unbounded
+        // fork on the only path that starts games. The first version of
+        // this test compared against the wrong thing and would have shipped
+        // exactly that.
+        assert_ne!(
+            STOCK_LAUNCHER, INSTALLED_AS,
+            "the fallback must not be the path we are installed at"
+        );
         assert!(
             !STOCK_LAUNCHER.ends_with("moose-fastlaunch"),
-            "fallback must not point at this program"
+            "nor this program by name"
         );
     }
 
