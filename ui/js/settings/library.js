@@ -191,10 +191,13 @@ export function wire(box) {
     });
     try {
       libStatus.textContent = await invoke("sync_library", { full });
-      // The grid is built from the cache, so it has to be rebuilt to show what
-      // just arrived.
-      const { showPlatforms } = await import("./library.js");
-      await showPlatforms();
+      // The grid is built from the cache, so it has to be drawn again to show
+      // what just arrived — but this is the settings window and it cannot
+      // reach that document. It used to `import("./library.js")`, which from
+      // here is *this* file: `showPlatforms` came back undefined, calling it
+      // threw, and the catch below reported a sync that had in fact worked as
+      // "Sync failed".
+      await window.__TAURI__.event.emit("library-synced");
     } catch (e) {
       libStatus.textContent = `Sync failed — ${e}`;
     } finally {

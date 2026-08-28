@@ -8,7 +8,7 @@ import { openFilterMenu } from "./filter.js";
 import { installPageFilter } from "./pagefilter.js";
 import { chooseMode, storedMode, shellMode, installColumnResizer } from "./shell.js";
 import { human, toast, escapeHtml } from "./util.js";
-import { showPlatforms, runSearch, setLayout, setZoom, renderRows, randomGame,
+import { showPlatforms, showRoms, runSearch, setLayout, setZoom, renderRows, randomGame,
   applyLayoutForView, layoutKeyForView } from "./library.js";
 import { setSidebar, installDetailResizer } from "./detail.js";
 import { installTabs, showSection, resetSection, activeSection } from "./tabs.js";
@@ -69,6 +69,15 @@ listen("shell-mode", async ({ payload }) => {
 
 listen("icons-changed", () => {
   if (state.view === "platforms") showPlatforms();
+});
+
+// The library index has just been rebuilt, in the settings window, which
+// cannot reach this document. The grid is drawn from the cache, so whatever is
+// on screen has to be drawn again or the games that just arrived are not
+// there — which is how a sync that worked looked like a sync that had not run.
+listen("library-synced", async () => {
+  if (state.view === "roms" && state.platform) return showRoms(state.platform);
+  if (state.view === "platforms") return showPlatforms();
 });
 
 // The layout pair in the header. Redrawn from scratch, as the settings

@@ -356,17 +356,23 @@ enum Folder {
 
 /// Tell the three apart.
 ///
-/// The disc test is what separates `psx/Final Fantasy VII (USA)/`, whose three
-/// files reduce to one name, from `psx/MultiDisk/`, whose members carry disc
-/// numbers too but reduce to five different games.
+/// What separates `psx/Final Fantasy VII (USA)/`, whose files are all named
+/// after the folder, from `psx/MultiDisk/`, whose members carry disc numbers
+/// too but are five different games and named after none of them.
 fn classify(dir: &Path, exts: &[String]) -> Folder {
     // `RPG_RT.ldb` is the marker EasyRPG itself looks for. Descending would
     // list the maps and graphics inside and lose the game entirely.
     if dir.join("RPG_RT.ldb").is_file() || dir.join("RPG_RT.exe").is_file() {
         return Folder::Game;
     }
+    let own = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let mut bases = BTreeSet::new();
-    let mut discs = 0;
+    let mut named_after_the_folder = true;
+    let mut files = 0;
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
         // A multi-disc game is flat. Anything with folders under it is a shelf.
@@ -382,15 +388,23 @@ fn classify(dir: &Path, exts: &[String]) -> Folder {
             continue;
         }
         let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
-        match strip_disc_marker(stem) {
-            Some(base) => {
-                bases.insert(base);
-                discs += 1;
-            }
-            None => return Folder::Shelf,
-        }
+        files += 1;
+        named_after_the_folder &= stem.to_ascii_lowercase().starts_with(&own);
+        bases.insert(strip_disc_marker(stem).unwrap_or_else(|| stem.to_owned()));
     }
-    if discs >= 2 && bases.len() == 1 { Folder::MultiDisc } else { Folder::Shelf }
+    if files == 0 {
+        return Folder::Shelf;
+    }
+    // RomM names a folder ROM after the game and everything inside after the
+    // folder, which is the strongest signal there is and the one that survives
+    // an odd member: `Lunar - Silver Star Story Complete (USA)` holds two discs
+    // and a bonus `(The Making of)` disc with no number on it at all.
+    if named_after_the_folder && !own.is_empty() {
+        return Folder::MultiDisc;
+    }
+    // Failing that, files named for nothing but their disc — `disc1.chd`,
+    // `disc2.chd` — which reduce to the same empty base.
+    if files >= 2 && bases.len() == 1 { Folder::MultiDisc } else { Folder::Shelf }
 }
 
 /// The fixed part of a walk: everything that does not change as it descends.
@@ -704,6 +718,27 @@ mod tests {
             "the shelves are walked into, the multi-disc game stays one entry, \
              the playlist RomM wrote is not a game, and `support` contributes nothing"
         );
+    }
+
+    /// A bonus disc with no number on it does not turn a game into a shelf.
+    ///
+    /// `Lunar - Silver Star Story Complete (USA)` ships two discs and a
+    /// `(The Making of)` disc. Reading disc numbers alone, the odd one out made
+    /// the whole folder look like a shelf and the game became four entries.
+    #[test]
+    fn a_folder_named_after_its_game_stays_one_game() {
+        let root = scratch("bonus-disc");
+        let roms = root.join("ROMs");
+        let game = "Lunar - Silver Star Story Complete (USA)";
+        touch(&roms.join(format!("snes/{game}/{game} (Disc 1).sfc")), b"x");
+        touch(&roms.join(format!("snes/{game}/{game} (Disc 2).sfc")), b"x");
+        touch(&roms.join(format!("snes/{game}/{game} (The Making of).sfc")), b"x");
+        touch(&roms.join(format!("snes/{game}/{game}.m3u")), b"x");
+
+        let layout = Layout::new(&root, Some(&roms));
+        let (games, _) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].fs_name, game);
     }
 
     /// The gamelist keys off the path, not the file name.
