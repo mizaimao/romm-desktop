@@ -9,6 +9,7 @@ rather than a record of one already taken.
 | File | What it is | Rows |
 | --- | --- | --- |
 | `audit-name-vs-content.tsv` | Files here whose name is not the game inside, and what the server calls those bytes | 190 |
+| `audit-server-art-stranded.tsv` | Server artwork left under an old name on purpose: the picture is of the game the ROM was misnamed as | 162 |
 | `audit-sync-applied.tsv` | What the 2026-08-28 sync did: every file renamed, fetched or parked | 1,794 |
 | `worth-taking.tsv` | Games on the Super Game HDD the server does not have, rated 80+ | 3,556 |
 | `arcade-proposed-names.tsv` | Names as the emulator reads them from the romset, with region | 1,613 |

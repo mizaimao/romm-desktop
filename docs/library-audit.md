@@ -308,6 +308,33 @@ PSP, 69 DS, 55 GameCube, 11 3DO, 4 Saturn, and the two N64 folder ROMs. That is
 127 GB against 76 GB free on this machine, so it is a choice rather than an
 omission.
 
+## The server's artwork, renamed to match
+
+The server's media folders are an ES-DE-style export -- `<platform>/covers/<rom
+name>.png` and ten more kinds beside it -- and they still carried the ROM names
+from before the server was cleaned. RomM itself does not care, because it serves
+art by game id, but ES-DE finds art by filename, so a card built from those
+folders would have come out blank for 1,330 games.
+
+**15,353 media files renamed to follow their ROMs.** Verified by inode: 81,617
+files before, 81,617 after, and the same multiset of inodes, so nothing was
+overwritten or lost. The run was rehearsed first on a hardlink copy of four
+platforms -- renames in the copy do not touch the original names, and the inode
+fingerprint proved the same thing there before anything real moved.
+
+**1,632 files, covering 162 games, were deliberately left alone.** These are the
+games whose name was the name of a *different* game, and the artwork was scraped
+against that name -- so `megadrive/covers/Kiss Shot (Japan).png` is a photograph
+of a pool table, and the ROM that used to be called Kiss Shot is King Salmon.
+Renaming that file would put a picture of Kiss Shot on King Salmon, which is
+worse than leaving it stranded. They are listed in
+[lists/audit-server-art-stranded.tsv](lists/audit-server-art-stranded.tsv) and
+they want a re-export from RomM, which holds the right cover for each of them.
+
+Checked by opening both images rather than by reasoning about them: RomM's cover
+for that ROM is King Salmon's box, and the exported file is Kiss Shot's. Nothing
+in the filenames said so.
+
 ## What is left to do
 
 Steps 1, 5 and 6 are done, along with the duplicate half of 4. The rest stands.
@@ -334,6 +361,8 @@ Steps 1, 5 and 6 are done, along with the duplicate half of 4. The rest stands.
 7. **Rescan on the server** to clear the nine stale RomM rows whose files were
    renamed out from under them. Nothing is missing there; the rows just point at
    names that no longer exist.
+8. **Re-export artwork for the 162 games** whose exported picture is of the game
+   they used to be misnamed as. RomM has the right cover for every one.
 
 `wrong-names.md` and `md-rename-plan.md` describe step 1 from the server's side
 and are now finished business on both: the renames they ask for were done there,
