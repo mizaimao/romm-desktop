@@ -113,13 +113,12 @@ is 112 bytes longer here than the published dump.
 Of the 58 files the server does not have, 46 are arcade or Neo Geo romsets
 (`quizmoon`, `inufuku`, `lordgun` and friends). The rest:
 
-* Seven the server has **lost** — RomM still lists them and flags them
-  `missing_from_fs`: `Barbie-Game Girl.gb`, `Harvest Moon.gb`, `Home Alone 2.gb`,
-  `Ecco the Dolphin (USA, Europe).gg`, `Madden NFL '96 (USA, Europe).gg`,
-  `Final Zone (Japan, USA).zip`, `Snow Bros. - Nick & Tom (Japan).zip`. This
-  machine holds the only copy of the first five; the last two are the broken
-  files above, so they are no loss. RomM also lists two more it cannot find,
-  `Kat's Run` and `Super Bikkuriman`, which are gone from both sides.
+* Nine RomM lists and cannot find, flagged `missing_from_fs` — `Barbie-Game
+  Girl.gb`, `Harvest Moon.gb`, `Home Alone 2.gb`, `Ecco the Dolphin.gg`,
+  `Madden NFL '96.gg`, `Final Zone.zip`, `Snow Bros..zip`, `Kat's Run.7z`,
+  `Super Bikkuriman.7z`. Not losses: each is a stale row left behind when the
+  file was renamed and repacked on the server, and the game is there under its
+  No-Intro name. A RomM rescan clears the nine rows.
 * `psx/Tony Hawks Pro Skater 2 (USA).chd`, 463 MB, which exists nowhere on the
   server. Its name is missing the apostrophe Redump uses.
 * Three that are on the server under another folder or another packaging:
@@ -295,9 +294,19 @@ directories the way the server stores them: `psx/Lunar - Silver Star Story
 Complete (USA)` (three discs and a playlist) and `sfc/AdditionalRoms` (209
 unlicensed and homebrew SNES ROMs).
 
-**Nothing under `library/roms` is now unknown to RomM**, and 8,944 of the
-server's 9,238 games are here. The 294 that are not have simply never been
-downloaded — 108 PSP, 69 DS, 55 GameCube.
+**Nothing under `library/roms` is now unknown to RomM.** The 45 games that were
+on the server and not here — mostly Mega Drive titles whose local file had turned
+out to be a different game — were fetched afterwards, which leaves every
+cartridge platform, plus arcade, PlayStation and Dreamcast, complete:
+
+    arcade  dc  famicom  gamegear  gb  gba  gbc  mastersystem  megadrive
+    neo-geo-pocket  neogeoaes  nes  pcengine  psx  sfc  snes  wonderswan
+    wonderswancolor          -- all complete against the server
+
+What is left is 249 games never downloaded, and they are the disc systems: 108
+PSP, 69 DS, 55 GameCube, 11 3DO, 4 Saturn, and the two N64 folder ROMs. That is
+127 GB against 76 GB free on this machine, so it is a choice rather than an
+omission.
 
 ## What is left to do
 
@@ -322,10 +331,9 @@ Steps 1, 5 and 6 are done, along with the duplicate half of 4. The rest stands.
    The Oddworld playlist still points at a `MultiDisk/` folder that is not here;
    RomM lists the playlist but not the discs beside it, which is worth a look on
    the server.
-7. The five games RomM has lost are still here and still listed by RomM, so the
-   mirror kept them: `Barbie-Game Girl.gb`, `Harvest Moon.gb`, `Home Alone 2.gb`,
-   `Ecco the Dolphin.gg`, `Madden NFL '96.gg`. Upload them and this machine stops
-   being the only copy.
+7. **Rescan on the server** to clear the nine stale RomM rows whose files were
+   renamed out from under them. Nothing is missing there; the rows just point at
+   names that no longer exist.
 
 `wrong-names.md` and `md-rename-plan.md` describe step 1 from the server's side
 and are now finished business on both: the renames they ask for were done there,
