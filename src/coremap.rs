@@ -35,6 +35,14 @@ pub struct System {
     #[serde(default)]
     pub fullname: Option<String>,
     pub romm_platforms: Vec<String>,
+    /// The file extensions ES-DE accepts for this system, `.sfc` and friends.
+    ///
+    /// Read only when walking into a subfolder. A top-level directory holds
+    /// games and little else, but `arcade/fbneo` is battery files and
+    /// `famicom/FCEUmm` is save states, and without this the recursion listed
+    /// those as games.
+    #[serde(default)]
+    pub extensions: Vec<String>,
     pub emulators: Vec<Emulator>,
 }
 

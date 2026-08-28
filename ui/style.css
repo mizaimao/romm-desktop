@@ -1397,6 +1397,7 @@ button:has(> .icon + span) {
 .icon-dice      { --icon: url("icons/dice-5.svg"); }
 .icon-disk      { --icon: url("icons/hard-drive-download.svg"); }
 .icon-cloud     { --icon: url("icons/cloud.svg"); }
+.icon-folder    { --icon: url("icons/folder.svg"); }
 .icon-pane      { --icon: url("icons/square.svg"); }
 .icon-book      { --icon: url("icons/book-open.svg"); }
 .icon-columns   { --icon: url("icons/columns-2.svg"); }
@@ -3459,3 +3460,20 @@ body.mobile #detail .sub {
    more specific than `html.backdrop-on { background: transparent }`, so it won,
    and the shader ran perfectly behind an opaque page. With a backdrop the page
    is meant to be see-through and the canvas provides the colour. */
+
+
+/* Folders, the way ES-DE shows them: a shelf you walk into, drawn above the
+   games at that level. The block is separate from the game grid because the
+   games are sorted, filtered and windowed and a folder is none of those. */
+.folders { margin-bottom: 1rem; }
+.folders .gcard .art,
+.folders .row .have {
+  display: grid;
+  place-items: center;
+}
+.folders .gcard .art .icon {
+  width: 2.4em;
+  height: 2.4em;
+  opacity: 0.75;
+}
+.folders .gcard .art { background: color-mix(in srgb, currentColor 8%, transparent); }

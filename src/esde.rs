@@ -64,6 +64,14 @@ pub struct Game {
     pub system: String,
     pub name: String,
     pub fs_name: String,
+    /// Where this sits inside the system directory: `""` at the top,
+    /// `"Aftermarket"` or `"AdditionalRoms/Homebrew"` below it.
+    ///
+    /// ES-DE walks into subfolders and shows them as folders, so a library
+    /// that files its homebrew that way has games several levels down. This is
+    /// the path that makes them findable again — the front ends draw a folder
+    /// per distinct value, and the gamelist and media lookups key off it.
+    pub rel_dir: String,
     /// Absolute path — ES-DE libraries live wherever the user put them, so
     /// nothing may be assumed about a layout relative to the project.
     pub path: PathBuf,
@@ -97,7 +105,7 @@ impl Layout {
 }
 
 /// Metadata for one game out of a gamelist.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Entry {
     name: Option<String>,
     desc: Option<String>,
@@ -107,11 +115,18 @@ struct Entry {
     year: Option<i32>,
 }
 
-/// Parse `gamelist.xml` into `file stem -> metadata`.
+/// Parse `gamelist.xml` into `path stem -> metadata`.
 ///
 /// Hand-rolled rather than pulled in as an XML dependency: the format is flat,
 /// and the only awkward part is that `<path>` is relative and usually prefixed
-/// `./`, so it is reduced to a file name for matching.
+/// `./`, so the prefix is stripped and the extension dropped for matching.
+///
+/// Keyed by the path relative to the system directory, not by file name.
+/// `<path>./Aftermarket/Blow'em Out!.zip` and a top-level `Blow'em Out!.zip`
+/// are two different games, and keying on the file name alone let one
+/// overwrite the other's name and description. The bare name is inserted as a
+/// second key when it is still free, so a gamelist that writes a nested game
+/// without its folder is still matched.
 fn parse_gamelist(path: &Path) -> BTreeMap<String, Entry> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return BTreeMap::new();
@@ -128,22 +143,24 @@ fn parse_gamelist(path: &Path) -> BTreeMap<String, Entry> {
             (!v.is_empty()).then_some(v)
         };
         let Some(p) = field("path") else { continue };
-        let file = p.rsplit(['/', '\\']).next().unwrap_or(&p).to_owned();
-        let key = file.rsplit_once('.').map_or(file.clone(), |(s, _)| s.to_owned());
-        out.insert(
-            key,
-            Entry {
-                name: field("name"),
-                desc: field("desc"),
-                genre: field("genre"),
-                players: field("players"),
-                // ES-DE stores 0.0–1.0; the rest of the app uses RomM's 0–100.
-                rating: field("rating").and_then(|r| r.parse::<f64>().ok()).map(|r| r * 100.0),
-                // "19940101T000000"
-                year: field("releasedate")
-                    .and_then(|d| d.get(..4).and_then(|y| y.parse().ok())),
-            },
-        );
+        let rel = p.replace('\\', "/").trim_start_matches("./").to_owned();
+        let key = rel.rsplit_once('.').map_or(rel.clone(), |(s, _)| s.to_owned());
+        let file = key.rsplit('/').next().unwrap_or(&key).to_owned();
+        let entry = Entry {
+            name: field("name"),
+            desc: field("desc"),
+            genre: field("genre"),
+            players: field("players"),
+            // ES-DE stores 0.0–1.0; the rest of the app uses RomM's 0–100.
+            rating: field("rating").and_then(|r| r.parse::<f64>().ok()).map(|r| r * 100.0),
+            // "19940101T000000"
+            year: field("releasedate")
+                .and_then(|d| d.get(..4).and_then(|y| y.parse().ok())),
+        };
+        if file != key {
+            out.entry(file).or_insert_with(|| entry.clone());
+        }
+        out.insert(key, entry);
     }
     out
 }
@@ -244,6 +261,231 @@ fn slug_map(map: &CoreMap) -> BTreeMap<&str, &str> {
     sys_to_slug
 }
 
+/// Files that are never a game, whatever folder they turn up in.
+///
+/// [`is_game_file`] is a deny list, which is right for a system directory: it
+/// holds games and little else. One level down that stops being true.
+/// `arcade/fbneo` is full of `.nv` battery files, `famicom/FCEUmm` of
+/// `.state.auto`, `easyrpg/Imgs` of screenshots — recursing without this
+/// listed every one of them as a game.
+const NEVER_GAMES: &[&str] = &[
+    "auto", "bak", "bmp", "cfg", "dat", "db", "fs", "ini", "jpeg", "jpg", "ldb", "lmt", "lmu",
+    "log", "m3u", "mid", "nv", "ogg", "png", "rtc", "sav", "srm", "state", "txt", "wav", "webp",
+    "xml", "xyz",
+];
+
+/// Whether a file below the top level counts as a game.
+///
+/// The system's own extension list wins outright, so `dreamcast/*.dat` is
+/// still a game even though `.dat` is junk everywhere else. A spelling ES-DE
+/// does not list falls through and is kept — `n3ds/eShop` is full of `.zcci`,
+/// and an allow list alone would have thrown the lot away.
+///
+/// `.m3u` is the reason the list wins rather than merely helping. RomM writes
+/// one into every folder it serves, so `snes/Aftermarket/Aftermarket.m3u` sits
+/// beside the games naming all thirteen as discs. It is listed for `psx` and
+/// `dreamcast`, where a playlist really is how a game starts, and nowhere
+/// else.
+fn nested_game_file(path: &Path, exts: &[String]) -> bool {
+    if !is_game_file(path) {
+        return false;
+    }
+    let Some(ext) = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    if exts.iter().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext)) {
+        return true;
+    }
+    !NEVER_GAMES.contains(&ext.as_str())
+}
+
+/// `Shenmue (USA) (Disc 2)` -> `Shenmue (USA)`, and `(Disk 2)`, `(CD 2)`,
+/// `(Side A)` the same way. `None` when there is no marker at all.
+///
+/// A file named for nothing but its disc — `disc1.chd` — reduces to the empty
+/// string rather than `None`, so a folder of those reads as one game.
+///
+/// The label has to be short and alphanumeric, or `Tales of the Disc Golfer`
+/// would reduce to something that matches nothing.
+fn strip_disc_marker(stem: &str) -> Option<String> {
+    let lower = stem.to_ascii_lowercase();
+    // A folder whose files are named only by their disc: `disc1.chd`,
+    // `cd 2.bin`. There is no title to strip, so they all reduce to nothing
+    // and land on the same base — which is the answer, since a folder named
+    // that way holds one game by construction.
+    let bare = lower.replace([' ', '_', '-'], "");
+    for kind in ["disc", "disk", "cd", "side"] {
+        if let Some(n) = bare.strip_prefix(kind)
+            && !n.is_empty()
+            && n.len() <= 2
+            && n.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return Some(String::new());
+        }
+    }
+    for kind in ["disc", "disk", "cd", "side"] {
+        let open = format!("({kind} ");
+        let mut from = 0;
+        while let Some(i) = lower[from..].find(&open) {
+            let at = from + i;
+            let Some(len) = lower[at..].find(')') else { break };
+            let end = at + len + 1;
+            let label = stem[at + open.len()..end - 1].trim();
+            if !label.is_empty()
+                && label.len() <= 2
+                && label.chars().all(|c| c.is_ascii_alphanumeric())
+            {
+                let joined = format!("{}{}", &stem[..at], &stem[end..]);
+                return Some(joined.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+            from = at + 1;
+        }
+    }
+    None
+}
+
+/// What a directory inside a system folder turns out to be.
+enum Folder {
+    /// The directory itself is the game. EasyRPG works this way.
+    Game,
+    /// Discs of one game, which RomM also serves as a single folder ROM.
+    MultiDisc,
+    /// A shelf of unrelated games. ES-DE walks into these, and so do we.
+    Shelf,
+}
+
+/// Tell the three apart.
+///
+/// The disc test is what separates `psx/Final Fantasy VII (USA)/`, whose three
+/// files reduce to one name, from `psx/MultiDisk/`, whose members carry disc
+/// numbers too but reduce to five different games.
+fn classify(dir: &Path, exts: &[String]) -> Folder {
+    // `RPG_RT.ldb` is the marker EasyRPG itself looks for. Descending would
+    // list the maps and graphics inside and lose the game entirely.
+    if dir.join("RPG_RT.ldb").is_file() || dir.join("RPG_RT.exe").is_file() {
+        return Folder::Game;
+    }
+    let mut bases = BTreeSet::new();
+    let mut discs = 0;
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        // A multi-disc game is flat. Anything with folders under it is a shelf.
+        if path.is_dir() {
+            return Folder::Shelf;
+        }
+        if !nested_game_file(&path, exts) {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        // The playlist is how the folder launches, not one of its discs.
+        if name.to_ascii_lowercase().ends_with(".m3u") {
+            continue;
+        }
+        let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+        match strip_disc_marker(stem) {
+            Some(base) => {
+                bases.insert(base);
+                discs += 1;
+            }
+            None => return Folder::Shelf,
+        }
+    }
+    if discs >= 2 && bases.len() == 1 { Folder::MultiDisc } else { Folder::Shelf }
+}
+
+/// The fixed part of a walk: everything that does not change as it descends.
+struct Walk<'a> {
+    system: &'a str,
+    slug: &'a str,
+    meta: &'a BTreeMap<String, Entry>,
+    exts: &'a [String],
+}
+
+impl Walk<'_> {
+    fn game(&self, path: &Path, rel_dir: &str, is_dir: bool) -> Game {
+        let fs_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let stem = fs_name.rsplit_once('.').map_or(fs_name.clone(), |(s, _)| s.to_owned());
+        // The gamelist is keyed by path relative to the system directory, so a
+        // game in a subfolder has to be looked up under that path.
+        let key = if rel_dir.is_empty() { stem.clone() } else { format!("{rel_dir}/{stem}") };
+        let e = self.meta.get(&key);
+        let size = if is_dir {
+            dir_size(path)
+        } else {
+            std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0)
+        };
+        Game {
+            platform_slug: self.slug.to_owned(),
+            system: self.system.to_owned(),
+            name: e.and_then(|e| e.name.clone()).unwrap_or_else(|| stem.clone()),
+            fs_name,
+            rel_dir: rel_dir.to_owned(),
+            path: path.to_owned(),
+            size_bytes: size,
+            summary: e.and_then(|e| e.desc.clone()),
+            genres: e
+                .and_then(|e| e.genre.clone())
+                .map(|g| g.split([',', '/']).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect())
+                .unwrap_or_default(),
+            players: e.and_then(|e| e.players.clone()),
+            rating: e.and_then(|e| e.rating),
+            release_year: e.and_then(|e| e.year),
+        }
+    }
+}
+
+/// One directory, then the shelves beneath it.
+///
+/// A shelf that turns out to hold nothing contributes nothing, which is what
+/// drops `arcade/fbneo` and `famicom/FCEUmm` without having to name them.
+fn walk(w: &Walk, dir: &Path, rel_dir: &str, out: &mut Vec<Game>) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Some(fs_name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        // A leading dot means hidden, and the device means it. Batocera files
+        // multi-disc games as `.Final Fantasy VII (USA)/` with the `.m3u`
+        // beside it, and scanning the folder too listed every one of them
+        // twice, once properly and once with a dot in front and no way to start
+        // it.
+        if fs_name.starts_with('.') {
+            continue;
+        }
+        if path.is_dir() {
+            match classify(&path, w.exts) {
+                Folder::Shelf => {
+                    let sub = if rel_dir.is_empty() {
+                        fs_name
+                    } else {
+                        format!("{rel_dir}/{fs_name}")
+                    };
+                    walk(w, &path, &sub, out);
+                }
+                // A folder game and a multi-disc folder are both one entry,
+                // the way RomM serves them.
+                Folder::Game | Folder::MultiDisc => out.push(w.game(&path, rel_dir, true)),
+            }
+            continue;
+        }
+        // The top level keeps the permissive rule it has always had; below it
+        // the system's extension list decides, because that is where the
+        // emulator's own bookkeeping lives.
+        let keep = if rel_dir.is_empty() {
+            is_game_file(&path)
+        } else {
+            nested_game_file(&path, w.exts)
+        };
+        if keep {
+            out.push(w.game(&path, rel_dir, false));
+        }
+    }
+}
+
 /// Scan an ES-DE library into games, keyed to RomM platform slugs.
 ///
 /// Systems the core map does not know are skipped rather than guessed at — a
@@ -287,59 +529,13 @@ pub fn scan(layout: &Layout, map: &CoreMap) -> Result<(Vec<Game>, Vec<String>)> 
         };
 
         let meta = parse_gamelist(&layout.gamelists.join(system).join("gamelist.xml"));
-
-        for f in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let path = f.path();
-            // A directory here is a multi-disc game, which ES-DE treats as one
-            // entry, same as RomM's folder ROMs.
-            // A leading dot means hidden, and the device means it.
-            //
-            // Batocera's own front end skips these, and multi-disc games are
-            // filed exactly this way: the discs go in `.Final Fantasy VII
-            // (USA)/` and the `.m3u` beside it is the thing to launch. Scanning
-            // the folder as well listed every one of those games twice — once
-            // properly and once as `.Final Fantasy VII (USA)`, with a dot in
-            // front of the name and no way to start it.
-            let hidden = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with('.'));
-            if hidden {
-                continue;
-            }
-            let is_dir = path.is_dir();
-            if !is_dir && !is_game_file(&path) {
-                continue;
-            }
-            let Some(fs_name) = path.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
-                continue;
-            };
-            let stem = fs_name.rsplit_once('.').map_or(fs_name.clone(), |(s, _)| s.to_owned());
-            let e = meta.get(&stem);
-            let size = if is_dir {
-                dir_size(&path)
-            } else {
-                std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0)
-            };
-            out.push(Game {
-                platform_slug: (*slug).to_owned(),
-                system: system.to_owned(),
-                name: e.and_then(|e| e.name.clone()).unwrap_or_else(|| stem.clone()),
-                fs_name,
-                path,
-                size_bytes: size,
-                summary: e.and_then(|e| e.desc.clone()),
-                genres: e
-                    .and_then(|e| e.genre.clone())
-                    .map(|g| g.split([',', '/']).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect())
-                    .unwrap_or_default(),
-                players: e.and_then(|e| e.players.clone()),
-                rating: e.and_then(|e| e.rating),
-                release_year: e.and_then(|e| e.year),
-            });
-        }
+        let exts = map.systems.get(system).map(|s| s.extensions.as_slice()).unwrap_or(&[]);
+        let w = Walk { system, slug, meta: &meta, exts };
+        walk(&w, &dir, "", &mut out);
     }
-    out.sort_by(|a, b| (&a.platform_slug, &a.name).cmp(&(&b.platform_slug, &b.name)));
+    out.sort_by(|a, b| {
+        (&a.platform_slug, &a.rel_dir, &a.name).cmp(&(&b.platform_slug, &b.rel_dir, &b.name))
+    });
     skipped.sort();
     Ok((out, skipped))
 }
@@ -360,7 +556,15 @@ fn dir_size(p: &Path) -> i64 {
 /// *ES-DE system* name — not the RomM slug, which is why `Game` carries both.
 pub fn media_path(layout: &Layout, system: &str, stem: &str, kind: &str) -> Option<PathBuf> {
     const EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "mp4", "webm", "mkv", "pdf"];
-    let dir = layout.media.join(system).join(kind);
+    // ES-DE mirrors the ROM folder structure under each media type, so a game
+    // in `snes/Aftermarket` has its cover in `covers/Aftermarket`. `stem` may
+    // therefore carry a subfolder, and the listing has to be read from that
+    // directory rather than the top one.
+    let (sub, stem) = stem.rsplit_once('/').unwrap_or(("", stem));
+    let mut dir = layout.media.join(system).join(kind);
+    if !sub.is_empty() {
+        dir = dir.join(sub);
+    }
     let names = media_listing(&dir);
     EXTS.iter().find_map(|e| {
         let file = format!("{stem}.{e}");
@@ -443,12 +647,120 @@ mod tests {
             r#"{
               "default_core_by_romm_platform": {"snes": "snes9x", "megadrive": "genesisgx"},
               "systems": {
-                "snes":      {"romm_platforms": ["snes"],      "emulators": []},
+                "snes":      {"romm_platforms": ["snes"],
+                              "extensions": [".sfc", ".smc", ".zip"], "emulators": []},
                 "megadrive": {"romm_platforms": ["megadrive"], "emulators": []}
               }
             }"#,
         )
         .unwrap()
+    }
+
+    /// A shelf is walked into; a multi-disc game is not.
+    ///
+    /// Both are directories inside a system folder and RomM serves both as a
+    /// single folder ROM, so the only thing telling them apart is what is
+    /// inside: three files that reduce to one name, or thirteen that do not.
+    #[test]
+    fn a_shelf_is_walked_into_and_a_multi_disc_game_is_not() {
+        let root = scratch("shelves");
+        let roms = root.join("ROMs");
+
+        touch(&roms.join("snes/Top Level Game.sfc"), b"x");
+        // What RomM leaves behind: the games, and a playlist naming all of
+        // them as if they were discs of one.
+        touch(&roms.join("snes/Aftermarket/Witch n' Wiz.zip"), b"x");
+        touch(&roms.join("snes/Aftermarket/Corn Buster.zip"), b"x");
+        touch(&roms.join("snes/Aftermarket/Aftermarket.m3u"), b"x");
+        // Two levels down, which the card really has under `sfc`.
+        touch(&roms.join("snes/AdditionalRoms/Homebrew/Someone's Demo.sfc"), b"x");
+        // A real multi-disc game: one name once the disc number is stripped.
+        touch(&roms.join("snes/Chrono Trigger (USA)/Chrono Trigger (USA) (Disc 1).sfc"), b"x");
+        touch(&roms.join("snes/Chrono Trigger (USA)/Chrono Trigger (USA) (Disc 2).sfc"), b"x");
+        // Disc numbers throughout, but five different games — a shelf.
+        touch(&roms.join("snes/MultiDisk/Colony Wars (USA) (Disc 1).sfc"), b"x");
+        touch(&roms.join("snes/MultiDisk/Heart of Darkness (USA) (Disc 1).sfc"), b"x");
+        // The emulator's own bookkeeping, which is not a game anywhere.
+        touch(&roms.join("snes/support/dino.nv"), b"x");
+        touch(&roms.join("snes/support/B-Wings.state.auto"), b"x");
+
+        let layout = Layout::new(&root, Some(&roms));
+        let (games, _) = scan(&layout, &map()).unwrap();
+        let mut found: Vec<(String, String)> =
+            games.iter().map(|g| (g.rel_dir.clone(), g.name.clone())).collect();
+        found.sort();
+
+        assert_eq!(
+            found,
+            vec![
+                ("".to_owned(), "Chrono Trigger (USA)".to_owned()),
+                ("".to_owned(), "Top Level Game".to_owned()),
+                ("AdditionalRoms/Homebrew".to_owned(), "Someone's Demo".to_owned()),
+                ("Aftermarket".to_owned(), "Corn Buster".to_owned()),
+                ("Aftermarket".to_owned(), "Witch n' Wiz".to_owned()),
+                ("MultiDisk".to_owned(), "Colony Wars (USA) (Disc 1)".to_owned()),
+                ("MultiDisk".to_owned(), "Heart of Darkness (USA) (Disc 1)".to_owned()),
+            ],
+            "the shelves are walked into, the multi-disc game stays one entry, \
+             the playlist RomM wrote is not a game, and `support` contributes nothing"
+        );
+    }
+
+    /// The gamelist keys off the path, not the file name.
+    ///
+    /// Two games called `Foo` — one at the top, one in a folder — used to share
+    /// a key, and whichever the parser read second won both names.
+    #[test]
+    fn a_nested_game_takes_its_name_from_its_own_gamelist_entry() {
+        let root = scratch("nested-gamelist");
+        let roms = root.join("ROMs");
+        touch(&roms.join("snes/Foo.sfc"), b"x");
+        touch(&roms.join("snes/Aftermarket/Foo.sfc"), b"x");
+        touch(
+            &root.join("gamelists/snes/gamelist.xml"),
+            br#"<gameList>
+                 <game><path>./Foo.sfc</path><name>The Top One</name></game>
+                 <game><path>./Aftermarket/Foo.sfc</path><name>The Nested One</name></game>
+               </gameList>"#,
+        );
+
+        let layout = Layout::new(&root, Some(&roms));
+        let (games, _) = scan(&layout, &map()).unwrap();
+        let named = |rel: &str| {
+            games.iter().find(|g| g.rel_dir == rel).map(|g| g.name.clone()).unwrap()
+        };
+        assert_eq!(named(""), "The Top One");
+        assert_eq!(named("Aftermarket"), "The Nested One");
+    }
+
+    /// EasyRPG games are directories, and descending would list their maps and
+    /// lose the game.
+    #[test]
+    fn a_folder_with_an_rpg_maker_marker_is_the_game() {
+        let root = scratch("rpgmaker");
+        let roms = root.join("ROMs");
+        touch(&roms.join("snes/Ib/RPG_RT.ldb"), b"x");
+        touch(&roms.join("snes/Ib/Map0001.lmu"), b"x");
+
+        let layout = Layout::new(&root, Some(&roms));
+        let (games, _) = scan(&layout, &map()).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].name, "Ib");
+        assert_eq!(games[0].rel_dir, "");
+    }
+
+    #[test]
+    fn disc_markers_are_stripped_but_titles_are_not() {
+        assert_eq!(strip_disc_marker("Shenmue (USA) (Disc 2)").as_deref(), Some("Shenmue (USA)"));
+        assert_eq!(
+            strip_disc_marker("Metal Gear Solid (USA) (Disc 1) (Rev 1)").as_deref(),
+            Some("Metal Gear Solid (USA) (Rev 1)")
+        );
+        assert_eq!(strip_disc_marker("Panzer Dragoon Saga (Disk 3)").as_deref(), Some("Panzer Dragoon Saga"));
+        assert_eq!(strip_disc_marker("Some Game (Side A)").as_deref(), Some("Some Game"));
+        // No marker at all, and a title that merely contains the word.
+        assert_eq!(strip_disc_marker("Super Mario World"), None);
+        assert_eq!(strip_disc_marker("Tales of the Disc Golfer"), None);
     }
 
     /// The KNULLI scheme, end to end through a real scan.

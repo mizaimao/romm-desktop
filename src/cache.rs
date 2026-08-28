@@ -132,6 +132,11 @@ pub struct RomRow {
     /// from a local ES-DE tree. Artwork there is keyed by ES-DE system name,
     /// not by RomM slug, so the two cannot be used interchangeably.
     pub esde_system: Option<String>,
+    /// Subfolder inside the system directory, `""` at the top level.
+    ///
+    /// Server rows are always empty: RomM has no folders, it has one ROM per
+    /// folder. Only a local ES-DE scan fills this in.
+    pub rel_dir: String,
     /// Absolute path for a locally scanned game.
     pub local_path: Option<String>,
 }
@@ -164,7 +169,18 @@ const ROM_COLUMNS: &str = "id, platform_slug, COALESCE(NULLIF(name, ''), fs_name
                            cover_small_path, summary, meta_json, alt_names_json, \
                            regions_json, manual_path, youtube_id, \
                            COALESCE(multi_file, 0), esde_system, local_path, \
-                           last_played";
+                           last_played, COALESCE(rel_dir, '')";
+
+/// Hide a server row that the local scan has walked into.
+///
+/// RomM has no folders. It indexed `snes/Aftermarket` as one ROM with thirteen
+/// files, and the scan now lists those thirteen games and draws a folder — so
+/// without this the shelf appears twice, once as a folder you can open and
+/// once as a single unplayable game beside it.
+///
+/// Only ever hides the container. The proper cure is rescanning on the RomM
+/// side so the server indexes the games individually.
+const NOT_A_WALKED_SHELF: &str = "NOT (roms.id > 0 AND COALESCE(roms.multi_file, 0)      AND EXISTS (SELECT 1 FROM roms AS l WHERE l.id < 0                    AND l.platform_slug = roms.platform_slug                    AND (l.rel_dir = roms.fs_name OR l.rel_dir LIKE roms.fs_name || '/%')))";
 
 /// Whether a row is something to put on screen.
 ///
@@ -214,6 +230,7 @@ fn rom_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RomRow> {
         esde_system: r.get(18)?,
         local_path: r.get(19)?,
         last_played: r.get(20)?,
+        rel_dir: r.get(21).unwrap_or_default(),
     })
 }
 
@@ -256,6 +273,10 @@ impl Cache {
             // recent games, and comes from the server rather than being
             // recorded here, so it follows you between machines.
             ("last_played", "TEXT"),
+            // Where the game sits inside its system directory. Empty at the
+            // top, `Aftermarket` or `AdditionalRoms/Homebrew` below it — the
+            // folders ES-DE walks into and the front ends now draw.
+            ("rel_dir", "TEXT"),
         ] {
             let _ = conn.execute(&format!("ALTER TABLE roms ADD COLUMN {col} {ty}"), []);
         }
@@ -456,8 +477,9 @@ impl Cache {
         {
             let mut ins = tx.prepare(
                 "INSERT INTO roms (id, platform_slug, name, fs_name, fs_size_bytes,
-                                   summary, meta_json, local_path, esde_system, multi_file)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                   summary, meta_json, local_path, esde_system, multi_file,
+                                   rel_dir)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             // OR IGNORE, not OR REPLACE: a platform the server already knows
             // about keeps its own id, name and count. This only has to make
@@ -489,6 +511,7 @@ impl Cache {
                     g.path.to_string_lossy(),
                     g.system,
                     i64::from(g.path.is_dir()),
+                    g.rel_dir,
                 ])?;
                 *counts.entry(g.platform_slug.as_str()).or_default() += 1;
             }
@@ -810,7 +833,9 @@ impl Cache {
 
     /// Every game, ordered as the platform pages order them.
     pub fn all_roms(&self) -> Result<Vec<RomRow>> {
-        let sql = format!("SELECT {ROM_COLUMNS} FROM roms ORDER BY 2, 3 COLLATE NOCASE");
+        let sql =
+            format!("SELECT {ROM_COLUMNS} FROM roms WHERE {NOT_A_WALKED_SHELF} \
+                     ORDER BY 2, 3 COLLATE NOCASE");
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map([], rom_from_row)?
@@ -824,7 +849,7 @@ impl Cache {
         // page is a wall of a few hundred names; the handful you actually play
         // being at the top is the difference between browsing and searching.
         let sql = format!(
-            "SELECT {ROM_COLUMNS} FROM roms WHERE platform_slug = ?1 \
+            "SELECT {ROM_COLUMNS} FROM roms WHERE platform_slug = ?1 AND {NOT_A_WALKED_SHELF} \
              ORDER BY (id IN ({FAVORITE_ROMS})) DESC, 3 COLLATE NOCASE"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -1291,6 +1316,7 @@ mod tests {
             system: system.into(),
             name: name.into(),
             fs_name: file.into(),
+            rel_dir: String::new(),
             path: std::path::PathBuf::from(format!("/ES-DE/ROMs/{system}/{file}")),
             size_bytes: 42,
             summary: None,

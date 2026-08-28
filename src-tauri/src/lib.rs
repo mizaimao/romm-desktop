@@ -161,6 +161,12 @@ struct RomView {
     /// free text inside the metadata blob, and the page would otherwise parse
     /// the same JSON once per game on every redraw.
     players: Option<u8>,
+    /// Subfolder inside the ES-DE system directory, `""` at the top level.
+    ///
+    /// The page builds the folder view out of this. It arrives with the rest of
+    /// the list, once, so walking in and out of a folder is a redraw rather
+    /// than a round trip.
+    rel_dir: String,
 }
 
 #[derive(Serialize)]
@@ -1259,6 +1265,7 @@ fn to_views(
                     .and_then(|v| v.as_str())
                     .and_then(cache::max_players),
                 last_played: r.last_played.clone(),
+                rel_dir: r.rel_dir.clone(),
                 id: r.id,
                 name: r.name,
                 fs_name: r.fs_name,

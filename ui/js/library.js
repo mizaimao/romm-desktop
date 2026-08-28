@@ -382,6 +382,7 @@ export async function showRoms(slug) {
   state.platform = slug;
   state.lastPlatform = slug;
   localStorage.setItem("lastPlatform", slug);
+  state.folder = "";
   el.search.value = "";
   state.rows = await invoke("roms", { platform: slug, list: listRef() });
   await arrangeCurrentList();
@@ -448,6 +449,8 @@ export function delegateGames(container) {
   };
 
   container.addEventListener("click", (ev) => {
+    const dir = ev.target.closest?.("[data-dir]");
+    if (dir && container.contains(dir)) return openFolder(dir.dataset.dir);
     const id = idOf(ev);
     if (id !== null) selectRom(id);
   });
@@ -537,16 +540,107 @@ function markSelected() {
   }
 }
 
+/// Split a console's rows into what is on screen at the folder now open.
+///
+/// A game whose `rel_dir` is the current folder is drawn as a game; anything
+/// deeper contributes its next path segment as a folder. Two levels down
+/// (`AdditionalRoms/Homebrew`) that means the shelf shows `AdditionalRoms`
+/// and nothing else until you open it, which is what ES-DE does.
+function atFolder(rows) {
+  const here = state.folder || "";
+  const under = here ? `${here}/` : "";
+  const games = [];
+  const dirs = new Map();
+  for (const r of rows) {
+    const rel = r.rel_dir || "";
+    if (rel === here) {
+      games.push(r);
+      continue;
+    }
+    if (!rel.startsWith(under)) continue;
+    const next = rel.slice(under.length).split("/")[0];
+    if (!next) continue;
+    const seen = dirs.get(next) ?? { name: next, path: under + next, count: 0 };
+    seen.count += 1;
+    dirs.set(next, seen);
+  }
+  return {
+    games,
+    dirs: [...dirs.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/// Walk into a folder, or back out of one.
+///
+/// Back is the trail the controller and the Back button already share, so one
+/// press goes up one level and the press after that leaves the console.
+export function openFolder(path) {
+  const from = state.folder || "";
+  if ((path || "") === from) return;
+  // Only walking *in* leaves a crumb. Back calls `goToFolder` directly —
+  // pushing here as well would drop a crumb pointing forward again, and Back
+  // would bounce between two levels forever.
+  trail.push(() => goToFolder(from));
+  goToFolder(path);
+}
+
+function goToFolder(path) {
+  state.folder = path || "";
+  el.title.textContent = state.folder
+    ? `${state.platform} / ${state.folder.split("/").join(" / ")}`
+    : `${state.platform} — ${state.rows.length} games`;
+  renderRows(state.rows, false);
+}
+
+function folderCardMarkup(d) {
+  return `
+      <div class="gcard folder" data-dir="${escapeHtml(d.path)}">
+        <div class="art"><span class="icon icon-folder"></span></div>
+        <div class="gname">${escapeHtml(d.name)}</div>
+        <div class="gmeta">${d.count} game${d.count === 1 ? "" : "s"}</div>
+      </div>`;
+}
+
+function folderRowMarkup(d) {
+  return `
+      <div class="row folder" data-dir="${escapeHtml(d.path)}">
+        <span class="have"><span class="icon icon-folder"></span></span>
+        <span class="nm">${escapeHtml(d.name)}</span>
+        <span class="sz">${d.count} game${d.count === 1 ? "" : "s"}</span>
+      </div>`;
+}
+
+/// The folders for this level, as one block above the games.
+///
+/// Drawn separately rather than mixed into the list because the games are
+/// sorted, filtered and windowed and a folder is none of those things — it
+/// belongs at the top whatever the list is ordered by, the way a file manager
+/// does it.
+function foldersMarkup(dirs) {
+  if (!dirs.length) return "";
+  const inner =
+    state.layout === "grid"
+      ? `<div class="gcards">${dirs.map(folderCardMarkup).join("")}</div>`
+      : `<div class="rows">${dirs.map(folderRowMarkup).join("")}</div>`;
+  return `<div class="folders">${inner}</div>`;
+}
+
 export function renderRows(unsorted, showPlatform) {
   // Ordered here rather than by whoever supplied the rows, so every path that
   // draws a list — a console, a collection, a search, a redraw after the order
   // changed — goes through the same comparison.
   // Narrowed first, then ordered. The other way round sorts rows that are
   // about to be thrown away, which on 2,506 games is most of the work.
-  const rows = sorted(filtered(unsorted));
+  //
+  // Folders come out before any of that. They are not sorted, filtered or
+  // windowed with the games, and a console whose top level is nothing but
+  // folders is not an empty console.
+  const { games, dirs } =
+    showPlatform || state.view !== "roms" ? { games: unsorted, dirs: [] } : atFolder(unsorted);
+  const rows = sorted(filtered(games));
   refreshSortButton();
   refreshFilterButton();
-  if (!rows.length) {
+  if (!rows.length && !dirs.length) {
     stopWindowing();
     // A filtered list that matches nothing looks exactly like a console with
     // no games in it, and the filter is off screen in a menu — so the empty
@@ -605,6 +699,8 @@ export function renderRows(unsorted, showPlatform) {
         ? gridMarkup(rows)
         : listMarkup(rows, showPlatform);
   }
+  // After the games, so the windowed list keeps the container it was handed.
+  if (dirs.length) region("games").insertAdjacentHTML("afterbegin", foldersMarkup(dirs));
   // Work out where the cursor can go while nobody is waiting on it, rather
   // than on the first arrow press after this.
   primeNav();

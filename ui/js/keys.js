@@ -218,6 +218,8 @@ function activate() {
   // transition the mouse does, and a click handler is not the place to keep it.
   if (node.dataset.slug) openPlatform(node.dataset.slug, node);
   else if (node.dataset.id) invoke("rom_detail", { id: Number(node.dataset.id) }).then(play);
+  // A folder opens rather than plays, and the card already knows which one.
+  else if (node.dataset.dir !== undefined) node.click();
   // Collection cards already carry the navigation in their click handler,
   // which knows the group it came from; reuse it rather than duplicating.
   else if (node.dataset.cid || node.dataset.group) node.click();

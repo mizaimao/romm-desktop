@@ -13,6 +13,14 @@ export const state = {
   selected: null,
   /// Platform slug -> cover aspect (w/h), measured by the backend.
   aspects: {},
+  /// The folder open inside the current console: `""` at the top,
+  /// `"Aftermarket"` or `"AdditionalRoms/Homebrew"` below it.
+  ///
+  /// ES-DE shows a subfolder as a folder you walk into. The scan records where
+  /// each game sits, the whole console arrives in one call, and this is the
+  /// only thing that changes when you open one — so walking the tree is a
+  /// redraw, not a round trip.
+  folder: "",
   /// The collection currently open, so its position can be remembered too.
   collection: null,
   /// Its name, separate from the rendered title. The title carries a count and
