@@ -8,6 +8,8 @@ rather than a record of one already taken.
 
 | File | What it is | Rows |
 | --- | --- | --- |
+| `audit-name-vs-content.tsv` | Files here whose name is not the game inside, and what the server calls those bytes | 190 |
+| `audit-sync-applied.tsv` | What the 2026-08-28 sync did: every file renamed, fetched or parked | 1,794 |
 | `worth-taking.tsv` | Games on the Super Game HDD the server does not have, rated 80+ | 3,556 |
 | `arcade-proposed-names.tsv` | Names as the emulator reads them from the romset, with region | 1,613 |
 | `wanted-by-consensus.tsv` | Per-platform want-lists from Time Extension and Wikipedia | 629 |
