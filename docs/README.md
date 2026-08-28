@@ -22,6 +22,7 @@ cost days, and where things stand. Everything else here is one subject.
 | --- | --- |
 | [features-wanted.md](features-wanted.md) | Things a retro frontend normally has and this one does not. A menu, not a queue |
 | [memory-footprint.md](memory-footprint.md) | What the app weighs and why — 192 MB, and 106 MB of it is WebKit |
+| [fast-launch.md](fast-launch.md) | Why a game takes 4.26 s to start, and the launcher being written to fix it |
 | [attract-mode.md](attract-mode.md) | How ES and ES-DE do the arcade screensaver, read out of both sources. Not built |
 | [cartridge-shelf.md](cartridge-shelf.md) | Games shown as the physical cartridge, Socket-style. Scoped, not built |
 | [one-core-two-frontends.md](one-core-two-frontends.md) | The shape once the answer became "Flip **and** Thor" |
