@@ -1418,7 +1418,8 @@ button:has(> .icon + span) {
    has been left alone and there is nothing on screen worth reaching. */
 #attract {
   position: fixed;
-  inset: 0;
+  /* A tenth of the screen clear on every side. */
+  inset: 10vh 10vw;
   z-index: 90;
   background: #000;
   display: grid;
@@ -1426,6 +1427,15 @@ button:has(> .icon + span) {
   opacity: 0;
   transition: opacity .5s ease;
   outline: none;
+}
+/* The margin would otherwise show the library through it, so the black goes
+   behind the whole screen and the content sits inside the margin. */
+#attract::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: -1;
 }
 #attract.on { opacity: 1; }
 .attract-art { position: relative; overflow: hidden; }
