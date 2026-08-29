@@ -51,22 +51,59 @@ every GBA game report unsupported.
 Of the library, 46% of hashed ROMs have achievements, 37% are recognised
 dumps with no achievement set authored, and 17% are unknown to RA.
 
-## Hasheous is the authority on dump quality
+**Arcade is hashed by file name, not contents.** RA's arcade hash is the md5 of
+the filename with its extension removed — verified against this library, where
+`midssio`, `blockade` and `mineswpr` all match exactly. That is why the arcade
+folder must keep MAME short names.
+
+**Neo Geo AES cannot be hashed at all.** RetroAchievements has no such console;
+Neo Geo sits under Arcade. RomM's `neogeoaes` platform has `ra_id NULL`, so
+`RAHasher` is never invoked and its 162 ROMs stay unhashed for ever. That is
+not a failure to fix. Moving them to `arcade` would not help either: their
+names are descriptive (`3 Count Bout ~ Fire Suplex (NGM-043)(NGH-043).zip`)
+rather than MAME set names, so the filename hash would resolve to nothing.
+
+A `.m3u` playlist has no RA hash either — RA hashes discs, not playlists.
+
+## No-Intro decides. Hasheous only points
 
 `https://hasheous.org/api/v1/Lookup/ByHash/MD5/<md5>` aggregates No-Intro,
-Redump and TOSEC. It returns the **canonical filename including dump flags**,
-which is the actual verdict:
+Redump and TOSEC, and returns the canonical filename in
+`signature.rom.name` — including TOSEC's dump flags:
 
     Home Alone (1991)(THQ)(EU-US).gb                            clean
     Kat's Run - Zennihon K Car Senshuken (1995)(Atlus)(JP)[b3]  bad dump
-    Ecco the Dolphin (1994)(Sega)(EU-US)[b2]                    bad dump
     Chase H.Q. (1991-03-08)(Taito)(JP)(en)[h]                   hacked
 
-Being *absent* from RetroAchievements proves nothing — their coverage is thin
-on Europe-only releases and revisions. Being flagged `[b]`, `[h]`, `[o]` or
-`[f]` in TOSEC is proof.
+That is a *lead*, not a verdict. **Confirm against the No-Intro DAT before
+replacing anything.** On 2026-08-29 a sweep of 336 ROMs flagged 18, and two of
+them were fine:
 
-RomM already talks to this service; no key is needed for lookups.
+- `ClayFighter (Europe).zip` — flagged `[b]`. It is the exact No-Intro
+  `ClayFighter (Europe).md`. TOSEC had matched it against a *US* entry.
+- `Star Fox (USA) (Rev 2).zip` — flagged `[a]`. It is the exact No-Intro
+  `Star Fox (USA) (Rev 2).sfc`.
+
+Both would have been replaced with a worse file on TOSEC's word alone.
+
+The DATs are fetchable and need no account:
+
+    https://raw.githubusercontent.com/libretro/libretro-database/master/metadat/no-intro/<System>.dat
+
+`Nintendo - Game Boy.dat`, `Sega - Game Gear.dat`,
+`Sega - Mega Drive - Genesis.dat`,
+`Nintendo - Super Nintendo Entertainment System.dat`. Each `rom (` line carries
+`name`, `size`, `crc`, `md5`, `sha1`; index them by md5 and a lookup is
+instant. Note the Game Gear DAT names some entries `.sms` — Game Gear and
+Master System share a format, and those are still Game Gear entries.
+
+**Hasheous's MD5 index has holes.** `Taito Chase H.Q. (USA)` returned no match
+by MD5 and resolved correctly by SHA1. If MD5 comes back empty, try
+`/Lookup/ByHash/SHA1/<sha1>` before concluding anything.
+
+Being *absent* from RetroAchievements proves nothing either — their coverage is
+thin on Europe-only releases and revisions. Of 336 ROMs RA did not recognise,
+318 were clean dumps it simply does not cover.
 
 ## Traps that produced wrong answers
 
@@ -111,9 +148,34 @@ inserting a filename, or the file stops being valid XML and ES reads nothing.
 
 ## Where it stands
 
-Server, SSD and Android agree. The **Flip has not been touched** and is behind
-by: 56 merged games, the Home Alone dump fix, the two Oddworld discs, and six
-bad dumps still present.
+**2026-08-29.** All four copies agree on dump quality. Fourteen bad dumps were
+replaced with exact No-Intro matches across server, SSD, Android and Flip, each
+verified after it landed rather than only before it was sent:
 
-Deliberately not done: compressing the 4,158 raw cart ROMs (~4.5 GB saving) —
-it renames files, so it desyncs any device it is not done on.
+    gamegear  Chase H.Q. · Indiana Jones · NHL All-Star Hockey · Poker Face Paul's
+              Poker · R.B.I. Baseball '94 · Super Off Road · Surf Ninjas · Tails Adventure
+    gb        Rocky and Bullwinkle · Garfield Labyrinth · FIFA Road to WC 98 · Spot
+    megadrive Landstalker (USA) · Flashback - The Quest for Identity (USA)
+
+Six of those were renamed to their No-Intro names, which also moved their
+artwork and gamelist entries. The Game Gear library — 328 ROMs — was copied to
+the Flip, which previously had none.
+
+Hashing is complete: 1,556 unhashed rows down to the 162 Neo Geo AES and one
+`.m3u`, neither of which can ever hash. Every ROM on disk that RA can hash has
+a hash.
+
+Still open:
+
+- The Flip is behind on the older backlog — 56 merged games, the Home Alone fix
+  and the two Oddworld discs.
+- `Flashback (Japan).zip` is not a No-Intro dump on any device. Left alone;
+  only the USA release was asked for.
+- The SSD and Android still have artwork filed under pre-rename names for
+  `Ecco the Dolphin (USA, Europe, Brazil) (En)` and `Madden 96 (USA, Europe)`.
+  The Flip's copies were mapped across, so only those two are stale.
+- No Game Gear favourites exist anywhere — not in any gamelist, not as a
+  RomM collection. The other nine systems have a `★ Best of <system>`.
+- Compressing the 4,158 raw cart ROMs (~4.5 GB saving) is deliberately not
+  done: it renames files, so it desyncs any device it is not done on. Frank
+  wants tests first.

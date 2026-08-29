@@ -7,6 +7,7 @@ cost days, and where things stand. Everything else here is one subject.
 
 | | |
 | --- | --- |
+| [devices.md](devices.md) | **How to reach each of the four copies and where everything is on it** — ROMs, artwork, gamelists, hashes, and the shell traps that waste a day. Start here before touching any of them |
 | [flip-knulli-changes.md](flip-knulli-changes.md) | **Every change made to the Miyoo Flip**, read back off the device. Read before touching it |
 | [knulli-addon.md](knulli-addon.md) | `moose-patch` — what it patches, how a patch is undone, the favourites sync |
 | [handheld-os.md](handheld-os.md) | Which OS the Flip should run, and why |
@@ -25,7 +26,7 @@ cost days, and where things stand. Everything else here is one subject.
 | [fast-launch.md](fast-launch.md) | Why a game takes 4.26 s to start, and the launcher being written to fix it |
 | [attract-mode.md](attract-mode.md) | How ES and ES-DE do the arcade screensaver, read out of both sources. Not built |
 | [cartridge-shelf.md](cartridge-shelf.md) | Games shown as the physical cartridge, Socket-style. Scoped, not built |
-| [library-sync.md](library-sync.md) | Keeping server, SSD, Android and Flip in step — and how RomM, RetroAchievements and Hasheous each hash differently |
+| [library-sync.md](library-sync.md) | Keeping server, SSD, Android and Flip in step — how RomM, RetroAchievements and Hasheous each hash differently, and why No-Intro is the one that decides |
 | [one-core-two-frontends.md](one-core-two-frontends.md) | The shape once the answer became "Flip **and** Thor" |
 | [port-plan.md](port-plan.md) | The plan that came out of it |
 | [handheld-frontend.md](handheld-frontend.md) | The SDL front end. Superseded by the addon — see `knulli-addon.md` |

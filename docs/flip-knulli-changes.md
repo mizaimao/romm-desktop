@@ -93,27 +93,32 @@ list and are off.
 
 Cores aligned with romm-desktop (written 2026-08-23):
 
-    dreamcast=flycastvl  fbneo=fbneo    gb=gambatte   gba=vba-m   gbc=gambatte
+    dreamcast=flycastvl  fbneo=fbneo    gb=gambatte   gba=mgba    gbc=gambatte
     megadrive=genesisplusgx             n64=mupen64plus/rice
     neogeo=geolith       nes=fceumm     psx=pcsx_rearmed          snes=snes9x
 
 **`neogeo=geolith` is deliberate** — the ROMs are geolith-specific. Do not
 switch it to fbneo.
 
-**`gba=vba-m` is deliberate too** (changed 2026-08-27, was `mgba`). mGBA is the
-better emulator, but its cheats are broken under RetroArch: enable one and the
-core keeps running while the frontend stops taking input. mGBA reports
-non-linear memory segments through `RETRO_ENVIRONMENT_SET_MEMORY_MAPS` and
-RetroArch's cheat manager cannot follow them — [RetroArch#7387][ra7387], open
-since 2018, with core and frontend each saying it is the other's fix. vba-m
-handles CodeBreaker and GameShark codes itself and does not go through that
-path. Verified working on Castlevania - Circle of the Moon.
+**`gba=mgba`, and it stays there.** vba-m was tried on 2026-08-27 and put back
+the next day; the vbam-era game saves are on the card at
+`/userdata/saves/gba-backup-vbam-20260828/`.
 
-Battery saves survive the switch: RetroArch owns the filename, not the core, so
-both write `<rom>.srm` into `/userdata/saves/gba/`, and
-`sort_savefiles_enable` is false so there are no per-core subfolders. The
-mGBA-era saves are backed up on the card at `/userdata/saves/gba-backup-mgba/`.
-Save states do not survive, and never do across cores.
+What the swap was for is still true: mGBA's cheats are broken under RetroArch.
+Enable one and the core keeps running while the frontend stops taking input.
+mGBA reports non-linear memory segments through
+`RETRO_ENVIRONMENT_SET_MEMORY_MAPS` and RetroArch's cheat manager cannot follow
+them — [RetroArch#7387][ra7387], open since 2018, with core and frontend each
+saying it is the other's fix. vba-m handles CodeBreaker and GameShark codes
+itself and does not go through that path. So if cheats are ever wanted on a
+particular GBA game, `gba["<rom>.gba"].core=vbam` is the per-game way to get
+them without moving the whole system.
+
+Switching either way is cheap for game saves and not for save states.
+RetroArch owns the `.srm` filename rather than the core, and
+`sort_savefiles_enable` is false, so both cores write into
+`/userdata/saves/gba/` with no per-core subfolder. Save states do not survive a
+core change and never do.
 
 The one thing to watch is EEPROM games — the two cores can disagree on layout
 where they cannot on flat SRAM. In this library that is Shantae Advance and
@@ -245,6 +250,41 @@ Each of these looked like something else first.
   you are testing on.
 * **Never bulk-launch RetroArch on the Mac.** Every launch opens a window;
   `video_driver=null` does not prevent it.
+
+## 9. The library on the card
+
+Layout, which is not the ES-DE layout the SSD and Android use:
+
+    /userdata/roms/<system>/                    the ROMs
+    /userdata/roms/<system>/images/<base>-image.png
+    /userdata/roms/<system>/gamelist.xml        with explicit <image> tags
+
+The image is the **miximage downscaled to 640×480**, the screen's size.
+`sips -z 480 640 in.png --out "<base>-image.png"` matches what is already
+there. A system with ROMs and no gamelist entries shows no artwork at all —
+`pcengine` sat at 292 games and 2 entries until that was noticed.
+
+Copy a whole system as one tar rather than hundreds of scp calls; 204 MB took
+55 seconds that way. `COPYFILE_DISABLE=1` keeps macOS from writing `._` files
+into it, and `tar` complaining `Cannot change ownership` on extract is exFAT
+having no Unix ownership — the extraction worked.
+
+**Game Gear, 2026-08-29.** The card had none: `/userdata/roms/gamegear` held
+only `_info.txt`. It now has 328 ROMs, 331 images and a 328-entry gamelist,
+every ROM hashed on the device and compared against the SSD. 226 MB.
+
+Note it has **no favourites**. Every other system does — nes 85, snes 71,
+megadrive 67, gba 44, gb 41, gbc 31, all as `<favorite>true</favorite>` in the
+gamelist. Game Gear has never been favourited on any device, so there was
+nothing to bring across.
+
+Dump fixes the same day, all confirmed against the No-Intro DAT after landing:
+Rocky and Bullwinkle, Garfield Labyrinth, Spot and FIFA on `gb`, plus
+Flashback USA on `megadrive`, with `Landstalker   The Treasures of King Nole
+(Europe).7z` and both `Flashback (Europe)` files removed. The card already had
+the correct `Landstalker (USA).zip`. See [library-sync.md](library-sync.md).
+
+Still behind: 56 merged games, the Home Alone fix, the two Oddworld discs.
 
 ## Where it stands
 
