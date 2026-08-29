@@ -25,7 +25,7 @@ cost days, and where things stand. Everything else here is one subject.
 | [fast-launch.md](fast-launch.md) | Why a game takes 4.26 s to start, and the launcher being written to fix it |
 | [attract-mode.md](attract-mode.md) | How ES and ES-DE do the arcade screensaver, read out of both sources. Not built |
 | [cartridge-shelf.md](cartridge-shelf.md) | Games shown as the physical cartridge, Socket-style. Scoped, not built |
-| [retro-ssd-gaps.md](retro-ssd-gaps.md) | The 24 files the Retro SSD sync did not land, and which are real |
+| [library-sync.md](library-sync.md) | Keeping server, SSD, Android and Flip in step — and how RomM, RetroAchievements and Hasheous each hash differently |
 | [one-core-two-frontends.md](one-core-two-frontends.md) | The shape once the answer became "Flip **and** Thor" |
 | [port-plan.md](port-plan.md) | The plan that came out of it |
 | [handheld-frontend.md](handheld-frontend.md) | The SDL front end. Superseded by the addon — see `knulli-addon.md` |
