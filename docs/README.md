@@ -35,6 +35,7 @@ cost days, and where things stand. Everything else here is one subject.
 
 | | |
 | --- | --- |
+| [inventory.md](inventory.md) | **Hashing every file on the SSD and checking it against No-Intro, Redump, TOSEC and MAME** — the plan, the schema, and how CHDs and headered ROMs are handled. Step by step, re-runnable |
 | [library-audit.md](library-audit.md) | Every ROM hashed against No-Intro and Redump, and this machine compared with the server. 2026-08-28 |
 | [arcade-coverage.md](arcade-coverage.md) | What of the arcade set actually runs, measured against the DATs |
 | [arcade-missing-roms.md](arcade-missing-roms.md) | The 13 of 2,504 that will not, and the files they need |
