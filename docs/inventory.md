@@ -164,3 +164,49 @@ Frank reviews per system before anything moves.
 - NES and Famicom stay separate systems. So do SNES and SFC. Merging later is
   easy; splitting is not.
 - `_hidden` folder names are kept exactly as they are.
+
+## First run — 2026-08-30
+
+Built. `/Volumes/Retro/_inventory/` holds `inventory.db`, `inventory.json`,
+`report.md`, the DATs, the scripts and the logs. 103 MB.
+
+**14,291 files, 2,124 archive members, 97,618 references.**
+
+Cartridges came out at 6,655 verified good against No-Intro. The remainder is
+mostly explainable: `sfc` is 412 multi-member GoodSNES bundles, of which 409
+contain a clean dump; `famicom` and `sfc` are heavy with fan translations that
+no DAT lists; `wonderswan` and `ngp` are thin in the libretro mirror (219 and 9
+entries) rather than wrong on disk.
+
+Discs went as designed. PSP's DVD CHDs verified 109 of 112 straight from the
+header with no extraction. Every single-track CD disc that was extracted
+matched Redump exactly — psx 90, 3do 18. The 68 that did not match are **all**
+multi-track, none genuinely unrecognised, and they need cue-accurate splitting
+that reproduces Redump's track boundaries including generated pregaps. Not
+guessed at: getting it wrong reports good dumps as bad. PS2's 118 CD-style CHDs
+are deferred — extraction is roughly fifteen hours for that system alone.
+
+Arcade: 2,097 sets are exact zip-hash matches against the FBNeo and MAME DATs,
+507 are known sets from a different emulator version, 156 unrecognised. The
+`neogeo` folder is largely unmatched because it uses descriptive names rather
+than MAME set names, which is expected and is why nothing there is renamed.
+
+### Four bugs this run had, all found by checking rather than assuming
+
+- The iNES header is 16 bytes. Reading the 4-byte magic and hashing from there
+  gave NES **0** good out of 849. Fixed: 752.
+- N64 dumps come in three byte orders and No-Intro lists big-endian. Converting
+  first took n64 from 27 good to 555, and N64_All from 9 to 544.
+- Header stripping ran only on loose files, so every headered `.nes` inside a
+  `.zip` missed. Famicom went from 1 good to 256.
+- The CHD truncation check used the v5 header layout on v4 files and called 15
+  healthy Dreamcast CHDs truncated. It is now version-gated.
+
+The lesson each time: a verdict of "bad" that arrives in bulk is a bug in the
+checker until proven otherwise.
+
+### What renaming would touch
+
+1,132 files across the cartridge systems are verified good under a name that
+differs from No-Intro's, and 1,127 of those carry references — artwork, saves,
+gamelist entries. Nothing has been renamed.
