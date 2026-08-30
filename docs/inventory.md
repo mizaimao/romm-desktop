@@ -210,3 +210,78 @@ checker until proven otherwise.
 1,132 files across the cartridge systems are verified good under a name that
 differs from No-Intro's, and 1,127 of those carry references — artwork, saves,
 gamelist entries. Nothing has been renamed.
+
+## Where each system stands — 2026-08-30
+
+The rule this all serves: **every file hash-verified, every filename the
+consensus database-registered name.** Both halves, always, without asking.
+See the memory note `hash-verified-database-names`.
+
+NES, Famicom and Mega Drive are finished. What is left in each is fan
+translations and hacks that no database has ever registered a hash for, so they
+can be neither verified nor renamed. That is a floor, not a backlog.
+
+    nes         860 / 891       genesis    1191 / 1221
+    famicom     838 / 989       nes_unlicensed 1115 / 1118
+
+Tonight took NES from 752 verified to 860, Famicom from 256 to 838, Mega Drive
+from 882 to 1191, and imported 259 Mega Drive, 701 NES/Famicom and 1,115
+unlicensed titles under their database names.
+
+### Still worth doing
+
+- **sfc, 171 of 709.** 412 files are multi-member GoodSNES bundles — every
+  variant of a game in one archive. 409 contain a clean dump. Unpack, verify,
+  name. The one substantial job left.
+- **wonderswan 3/53, wonderswancolor 25/71, ngp 24/48.** ~95 unexplained, but
+  the libretro DATs for these are thin — the Neo Geo Pocket one has **nine
+  entries**. Suspect coverage, not bad dumps.
+- **gb, gbc, gba, n64, snes** — 68 unexplained between them, scattered.
+
+### Deliberately not work
+
+- **`0_BIOS`, 3,339 files.** Hashed, never matched: BIOS images are not in
+  No-Intro. Separate job.
+- **arcade, neogeo, arcade_original.** 507 sets come from a different MAME
+  version. Recognised, and **never renamed** — the filename is the set name the
+  emulator looks up, and parent/clone loading depends on it.
+- **psx, dreamcast, saturn** — 68 multi-track CDs needing cue-accurate track
+  splitting including generated pregaps. Not guessed at: getting it wrong
+  reports good dumps as bad.
+
+### Renaming, and the two ways it bites
+
+1,139 files were renamed to their database names, carrying 9,036 artwork files
+and their gamelist entries. Two hazards, both hit for real:
+
+- **exFAT is case-insensitive.** `BattleTech` → `Battletech` is the *same file*.
+  Copy-then-delete destroys it — three Mega Drive files were lost this way and
+  restored from the payload. Rename via a temporary name instead.
+- **The target name may already exist.** 54 renames were blocked that way. All
+  turned out to be duplicates the import had created: the title matcher treated
+  `Break Time (U)` and `Break Time - The National Pool Tour (USA)` as different
+  games. 52 were the same ROM under a different iNES header, 2 the same ROM in
+  a differently-compressed zip.
+
+**Variant markers are identity, not noise.** `[a1]`, `[a2]`, `(Alt)`, `[b2]` must
+stay in the normalised key. Stripping them matched seven NES alternates to the
+consensus dump and deleted them. An alternate keeps whatever name its own hash
+carries — Hasheous returns TOSEC names such as
+`Jaws (1987-11)(LJN)(US)[a2].nes` for exactly this.
+
+### Sets are dated, and that matters
+
+Frank's Mega Drive library *was* a 2017 No-Intro set — 898 of 966 files
+byte-identical to it. No-Intro has since re-dumped 88 of those. A file that
+fails a 2026 DAT while matching a 2017 one is **stale, not broken**.
+
+Better still: 11 of them were reconstructed with no sourcing at all. They were
+trimmed ROMs, and padding with `0xFF` to full cart size reproduces the current
+No-Intro hash exactly. Four NES overdumps went the other way, fixed by
+truncation. Always try the transform before asking for a new file.
+
+### Only the SSD is current
+
+Server, Android and Flip still carry the old names and none of the imports —
+roughly 2,000 imports and 1,193 renames behind. That was deliberate: get the
+canonical copy right, then push.
