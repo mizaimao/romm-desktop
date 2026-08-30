@@ -35,6 +35,7 @@ cost days, and where things stand. Everything else here is one subject.
 
 | | |
 | --- | --- |
+| [library-rules.md](library-rules.md) | **The rules: every file hash-verified, every filename the database name** — and the mechanics that have gone wrong at least once. Read before touching the library |
 | [inventory.md](inventory.md) | **Hashing every file on the SSD and checking it against No-Intro, Redump, TOSEC and MAME** — the plan, the schema, and how CHDs and headered ROMs are handled. Step by step, re-runnable |
 | [library-audit.md](library-audit.md) | Every ROM hashed against No-Intro and Redump, and this machine compared with the server. 2026-08-28 |
 | [arcade-coverage.md](arcade-coverage.md) | What of the arcade set actually runs, measured against the DATs |

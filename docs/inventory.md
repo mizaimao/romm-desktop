@@ -285,3 +285,32 @@ truncation. Always try the transform before asking for a new file.
 Server, Android and Flip still carry the old names and none of the imports —
 roughly 2,000 imports and 1,193 renames behind. That was deliberate: get the
 canonical copy right, then push.
+
+## Progress, 2026-08-30
+
+Finished, in order: NES, Famicom, Mega Drive, WonderSwan, WonderSwan Color,
+Neo Geo Pocket. The policy these follow is [library-rules.md](library-rules.md).
+
+    nes             860 / 891      wonderswan       96 / 102
+    famicom         838 / 989      wonderswancolor 103 / 114
+    genesis        1191 / 1221     ngp             106 / 119
+    nes_unlicensed 1115 / 1118
+
+Three findings worth carrying forward:
+
+**A folder name is not evidence.** 80 of 124 WonderSwan files sat in the wrong
+system — `wonderswan_hidden` was 45 Color games, `wonderswancolor_hidden` was 35
+WonderSwan games — and 7 Neo Geo Pocket files had the wrong extension. Verifying
+against one system's DAT made a healthy library look broken. File by hash.
+
+**Thin DATs look like bad dumps.** Neo Geo Pocket's libretro DAT has nine
+entries. WonderSwan's names are largely catalogued by TOSEC under their serial,
+not by No-Intro. "Unverified" there meant uncatalogued, not wrong: ngp went from
+24 verified to 106 without a single bad dump being found.
+
+**The set may be worse than what you have.** Two Neo Geo Pocket replacements
+were rejected: the set's `Bust-A-Move Pocket (USA)` is a Beta, and its Puyo Puyo
+is an older Japanese revision against Frank's v1.06. Check region and variant
+before replacing, not just whether the hash verifies.
+
+Next: `sfc`, 171 of 709, where 412 files are multi-member GoodSNES bundles.
