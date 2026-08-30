@@ -108,4 +108,7 @@ SSD only. Server, Android and Flip get pushed once the canonical copy is right.
 ## Where it stands
 
 See [inventory.md](inventory.md). Finished: NES, Famicom, Mega Drive,
-WonderSwan, WonderSwan Color, Neo Geo Pocket. Next: `sfc`.
+WonderSwan, WonderSwan Color, Neo Geo Pocket, Game Boy. Next: `sfc`.
+
+Game Boy set the folder split the later systems follow: English releases at the
+top, `AdditionalRoms/Japanese` and `AdditionalRoms/Unlicensed` beneath it.

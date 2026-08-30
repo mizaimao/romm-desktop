@@ -313,4 +313,41 @@ were rejected: the set's `Bust-A-Move Pocket (USA)` is a Beta, and its Puyo Puyo
 is an older Japanese revision against Frank's v1.06. Check region and variant
 before replacing, not just whether the hash verifies.
 
+## Game Boy, 2026-08-30
+
+Source: `Nintendo - Game Boy` in the work folder, 1,919 archives, 1,899 matching
+No-Intro 2026.08.01. The 20 that do not are demos, test programs and BIOS.
+
+    gb   1420 / 1363        gbc   493 / 470
+
+What the pass did:
+
+    10  bad dumps replaced from the source
+     5  GBC games moved out of gb, hash-matched against the GBC DAT
+     8  Sachen rips swapped for the 9 complete multicarts
+    20  unverifiable roms filed under AdditionalRoms/Unlicensed
+   793  new titles imported
+     2  Europe copies dropped where a USA copy was already held
+
+Frank's folder split, which the later systems should follow:
+
+    gb/                            English releases
+    gb/AdditionalRoms/Japanese     Japan-only
+    gb/AdditionalRoms/Unlicensed   unlicensed, homebrew, multicarts
+    gb/Aftermarket                 pre-existing, left alone
+
+Three things learned here:
+
+**ES-DE media mirrors the ROM subfolder.** Moving a rom into `AdditionalRoms/`
+means its artwork moves to `downloaded_media/gb/<type>/AdditionalRoms/` too.
+`Aftermarket/` already worked this way and showed the convention.
+
+**A GB cart header identifies a multicart rip.** Offset 0x134 reading `GAME`
+with a null old-licensee byte at 0x14B means a game carved out of a Sachen
+4-in-1. No database registers those individually; the whole cart is the entry.
+
+**exFAT here has a 1 MB allocation block.** A 32 KB rom occupies 1 MB. `gb` is
+325 MB of data reported as 2.2 GB. Small-rom systems will always look enormous
+on this volume; it is not a fault.
+
 Next: `sfc`, 171 of 709, where 412 files are multi-member GoodSNES bundles.
