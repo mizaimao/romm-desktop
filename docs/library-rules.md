@@ -72,6 +72,15 @@ Fan translations and hacks. No database has ever registered a hash for them, so
 they can be neither verified nor renamed. That is a floor, not a backlog — do
 not report it as outstanding work.
 
+## One region per game
+
+US preferred, then World, then Europe, then Japan — unless the contents diverge
+enough to be worth keeping on their own. European multi-language builds and PAL
+size differences are not divergence; they are the same game.
+
+Rank the region tag, never substring-match it. `(Japan, USA)` is a USA release
+and outranks `(Europe)`, but does not contain the string `(USA`.
+
 ## Imports
 
 One region per title, preferring **USA > World > Europe > Japan**. Skip anything
@@ -108,7 +117,8 @@ SSD only. Server, Android and Flip get pushed once the canonical copy is right.
 ## Where it stands
 
 See [inventory.md](inventory.md). Finished: NES, Famicom, Mega Drive,
-WonderSwan, WonderSwan Color, Neo Geo Pocket, Game Boy. Next: `sfc`.
+WonderSwan, WonderSwan Color, Neo Geo Pocket, Game Boy, Game Boy Color, Game
+Boy Advance. Next: `sfc`.
 
 Game Boy set the folder split the later systems follow: English releases at the
 top, `AdditionalRoms/Japanese` and `AdditionalRoms/Unlicensed` beneath it.

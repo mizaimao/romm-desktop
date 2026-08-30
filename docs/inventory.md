@@ -350,4 +350,47 @@ with a null old-licensee byte at 0x14B means a game carved out of a Sachen
 325 MB of data reported as 2.2 GB. Small-rom systems will always look enormous
 on this volume; it is not a fault.
 
+## Game Boy Color and Game Boy Advance, 2026-08-30
+
+Same pass as Game Boy, same folder split.
+
+    gbc  1359 / 1338      gba  2112 / 2097
+
+    gbc    2 bad dumps replaced,  866 imported
+    gba   14 bad dumps replaced, 1300 imported
+
+The GBA multiboot set (96 files) was skipped on Frank's word: it is WarioWare
+and GameCube kiosk demos plus the 30 Animal Crossing NES games he already owns,
+no No-Intro DAT exists for multiboot, and Hasheous knows none of them.
+
+**The libretro GBA DAT is incomplete.** 67 of a 3,379-file No-Intro set are
+missing from it, a dozen of them real retail games — Fear Factor Unleashed,
+Shamu's Deep Sea Adventures, the Harry Potter and Crash/Spyro compilations.
+`Happy Feet (USA)` is byte-identical to the source set's copy and still reads as
+unverified. Before calling a file bad, check whether the DAT simply lacks it.
+
+## Region deduplication, 2026-08-30
+
+Frank's rule: one region per game, US preferred, unless the contents diverge
+enough to be worth keeping separately. 455 files dropped, 19,321 -> 18,866.
+
+    n64 207   N64_All 204   nes_unlicensed 27   genesis 11   sfc 3   other 3
+
+Nothing diverged in the end. The 186 first flagged as divergent were European
+multi-language builds and PAL size differences — `Banjo-Kazooie (Europe)
+(En,Fr,De)` is Banjo-Kazooie with French and German, not a different game.
+
+**Rank the region tag, do not substring-match it.** `1080 Snowboarding (Japan,
+USA)` does not contain the string `(USA`, so it ranked as Japan and was about to
+lose to the Europe copy. Parse the first parenthesised group, split on commas,
+and take the best member. This is the second time this bug has nearly cost a
+file; the first was Dr. Mario `(JU)`.
+
+The `_hidden` systems were skipped — Frank said leave those be. 10 files there
+would otherwise qualify.
+
+Still open: `gamelists/nes/gamelist.xml` is duplicated end to end, two `<?xml`
+declarations and two `<gameList>` roots in one file. `n64` and `N64_All` share
+339 of their hashes and are effectively the same library twice.
+
 Next: `sfc`, 171 of 709, where 412 files are multi-member GoodSNES bundles.
