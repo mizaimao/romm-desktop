@@ -151,6 +151,62 @@ Unlicensed titles go to their own folder — `nes_unlicensed`, sorted into
 - **A set is dated.** A file that fails a current DAT while matching an older
   one is stale, not broken.
 
+## Cleaning a system, in order
+
+The sequence that worked on GBA, 2,110 files down to 879. Run it in this order;
+each step narrows what the next has to look at.
+
+1. **Hash the source set against No-Intro.** Repair before sourcing -- 12 bad
+   dumps were fixed from the set itself, and 5 turned out to be GBC games in the
+   wrong folder. The hash decides the system, not the folder name.
+2. **Import what is missing**, one region per title, into `AdditionalRoms/`
+   split by `Japanese`, `Unlicensed`, `Multicart`.
+3. **Deduplicate by cartridge id.** See the section above. 258 regional
+   duplicates on GBA that no title match could see.
+4. **Newest revision only.** See that section.
+5. **Drop compilations** whose every game is held standalone -- 32 of 44.
+6. **Content block-hash the folder** for what metadata cannot see. 64 KB blocks,
+   skip the all-`00`/all-`FF` padding, pairs sharing >=55% are the same game.
+   This found `Yu-Gi-Oh! Duel Monsters Expert 3 (Japan)` = `World Championship
+   Tournament 2004 (USA)` at 99.5%.
+7. **Drop games with no English at all** where no English release exists.
+8. **Rename everything to its database name.**
+9. **Rebuild from a reference list** if the set is still too big -- the Flip's
+   own library is the best one, since it is what Frank actually carries. Keep
+   the SSD's corrected names, not the reference's older ones.
+
+### Four traps, all of which bit
+
+- **Never require the internal cart title or the publisher code to match.** Both
+  are localised. `FINDET NEMO` is not `FINDING NEMO`; Konami Japan is `EM` and
+  Konami USA is `A4`. Adding either as a guard blocks every genuine cross-region
+  pair -- this killed the method twice in one session before it was spotted.
+- **A file that fails its DAT may be a patch, not a bad dump.** The GBA repair
+  pass replaced Frank's Shin-chan English patch and a double-patched FF6 with
+  vanilla copies. Check the size: a patch is usually *larger* than the base rom
+  and shares ~98% of its blocks. Record them with verdict `patched`.
+- **Content matching is useless across localisations.** A Japanese build shares
+  0% with its US twin because it is compiled separately. `Lufia` and `Chinmoku
+  no Iseki` can only be matched by knowing the games.
+- **The region byte lies.** A Brazilian NTSC release carries `E` like a USA
+  cart. Group by the id, rank by the region tag in the *filename*.
+
+### Filters that do not work
+
+Tried and discarded, so nobody tries them again:
+
+- **ScreenScraper ratings.** American Bass Challenge 1.0, Wario Land 4 0.9. No
+  vote count is stored, so two votes read the same as two hundred.
+- **Publisher.** Zoo Digital *distributed* Alien Hominid, R-Type III and SimCity
+  2000 in Europe. A budget label is not a bad game.
+- **"Licensed tie-in" as a category.** 225 were moved out and moved straight
+  back; Frank plays plenty of them.
+- **RetroAchievements as a quality list.** Sets exist for 466 of the GBA library
+  but also for 300 games not held. It measures who built a set, not what is good.
+
+There is no community "avoid" list to download. Naming bad games is judgement,
+and it should be offered as judgement rather than dressed up as data.
+
 ## Scope
 
 SSD only. Server, Android and Flip get pushed once the canonical copy is right.
