@@ -87,6 +87,41 @@ A game held in more than one revision keeps the newest. `(Rev N)`, `(Rev A/B/C)`
 and `(vN.N)` all count. Group on the filename with the revision marker stripped
 so the comparison stays inside one region and one language set.
 
+## Group by the cartridge id, never by the title
+
+A game released in more than one region is usually renamed in each. Titles
+cannot see that; the cartridge header can.
+
+    N64   3-char game id at 0x3B, region letter at 0x3E
+    GBA   4-char game code at 0xAC, 4th character is the region
+    SNES  4-char code in the extended header, only ~35% of carts carry one
+    NES   nothing; there is no reliable key
+
+What this catches that a title match never will:
+
+    Quest 64 (USA) = Holy Magic Century (Europe) = Eltale Monsters (Japan)
+    Castlevania - Aria of Sorrow (USA) = Akatsuki no Minuet (Japan)
+    Over the Hedge (USA) = Ab durch die Hecke / Vecinos Invasores / four more
+
+Two traps, both hit for real:
+
+- **Do not require the internal cart title to match.** It is localised too, so
+  `FINDET NEMO` never equals `FINDING NEMO` and the guard blocks every genuine
+  pair. Group on the id plus the *publisher* code instead; that still separates
+  bootlegs that reuse an id.
+- **The region byte lies.** A Brazilian NTSC release carries `E` like a USA
+  cart. Group by the id, but rank by the region tag in the *filename*.
+
+Placeholder ids (`000`) are not identities. Exclude homebrew, aftermarket,
+bootlegs, protos and translations from region matching entirely.
+
+## Compilations
+
+A "2 Games in 1" cart is redundant when every game inside is also held
+standalone. 32 of 44 on GBA were. Keep the ones holding a game that exists
+nowhere else -- the Atari collections are the only copy of Gauntlet, Klax,
+Centipede and a dozen more.
+
 ## Imports
 
 One region per title, preferring **USA > World > Europe > Japan**. Skip anything

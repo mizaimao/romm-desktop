@@ -436,5 +436,34 @@ already took one copy per title.
 Left undone: genesis, nes and snes have one each — NHLPA Hockey 93, Track &
 Field II, Final Fantasy II.
 
-Next: `sfc` is finished. Remaining: disc systems (328 files, CHD extraction),
-arcade (663 gaps, filename-based hashing), `0_BIOS` (3,339).
+## Discs, 2026-08-31
+
+    psx  117 / 117      ps2  119 / 115      dreamcast  31 / 25
+    3do   18 /  18      psp  112 / 109      saturn      4 /  0
+
+**Dreamcast verified nothing because the verifier could not read it.** Its CHDs
+carry a `CHGD` tag -- GD-ROM, the Dreamcast's own format -- and `cdverify.py`
+only knew `CHT2` and `DVD `, so it skipped 20 discs without recording an error.
+Both extract with `chdman extractcd`.
+
+Six Dreamcast discs still do not match, all short by exactly 529,200 bytes on
+the last track -- 225 sectors, the same number on six different games. They came
+from GDI rips; Redump's dumps include the mastering pattern Sega wrote into the
+lead-out. Padding with 0x00 or 0xFF does not reproduce it. They play correctly.
+
+**Multi-disc layout.** The `.m3u` goes at the system root and the discs in
+`MultiDisk/`; that is what the gamelists already pointed at. Eight of nine psx
+games and both dreamcast games had it the other way round, so every multi-disc
+game was showing without its metadata. Fixing it also found 27 psx and 5
+dreamcast discs stored twice -- 12 GB.
+
+**An ES-DE gamelist can have two root elements.** `<alternativeEmulator>` sits
+before `<gameList>` on 8 systems here. A strict XML parser rejects that, so
+every script using ET.parse silently skipped those gamelists and left 92 dead
+entries behind. `scratchpad/gledit.py` splits the prologue off and reassembles.
+A sweep repointed 475 entries, moved 33 to the right system, removed 224.
+
+Also: 3,533 AppleDouble `._` files, 3 GB, left by `shutil.copy2` preserving
+extended attributes exFAT cannot store. Use plain copies.
+
+Next: arcade (663 gaps, filename-based hashing), `0_BIOS` (3,339), saturn (4).
