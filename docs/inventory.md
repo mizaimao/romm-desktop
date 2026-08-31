@@ -393,4 +393,48 @@ Still open: `gamelists/nes/gamelist.xml` is duplicated end to end, two `<?xml`
 declarations and two `<gameList>` roots in one file. `n64` and `N64_All` share
 339 of their hashes and are effectively the same library twice.
 
-Next: `sfc`, 171 of 709, where 412 files are multi-member GoodSNES bundles.
+## Nintendo 64, rebuilt 2026-08-30
+
+`n64` was two folders holding one library — `n64` 364 files and `N64_All` 349,
+sharing 338 roms. `N64_All` was worth one file. It is gone.
+
+**The library was in mixed byte orders and the extensions lied.**
+`Star Fox 64 (USA).n64` was a v64 file; `FIFA 64 (Europe).z64` was a v64 file;
+`Super Mario 64 (USA).z64` really was z64. Every one converted to the right
+No-Intro hash, so nothing was broken, but comparing raw bytes against a
+big-endian source showed 26 matches out of 1,140. Convert before comparing, and
+never trust an N64 extension.
+
+Rebuilt from the BigEndian source, everything now genuine z64:
+
+    n64/                             21   the games Frank plays
+    n64/AdditionalRoms/USA          334
+    n64/AdditionalRoms/Europe       341
+    n64/AdditionalRoms/Japan        235
+    n64/AdditionalRoms/Unlicensed    16
+
+Three files were kept out of the replacement because the source has no copy: the
+Sealed Palace pirate cart, the Majora's Mask Redux romhack, and Wonder Project
+J2 `(T-En by Ryu v1.0)`. **That last one nearly went.** Its `dat_name` is the
+plain Japanese rom, so sourcing by dat_name would have silently replaced an
+English translation with the untranslated game. Check the verdict, not just the
+name, before replacing anything marked `mismatch`.
+
+## Newest revision only, 2026-08-30
+
+Frank's rule: when a game is held in more than one revision, keep the newest.
+115 games across the cart systems, 145 older copies; 142 dropped.
+
+    n64 84   nes_unlicensed 43   wonderswancolor_hidden 9   ngp_hidden 6
+
+`(Rev N)`, `(Rev A/B/C)` and `(vN.N)` all mark a revision. Group on the filename
+with that marker removed — same game, same region, same languages — so
+`Bible Adventures (USA) (v1.5) (Unl)` collects its five older siblings but never
+pulls in a different region. gb, gbc, gba and sfc came back clean: their imports
+already took one copy per title.
+
+Left undone: genesis, nes and snes have one each — NHLPA Hockey 93, Track &
+Field II, Final Fantasy II.
+
+Next: `sfc` is finished. Remaining: disc systems (328 files, CHD extraction),
+arcade (663 gaps, filename-based hashing), `0_BIOS` (3,339).

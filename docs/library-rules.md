@@ -81,6 +81,12 @@ size differences are not divergence; they are the same game.
 Rank the region tag, never substring-match it. `(Japan, USA)` is a USA release
 and outranks `(Europe)`, but does not contain the string `(USA`.
 
+## Newest revision only
+
+A game held in more than one revision keeps the newest. `(Rev N)`, `(Rev A/B/C)`
+and `(vN.N)` all count. Group on the filename with the revision marker stripped
+so the comparison stays inside one region and one language set.
+
 ## Imports
 
 One region per title, preferring **USA > World > Europe > Japan**. Skip anything
@@ -118,7 +124,9 @@ SSD only. Server, Android and Flip get pushed once the canonical copy is right.
 
 See [inventory.md](inventory.md). Finished: NES, Famicom, Mega Drive,
 WonderSwan, WonderSwan Color, Neo Geo Pocket, Game Boy, Game Boy Color, Game
-Boy Advance. Next: `sfc`.
+Boy Advance, Super Famicom, SNES, Nintendo 64.
+
+Remaining: disc systems, arcade, `0_BIOS`.
 
 Game Boy set the folder split the later systems follow: English releases at the
 top, `AdditionalRoms/Japanese` and `AdditionalRoms/Unlicensed` beneath it.
