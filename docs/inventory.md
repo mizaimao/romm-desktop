@@ -466,4 +466,44 @@ A sweep repointed 475 entries, moved 33 to the right system, removed 224.
 Also: 3,533 AppleDouble `._` files, 3 GB, left by `shutil.copy2` preserving
 extended attributes exFAT cannot store. Use plain copies.
 
+## Game Boy Advance, rebuilt from the Flip, 2026-08-31
+
+The full set was too large to browse on a handheld, so `gba` became
+`gba_superset` (1,642 files) and a fresh `gba` was built from the games the
+Flip actually carries, plus everything unlicensed, aftermarket and multicart.
+
+    gba/                            764
+    gba/Aftermarket                  24
+    gba/AdditionalRoms/Unlicensed    62
+    gba/AdditionalRoms/Multicart     29
+                                    879 files, 865 verified
+
+770 of the Flip's 786 mapped across -- 736 by filename, 34 by title because the
+name had been corrected here since. The copies take the SSD's No-Intro names,
+not the Flip's older ones, so the two now disagree on 34 filenames.
+
+**Two patched roms were destroyed and restored.** The morning's repair pass
+replaced `Shin chan - Aventuras en Cineland (Spain) (patched)` and
+`Final Fantasy VI Advance (USA) double_patched` with vanilla copies because they
+failed No-Intro. A file that fails the DAT may be a patch, not a bad dump; the
+same trap was caught on Wonder Project J2 for N64 and then walked into here.
+Both are now recorded with verdict `patched` so nothing replaces them again.
+
+**Duplicate hunting, what worked and what did not.** Cart id and internal title
+found 258 regional duplicates. Content block-hashing found 24 more that no
+metadata could see -- `Yu-Gi-Oh! Duel Monsters Expert 3 (Japan)` is
+`World Championship Tournament 2004 (USA)` at 99.5%. But content is useless for
+localised builds: a Japanese release shares 0% with its US twin because it is
+compiled separately, so `Lufia` vs `Chinmoku no Iseki` and `Horsez` vs
+`Mein Gestuet` can only be matched by knowing the games.
+
+Filters that turned out to be worthless: ScreenScraper ratings (American Bass
+Challenge 1.0, Wario Land 4 0.9), publisher (Zoo Digital *distributed* Alien
+Hominid and R-Type III), and "licensed tie-in" as a category -- Frank plays
+plenty of those, and the 225 moved out were moved straight back.
+
+There is no community "avoid" list to download. RetroAchievements has sets for
+466 of these but 300 more for games not held, so it measures who built a set,
+not what is good.
+
 Next: arcade (663 gaps, filename-based hashing), `0_BIOS` (3,339), saturn (4).
