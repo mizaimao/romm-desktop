@@ -93,13 +93,20 @@ jobs:
       # still has to *build* it for the addon — and it builds `sdl2-sys`, which
       # is what has no SDL to link against on this runner. The failure names
       # sdl2-sys and looks like the exclusion was ignored.
+      #
+      # `moose-fastlaunch` is the third. It replaces EmulationStation's Python
+      # launcher on the Flip, so it is Linux-only by construction: it execs the
+      # stock launcher through `std::os::unix::process::CommandExt`, and there
+      # is no Windows equivalent to write. Nothing here ships it to Windows —
+      # the release builds one binary, not the workspace — so the fix is to
+      # stop asking for it rather than to add a stub that could never run.
       - name: Clippy (without the SDL front end)
         if: runner.os == 'Windows'
-        run: cargo clippy --workspace --exclude romm-sdl --exclude moose-patch --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude romm-sdl --exclude moose-patch --exclude moose-fastlaunch --all-targets -- -D warnings
 
       - name: Tests (without the SDL front end)
         if: runner.os == 'Windows'
-        run: cargo test --workspace --exclude romm-sdl --exclude moose-patch
+        run: cargo test --workspace --exclude romm-sdl --exclude moose-patch --exclude moose-fastlaunch
 
   ui:
     name: ui
