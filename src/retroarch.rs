@@ -984,29 +984,11 @@ input_player2_gun_start_mbtn = \"3\"
             return String::new();
         };
 
-        // The period is one full press-and-release in frames, so at 60fps four
-        // shots a second is a period of 15 with the button down for 7 of them.
-        //
-        // Rounded rather than truncated: 7 Hz is 8.57 frames, and 60/7 in
-        // integers is 8 — 7.5 shots a second, half a shot fast. Every rate
-        // that does not divide 60 was drifting the same way.
-        //
-        // Clamped rather than trusted: a period of zero is a division by zero
-        // inside the emulator, and anything above about 30 shots a second is
-        // faster than the game can read.
+        // One press-and-release in frames, and how much of it the button is
+        // down. Shared with the Flip's rapid-fire patch — see turbo_timing for
+        // why it rounds and why the hold is capped rather than halved.
         let hz = hz.clamp(1, 30);
-        let period = ((60.0 / hz as f32).round() as u32).max(2);
-        // How long the button is *held* each cycle, capped rather than half
-        // the period.
-        //
-        // Half of a slow period is a long press: at 2 shots a second it is a
-        // quarter of a second with the button down, and a quarter of a second
-        // is a held button to any game that cares — Pulstar and Blazing Star
-        // charge a shot from exactly that, so slow rapid fire spent its time
-        // charging instead of shooting. Four frames is 67ms: unmistakably a
-        // tap, and long enough for a game reading input every other frame to
-        // see it.
-        let duty = (period / 2).clamp(1, 4);
+        let (period, duty) = crate::tweaks::turbo_timing(hz);
 
         eprintln!("rapid fire: hold {which:?}, {hz} shots a second (turbo mode 3, period {period})");
         format!(

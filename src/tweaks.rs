@@ -72,6 +72,37 @@ pub enum AutoFire {
     Top,
 }
 
+/// The repeat, in frames: one full press-and-release, and how long of it the
+/// button is down.
+///
+/// Shared because there are two front ends writing the same four RetroArch
+/// keys — the desktop, which resolves the modifier from a pad profile, and the
+/// Flip's `rapid-fire-rate` patch, which writes fixed numbers into
+/// `knulli.conf`. Two copies of this arithmetic would disagree eventually and
+/// the symptom would be "it feels different on the handheld".
+///
+/// Rounded rather than truncated: 7 Hz is 8.57 frames, and 60/7 in integers is
+/// 8 — 7.5 shots a second, half a shot fast. Every rate that does not divide
+/// 60 was drifting the same way.
+///
+/// Clamped rather than trusted: a period of zero is a division by zero inside
+/// the emulator, and anything above about 30 shots a second is faster than the
+/// game can read.
+///
+/// The hold is capped at four frames rather than set to half the period. Half
+/// of a slow period is a long press — at 2 shots a second that is a quarter of
+/// a second with the button down, and a quarter of a second is a held button to
+/// any game that cares. Pulstar and Blazing Star charge a shot from exactly
+/// that, so slow rapid fire spent its time charging instead of shooting. Four
+/// frames is 67ms: unmistakably a tap, and long enough for a game reading input
+/// every other frame to see it.
+pub fn turbo_timing(hz: u32) -> (u32, u32) {
+    let hz = hz.clamp(1, 30);
+    let period = ((60.0 / hz as f32).round() as u32).max(2);
+    let duty = (period / 2).clamp(1, 4);
+    (period, duty)
+}
+
 impl AutoFire {
     pub fn parse(s: &str) -> Self {
         match s {

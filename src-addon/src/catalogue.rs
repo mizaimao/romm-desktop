@@ -207,6 +207,162 @@ fn shader(paths: &Paths, slug: &'static str, name: &'static str) -> Patch {
     }
 }
 
+/// The arcade systems on this card. `mame` has no ROMs and `neogeocd` is not a
+/// folder here, so writing lines for either would be noise in a file configgen
+/// re-reads at every launch of every system.
+const ARCADE: [&str; 2] = ["fbneo", "neogeo"];
+
+/// What the Flip's own controller config calls each button.
+///
+/// Read off `retroarchcustom.cfg` rather than reasoned about. The letters here
+/// are the letters printed on the plastic — see the warning at the top of
+/// docs/handover.md, which cost two rounds of getting this exactly backwards.
+/// RetroPad B is the primary fire in every arcade core, and on this device
+/// that is the button printed **B**, not the one printed A.
+const BTN_A: u8 = 0;
+const BTN_Y: u8 = 3;
+const BTN_L1: u8 = 4;
+const BTN_R1: u8 = 5;
+
+/// One `<system>.retroarch.<key>=<value>` line per arcade system.
+///
+/// configgen copies anything under a `retroarch.` prefix straight into
+/// retroarchcustom.cfg, and it does it at the *end* of writeLibretroConfig —
+/// after the controller bindings — so these win over what it just wrote. That
+/// is the only reason a rebind is possible from here at all.
+fn arcade_lines(pairs: &[(&str, String)]) -> String {
+    let mut out = String::new();
+    for system in ARCADE {
+        for (key, value) in pairs {
+            out.push_str(&format!("{system}.retroarch.{key}={value}\n"));
+        }
+    }
+    out
+}
+
+/// The block for one modifier button.
+///
+/// `remap` is the pair of lines that move a face button's normal job out of the
+/// way, and it is empty for the shoulders because nothing is in the way there.
+fn rapid_fire_body(btn: u8, remap: &[(&str, String)]) -> String {
+    let mut pairs = vec![
+        // Mode 3 is "single button (hold)": while the modifier is down,
+        // RetroPad B repeats. Not mode 0 — RetroArch calls that one "classic"
+        // and it *latches*, leaving the button flagged after everything is
+        // released. A latch nobody remembers is dangerous in exactly the games
+        // this exists for.
+        ("input_turbo_mode", "3".to_string()),
+        ("input_turbo_default_button", "0".to_string()),
+        ("input_player1_turbo_btn", btn.to_string()),
+    ];
+    pairs.extend(remap.iter().map(|(k, v)| (*k, v.clone())));
+    arcade_lines(&pairs)
+}
+
+/// Hold a button, the shot repeats.
+///
+/// The rate lives in its own patch and its own block. That is not tidiness:
+/// `set_block` removes a block and appends the new one at the end of the file,
+/// so re-applying this patch would move it *below* the rate block — and
+/// configgen reads knulli.conf last-wins. Two blocks that set the same key can
+/// therefore swap which one wins simply because you changed the other one.
+/// Disjoint key sets are what make the two independent.
+fn rapid_fire(paths: &Paths) -> Patch {
+    // Holding the modifier on its own is not a style note. RetroArch reports
+    // the repeat only on frames where the button is not physically pressed —
+    // the real press wins — so a modifier that also sends the fire button gives
+    // one continuous shot and no repeat at all.
+    let shoulder = |btn: u8| vec![block(paths, "rapid-fire", Some(&rapid_fire_body(btn, &[])))];
+
+    Patch {
+        id: "rapid-fire",
+        title: "Rapid fire",
+        detail: "fbneo and neogeo input keys in knulli.conf, passed through to \
+                 retroarchcustom.cfg by configgen. Hold the button and the shot repeats; let \
+                 go and it stops. Hold it on its own — RetroArch drops the repeat on any \
+                 frame the button is physically pressed, so a modifier that also fires gives \
+                 one long shot and no repeat. The rate is the next patch along.",
+        choices: vec![
+            Choice { name: "off".into(), steps: vec![block(paths, "rapid-fire", None)] },
+            Choice { name: "hold L1".into(), steps: shoulder(BTN_L1) },
+            Choice { name: "hold R1".into(), steps: shoulder(BTN_R1) },
+            // Y is not free the way the shoulders are: it is RetroPad Y, which
+            // these cores map to Neo Geo C, so holding it sends C underneath
+            // the repeat. Harmless in a game that does not use C.
+            Choice { name: "hold Y".into(), steps: shoulder(BTN_Y) },
+            // A is not free either, and unlike Y it cannot be left alone: it is
+            // RetroPad A, which these cores map to Neo Geo B — jump. Holding
+            // the modifier would hold jump for as long as you were firing.
+            //
+            // So A's normal job moves to Y: RetroPad A is rebound to the button
+            // printed Y, and RetroPad Y is cleared off it so one press does not
+            // send both. The cost is Neo Geo C, which nothing reaches while
+            // this option is on.
+            Choice {
+                name: "hold A".into(),
+                steps: vec![block(
+                    paths,
+                    "rapid-fire",
+                    Some(&rapid_fire_body(
+                        BTN_A,
+                        &[
+                            ("input_player1_a_btn", BTN_Y.to_string()),
+                            ("input_player1_y_btn", "nul".to_string()),
+                        ],
+                    )),
+                )],
+            },
+        ],
+    }
+}
+
+/// How fast it repeats, one shot a second at a time.
+///
+/// Six is the setting to use. It cannot be option zero — the catalogue's rule
+/// is that option zero touches nothing, so that a bare device reads as
+/// untouched rather than as misconfigured — so "off" here means no period line
+/// at all and RetroArch's own default, which is a six-frame cycle, about ten a
+/// second, and faster than most of these games read input.
+fn rapid_fire_rate(paths: &Paths) -> Patch {
+    let mut choices =
+        vec![Choice { name: "off".into(), steps: vec![block(paths, "rapid-fire-rate", None)] }];
+    for hz in 1..=12u32 {
+        // The same arithmetic the desktop uses, from the same function, so the
+        // two cannot drift into feeling different at the same number.
+        let (period, duty) = romm_desktop::tweaks::turbo_timing(hz);
+        // The rate you asked for, written next to the frames it became.
+        //
+        // Not decoration. A period is whole frames, so the top of this range is
+        // quantised: 11 and 12 a second are both a 5-frame cycle, and without
+        // this line the two options would be byte-identical blocks — `state`
+        // would match the first one and the menu would read 11 after you chose
+        // 12. configgen ignores comments, so it costs nothing.
+        let body = format!(
+            "# {hz} a second — a {period}-frame cycle, button down for {duty} of them\n{}",
+            arcade_lines(&[
+                ("input_turbo_period", period.to_string()),
+                ("input_duty_cycle", duty.to_string()),
+            ])
+        );
+        choices.push(Choice {
+            name: format!("{hz} a second"),
+            steps: vec![block(paths, "rapid-fire-rate", Some(&body))],
+        });
+    }
+    Patch {
+        id: "rapid-fire-rate",
+        title: "Rapid fire rate",
+        detail: "input_turbo_period and input_duty_cycle, in frames. Six a second is the one \
+                 to use. The button is held for at most four frames whatever the rate: half \
+                 of a slow cycle is a quarter-second press, and a quarter of a second is a \
+                 held button to any game that charges a shot — Pulstar and Blazing Star spent \
+                 the slow settings winding up instead of firing. A cycle is whole frames, so \
+                 the fast end is coarse — 11 and 12 a second are the same five frames — and \
+                 the block says which rate was asked for.",
+        choices,
+    }
+}
+
 /// The patches tab, in the order it is drawn.
 pub fn all(paths: &Paths) -> Vec<Patch> {
     vec![
@@ -285,6 +441,9 @@ pub fn all(paths: &Paths) -> Vec<Patch> {
         shader(paths, "gba", "Game Boy Advance"),
         shader(paths, "gb", "Game Boy"),
         shader(paths, "gbc", "Game Boy Color"),
+
+        rapid_fire(paths),
+        rapid_fire_rate(paths),
 
         Patch {
             id: "hotkey-app",
@@ -529,6 +688,185 @@ mod tests {
         );
     }
 
+    /// The lines one option of `rapid-fire` puts in knulli.conf.
+    fn rapid_fire_conf(paths: &Paths, option: &str) -> String {
+        let patches = all(paths);
+        let patch = patches.iter().find(|p| p.id == "rapid-fire").expect("no rapid-fire patch");
+        let i = patch
+            .choices
+            .iter()
+            .position(|c| c.name == option)
+            .unwrap_or_else(|| panic!("rapid-fire has no option {option:?}"));
+        patch.apply(i).unwrap();
+        std::fs::read_to_string(paths.knulli_conf()).unwrap_or_default()
+    }
+
+    /// Holding A would otherwise hold jump.
+    ///
+    /// The modifier has to send nothing of its own — RetroArch drops the repeat
+    /// on any frame the button is physically down, and more to the point these
+    /// cores map RetroPad A to Neo Geo B. Holding it to fire would hold jump
+    /// for the whole burst. So A's normal job moves to the button printed Y.
+    #[test]
+    fn hold_a_moves_a_out_of_the_way_and_lands_it_on_y() {
+        let paths = scratch("rapid-fire-a");
+        let conf = rapid_fire_conf(&paths, "hold A");
+
+        for system in ARCADE {
+            // A is the modifier.
+            assert!(
+                conf.contains(&format!("{system}.retroarch.input_player1_turbo_btn={BTN_A}")),
+                "{system}: A is not the modifier:\n{conf}"
+            );
+            // And what A used to do now happens on Y.
+            assert!(
+                conf.contains(&format!("{system}.retroarch.input_player1_a_btn={BTN_Y}")),
+                "{system}: normal-paced A did not land on Y:\n{conf}"
+            );
+            // Y stops sending its own button, or one press would send both.
+            assert!(
+                conf.contains(&format!("{system}.retroarch.input_player1_y_btn=nul")),
+                "{system}: Y still sends Y as well:\n{conf}"
+            );
+        }
+    }
+
+    /// The remap belongs to `hold A` and to nothing else.
+    ///
+    /// A rebind left behind by a different option is a controller that is
+    /// silently wrong in every arcade game, which is a far worse bug than rapid
+    /// fire not working — you would not know to look here.
+    #[test]
+    fn only_hold_a_rebinds_anything() {
+        for option in ["off", "hold L1", "hold R1", "hold Y"] {
+            let paths = scratch(&format!("rapid-fire-{}", option.replace(' ', "-")));
+            let conf = rapid_fire_conf(&paths, option);
+            assert!(
+                !conf.contains("input_player1_a_btn"),
+                "{option} rebound A:\n{conf}"
+            );
+            assert!(
+                !conf.contains("input_player1_y_btn"),
+                "{option} rebound Y:\n{conf}"
+            );
+        }
+    }
+
+    /// Turning it off puts the face buttons back.
+    ///
+    /// `hold A` is the only option that touches a binding, so it is the only
+    /// one whose revert has anything to undo. Leaving the rebind behind would
+    /// mean A does nothing and Y does A's job, forever, with rapid fire showing
+    /// as off.
+    #[test]
+    fn switching_off_after_hold_a_leaves_no_rebind() {
+        let paths = scratch("rapid-fire-a-off");
+        rapid_fire_conf(&paths, "hold A");
+        let conf = rapid_fire_conf(&paths, "off");
+        assert!(!conf.contains("input_player1_a_btn"), "A is still rebound:\n{conf}");
+        assert!(!conf.contains("input_player1_y_btn"), "Y is still cleared:\n{conf}");
+        assert!(!conf.contains("input_turbo_mode"), "turbo is still on:\n{conf}");
+    }
+
+    /// The modifier is a different RetroPad button from the one that repeats.
+    ///
+    /// RetroPad B — `input_turbo_default_button=0` — is what pulses, and on
+    /// this device that is the button printed B. Every option here has to hold
+    /// something else, or the physical press wins on every frame and there is
+    /// no repeat at all.
+    #[test]
+    fn no_option_holds_the_button_that_repeats() {
+        let paths = scratch("rapid-fire-modifier");
+        let patches = all(&paths);
+        let patch = patches.iter().find(|p| p.id == "rapid-fire").unwrap();
+        for choice in patch.choices.iter().skip(1) {
+            let i = patch.choices.iter().position(|c| c.name == choice.name).unwrap();
+            patch.apply(i).unwrap();
+            let conf = std::fs::read_to_string(paths.knulli_conf()).unwrap();
+            assert!(
+                !conf.contains("input_player1_turbo_btn=1"),
+                "{} holds the button that repeats:\n{conf}",
+                choice.name
+            );
+            assert!(
+                conf.contains("input_turbo_default_button=0"),
+                "{} does not pulse RetroPad B:\n{conf}",
+                choice.name
+            );
+        }
+    }
+
+    /// Twelve rates, each a different block.
+    ///
+    /// A period is whole frames, so 11 and 12 a second both come out as five —
+    /// and two options that write byte-identical blocks are two options the
+    /// menu cannot tell apart. It read back as 11 after choosing 12 until the
+    /// requested rate went into the block as a comment.
+    #[test]
+    fn every_rate_is_its_own_setting() {
+        let paths = scratch("rapid-fire-rates");
+        let patches = all(&paths);
+        let patch = patches.iter().find(|p| p.id == "rapid-fire-rate").unwrap();
+
+        assert_eq!(patch.choices.len(), 13, "off, then one a second up to twelve");
+        for (i, hz) in (1..=12u32).enumerate() {
+            assert_eq!(patch.choices[i + 1].name, format!("{hz} a second"));
+        }
+
+        let mut seen: Vec<String> = Vec::new();
+        for (i, choice) in patch.choices.iter().enumerate().skip(1) {
+            patch.apply(i).unwrap();
+            assert_eq!(patch.state(), State::At(i), "{} did not read back", choice.name);
+            let conf = std::fs::read_to_string(paths.knulli_conf()).unwrap();
+            assert!(!seen.contains(&conf), "{} wrote a block already used", choice.name);
+            seen.push(conf);
+        }
+    }
+
+    /// The handheld and the desktop agree on what a rate means.
+    ///
+    /// Both write `input_turbo_period` and `input_duty_cycle`, from the same
+    /// function, so "six a second" cannot come to mean two different speeds.
+    #[test]
+    fn the_rate_is_the_desktops_arithmetic() {
+        let paths = scratch("rapid-fire-timing");
+        let patches = all(&paths);
+        let patch = patches.iter().find(|p| p.id == "rapid-fire-rate").unwrap();
+        for hz in 1..=12u32 {
+            let i = patch.choices.iter().position(|c| c.name == format!("{hz} a second")).unwrap();
+            patch.apply(i).unwrap();
+            let conf = std::fs::read_to_string(paths.knulli_conf()).unwrap();
+            let (period, duty) = romm_desktop::tweaks::turbo_timing(hz);
+            assert!(
+                conf.contains(&format!("fbneo.retroarch.input_turbo_period={period}")),
+                "{hz} a second is not {period} frames:\n{conf}"
+            );
+            assert!(
+                conf.contains(&format!("fbneo.retroarch.input_duty_cycle={duty}")),
+                "{hz} a second does not hold for {duty} frames:\n{conf}"
+            );
+            assert!(duty <= 4, "{hz} a second holds the button for {duty} frames");
+            assert!(period > duty, "{hz} a second never lets the button go");
+        }
+    }
+
+    /// Both arcade systems, every time.
+    ///
+    /// neogeo is a separate folder with a separate core (geolith), so a patch
+    /// that only wrote fbneo lines would work in Metal Slug from the arcade
+    /// folder and do nothing at all from the Neo Geo one.
+    #[test]
+    fn both_arcade_systems_get_every_line() {
+        let paths = scratch("rapid-fire-systems");
+        let conf = rapid_fire_conf(&paths, "hold L1");
+        for system in ARCADE {
+            assert!(
+                conf.contains(&format!("{system}.retroarch.input_turbo_mode=3")),
+                "{system} was left out:\n{conf}"
+            );
+        }
+    }
+
     #[test]
     fn no_two_patches_write_the_same_block() {
         // Sharing a marker would mean one patch silently overwriting the
@@ -734,3 +1072,4 @@ mod tests {
         assert!(live(&text).contains(&"system.batterysaver.chargingbypass=0"));
     }
 }
+
