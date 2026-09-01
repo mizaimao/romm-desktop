@@ -27,6 +27,7 @@ cost days, and where things stand. Everything else here is one subject.
 | [attract-mode.md](attract-mode.md) | How ES and ES-DE do the arcade screensaver, read out of both sources. Not built |
 | [cartridge-shelf.md](cartridge-shelf.md) | Games shown as the physical cartridge, Socket-style. Scoped, not built |
 | [library-sync.md](library-sync.md) | Keeping server, SSD, Android and Flip in step — how RomM, RetroAchievements and Hasheous each hash differently, and why No-Intro is the one that decides |
+| [library-service.md](library-service.md) | **Replacing RomM** — why it is the wrong shape for this library, and the 18 endpoints a drop-in replacement has to answer. Not built |
 | [one-core-two-frontends.md](one-core-two-frontends.md) | The shape once the answer became "Flip **and** Thor" |
 | [port-plan.md](port-plan.md) | The plan that came out of it |
 | [handheld-frontend.md](handheld-frontend.md) | The SDL front end. Superseded by the addon — see `knulli-addon.md` |
